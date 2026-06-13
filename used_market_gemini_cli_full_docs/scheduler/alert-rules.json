@@ -1,0 +1,26 @@
+{
+  "rules": [
+    {
+      "id": "high-profit-gpu",
+      "name": "High Profit GPU Alert",
+      "enabled": false,
+      "category": "gpu",
+      "min_net_profit": 100000,
+      "max_fraud_risk": 0.2,
+      "allowed_model_statuses": ["normal", "cautionary"],
+      "channels": ["webhook", "discord"],
+      "notes": "Notify when a GPU listing has strong expected profit with low fraud risk."
+    },
+    {
+      "id": "full-pc-flip",
+      "name": "Full PC Flip Alert",
+      "enabled": false,
+      "category": "full_pc",
+      "min_net_profit": 120000,
+      "max_fraud_risk": 0.2,
+      "allowed_model_statuses": ["normal"],
+      "channels": ["webhook"],
+      "notes": "Notify when a full PC looks safe enough for decomposition or resale."
+    }
+  ]
+}

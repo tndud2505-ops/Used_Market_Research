@@ -1,0 +1,28 @@
+{
+  "name": "used-market-gemini-cli",
+  "version": "2.0.0",
+  "description": "CLI for collecting, normalizing, and reporting used-market listings",
+  "type": "module",
+  "bin": {
+    "used-market": "dist/MCP/logic/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/MCP/logic/index.js --debug-console",
+    "dev": "node --loader ts-node/esm MCP/logic/index.ts --debug-console",
+    "provider-check": "node dist/MCP/logic/index.js provider-check",
+    "sites": "node dist/MCP/logic/index.js sites",
+    "test": "npm run build"
+  },
+  "dependencies": {
+    "commander": "^14.0.0",
+    "googleapis": "^171.4.0",
+    "node-cron": "^4.2.1",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^24.6.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  }
+}

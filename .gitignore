@@ -1,0 +1,49 @@
+# dependencies
+node_modules/
+**/node_modules/
+
+# build outputs
+dist/
+**/dist/
+.next/
+coverage/
+test-results/
+playwright-report/
+
+# environment files
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+**/.codex-discord/
+
+# generated result data
+merge/result/
+**/merge/result/
+runs/
+**/runs/
+watcher_runtime/runs/
+**/watcher_runtime/runs/
+logs/
+**/logs/
+
+# logs
+*.log
+*.tmp
+*.tsbuildinfo
+
+# local temp files
+tmp_*
+tmp-*.json
+**/tmp-*.json
+tmp_startup_backup/
+
+# secrets
+secrets/
+**/secrets/
+
+# OS/editor
+.DS_Store
+Thumbs.db
