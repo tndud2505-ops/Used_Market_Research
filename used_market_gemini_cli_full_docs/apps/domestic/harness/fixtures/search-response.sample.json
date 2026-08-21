@@ -1,0 +1,37 @@
+{
+  "status": "success",
+  "data": {
+    "query": "RTX 5070",
+    "sources": [
+      { "key": "joonggonara", "status": "ready", "count": 2 },
+      { "key": "bunjang", "status": "ready", "count": 1 },
+      { "key": "hellomarket", "status": "ready", "count": 1 }
+    ],
+    "items": [
+      {
+        "title": "RTX 5070 게이밍 본체",
+        "price": 1250000,
+        "site": "joonggonara",
+        "url": "https://web.joongna.com/product/fixture-1",
+        "status": "active",
+        "fraud_risk": 0.08
+      },
+      {
+        "title": "RTX 5070 그래픽카드",
+        "price": 950000,
+        "site": "bunjang",
+        "url": "https://m.bunjang.co.kr/products/fixture-2",
+        "status": "active",
+        "fraud_risk": 0.12
+      },
+      {
+        "title": "RTX 5070 본체 급처",
+        "price": 1180000,
+        "site": "hellomarket",
+        "url": "https://www.hellomarket.com/item/fixture-3",
+        "status": "active",
+        "fraud_risk": 0.18
+      }
+    ]
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "status": "success",
+  "data": {
+    "query": "RTX 5070",
+    "sources": [
+      { "key": "joonggonara", "status": "ready", "count": 1 },
+      { "key": "bunjang", "status": "warning", "count": 0, "errors": ["timeout"] },
+      { "key": "rethinkmall", "status": "ready", "count": 1 }
+    ],
+    "items": [
+      {
+        "title": "RTX 5070 본체",
+        "price": 1300000,
+        "site": "joonggonara",
+        "url": "https://web.joongna.com/product/fixture-4",
+        "status": "active",
+        "fraud_risk": 0.1
+      },
+      {
+        "title": "RTX 5070 그래픽카드",
+        "price": 900000,
+        "site": "rethinkmall",
+        "url": "https://www.rethinkmall.com/goods/view?no=fixture-5",
+        "status": "active",
+        "fraud_risk": 0.15
+      }
+    ],
+    "quality": { "warnings": ["bunjang: timeout"] }
+  }
+}

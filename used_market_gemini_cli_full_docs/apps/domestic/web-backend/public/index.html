@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="중고나라·번개장터·헬로마켓·리씽크몰의 중고매물을 한 번에 검색하고 가격과 출처를 비교하는 중고매물 통합검색 서비스입니다." />
+    <meta name="robots" content="index, follow, max-image-preview:large" />
+    <meta name="google-site-verification" content="3DaGcd7QWP0wz8ZE1kklG8d728HZDpGBb_g4pU-gh7M" />
+    <link rel="canonical" href="https://used-pick.com/" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="USED MARKET" />
+    <meta property="og:locale" content="ko_KR" />
+    <meta property="og:title" content="중고매물 통합검색 | USED MARKET" />
+    <meta property="og:description" content="중고나라·번개장터·헬로마켓·리씽크몰의 중고매물을 한 번에 검색하고 가격과 출처를 비교하세요." />
+    <meta property="og:url" content="https://used-pick.com/" />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="중고매물 통합검색 | USED MARKET" />
+    <meta name="twitter:description" content="여러 중고마켓의 중고매물을 한 번에 검색하고 가격과 출처를 비교합니다." />
+    <title>중고매물 통합검색 | USED MARKET</title>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebSite",
+        "@id": "https://used-pick.com/#website",
+        "url": "https://used-pick.com/",
+        "name": "중고매물 통합검색 | USED MARKET",
+        "alternateName": ["USED MARKET", "USED PICK"],
+        "inLanguage": "ko-KR",
+        "description": "여러 중고마켓의 중고매물을 한 번에 검색하고 가격과 출처를 비교하는 중고매물 통합검색 서비스입니다."
+      }
+    </script>
+    <link rel="icon" href="/assets/mark.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/styles.css?v=global-english-v5" />
+    <style>
+      .source-summary { display: flex; flex-wrap: wrap; gap: 5px 12px; min-width: 0; max-width: 100%; margin-top: 6px; color: #888a84; font-size: 10px; line-height: 1.35; overflow-wrap: anywhere; }
+      .source-summary-item { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; white-space: nowrap; }
+      .source-summary-item::before { width: 5px; height: 5px; border-radius: 50%; background: #368264; content: ""; }
+      .source-summary-item.is-empty::before { background: #b2b4ad; }
+      .source-summary-item.is-warning { color: #b55448; font-weight: 800; }
+      .source-summary-item.is-warning::before { background: #b55448; }
+      .item-source-badge { display: inline-block; margin-right: 3px; padding: 3px 5px; color: #50534c; background: #edf1f2; font-size: 9px; font-weight: 800; line-height: 1; }
+    </style>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">본문으로 건너뛰기</a>
+    <div class="market-app">
+      <header class="site-header">
+        <a class="brand" href="/" aria-label="USED Market 홈"><img src="/assets/mark.svg" alt="" /><span>USED MARKET</span></a>
+        <div class="header-search">
+          <form class="top-search" id="search-form">
+            <label class="sr-only" for="keyword">상품 검색</label>
+            <span aria-hidden="true">⌕</span>
+            <input id="keyword" name="keyword" autocomplete="off" placeholder="상품명, 브랜드, 모델 검색" />
+            <button id="search-button" type="submit"><span>검색</span><b>↵</b></button>
+          </form>
+          <div class="recent-searches" aria-labelledby="recent-searches-title">
+            <div class="recent-searches-heading">
+              <h2 id="recent-searches-title">최근 검색</h2>
+              <button id="clear-recent-searches" type="button" hidden>전체 삭제</button>
+            </div>
+            <div class="recent-search-list" id="recent-search-list" aria-live="polite"></div>
+          </div>
+          <span class="search-status" id="search-status" role="status"></span>
+        </div>
+      </header>
+
+      <main id="main">
+        <nav class="country-tabs" id="country-tabs" aria-label="검색 국가" hidden></nav>
+        <nav class="site-tabs" id="site-tabs" aria-label="검색 사이트">
+          <button class="active" type="button" aria-pressed="true" data-site-tab="all">전체</button>
+          <button type="button" aria-pressed="false" data-site-tab="joonggonara">중고나라</button>
+          <button type="button" aria-pressed="false" data-site-tab="bunjang">번개장터</button>
+          <button type="button" aria-pressed="false" data-site-tab="hellomarket">헬로마켓</button>
+          <button type="button" aria-pressed="false" data-site-tab="rethinkmall">리씽크몰</button>
+        </nav>
+
+          <div class="catalog-layout">
+            <aside class="category-sidebar is-collapsed" aria-label="상품 카테고리">
+              <div class="category-heading">
+              <div class="category-heading-copy"><span class="eyebrow">BROWSE</span><h2>카테고리</h2></div>
+              <button class="category-disclosure" id="category-panel-toggle" type="button" aria-expanded="false" aria-controls="category-list" aria-label="카테고리 선택 펼치기">
+                <span class="category-summary" id="category-summary">전체</span>
+                <span class="category-disclosure-icon" aria-hidden="true"></span>
+              </button>
+            </div>
+            <nav class="category-list" id="category-list" aria-label="상품 카테고리 목록 (여러 개 선택 가능)" aria-hidden="true">
+              <button class="active" type="button" data-category-id="all" aria-current="page">전체</button>
+            </nav>
+          </aside>
+
+          <div class="results-column">
+            <section class="idle-panel" id="idle-panel" aria-labelledby="idle-title">
+              <div class="idle-message">
+                <img class="idle-mascot" src="/assets/empty-search-mascot.png" alt="검색을 돕는 USED Market 마스코트" width="128" height="128" />
+                <div class="idle-speech">
+                  <span class="eyebrow">USED MARKET</span>
+                  <h1 id="idle-title">중고매물<br />통합검색</h1>
+                  <p id="idle-description">중고나라·번개장터·헬로마켓·리씽크몰의 중고매물을 한 번에 비교해 보세요.</p>
+                </div>
+              </div>
+            </section>
+            <section class="results-section" aria-busy="false">
+              <div class="results-toolbar">
+                <div class="result-count">
+                  <strong id="result-count">0개</strong>
+                  <div id="freshness-status" class="freshness-status" aria-live="polite" hidden>
+                    <span id="freshness-message"></span>
+                    <button id="apply-refresh-results" type="button" hidden>새 매물 보기</button>
+                  </div>
+                  <div id="source-summary" class="source-summary" aria-live="polite"></div>
+                  <p id="control-notice" class="control-notice" role="status" hidden></p>
+                </div>
+                <div class="result-toolbar-actions">
+                  <div class="filter-dock" aria-label="검색 가격 범위">
+                    <label><span class="sr-only">최소 가격</span><input id="min-price" type="number" min="0" max="100000000000" step="10000" placeholder="최소 가격" aria-label="최소 가격" /></label>
+                    <span class="filter-range-separator" aria-hidden="true">~</span>
+                    <label><span class="sr-only">최대 가격</span><input id="max-price" type="number" min="0" max="100000000000" step="10000" placeholder="최대 가격" aria-label="최대 가격" /></label>
+                    <button class="apply-price-filter" id="apply-price-filter" type="button">적용</button>
+                    <button id="reset-filters" type="button">초기화</button>
+                  </div>
+                <nav class="result-sort-tabs" id="sort-tabs" aria-label="정렬 방식">
+                  <button class="active" type="button" data-sort="recommended" aria-pressed="true">추천순</button>
+                  <button type="button" data-sort="price_asc" aria-pressed="false">낮은 가격순</button>
+                  <button type="button" data-sort="price_desc" aria-pressed="false">높은 가격순</button>
+                  <button type="button" data-sort="recent" aria-pressed="false">최신순</button>
+                </nav>
+                </div>
+              </div>
+              <div class="result-list" id="result-list">
+                <div class="empty-state" aria-hidden="true"></div>
+              </div>
+              <nav class="result-pagination" id="pagination-controls" aria-label="검색 결과 페이지" hidden></nav>
+            </section>
+
+          </div>
+
+          <aside class="recent-viewed-panel" id="recent-viewed" aria-labelledby="recent-viewed-title">
+            <div class="recent-viewed-heading">
+              <span class="eyebrow">RECENT</span>
+              <h2 id="recent-viewed-title">최근 본 상품</h2>
+            </div>
+            <div class="recent-viewed-list" id="recent-viewed-list" aria-live="polite">
+              <div class="recent-viewed-empty"><span class="recent-viewed-empty-icon" aria-hidden="true">⌕</span><p>최근 본 상품이 없습니다.</p></div>
+            </div>
+            <section class="coupang-banner" aria-label="쿠팡 파트너스 광고">
+              <a class="coupang-banner-link" href="https://link.coupang.com/a/gbzRxu5ZU4" target="_blank" rel="sponsored noopener" referrerpolicy="unsafe-url" aria-describedby="coupang-banner-disclosure">
+                <img src="https://ads-partners.coupang.com/banners/1017393?trackingCode=AF1654530&amp;subId=&amp;traceId=V0-301-969b06e95b87326d-I1017393&amp;w=600&amp;h=900" alt="로켓와우 회원전용 매일 오전 7시 공개 프로모션" loading="lazy" decoding="async">
+              </a>
+              <p id="coupang-banner-disclosure">이 게시물은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.</p>
+            </section>
+          </aside>
+
+        </div>
+      </main>
+      <footer class="site-footer">
+        <div>
+          <strong>USED MARKET</strong>
+          <p>공개 중고상품 목록을 비교하는 검색 서비스입니다.</p>
+        </div>
+        <nav aria-label="서비스 문서">
+          <a href="/guide.html">이용 안내</a>
+          <a href="/used-market-integration.html">통합검색 소개</a>
+          <a href="/iphone-used-items.html">아이폰 중고매물</a>
+          <a href="/used-market-categories.html">중고매물 카테고리</a>
+          <a href="/privacy.html">개인정보처리방침</a>
+          <a href="/terms.html">이용약관</a>
+        </nav>
+      </footer>
+    </div>
+    <script type="module" src="/app.js?v=search-session-v6"></script>
+  </body>
+</html>

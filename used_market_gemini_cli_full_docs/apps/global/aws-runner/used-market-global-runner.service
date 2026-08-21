@@ -1,0 +1,37 @@
+[Unit]
+Description=Used Market Global Node Chromium Runner
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=__RUNNER_USER__
+Group=__RUNNER_USER__
+StateDirectory=used-market-global-runner
+StateDirectoryMode=0750
+WorkingDirectory=__APP_ROOT__/current
+EnvironmentFile=__RUNNER_ENV_FILE__
+Environment=HOME=/var/lib/used-market-global-runner
+ExecStartPre=/usr/bin/test -f __APP_ROOT__/current/dist/web-backend/logic/index.js
+ExecStart=/usr/bin/node __APP_ROOT__/current/aws-runner/runner.mjs
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=30
+TimeoutStopSec=30
+KillSignal=SIGTERM
+MemoryHigh=1500M
+MemoryMax=1800M
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+ReadWritePaths=/var/lib/used-market-global-runner
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target

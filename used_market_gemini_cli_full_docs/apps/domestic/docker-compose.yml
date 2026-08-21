@@ -1,0 +1,57 @@
+name: used-market-domestic
+
+services:
+  used-market-domestic:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    init: true
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8789:8787"
+    environment:
+      NODE_ENV: production
+      PORT: "8787"
+      LOCAL_BROWSER_BINARY: /usr/bin/chromium
+      LOCAL_BROWSER_COMMAND_TIMEOUT_MS: "15000"
+      NODE_OPTIONS: "--max-old-space-size=700"
+      PUBLIC_API_ONLY: "true"
+      SEARCH_CONCURRENCY_LIMIT: "1"
+      SEARCH_RETRY_AFTER_SECONDS: "5"
+      SEARCH_MAX_WORK_UNITS: "8"
+      SEARCH_CACHE_TTL_SECONDS: "120"
+      SEARCH_CACHE_MAX_ENTRIES: "24"
+      LOCAL_BROWSER_NO_SANDBOX: "true"
+    cpus: 0.7
+    mem_limit: 1200m
+    mem_reservation: 384m
+    memswap_limit: 1500m
+    pids_limit: 256
+    stop_grace_period: 30s
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    shm_size: "384mb"
+    tmpfs:
+      - /tmp:size=384m,mode=1777
+      - /home/node/.cache:size=96m,uid=1000,gid=1000,mode=0700
+      - /app/tmp:size=96m,uid=1000,gid=1000,mode=0700
+    volumes:
+      - used-market-domestic-results:/app/merge/result
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8787/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+volumes:
+  used-market-domestic-results:
+    name: used-market-domestic_results

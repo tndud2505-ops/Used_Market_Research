@@ -1,0 +1,152 @@
+# Cloudflare Runner 연결
+
+이 디렉터리는 Cloudflare Worker와 AWS Ubuntu 러너를 연결하는 Worker 코드다.
+
+## 역할 분리
+
+- Cloudflare Worker: 화면·검색 API·Cron Trigger·수동 실행 인증·AWS 러너 호출
+- AWS Node 러너: 번개장터·중고나라·헬로마켓·리씽크몰 검색·수집
+- `POST /api/runner/run`: 허용된 스케줄러 작업 하나 또는 묶음을 실행하는 인증된 Node 엔드포인트
+- `POST /api/search`: AWS 러너의 4개 사이트 검색·색인 응답을 Worker가 인증 프록시
+
+수동 실행도 작업 결과 저장 뒤 알림 dispatch와 reporter 후처리를 실행한다. 후처리 경고가 있으면 전체 응답은 `partial_success`가 되며 `postprocess.warnings`에서 원인을 확인할 수 있다.
+
+방문자 검색과 수집은 Cloudflare Browser Run이 아니라 AWS 러너에서 처리한다. Worker의 `RUNNER_URL`과 `SEARCH_RUNNER_URL`은 Cloudflare Tunnel 공개 URL이어야 하며, 로컬 `localhost`는 사용할 수 없다.
+
+## 로컬 검증
+
+```powershell
+npm run cloudflare:harness
+npm run test
+```
+
+## Node 서버 환경변수
+
+```powershell
+$env:CLOUDFLARE_RUNNER_TOKEN = "긴-랜덤-토큰"
+npm run web
+```
+
+Cloudflare Secret에도 같은 값을 `RUNNER_TOKEN`으로 저장한다.
+
+## Cloudflare 로컬 실행·배포
+
+실제 공개 Node 러너 URL을 환경변수로 넣은 뒤 실행한다. 배포 스크립트가 URL 없이 실행되는 것을 막는다.
+
+```powershell
+npm run cloudflare:dev
+npx wrangler secret put RUNNER_TOKEN --config cloudflare/wrangler.jsonc
+npx wrangler secret put MANUAL_RUN_TOKEN --config cloudflare/wrangler.jsonc
+$env:CLOUDFLARE_RUNNER_URL = "https://<public-node-runner>/api/runner/run"
+$env:CLOUDFLARE_SEARCH_RUNNER_URL = "https://<public-node-runner>/api/search"
+$env:CLOUDFLARE_FREE_TIER_MODE = "false"
+npm run cloudflare:deploy
+```
+
+Named Tunnel DNS가 전파된 뒤에는 다음 프로필로 운영 주소를 자동으로 넣어 배포할 수 있다.
+
+```powershell
+$env:CLOUDFLARE_TUNNEL_MODE = "named"
+$env:CLOUDFLARE_FREE_TIER_MODE = "false"
+npm run cloudflare:deploy
+```
+
+이 프로필은 `https://runner.used-pick.com`을 러너·검색·원본 주소로 사용한다. DNS가 아직 없으면 배포하지 말고 먼저 아래 CNAME을 추가한다.
+
+Cron 표현식은 Cloudflare 기준 UTC다. 수집은 AWS 러너에서 처리되며, 필요할 때만 D1 import를 사용한다. `FREE_TIER_MODE=false`이고 Worker에는 Browser/Queue 바인딩을 배포하지 않는다.
+
+## 수동 실행
+
+```powershell
+$headers = @{ Authorization = "Bearer $env:MANUAL_RUN_TOKEN"; "Content-Type" = "application/json" }
+$body = @{ job_name = "gpu-fast-scan" } | ConvertTo-Json
+Invoke-RestMethod -Uri "https://<worker-subdomain>.workers.dev/run" -Method Post -Headers $headers -Body $body
+```
+
+운영 전제: 공개 Node 러너의 HTTPS, 토큰 보관, 중복 실행 방지, 사이트 약관·접근 제한 준수 여부를 확인한다.
+
+## AWS runner deployment profile
+
+The active Worker/AWS profile:
+
+- Static assets are served by the Worker Assets binding.
+- `/api/search` proxies live search to AWS through Cloudflare Tunnel.
+- Cron and manual jobs call the authenticated AWS `/api/runner/run` endpoint.
+- D1 remains available for optional imported snapshots and fallback data.
+- Browser Run and Queue are intentionally not deployed for this profile.
+- Public GET responses and search POST bodies are cached to avoid duplicate origin/browser work.
+- The legacy Node/CDP bridge is used only when the free-tier bindings are not present.
+
+Resources created for this profile:
+
+- D1 database: `used-market-free`
+- Worker: `used-market-runner`
+
+Validate and deploy:
+
+```powershell
+npm run cloudflare:harness
+npx wrangler deploy --config cloudflare/wrangler.jsonc --dry-run
+npx wrangler deploy --config cloudflare/wrangler.jsonc --keep-vars
+```
+
+Recommended one-command release:
+
+```powershell
+npm run cloudflare:release
+```
+
+The release command runs the harness and dry-run first, deploys the Worker with
+the `used-pick.com` and `www.used-pick.com` custom domains, then checks the
+public health endpoint, homepage, and category API on both domains. Set
+`CLOUDFLARE_PUBLIC_URL` only when verifying a different production hostname.
+
+The AWS profile intentionally keeps the collection boundary outside Cloudflare. Keep the Tunnel token, Worker `RUNNER_TOKEN`, and optional D1 import token out of Git.
+
+### Live search result budget
+
+The search path collects up to 160 source candidates per selected market,
+quality-filters them, and keeps up to 40 qualified listings per market in a
+stable five-minute search window. The browser returns 16-item pages and can
+page through up to 200 combined listings when five markets are selected.
+Opening a later page requests another slice of the same cached window; it does
+not rerun or reshuffle the upstream search.
+The runner executes at most four uncached
+searches at once and queues sixteen more; an overloaded request receives
+HTTP 429 with `Retry-After: 2`. Source work is also bounded, which protects a
+small instance when several different searches arrive together. A queued
+request waits at most 3 seconds, and a cursor is retained for 5 minutes by
+default; an expired cursor returns HTTP 410 so it cannot page into a new
+search window. The recommended AWS plan for this project is 4 GB RAM. A 2 GB
+instance is only a constrained minimum for a runner-only machine; if other
+applications share the machine, keep the 4 GB plan.
+
+Price bounds are sent to the upstream marketplace when a confirmed parameter
+exists (Joonggonara and Hello Market). Bunjang and RethinkMall are searched in
+a bounded price-ordered/page-limited window and filtered again locally because
+no verified upstream price-range contract is used. Every source is checked
+again before merge, so a listing outside the requested range is never exposed.
+
+The user-facing sort modes are `recommended`, `price_asc`, and `recent`.
+`price_asc` keeps price as the primary key and marks suspicious listings instead
+of silently moving a higher-priced item ahead. `recent` still enforces source
+freshness and price policy. See `docs/wiki/02-search-verification.md` for the
+per-site table.
+
+## Named Tunnel public hostname
+
+The production named Tunnel is already running on AWS with the public hostname
+route `runner.used-pick.com`. If the hostname does not resolve, add this DNS
+record in the `used-pick.com` zone:
+
+```text
+Type: CNAME
+Name: runner
+Target: d039956d-422c-41cd-ab4b-ce19d870b9fb.cfargotunnel.com
+Proxy status: Proxied
+```
+
+After DNS propagation, set `CLOUDFLARE_RUNNER_URL`,
+`CLOUDFLARE_SEARCH_RUNNER_URL`, and `CLOUDFLARE_ORIGIN_URL` to the
+`https://runner.used-pick.com` endpoints, deploy the Worker, verify `/health`
+and `/api/search`, then stop the temporary `trycloudflare.com` process.

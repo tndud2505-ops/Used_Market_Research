@@ -1,0 +1,11 @@
+[Unit]
+Description=Run USED MARKET Global result retention daily
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+RandomizedDelaySec=15m
+Unit=used-market-global-retention.service
+
+[Install]
+WantedBy=timers.target

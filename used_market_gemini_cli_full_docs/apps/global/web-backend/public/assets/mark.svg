@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="USED MARKET">
+  <rect width="64" height="64" rx="18" fill="#111822"/>
+  <path d="M20 31.5c0-8.3 6.7-15 15-15 3.4 0 6.5 1.1 9 3.1" fill="none" stroke="#b7e1c2" stroke-linecap="round" stroke-width="5"/>
+  <path d="M44 32.5c0 8.3-6.7 15-15 15-3.4 0-6.5-1.1-9-3.1" fill="none" stroke="#ee6f3d" stroke-linecap="round" stroke-width="5"/>
+  <circle cx="35" cy="17" r="3" fill="#ee6f3d"/>
+  <circle cx="29" cy="47" r="3" fill="#b7e1c2"/>
+</svg>

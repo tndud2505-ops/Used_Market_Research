@@ -9,6 +9,12 @@ dist/
 coverage/
 test-results/
 playwright-report/
+.playwright-cli/
+**/.playwright-cli/
+.wrangler/
+**/.wrangler/
+.codex-remote-attachments/
+%SystemDrive%/
 
 # environment files
 .env
@@ -28,6 +34,10 @@ watcher_runtime/runs/
 **/watcher_runtime/runs/
 logs/
 **/logs/
+*.sqlite
+*.sqlite3
+*.sqlite-shm
+*.sqlite-wal
 
 # logs
 *.log
@@ -39,10 +49,39 @@ tmp_*
 tmp-*.json
 **/tmp-*.json
 tmp_startup_backup/
+tmp/
+**/tmp/
+backups/
+**/backups/
+*.har
+*.tgz
+*.tar.gz
+*.zip
+
+# local deployment probes and downloaded responses
+api-cat.json
+deployed-app.js
+deployed.html
+headers.txt
+health-bust.json
+response.json
+
+# retired combined-app copies; authoritative source is under apps/*
+used_market_gemini_cli_full_docs/docs/
+used_market_gemini_cli_full_docs/infra/
+used_market_gemini_cli_full_docs/web-backend/public/
 
 # secrets
 secrets/
 **/secrets/
+*.pem
+*.p12
+*.pfx
+*.key
+.dev.vars
+**/.dev.vars
+.dev.vars.*
+**/.dev.vars.*
 
 # OS/editor
 .DS_Store

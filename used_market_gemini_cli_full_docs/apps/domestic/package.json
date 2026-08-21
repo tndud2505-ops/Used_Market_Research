@@ -1,0 +1,60 @@
+{
+  "name": "used-market-domestic",
+  "version": "2.0.0",
+  "description": "CLI for collecting, normalizing, and reporting used-market listings",
+  "type": "module",
+  "engines": {
+    "node": ">=22",
+    "npm": ">=10"
+  },
+  "bin": {
+    "used-market": "dist/MCP/logic/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/MCP/logic/index.js --debug-console",
+    "dev": "node --loader ts-node/esm MCP/logic/index.ts --debug-console",
+    "provider-check": "node dist/MCP/logic/index.js provider-check",
+    "sites": "node dist/MCP/logic/index.js sites",
+    "web": "node --env-file-if-exists=.env dist/web-backend/logic/index.js",
+    "scheduler": "node --env-file-if-exists=.env dist/scheduler/logic/index.js",
+    "harness": "node harness/run.mjs",
+    "http:contract": "node harness/http-contract.mjs",
+    "bunjang:taxonomy": "npm run build && node harness/bunjang-taxonomy-contract.mjs",
+    "joonggonara:taxonomy": "npm run build && node harness/joonggonara-category-contract.mjs",
+    "category:harness": "node harness/category-harness-contract.mjs",
+    "category:record": "npm run build && node harness/category-mapping-record.mjs",
+    "category:compare": "npm run build && npm run search-only:build && node harness/category-site-comparison.mjs",
+    "category:live": "node harness/category-live-contract.mjs",
+    "category:matrix:live": "npm run build && npm run search-only:build && node harness/category-matrix-live.mjs",
+    "search:matrix:live": "npm run build && npm run search-only:build && node harness/general-search-matrix-live.mjs",
+    "browser:contract": "node harness/browser-contract.mjs",
+    "search-session:contract": "node harness/search-session-policy-contract.mjs",
+    "search-only:build": "npx tsc --target ES2022 --module NodeNext --moduleResolution NodeNext --skipLibCheck --types node --outDir dist market/logic/category-catalog.ts collector/logic/cdpBrowserRuntime.ts collector/logic/searchOnlyCategoryClassifier.ts collector/logic/helloMarketProbe.ts collector/logic/rethinkmallProbe.ts collector/logic/searchOnlySources.ts",
+    "rethinkmall:probe": "npm run search-only:build && node harness/rethinkmall-probe.mjs",
+    "hello-market:probe": "npm run search-only:build && node harness/hello-market-probe.mjs",
+    "data:validate": "npm run search-only:build && node harness/multi-source-data-validation.mjs",
+    "search-only:test": "npm run search-only:build && node harness/search-source-contract.mjs",
+    "cloudflare:harness": "node cloudflare/harness.mjs",
+    "index:harness": "node aws-runner/search-index-harness.mjs && node aws-runner/search-cursor-harness.mjs && node aws-runner/cache-first-production-harness-contract.mjs && node aws-runner/cache-first-production-harness-integration.mjs && node harness/index-freshness-ui-contract.mjs",
+    "index:load": "node aws-runner/search-index-load-harness.mjs",
+    "cloudflare:dev": "npx wrangler dev --config cloudflare/wrangler.jsonc",
+    "cloudflare:deploy": "node cloudflare/deploy.mjs",
+    "cloudflare:release": "node cloudflare/release.mjs",
+    "target-site:compare": "node harness/target-site-compare.mjs",
+    "test": "npm run build && node harness/app-isolation-contract.mjs && node harness/runtime-isolation-contract.mjs && node harness/category-contract.mjs && node harness/category-harness-contract.mjs && node harness/web-contract.mjs && node harness/ui-pagination-contract.mjs && npm run search-session:contract && npm run search-only:build && node harness/search-source-contract.mjs && npm run harness && npm run http:contract"
+  },
+  "dependencies": {
+    "commander": "^14.0.0",
+    "googleapis": "^171.4.0",
+    "node-cron": "^4.2.1",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@cloudflare/playwright": "^1.3.0",
+    "@playwright/cli": "0.1.18",
+    "@types/node": "^24.6.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  }
+}

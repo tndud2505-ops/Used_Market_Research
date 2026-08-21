@@ -1,0 +1,55 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "used-market-runner",
+  "main": "./worker.mjs",
+  "compatibility_date": "2026-08-11",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
+  "workers_dev": true,
+  "routes": [
+    {
+      "pattern": "used-pick.com",
+      "custom_domain": true
+    },
+    {
+      "pattern": "www.used-pick.com",
+      "custom_domain": true
+    }
+  ],
+  "assets": {
+    "directory": "../web-backend/public",
+    "binding": "ASSETS",
+    "run_worker_first": ["/", "/index.html"],
+    "not_found_handling": "none"
+  },
+  "vars": {
+    "FREE_TIER_MODE": "false",
+    "FREE_TIER_SEARCH_CACHE_TTL_SECONDS": "60",
+    "FREE_TIER_STATIC_CACHE_TTL_SECONDS": "86400",
+    "FREE_TIER_MAX_SEARCH_LIMIT": "60",
+    "SEARCH_RUNNER_TIMEOUT_MS": "60000",
+    "RUNNER_URL": "https://runner.used-pick.com/api/runner/run",
+    "SEARCH_RUNNER_URL": "https://runner.used-pick.com/api/search",
+    "ORIGIN_URL": "https://runner.used-pick.com"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "used-market-free",
+      "database_id": "a079cef4-ddd8-4efd-acfa-82dbf79e5f32",
+      "migrations_dir": "./migrations"
+    }
+  ],
+  "triggers": {
+    "crons": [
+      "0 0 * * *",
+      "0 6 * * *",
+      "0 12 * * *",
+      "0 18 * * *",
+      "30 18 * * *"
+    ]
+  }
+}

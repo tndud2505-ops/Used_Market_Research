@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Search and compare public used listings from marketplaces in Japan and the United States." />
+    <meta name="robots" content="index, follow, max-image-preview:large" />
+    <meta name="google-site-verification" content="3DaGcd7QWP0wz8ZE1kklG8d728HZDpGBb_g4pU-gh7M" />
+    <link rel="canonical" href="https://global.used-pick.com/global/?country=jp" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="USED MARKET" />
+    <meta property="og:locale" content="en_US" />
+    <meta property="og:title" content="Global Used Listings Search | USED MARKET" />
+    <meta property="og:description" content="Search and compare public used listings from marketplaces in Japan and the United States." />
+    <meta property="og:url" content="https://global.used-pick.com/global/?country=jp" />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="Global Used Listings Search | USED MARKET" />
+    <meta name="twitter:description" content="Search and compare public used listings from marketplaces in Japan and the United States." />
+    <title>Global Used Listings Search | USED MARKET</title>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebSite",
+        "@id": "https://global.used-pick.com/global/?country=jp#website",
+        "url": "https://global.used-pick.com/global/?country=jp",
+        "name": "Global Used Listings Search | USED MARKET",
+        "alternateName": ["USED MARKET", "USED PICK"],
+        "inLanguage": "en-US",
+        "description": "Search and compare public used listings from marketplaces in Japan and the United States."
+      }
+    </script>
+    <link rel="icon" href="/global/assets/mark.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/global/styles.css?v=global-app-v2" />
+    <style>
+      .source-summary { display: flex; flex-wrap: wrap; gap: 5px 12px; min-width: 0; max-width: 100%; margin-top: 6px; color: #888a84; font-size: 10px; line-height: 1.35; overflow-wrap: anywhere; }
+      .source-summary-item { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; white-space: nowrap; }
+      .source-summary-item::before { width: 5px; height: 5px; border-radius: 50%; background: #368264; content: ""; }
+      .source-summary-item.is-empty::before { background: #b2b4ad; }
+      .source-summary-item.is-warning { color: #b55448; font-weight: 800; }
+      .source-summary-item.is-warning::before { background: #b55448; }
+      .source-summary-detail { color: #777973; font-weight: 400; white-space: normal; }
+      .source-retry-button { border: 0; border-bottom: 1px solid currentColor; background: transparent; color: inherit; cursor: pointer; font: inherit; font-weight: 800; padding: 1px 0; }
+      .item-source-badge { display: inline-block; margin-right: 3px; padding: 3px 5px; color: #50534c; background: #edf1f2; font-size: 9px; font-weight: 800; line-height: 1; }
+    </style>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <div class="market-app">
+      <header class="site-header">
+        <a class="brand" href="/global/" aria-label="USED Market home"><img src="/global/assets/mark.svg" alt="" /><span>USED MARKET</span></a>
+        <div class="header-search">
+          <form class="top-search" id="search-form">
+            <label class="sr-only" for="keyword">Search products</label>
+            <span aria-hidden="true">⌕</span>
+            <input id="keyword" name="keyword" autocomplete="off" placeholder="Search by product, brand, or model" />
+            <button id="search-button" type="submit"><span>Search</span><b>↵</b></button>
+          </form>
+          <div class="recent-searches" aria-labelledby="recent-searches-title">
+            <div class="recent-searches-heading">
+              <h2 id="recent-searches-title">Recent Searches</h2>
+              <button id="clear-recent-searches" type="button" hidden>Clear All</button>
+            </div>
+            <div class="recent-search-list" id="recent-search-list" aria-live="polite"></div>
+          </div>
+          <span class="search-status" id="search-status" role="status"></span>
+        </div>
+      </header>
+
+      <main id="main">
+        <nav class="country-tabs" id="country-tabs" aria-label="Search country"></nav>
+        <nav class="site-tabs" id="site-tabs" aria-label="Search sites">
+          <button class="active" type="button" aria-pressed="true" data-site-tab="all">All</button>
+          <button type="button" aria-pressed="false" data-site-tab="mercari_jp">Mercari JP</button>
+          <button type="button" aria-pressed="false" data-site-tab="yahoo_auction_jp">Yahoo! Auctions</button>
+          <button type="button" aria-pressed="false" data-site-tab="rakuma">Rakuma</button>
+        </nav>
+
+          <div class="catalog-layout">
+            <aside class="category-sidebar is-collapsed" aria-label="Product categories">
+              <div class="category-heading">
+              <div class="category-heading-copy"><span class="eyebrow">BROWSE</span><h2>Categories</h2></div>
+              <button class="category-disclosure" id="category-panel-toggle" type="button" aria-expanded="false" aria-controls="category-list" aria-label="Show categories">
+                <span class="category-summary" id="category-summary">All</span>
+                <span class="category-disclosure-icon" aria-hidden="true"></span>
+              </button>
+            </div>
+            <nav class="category-list" id="category-list" aria-label="Product categories" aria-hidden="true">
+              <button class="active" type="button" data-category-id="all" aria-current="page">All</button>
+            </nav>
+          </aside>
+
+          <div class="results-column">
+            <section class="idle-panel" id="idle-panel" aria-labelledby="idle-title">
+              <div class="idle-message">
+                <img class="idle-mascot" src="/global/assets/empty-search-mascot.png" alt="USED Market search assistant" width="128" height="128" />
+                <div class="idle-speech">
+                  <span class="eyebrow">USED MARKET</span>
+                  <h1 id="idle-title">Global used listings<br />search</h1>
+                  <p id="idle-description">Search and compare public resale listings from Japan.</p>
+                </div>
+              </div>
+            </section>
+            <section class="results-section" aria-busy="false">
+              <div class="results-toolbar">
+                <div class="result-count">
+                  <strong id="result-count">0 results</strong>
+                  <div id="freshness-status" class="freshness-status" aria-live="polite" hidden>
+                    <span id="freshness-message"></span>
+                    <button id="apply-refresh-results" type="button" hidden>View new listings</button>
+                  </div>
+                  <div id="source-summary" class="source-summary" aria-live="polite"></div>
+                  <p id="control-notice" class="control-notice" role="status" hidden></p>
+                </div>
+                <div class="result-toolbar-actions">
+                  <div class="filter-dock" aria-label="Price range">
+                    <label><span class="sr-only">Minimum price</span><input id="min-price" type="number" min="0" max="100000000000" step="10000" placeholder="Minimum price" aria-label="Minimum price" /></label>
+                    <span class="filter-range-separator" aria-hidden="true">~</span>
+                    <label><span class="sr-only">Maximum price</span><input id="max-price" type="number" min="0" max="100000000000" step="10000" placeholder="Maximum price" aria-label="Maximum price" /></label>
+                    <button class="apply-price-filter" id="apply-price-filter" type="button">Apply</button>
+                    <button id="reset-filters" type="button">Reset</button>
+                  </div>
+                <nav class="result-sort-tabs" id="sort-tabs" aria-label="Sort results">
+                  <button class="active" type="button" data-sort="recommended" aria-pressed="true">Recommended</button>
+                  <button type="button" data-sort="price_asc" aria-pressed="false">Price: Low to High</button>
+                  <button type="button" data-sort="price_desc" aria-pressed="false">Price: High to Low</button>
+                  <button type="button" data-sort="recent" aria-pressed="false">Newest</button>
+                </nav>
+                </div>
+              </div>
+              <div class="result-list" id="result-list">
+                <div class="empty-state" aria-hidden="true"></div>
+              </div>
+              <nav class="result-pagination" id="pagination-controls" aria-label="Search result pages" hidden></nav>
+            </section>
+
+          </div>
+
+          <aside class="recent-viewed-panel" id="recent-viewed" aria-labelledby="recent-viewed-title">
+            <div class="recent-viewed-heading">
+              <span class="eyebrow">RECENT</span>
+              <h2 id="recent-viewed-title">Recently Viewed</h2>
+            </div>
+            <div class="recent-viewed-list" id="recent-viewed-list" aria-live="polite">
+              <div class="recent-viewed-empty"><span class="recent-viewed-empty-icon" aria-hidden="true">⌕</span><p>No recently viewed items.</p></div>
+            </div>
+          </aside>
+
+        </div>
+      </main>
+      <footer class="site-footer">
+        <div>
+          <strong>USED MARKET</strong>
+          <p>Compare public used listings from Japan and the United States.</p>
+        </div>
+        <nav aria-label="Marketplace regions">
+          <a href="/global/?country=jp">Japan Search</a>
+          <a href="/global/?country=us">United States Search</a>
+        </nav>
+      </footer>
+    </div>
+    <script type="module" src="/global/app.js?v=global-app-v3"></script>
+  </body>
+</html>

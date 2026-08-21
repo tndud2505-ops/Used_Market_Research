@@ -1,0 +1,46 @@
+{
+  "jobs": {
+    "gpu-fast-scan": {
+      "sites": ["joonggonara", "bunjang"],
+      "limit": 10,
+      "priority": "high",
+      "retry_count": 2,
+      "timeout_ms": 60000
+    },
+    "cpu-scan": {
+      "sites": ["joonggonara", "bunjang"],
+      "limit": 10,
+      "priority": "medium",
+      "retry_count": 2,
+      "timeout_ms": 60000
+    },
+    "ram-scan": {
+      "sites": ["joonggonara", "bunjang"],
+      "limit": 10,
+      "priority": "medium",
+      "retry_count": 2,
+      "timeout_ms": 60000
+    },
+    "ssd-scan": {
+      "sites": ["joonggonara", "bunjang"],
+      "limit": 10,
+      "priority": "medium",
+      "retry_count": 2,
+      "timeout_ms": 60000
+    },
+    "full-pc-scan": {
+      "sites": ["joonggonara", "bunjang"],
+      "limit": 40,
+      "priority": "high",
+      "retry_count": 1,
+      "timeout_ms": 90000
+    },
+    "daily-price-refresh": {
+      "sites": ["joonggonara", "bunjang"],
+      "limit": 10,
+      "priority": "medium",
+      "retry_count": 2,
+      "timeout_ms": 60000
+    }
+  }
+}
