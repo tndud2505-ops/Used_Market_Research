@@ -2,7 +2,7 @@
 
 ## Scope
 
-This change belongs only to `apps/global`. It does not modify, import, test, or deploy the domestic application.
+This change belongs only to `apps/global` and uses only this application's code, harnesses, documentation, and release path.
 
 ## User-visible contract
 
