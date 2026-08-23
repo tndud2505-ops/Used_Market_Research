@@ -1,4 +1,4 @@
-import { RESULT_PAGE_SIZE, clampResultPage, maxNavigableResultPage, pageResponseMatchesCursor, paginationItems, resultPageCount } from './pagination.mjs?v=pagination-v6';
+import { RESULT_PAGE_SIZE, clampResultPage, maxNavigableResultPage, pageResponseMatchesCursor, paginationItems, resultPageCount } from './pagination.mjs?v=pagination-v7';
 
 const APP_ID = 'domestic';
 const PAGE_PARAMS = new URLSearchParams(window.location.search);
@@ -1487,7 +1487,7 @@ async function loadResultPage(pageIndex) {
   state.appendError = '';
   setLoading(true, true);
   try {
-    while ((state.data?.items || []).length < targetItemCount && state.data?.pagination?.next_cursor) {
+    if ((state.data?.items || []).length < targetItemCount && state.data?.pagination?.next_cursor) {
       const previousCount = state.data.items.length;
       const requestedCursor = state.data.pagination.next_cursor;
       const nextData = await requestSearchPage({
@@ -1500,10 +1500,11 @@ async function loadResultPage(pageIndex) {
         refreshIndex: false
       });
       if (state.requestController !== requestController) return;
-      if (!pageResponseMatchesCursor(state.data?.pagination?.next_cursor, requestedCursor)) continue;
-      state.data = mergeSearchData(state.data, nextData);
-      rememberViewData(state.data);
-      if (state.data.items.length <= previousCount) break;
+      if (pageResponseMatchesCursor(state.data?.pagination?.next_cursor, requestedCursor)) {
+        state.data = mergeSearchData(state.data, nextData);
+        rememberViewData(state.data);
+        if (state.data.items.length <= previousCount) state.appendError = uiText('추가 결과가 없습니다.', 'No additional results were returned.');
+      }
     }
     const reachablePages = resultPageCount(Math.min(availableResultCount(), state.data.items.length));
     state.currentPage = clampResultPage(targetPage, reachablePages);
@@ -1768,11 +1769,11 @@ function renderPagination(totalCount = availableResultCount()) {
   }
   const loadedCount = Array.isArray(state.data?.items) ? state.data.items.length : 0;
   const maxNavigablePage = maxNavigableResultPage(loadedCount, totalCount, Boolean(state.data?.pagination?.next_cursor));
-  const pageButtons = paginationItems(state.currentPage, pageCount).map((item, index) => {
+  const pageButtons = paginationItems(state.currentPage, pageCount, maxNavigablePage).map((item, index) => {
     if (item === 'ellipsis') return `<span class="pagination-ellipsis" aria-hidden="true" data-pagination-gap="${index}">…</span>`;
     const label = IS_GLOBAL ? `Page ${item + 1}` : `${item + 1}페이지`;
-    if (item > maxNavigablePage) return `<span class="pagination-page-preview" aria-label="${label}">${item + 1}</span>`;
-    return `<button class="pagination-page" type="button" data-result-page="${item}" aria-label="${label}"${item === state.currentPage ? ' aria-current="page" disabled' : ''}>${item + 1}</button>`;
+    if (item > maxNavigablePage) return `<span class="pagination-page-preview" aria-label="${label} · ${uiText('아직 이동할 수 없음', 'Not available yet')}" aria-disabled="true">${item + 1}</span>`;
+    return `<button class="pagination-page" type="button" data-result-page="${item}" aria-label="${label}"${item === state.currentPage ? ' aria-current="page"' : ''}>${item + 1}</button>`;
   }).join('');
   const atLastPage = pageCount <= 1 || state.currentPage >= pageCount - 1;
   const nextLoadsMore = atLastPage && canExpand;

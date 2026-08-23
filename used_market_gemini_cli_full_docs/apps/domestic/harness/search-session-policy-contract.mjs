@@ -108,7 +108,11 @@ try {
   assert.match(app, /const pageBeforeCollection = state\.currentPage;/u);
   assert.match(app, /const pageToKeep = Number\.isInteger\(state\.currentPage\) \? state\.currentPage : pageBeforeCollection;/u);
   assert.match(app, /state\.currentPage = clampResultPage\(pageToKeep/u);
-  assert.match(app, /const requestedCursor = state\.data\.pagination\.next_cursor;[\s\S]{0,600}!pageResponseMatchesCursor\(state\.data\?\.pagination\?\.next_cursor, requestedCursor\)[\s\S]{0,100}continue;/u);
+  const pageHandler = app.slice(app.indexOf('async function loadResultPage'), app.indexOf('function canExpandResultWindow'));
+  assert.match(pageHandler, /if \(\(state\.data\?\.items \|\| \[\]\)\.length < targetItemCount && state\.data\?\.pagination\?\.next_cursor\)/u);
+  assert.doesNotMatch(pageHandler, /while \(/u);
+  assert.equal((pageHandler.match(/await requestSearchPage\(/gu) || []).length, 1);
+  assert.match(pageHandler, /pageResponseMatchesCursor\(state\.data\?\.pagination\?\.next_cursor, requestedCursor\)/u);
   const sortHandler = app.slice(app.indexOf("$$('[data-sort]')"), app.indexOf("$('#result-list').addEventListener", app.indexOf("$$('[data-sort]')")));
   assert.match(sortHandler, /renderAll\(\);[\s\S]{0,500}reason: 'sort'/u);
   assert.doesNotMatch(sortHandler, /collectActiveView/u);
@@ -128,7 +132,7 @@ try {
     /INDEX_MODE === "shadow"[\s\S]{0,300}body\?\.refresh_index === false[\s\S]{0,500}buildIndexedPayload\(body, indexed, null, "index_view"\)/u
   );
 
-  console.log(JSON.stringify({ status: "passed", checks: 42 }, null, 2));
+  console.log(JSON.stringify({ status: "passed", checks: 45 }, null, 2));
 } finally {
   const resolved = path.resolve(tempDir);
   const systemTemp = `${path.resolve(os.tmpdir())}${path.sep}`;

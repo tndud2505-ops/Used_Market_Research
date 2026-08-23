@@ -31,11 +31,21 @@ export function maxNavigableResultPage(loadedItemCount, availableItemCount, hasN
   return Math.min(totalPages - 1, lastLoadedPage + (hasNextCursor ? 1 : 0));
 }
 
-export function paginationItems(pageIndex, pageCount) {
+export function paginationItems(pageIndex, pageCount, maxNavigablePage = null) {
   const normalizedCount = Math.max(0, Math.floor(Number(pageCount) || 0));
   if (normalizedCount <= 7) return Array.from({ length: normalizedCount }, (_, index) => index);
   const current = clampResultPage(pageIndex, normalizedCount);
-  const visiblePages = [...new Set([0, current - 1, current, current + 1, normalizedCount - 1])]
+  const hasNavigableBoundary = maxNavigablePage !== null
+    && maxNavigablePage !== undefined
+    && Number.isFinite(Number(maxNavigablePage));
+  const navigableEnd = hasNavigableBoundary
+    ? Math.min(normalizedCount - 1, Math.max(current, Math.floor(Number(maxNavigablePage))))
+    : normalizedCount - 1;
+  const candidatePages = hasNavigableBoundary && navigableEnd <= 6
+    ? Array.from({ length: navigableEnd + 1 }, (_, index) => index)
+    : [0, current - 1, current, current + 1, navigableEnd];
+  if (navigableEnd < normalizedCount - 1) candidatePages.push(normalizedCount - 1);
+  const visiblePages = [...new Set(candidatePages)]
     .filter((index) => index >= 0 && index < normalizedCount)
     .sort((left, right) => left - right);
   const items = [];
