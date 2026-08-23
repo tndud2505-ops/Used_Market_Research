@@ -100,7 +100,7 @@ try {
   assert.match(app, /state\.sort === 'price_asc'[\s\S]{0,300}items\.sort/u);
   assert.match(
     app,
-    /renderAll\(\);[\s\S]{0,200}reason === 'price_filter'[\s\S]{0,200}\$\('#search-status'\)\.classList\.remove\('visible'\)/u,
+    /renderAll\(\);[\s\S]{0,500}reason === 'price_filter'[\s\S]{0,200}\$\('#search-status'\)\.classList\.remove\('visible'\)/u,
     "가격 범위 검색 완료 후 진행 상태를 닫는다"
   );
   assert.match(app, /function availableResultCount\(data = state\.data\)/u);

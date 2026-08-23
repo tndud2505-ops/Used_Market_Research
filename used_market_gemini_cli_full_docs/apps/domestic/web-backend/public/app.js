@@ -1361,7 +1361,9 @@ async function executeSearch({ keyword = '', categoryId = 'all', categoryIds = n
     state.appendError = '';
     trackSearchRefresh(data, fingerprint);
     renderAll();
-    if (reason === 'search' && MARKET_PROFILE !== 'global' && data.pagination?.next_cursor) {
+    const shouldPrefetchAllView = state.activeSite === 'all'
+      && ['search', 'sort', 'price_filter', 'site_filter'].includes(reason);
+    if (shouldPrefetchAllView && MARKET_PROFILE !== 'global' && data.pagination?.next_cursor) {
       void prefetchActiveResultPages();
     }
     if (reason === 'price_filter') {
