@@ -16,7 +16,7 @@
 
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; }
-body { min-width: 320px; margin: 0; background: var(--paper); }
+body { min-width: 0; margin: 0; background: var(--paper); }
 button, input, select { font: inherit; }
 button { cursor: pointer; }
 a { color: inherit; text-decoration: none; }
@@ -184,14 +184,15 @@ html[data-market-profile="global"] .result-sort-tabs button { min-height: 40px; 
 .loading-ring { width: 120px; height: 3px; background: var(--accent); animation: loading-scan 1.1s ease-in-out infinite; transform-origin: center; }
 @keyframes loading-scan { 0%, 100% { transform: scaleX(.35); opacity: .35; } 50% { transform: scaleX(1); opacity: 1; } }
 .error-state { min-height: 100px; padding: 25px 19px; border-left: 3px solid var(--red); color: var(--red); font-size: 11px; }
-.result-pagination { display: none; align-items: center; justify-content: center; gap: 3px; margin-top: 30px; border-top: 1px solid var(--line); padding-top: 18px; }
+.result-pagination { display: none; align-items: center; justify-content: center; flex-wrap: wrap; gap: 3px; margin-top: 30px; border-top: 1px solid var(--line); padding-top: 18px; }
 .market-app.has-results .result-pagination:not([hidden]) { display: flex; }
 .result-pagination[hidden] { display: none !important; }
-.result-pagination button { min-width: 38px; height: 38px; padding: 0 9px; border: 0; border-bottom: 2px solid transparent; color: var(--muted); background: transparent; font-size: 11px; font-variant-numeric: tabular-nums; }
+.result-pagination button { min-width: 40px; height: 40px; padding: 0 9px; border: 0; border-bottom: 2px solid transparent; color: var(--muted); background: transparent; font-size: 11px; font-variant-numeric: tabular-nums; }
 .result-pagination button:hover:not(:disabled) { color: var(--ink); border-bottom-color: #d8d9d2; }
 .result-pagination button[aria-current="page"] { color: var(--ink); border-bottom-color: var(--accent); font-weight: 900; }
 .result-pagination button:disabled { color: #c4c6bf; cursor: default; }
 .pagination-ellipsis { display: inline-flex; width: 24px; height: 38px; align-items: center; justify-content: center; color: var(--muted); font-size: 11px; }
+.pagination-continuation { cursor: help; }
 
 .recent-viewed-panel { min-height: 252px; border-bottom: 1px solid var(--line); }
 .recent-viewed-heading { min-height: 76px; padding: 16px 0 12px; border-bottom: 1px solid var(--line); }

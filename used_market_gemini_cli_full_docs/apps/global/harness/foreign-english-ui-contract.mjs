@@ -65,7 +65,7 @@ try {
     await page.route('**/api/search', async (route) => {
       const request = JSON.parse(route.request().postData() || '{}');
       requests.push(request);
-      if (request.keyword === 'session-fixture' || request.keyword === 'session-new-fixture') {
+      if (['session-fixture', 'session-new-fixture', 'session-short-fixture', 'session-long-fixture'].includes(request.keyword)) {
         const collectionSites = Array.isArray(request.sites) && request.sites.length
           ? request.sites
           : ['ebay', 'poshmark', 'vinted', 'unclaimed_baggage'];
@@ -73,8 +73,10 @@ try {
           fixtureSessionSequence += 1;
           fixtureSessionId = 'fixture-session-' + fixtureSessionSequence;
           fixtureSessionGeneration = 1;
-          fixtureSessionLoadedCount = 60;
-          fixtureSessionWindow = 60;
+          fixtureSessionLoadedCount = request.keyword === 'session-long-fixture'
+            ? 270
+            : ['session-new-fixture', 'session-short-fixture'].includes(request.keyword) ? 90 : 60;
+          fixtureSessionWindow = fixtureSessionLoadedCount;
           if (request.refresh_index === true) {
             fixtureSessionRefreshes += 1;
             await page.waitForTimeout(120);
@@ -93,7 +95,7 @@ try {
           ? Math.min(Math.max(request.session_window, 30), 640)
           : fixtureSessionWindow;
         fixtureSessionWindow = requestedWindow;
-        if (request.cursor && request.session_only !== true) {
+        if (request.cursor && request.session_only !== true && request.keyword !== 'session-short-fixture') {
           fixtureSessionGeneration += 1;
           fixtureSessionLoadedCount = Math.min(300, Math.max(fixtureSessionLoadedCount, requestedWindow));
         }
@@ -133,7 +135,8 @@ try {
         if (request.sort === 'price_desc') controlledItems.sort((left, right) => right.price - left.price);
         if (request.sort === 'recent') controlledItems.sort((left, right) => Date.parse(right.posted_at) - Date.parse(left.posted_at));
 
-        const pageIndex = Number.isInteger(request.session_page) ? request.session_page : 0;
+        const requestedPageIndex = Number.isInteger(request.session_page) ? request.session_page : 0;
+        const pageIndex = Math.min(requestedPageIndex, Math.max(0, Math.ceil(controlledItems.length / 30) - 1));
         const pageItems = controlledItems.slice(pageIndex * 30, pageIndex * 30 + 30);
         const sourceTotals = Object.fromEntries(collectionSites.map((site) => [
           site,
@@ -487,7 +490,7 @@ try {
     await page.locator('#search-button').click();
     await page.waitForFunction(() => document.querySelectorAll('#result-list .item-row').length === 30
       && /45 results/i.test(document.querySelector('#result-count')?.textContent || ''));
-    const sessionInitialRequest = requests.at(-1);
+    const sessionInitialRequest = requests.findLast((request) => request.keyword === 'session-fixture' && !request.session_id);
     const sessionInitial = {
       rows: await page.locator('#result-list .item-row').count(),
       count: (await page.locator('#result-count').textContent()).trim(),
@@ -500,7 +503,7 @@ try {
     const sessionRetryRowsWhilePending = await page.locator('#result-list .item-row').count();
     await page.waitForFunction(() => /60 results/i.test(document.querySelector('#result-count')?.textContent || '')
       && document.querySelector('.results-section')?.getAttribute('aria-busy') === 'false');
-    const sessionRetryRequest = requests.at(-1);
+    const sessionRetryRequest = requests.findLast((request) => request.keyword === 'session-fixture' && request.refresh_index === true);
 
     await page.locator('.pagination-page[data-result-page="1"]').click();
     await page.waitForFunction(() => document.querySelector('[data-result-page="1"]')?.getAttribute('aria-current') === 'page'
@@ -538,23 +541,87 @@ try {
       && /60 results/i.test(document.querySelector('#result-count')?.textContent || ''));
     await page.locator('.pagination-page[data-result-page="1"]').click();
     await page.waitForFunction(() => document.querySelector('[data-result-page="1"]')?.getAttribute('aria-current') === 'page');
+    const sessionPaginationBeforeNext = await page.locator('#pagination-controls').evaluate((root) => ({
+      pages: [...root.querySelectorAll('.pagination-page[data-result-page]')].map((node) => ({
+        page: node.textContent?.trim(),
+        state: node.getAttribute('data-page-state'),
+        disabled: node.hasAttribute('disabled')
+      })),
+      loadMoreCount: root.querySelectorAll('[data-expand-results]').length,
+      lockedContinuation: root.querySelector('[data-page-continuation="locked"]')?.getAttribute('aria-label') || ''
+    }));
     const expansionRequestStart = requests.length;
-    await page.locator('[data-expand-results]').click();
-    await page.waitForFunction(() => /220 results/i.test(document.querySelector('#result-count')?.textContent || '')
+    await page.locator('.pagination-page[data-result-page="2"][data-page-state="next"]').click();
+    await page.waitForFunction(() => /90 results/i.test(document.querySelector('#result-count')?.textContent || '')
       && document.querySelector('[data-result-page="2"]')?.getAttribute('aria-current') === 'page'
       && document.querySelectorAll('#result-list .item-row').length === 30);
     const sessionExpansionRequests = requests.slice(expansionRequestStart);
     const sessionExpanded = {
       rows: await page.locator('#result-list .item-row').count(),
       count: (await page.locator('#result-count').textContent()).trim(),
-      requests: sessionExpansionRequests
+      requests: sessionExpansionRequests,
+      beforeNext: sessionPaginationBeforeNext,
+      afterNext: await page.locator('#pagination-controls').evaluate((root) => ({
+        pages: [...root.querySelectorAll('.pagination-page[data-result-page]')].map((node) => ({
+          page: node.textContent?.trim(),
+          state: node.getAttribute('data-page-state'),
+          disabled: node.hasAttribute('disabled'),
+          cached: node.getAttribute('data-page-cached')
+        }))
+      }))
     };
 
     await page.locator('#keyword').fill('session-new-fixture');
     await page.locator('#search-button').click();
-    await page.waitForFunction(() => /60 results/i.test(document.querySelector('#result-count')?.textContent || '')
+    await page.waitForFunction(() => /90 results/i.test(document.querySelector('#result-count')?.textContent || '')
       && document.querySelectorAll('#result-list .item-row').length === 30);
-    const sessionNewSearchRequest = requests.at(-1);
+    const sessionNewSearchRequest = requests.findLast((request) => request.keyword === 'session-new-fixture' && !request.session_id);
+    await page.waitForFunction(() => document.querySelector('[data-result-page="2"]')?.getAttribute('data-page-cached') === 'true');
+    const cachedJumpRequestCount = requests.length;
+    await page.locator('.pagination-page[data-result-page="2"]').click();
+    await page.waitForFunction(() => document.querySelector('[data-result-page="2"]')?.getAttribute('aria-current') === 'page');
+    const cachedJump = {
+      requestDelta: requests.length - cachedJumpRequestCount,
+      count: (await page.locator('#result-count').textContent()).trim(),
+      rows: await page.locator('#result-list .item-row').count(),
+      focusId: await page.evaluate(() => document.activeElement?.id || '')
+    };
+
+    await page.locator('#keyword').fill('session-short-fixture');
+    await page.locator('#search-button').click();
+    await page.waitForFunction(() => /90 results/i.test(document.querySelector('#result-count')?.textContent || '')
+      && document.querySelector('[data-result-page="2"]')?.getAttribute('data-page-cached') === 'true');
+    await page.locator('.pagination-page[data-result-page="2"]').click();
+    await page.waitForFunction(() => document.querySelector('[data-result-page="2"]')?.getAttribute('aria-current') === 'page');
+    const shortRequestCount = requests.length;
+    await page.locator('.pagination-page[data-result-page="3"][data-page-state="next"]').click();
+    await page.waitForFunction(() => /No additional listings were found/i.test(document.querySelector('#search-status')?.textContent || '')
+      && document.querySelector('.results-section')?.getAttribute('aria-busy') === 'false');
+    const insufficientNext = {
+      requestDelta: requests.length - shortRequestCount,
+      currentPage: (await page.locator('.pagination-page[aria-current="page"]').textContent()).trim(),
+      count: (await page.locator('#result-count').textContent()).trim(),
+      rows: await page.locator('#result-list .item-row').count()
+    };
+
+    await page.locator('#keyword').fill('session-long-fixture');
+    await page.locator('#search-button').click();
+    await page.waitForFunction(() => /270 results/i.test(document.querySelector('#result-count')?.textContent || '')
+      && document.querySelectorAll('#result-list .item-row').length === 30);
+    await page.setViewportSize({ width: 320, height: 780 });
+    await page.waitForTimeout(50);
+    const pagination320 = await page.locator('#pagination-controls').evaluate((root) => ({
+      overflow: document.documentElement.scrollWidth > window.innerWidth,
+      height: root.getBoundingClientRect().height,
+      pageLabels: [...root.querySelectorAll('.pagination-page')].map((node) => node.textContent?.trim()),
+      rowCount: new Set([...root.querySelectorAll('button')].map((node) => Math.round(node.getBoundingClientRect().top))).size,
+      buttons: [...root.querySelectorAll('button')].map((node) => {
+        const rect = node.getBoundingClientRect();
+        return { width: rect.width, height: rect.height };
+      }),
+      lockedLabel: root.querySelector('[data-page-continuation="locked"]')?.getAttribute('aria-label') || ''
+    }));
+    await page.setViewportSize({ width: 1440, height: 900 });
     const sessionFlow = {
       initial: sessionInitial,
       retryRowsWhilePending: sessionRetryRowsWhilePending,
@@ -565,7 +632,10 @@ try {
       filterRequest: sessionFilterRequest,
       resetRequest: sessionResetRequest,
       expanded: sessionExpanded,
-      newSearchRequest: sessionNewSearchRequest
+      newSearchRequest: sessionNewSearchRequest,
+      cachedJump,
+      insufficientNext,
+      pagination320
     };
 
     await page.locator('#keyword').fill('no-results');
@@ -698,6 +768,7 @@ try {
   assert.deepEqual(result.japan.leaks, []);
   assert.match(result.japan.paginationText, /Previous/i);
   assert.match(result.japan.paginationText, /Next/i);
+  assert.match(result.japan.paginationText, /Next/i);
   assert.equal(result.japan.paginationLabel, 'Search result pages');
   assert.match(result.japan.clearRecentText, /^Clear all$/i);
   assert.equal(result.japan.clearRecentVisible, true);
@@ -787,27 +858,46 @@ try {
   assert.equal(result.sessionFlow.resetRequest.max_price, undefined);
 
   assert.equal(result.sessionFlow.expanded.rows, 30);
-  assert.match(result.sessionFlow.expanded.count, /220 results/i);
-  assert.equal(result.sessionFlow.expanded.requests.length, 3);
-  const [exposeRequest, continuationRequest, expandedPageRequest] = result.sessionFlow.expanded.requests;
-  assert.equal(exposeRequest.session_id, replacementSessionId);
-  assert.equal(exposeRequest.session_generation, 1);
-  assert.equal(exposeRequest.session_page, 0);
-  assert.equal(exposeRequest.session_only, true);
-  assert.equal(exposeRequest.session_window, 220, 'one load-more action must expand the session window by exactly 160');
-  assert.equal(continuationRequest.session_id, replacementSessionId);
-  assert.equal(continuationRequest.session_generation, 1);
-  assert.equal(continuationRequest.session_only, undefined);
-  assert.equal(continuationRequest.session_window, 220);
-  assert.match(continuationRequest.cursor, /^fixture-cursor-/);
+  assert.match(result.sessionFlow.expanded.count, /90 results/i);
+  assert.deepEqual(result.sessionFlow.expanded.beforeNext.pages, [
+    { page: '1', state: 'loaded', disabled: false },
+    { page: '2', state: 'loaded', disabled: true },
+    { page: '3', state: 'next', disabled: false }
+  ]);
+  assert.equal(result.sessionFlow.expanded.beforeNext.loadMoreCount, 0, 'next-page discovery must not require a duplicate load-more control');
+  assert.match(result.sessionFlow.expanded.beforeNext.lockedContinuation, /more pages may be available/i);
+  assert.equal(result.sessionFlow.expanded.requests.length, 1, 'the immediately next page must use one session/cursor request');
+  const [expandedPageRequest] = result.sessionFlow.expanded.requests;
   assert.equal(expandedPageRequest.session_id, replacementSessionId);
-  assert.equal(expandedPageRequest.session_generation, 2, 'the final page request must use the generation returned by continuation');
+  assert.equal(expandedPageRequest.session_generation, 1);
   assert.equal(expandedPageRequest.session_page, 2);
-  assert.equal(expandedPageRequest.session_only, true);
-  assert.equal(expandedPageRequest.session_window, 220);
+  assert.equal(expandedPageRequest.session_only, undefined);
+  assert.equal(expandedPageRequest.session_window, 90);
+  assert.match(expandedPageRequest.cursor, /^fixture-cursor-/);
+  assert.deepEqual(result.sessionFlow.expanded.afterNext.pages, [
+    { page: '1', state: 'loaded', disabled: false, cached: 'false' },
+    { page: '2', state: 'loaded', disabled: false, cached: 'false' },
+    { page: '3', state: 'loaded', disabled: true, cached: 'true' },
+    { page: '4', state: 'next', disabled: false, cached: 'false' }
+  ]);
   assert.equal(result.sessionFlow.newSearchRequest.session_id, undefined, 'a new keyword must not inherit the previous search session');
   assert.equal(result.sessionFlow.newSearchRequest.session_generation, undefined);
   assert.equal(result.sessionFlow.newSearchRequest.session_only, undefined);
+  assert.equal(result.sessionFlow.cachedJump.requestDelta, 0, 'page 1 to prefetched page 3 must render from the browser page cache');
+  assert.match(result.sessionFlow.cachedJump.count, /90 results.*Page 3 of 3/i);
+  assert.equal(result.sessionFlow.cachedJump.rows, 30);
+  assert.equal(result.sessionFlow.cachedJump.focusId, 'result-count', 'a completed page transition must focus the result summary');
+  assert.equal(result.sessionFlow.insufficientNext.requestDelta, 1);
+  assert.equal(result.sessionFlow.insufficientNext.currentPage, '3', 'an unfilled target page must preserve the current page');
+  assert.match(result.sessionFlow.insufficientNext.count, /90 results.*Page 3 of 3/i);
+  assert.equal(result.sessionFlow.insufficientNext.rows, 30);
+  assert.equal(result.sessionFlow.pagination320.overflow, false);
+  assert.deepEqual(result.sessionFlow.pagination320.pageLabels, ['1', '2', '9', '10'],
+    'long pagination must retain the first pages, authoritative last page, and immediately reachable next page');
+  assert.ok(result.sessionFlow.pagination320.rowCount <= 2, `320px pagination must stay within two control rows: ${result.sessionFlow.pagination320.rowCount}`);
+  assert.ok(result.sessionFlow.pagination320.buttons.every((button) => button.width >= 40 && button.height >= 40),
+    `320px pagination controls must retain 40px targets: ${JSON.stringify(result.sessionFlow.pagination320.buttons)}`);
+  assert.match(result.sessionFlow.pagination320.lockedLabel, /more pages may be available/i);
 
   assert.equal(result.emptyState.text, 'No results');
   assert.match(result.emptyState.count, /0 results/i);

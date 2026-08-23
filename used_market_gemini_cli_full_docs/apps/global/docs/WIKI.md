@@ -4,7 +4,7 @@ description: Verified operating knowledge for the standalone global used-listing
 type: reference
 scope: apps/global
 source: code-verified and user-approved
-verified: 2026-08-20
+verified: 2026-08-24
 ---
 
 # USED MARKET Global Wiki
@@ -27,6 +27,7 @@ Read first:
 - Runtime boundary: `docs/APP_SCOPE.md`
 - Deployment and rollback: `DEPLOYMENT.md`
 - Harness overview: `harness/README.md`
+- Latest pagination verification: `docs/worklog/2026-08-24-pagination-ux.md`
 
 ## Marketplace Matrix
 
@@ -82,7 +83,9 @@ Primary code and contracts:
 | Vinted US | Up to 30 relevant public listing cards | Continue within the 96-card page, then follow the verified next-page control, 30 results at a time | Price controls apply to the collected window; Newest is unavailable without a valid listing date | Same three queries |
 | Unclaimed Baggage | Up to 30 relevant public product cards | Follow the verified Shopify next-page control, 30 results at a time | Price controls apply to the collected window; Newest is unavailable without a valid listing date | Same three queries |
 
-The UI shows 30 rows per page. The runner owns a normalized, memory-only search session for 10 idle minutes, promotes active sessions in an LRU capped at 32, and keeps at most 1,000 verified rows per session. The server—not the browser—enforces each additional visible window step at no more than 160 rows and the 160→320→480→640 source-window budget. One `Load more listings` action follows at most eight source requests and stops after three consecutive empty continuation batches. Sort, price filters, tabs, and numbered pages query the same session without marketplace I/O; numeric price is the primary key in both directions and quality warnings only break equal-price ties. Vinted and Unclaimed Baggage cursors preserve within-page offsets so continuation does not skip unused cards on the current source page. An exhausted source is explicitly marked and is not restarted from page one while another source continues. Cursor, generation, query, category, site set, and limit are bound together; stale, replayed, or mismatched continuations are rejected.
+The UI shows 30 rows per page. The runner owns a normalized, memory-only search session for 10 idle minutes, promotes active sessions in an LRU capped at 32, and keeps at most 1,000 verified rows per session. The server—not the browser—enforces each additional visible window step at no more than 160 rows and retains the bounded 160→320→480→640 source-window policy. Sort, price filters, tabs, and numbered pages query the same session without marketplace I/O unless the user selects the one page immediately beyond the authoritative window; numeric price is the primary key in both directions and quality warnings only break equal-price ties. Vinted and Unclaimed Baggage cursors preserve within-page offsets so continuation does not skip unused cards on the current source page. An exhausted source is explicitly marked and is not restarted from page one while another source continues. Cursor, generation, query, category, site set, and limit are bound together; stale, replayed, or mismatched continuations are rejected.
+
+Numbered pagination exposes the current authoritative `session.available_count` plus exactly one reachable next-page control. Up to seven reachable pages are shown directly. Longer sessions use a compact sequence that retains the first page, authoritative last loaded page, current-page neighbors, and the immediately reachable next page, with ellipses for omitted ranges. It does not turn the 640-row capacity into a false total page count. A final non-numbered locked ellipsis only indicates that more pages may become available. The browser prefetches session-only page 2 and page 3 and keeps them in a generation-bound page cache, so a cached 1→3 jump renders without another request. The immediately next page performs exactly one request: a session-only window read when rows are already buffered, or one cursor continuation otherwise. A generation change discards the browser page cache. If that request cannot fill the requested view page, the current page remains visible while authoritative counts and continuation state are updated. Page changes move focus to the result count instead of attempting to focus the disabled current-page button. At 320px, the compact controls retain 40px targets and wrap to no more than two rows.
 
 Request-level overload is preserved as HTTP 429 with `Retry-After`; it is not rewritten as a generic 503. The UI displays the wait time and offers a retry. A failed marketplace in a partial aggregate response shows its normalized error. The current retry action rebuilds one coherent aggregate session rather than splicing a source-only response into an incompatible cursor generation.
 

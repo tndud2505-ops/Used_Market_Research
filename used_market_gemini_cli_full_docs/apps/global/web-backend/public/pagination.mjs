@@ -31,3 +31,21 @@ export function paginationItems(pageIndex, pageCount) {
   }
   return items;
 }
+
+export function paginationControlItems({ currentPage = 0, loadedPageCount, canLoadNext = false } = {}) {
+  const loaded = Math.max(0, Math.floor(Number(loadedPageCount) || 0));
+  const reachable = loaded + (canLoadNext ? 1 : 0);
+  const current = clampResultPage(currentPage, Math.max(loaded, 1));
+  const pages = reachable <= 7
+    ? Array.from({ length: reachable }, (_, page) => page)
+    : [...new Set([0, current - 1, current, current + 1, loaded - 1, ...(canLoadNext ? [loaded] : [])])]
+      .filter((page) => page >= 0 && page < reachable)
+      .sort((left, right) => left - right);
+  const items = [];
+  for (const page of pages) {
+    if (items.length && page - items.at(-1).page > 1) items.push({ type: 'ellipsis' });
+    items.push({ type: 'page', page, state: page < loaded ? 'loaded' : 'next' });
+  }
+  if (canLoadNext) items.push({ type: 'continuation', state: 'locked' });
+  return items;
+}

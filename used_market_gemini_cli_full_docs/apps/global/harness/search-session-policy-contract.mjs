@@ -9,6 +9,7 @@ import {
 import {
   RESULT_PAGE_SIZE,
   RESULT_WINDOW_MAX,
+  paginationControlItems,
   resultPageCount
 } from '../web-backend/public/pagination.mjs';
 
@@ -71,6 +72,8 @@ function page(items, nextCursor, site = 'poshmark') {
 }
 
 const appSource = await readFile(new URL('../web-backend/public/app.js', import.meta.url), 'utf8');
+const htmlSource = await readFile(new URL('../web-backend/public/index.html', import.meta.url), 'utf8');
+const cssSource = await readFile(new URL('../web-backend/public/styles.css', import.meta.url), 'utf8');
 const orchestratorSource = await readFile(new URL('../MCP/logic/orchestrator.ts', import.meta.url), 'utf8');
 
 await checkContract('established page and session limits', () => {
@@ -79,6 +82,51 @@ await checkContract('established page and session limits', () => {
   assert.equal(resultPageCount(1000), 34);
   assert.match(appSource, /const SEARCH_SESSION_MAX_ITEMS = 1000;/);
   assert.match(appSource, /items\.slice\(start, start \+ RESULT_PAGE_SIZE\)/);
+});
+
+await checkContract('pagination assets are cache-busted and retain both direction controls', () => {
+  assert.match(htmlSource, /\/global\/styles\.css\?v=global-pagination-v4/);
+  assert.match(htmlSource, /\/global\/app\.js\?v=global-pagination-v6/);
+  assert.doesNotMatch(cssSource, /body\s*\{[^}]*min-width:\s*320px/);
+  assert.match(appSource, />Previous<\/button>/);
+  assert.match(appSource, />Next<\/button>/);
+});
+
+await checkContract('pagination exposes loaded reachability, one next page, and a truthful locked continuation', () => {
+  assert.deepEqual(
+    paginationControlItems({ currentPage: 0, loadedPageCount: 3, canLoadNext: true }),
+    [
+      { type: 'page', page: 0, state: 'loaded' },
+      { type: 'page', page: 1, state: 'loaded' },
+      { type: 'page', page: 2, state: 'loaded' },
+      { type: 'page', page: 3, state: 'next' },
+      { type: 'continuation', state: 'locked' }
+    ]
+  );
+  assert.deepEqual(
+    paginationControlItems({ currentPage: 5, loadedPageCount: 12, canLoadNext: true }),
+    [
+      { type: 'page', page: 0, state: 'loaded' },
+      { type: 'ellipsis' },
+      { type: 'page', page: 4, state: 'loaded' },
+      { type: 'page', page: 5, state: 'loaded' },
+      { type: 'page', page: 6, state: 'loaded' },
+      { type: 'ellipsis' },
+      { type: 'page', page: 11, state: 'loaded' },
+      { type: 'page', page: 12, state: 'next' },
+      { type: 'continuation', state: 'locked' }
+    ],
+    'long sessions must keep first, last, current neighbors, and the reachable next page without rendering every number'
+  );
+  assert.deepEqual(
+    paginationControlItems({ currentPage: 2, loadedPageCount: 3, canLoadNext: false }),
+    [
+      { type: 'page', page: 0, state: 'loaded' },
+      { type: 'page', page: 1, state: 'loaded' },
+      { type: 'page', page: 2, state: 'loaded' }
+    ],
+    'no speculative continuation is shown when the session cannot continue'
+  );
 });
 
 await checkContract('additional pages accumulate, deduplicate, and stop at 1000', () => {
@@ -212,6 +260,19 @@ await checkContract('numbered pages and controls use the same server session wit
   const pageHandler = appSource.slice(pageStart, pageEnd);
   assert.match(pageHandler, /state\.sessionId/);
   assert.match(pageHandler, /loadSessionView\(\{[\s\S]{0,220}?page:\s*targetPage[\s\S]{0,220}?sessionOnly:\s*true/);
+  assert.match(pageHandler, /requestedPage\s*===\s*loadedPageCount[\s\S]{0,220}?loadNextSessionPage/,
+    'the one page immediately beyond loaded rows must use the bounded next-page path');
+
+  const nextStart = appSource.indexOf('async function loadNextSessionPage');
+  const nextEnd = appSource.indexOf('\nfunction ', nextStart + 20);
+  assert.ok(nextStart >= 0 && nextEnd > nextStart, 'loadNextSessionPage must exist');
+  const nextHandler = appSource.slice(nextStart, nextEnd);
+  const requestCalls = nextHandler.match(/requestSearchPage\(/g) || [];
+  assert.equal(requestCalls.length, 1, 'the next page action must issue exactly one session/cursor request');
+  assert.match(nextHandler, /sessionPage:\s*targetPage/);
+  assert.match(nextHandler, /sessionWindow:\s*targetWindow/);
+  assert.match(nextHandler, /sessionOnly:\s*hasBufferedRows/);
+  assert.match(nextHandler, /cursor:\s*hasBufferedRows\s*\?\s*null\s*:\s*state\.data\?\.pagination\?\.next_cursor/);
 
   const refreshStart = appSource.indexOf('async function refreshSessionView');
   const refreshEnd = appSource.indexOf('\nfunction ', refreshStart + 20);

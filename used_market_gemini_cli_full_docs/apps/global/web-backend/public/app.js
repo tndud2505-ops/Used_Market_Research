@@ -1,4 +1,4 @@
-import { RESULT_PAGE_SIZE, clampResultPage, paginationItems, resultPageCount } from './pagination.mjs?v=global-english-v4';
+import { RESULT_PAGE_SIZE, clampResultPage, paginationControlItems, resultPageCount } from './pagination.mjs?v=global-pagination-v5';
 
 const APP_ID = 'global';
 const API_BASE_PATH = '/global/api';
@@ -72,6 +72,7 @@ const state = {
   collectionSites: [],
   collectionData: null,
   viewData: new Map(),
+  sessionPageData: new Map(),
   focusedSiteWindows: {},
   favorites: loadFavorites(),
   favoriteItems: loadFavoriteItems(),
@@ -964,6 +965,12 @@ function adoptSessionData(data, options = {}) {
     && Number.isInteger(state.sessionGeneration)
     && Number.isInteger(session.generation)
     && session.generation < state.sessionGeneration) return null;
+  if (state.sessionId === session.id
+    && Number.isInteger(state.sessionGeneration)
+    && Number.isInteger(session.generation)
+    && session.generation !== state.sessionGeneration) {
+    state.sessionPageData = new Map();
+  }
   state.sessionId = session.id;
   state.sessionGeneration = session.generation;
   state.sessionWindow = session.window;
@@ -990,13 +997,62 @@ function clearSearchSession() {
   state.collectionSites = [];
   state.collectionData = null;
   state.viewData = new Map();
+  state.sessionPageData = new Map();
   state.focusedSiteWindows = {};
 }
 
 function rememberViewData(data) {
   if (!data) return;
-  state.viewData.set(sessionViewKey(), data);
+  const viewKey = sessionViewKey();
+  state.viewData.set(viewKey, data);
+  const session = sessionInfo(data);
+  if (session && data?._session_page_data) {
+    state.sessionPageData.set(`${session.id}:${session.generation}:${viewKey}:${session.page}`, data);
+  }
   if (state.activeSite === 'all') state.collectionData = data;
+}
+
+function cachedSessionPage(page, site = state.activeSite) {
+  if (!state.sessionId || !Number.isInteger(state.sessionGeneration)) return null;
+  return state.sessionPageData.get(`${state.sessionId}:${state.sessionGeneration}:${sessionViewKey(site)}:${page}`) || null;
+}
+
+async function prefetchSessionPages(data = state.data) {
+  const session = sessionInfo(data);
+  if (!session || session.available_count <= RESULT_PAGE_SIZE) return;
+  const sessionId = session.id;
+  const sessionGeneration = session.generation;
+  const viewKey = sessionViewKey();
+  const site = state.activeSite;
+  const categoryIds = selectedCategoryIds();
+  const sites = state.collectionSites.length ? [...state.collectionSites] : getSelectedSites(categoryIds, state.query);
+  const lastPrefetchPage = Math.min(resultPageCount(session.available_count) - 1, 2);
+  for (let page = 1; page <= lastPrefetchPage; page += 1) {
+    if (state.sessionId !== sessionId || sessionViewKey(site) !== viewKey || cachedSessionPage(page, site)) continue;
+    try {
+      const pageData = await requestSearchPage({
+        keyword: state.query,
+        categoryIds,
+        sites,
+        viewSites: activeViewSites(site),
+        sessionId,
+        sessionGeneration,
+        sessionPage: page,
+        sessionOnly: true,
+        sessionWindow: session.window,
+        refreshIndex: false
+      });
+      if (state.sessionId !== sessionId || sessionViewKey(site) !== viewKey) return;
+      const normalized = normalizeSessionPageData(pageData, { viewKey });
+      const prefetchedSession = sessionInfo(normalized);
+      if (prefetchedSession?.id === sessionId && prefetchedSession.generation === sessionGeneration) {
+        state.sessionPageData.set(`${sessionId}:${sessionGeneration}:${viewKey}:${page}`, normalized);
+        renderPagination();
+      }
+    } catch {
+      return;
+    }
+  }
 }
 
 function previewDataForSite(site) {
@@ -1061,6 +1117,7 @@ async function loadSessionView({ page = 0, site = state.activeSite, sessionOnly 
     state.data = accepted;
     state.currentPage = sessionInfo(accepted)?.page ?? page;
     rememberViewData(accepted);
+    void prefetchSessionPages(accepted);
     return true;
   } catch (error) {
     if (error.name === 'AbortError') return false;
@@ -1431,6 +1488,7 @@ async function executeSearch({ keyword = '', categoryId = 'all', categoryIds = n
     if (!accepted) return false;
     state.data = accepted;
     rememberViewData(accepted);
+    void prefetchSessionPages(accepted);
     state.appendError = '';
     trackSearchRefresh(accepted, fingerprint);
     renderAll();
@@ -1454,10 +1512,28 @@ async function executeSearch({ keyword = '', categoryId = 'all', categoryIds = n
 
 async function loadResultPage(pageIndex) {
   if (!state.data || state.loading) return;
-  const pageCount = resultPageCount(availableResultCount());
-  const targetPage = clampResultPage(pageIndex, pageCount);
+  const loadedPageCount = resultPageCount(availableResultCount());
+  const requestedPage = Math.max(0, Math.floor(Number(pageIndex) || 0));
+  if (requestedPage > loadedPageCount) return;
+  if (requestedPage === loadedPageCount) {
+    if (state.sessionId) {
+      if (canExpandResultWindow()) await loadNextSessionPage(requestedPage);
+      return;
+    }
+  }
+  const targetPage = requestedPage === loadedPageCount
+    ? requestedPage
+    : clampResultPage(requestedPage, loadedPageCount);
   if (targetPage === state.currentPage) return;
   if (state.sessionId) {
+    const cached = cachedSessionPage(targetPage);
+    if (cached) {
+      state.data = cached;
+      state.currentPage = targetPage;
+      renderAll();
+      focusCurrentPage();
+      return;
+    }
     const loaded = await loadSessionView({ page: targetPage, site: state.activeSite, sessionOnly: true });
     if (loaded) focusCurrentPage();
     return;
@@ -1506,6 +1582,75 @@ async function loadResultPage(pageIndex) {
       setLoading(false);
       renderAll();
       focusCurrentPage();
+    }
+  }
+}
+
+async function loadNextSessionPage(targetPage) {
+  const session = sessionInfo();
+  if (!session || !state.sessionId || state.loading) return false;
+  const targetWindow = Math.min((targetPage + 1) * RESULT_PAGE_SIZE, session.window + RESULT_PAGE_SIZE, SITE_RESULT_WINDOW_MAX, SEARCH_SESSION_MAX_ITEMS);
+  const hasBufferedRows = session.loaded_count >= targetWindow;
+  if (!hasBufferedRows && !state.data?.pagination?.next_cursor) return false;
+  const requestController = new AbortController();
+  state.requestController?.abort();
+  state.requestController = requestController;
+  const categoryIds = selectedCategoryIds();
+  const sites = state.collectionSites.length ? [...state.collectionSites] : getSelectedSites(categoryIds, state.query);
+  const priorPage = state.currentPage;
+  const priorData = state.data;
+  state.appendError = '';
+  setLoading(true, true);
+  try {
+    const pageData = await requestSearchPage({
+      keyword: state.query,
+      categoryIds,
+      sites,
+      viewSites: activeViewSites(),
+      cursor: hasBufferedRows ? null : state.data?.pagination?.next_cursor,
+      sessionId: state.sessionId,
+      sessionGeneration: state.sessionGeneration,
+      sessionPage: targetPage,
+      sessionOnly: hasBufferedRows,
+      sessionWindow: targetWindow,
+      signal: requestController.signal,
+      refreshIndex: false
+    });
+    if (state.requestController !== requestController) return false;
+    const accepted = adoptSessionData(pageData);
+    if (!accepted) return false;
+    const acceptedSession = sessionInfo(accepted);
+    if (acceptedSession?.page !== targetPage) {
+      const priorItems = Array.isArray(priorData?.items) ? priorData.items : [];
+      state.data = {
+        ...accepted,
+        items: priorItems,
+        session: { ...acceptedSession, page: priorPage },
+        quality: { ...(accepted.quality || {}), returned_count: priorItems.length },
+        _session_page_data: true
+      };
+      state.currentPage = priorPage;
+      rememberViewData(state.data);
+      $('#search-status').textContent = 'No additional listings were found for that page.';
+      $('#search-status').classList.add('visible');
+      return false;
+    }
+    state.data = accepted;
+    state.currentPage = targetPage;
+    rememberViewData(accepted);
+    return true;
+  } catch (error) {
+    if (error.name === 'AbortError') return false;
+    state.appendError = formatSourceMessage(error.message);
+    $('#search-status').textContent = `Could not load this page: ${state.appendError}`;
+    $('#search-status').classList.add('visible');
+    return false;
+  } finally {
+    if (state.requestController === requestController) {
+      state.requestController = null;
+      setLoading(false);
+      renderAll();
+      if (state.currentPage === targetPage) focusCurrentPage();
     }
   }
 }
@@ -1782,22 +1927,26 @@ function renderPagination(totalCount = availableResultCount()) {
     hidePagination();
     return;
   }
-  const pageButtons = paginationItems(state.currentPage, pageCount).map((item, index) => (
-    item === 'ellipsis'
-      ? `<span class="pagination-ellipsis" aria-hidden="true" data-pagination-gap="${index}">…</span>`
-      : `<button class="pagination-page" type="button" data-result-page="${item}" aria-label="Page ${item + 1}"${item === state.currentPage ? ' aria-current="page" disabled' : ''}>${item + 1}</button>`
-  )).join('');
-  const atLastPage = pageCount <= 1 || state.currentPage >= pageCount - 1;
-  const expandButton = canExpand && atLastPage
-    ? `<button class="pagination-direction" type="button" data-expand-results${state.loading ? ' disabled' : ''}>${'Load more listings'}</button>`
-    : '';
-  root.innerHTML = `${pageCount > 1 ? `<button class="pagination-direction" type="button" data-result-page="${state.currentPage - 1}" aria-label="${'Previous page'}"${state.currentPage === 0 || state.loading ? ' disabled' : ''}>${'Previous'}</button>${pageButtons}<button class="pagination-direction" type="button" data-result-page="${state.currentPage + 1}" aria-label="${'Next page'}"${atLastPage || state.loading ? ' disabled' : ''}>${'Next'}</button>` : ''}${expandButton}`;
+  const controls = paginationControlItems({ currentPage: state.currentPage, loadedPageCount: pageCount, canLoadNext: canExpand });
+  const pageButtons = controls.map((item, index) => {
+    if (item.type === 'ellipsis') {
+      return `<span class="pagination-ellipsis" aria-hidden="true" data-pagination-gap="${index}">…</span>`;
+    }
+    if (item.type === 'continuation') {
+      return `<span class="pagination-ellipsis pagination-continuation" role="img" aria-label="More pages may be available after the next page" data-page-continuation="locked" data-pagination-gap="${index}">…</span>`;
+    }
+    const current = item.page === state.currentPage;
+    const cached = item.state === 'loaded' && Boolean(cachedSessionPage(item.page));
+    return `<button class="pagination-page" type="button" data-result-page="${item.page}" data-page-state="${item.state}" data-page-cached="${cached}" aria-label="Page ${item.page + 1}${item.state === 'next' ? ', load next results' : ''}"${current ? ' aria-current="page" disabled' : ''}>${item.page + 1}</button>`;
+  }).join('');
+  const reachableLastPage = pageCount - 1 + (canExpand ? 1 : 0);
+  root.innerHTML = `<button class="pagination-direction" type="button" data-result-page="${state.currentPage - 1}" aria-label="Previous page"${state.currentPage === 0 || state.loading ? ' disabled' : ''}>Previous</button>${pageButtons}<button class="pagination-direction" type="button" data-result-page="${state.currentPage + 1}" aria-label="Next page"${state.currentPage >= reachableLastPage || state.loading ? ' disabled' : ''}>Next</button>`;
   root.hidden = false;
 }
 
 function focusCurrentPage() {
+  $('#result-count')?.focus({ preventScroll: true });
   requestAnimationFrame(() => {
-    $('#pagination-controls [aria-current="page"]')?.focus({ preventScroll: true });
     $('.results-toolbar')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   });
 }
