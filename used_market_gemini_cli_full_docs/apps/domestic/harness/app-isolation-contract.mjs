@@ -22,7 +22,7 @@ const app = await readFile(path.join(root, 'web-backend/public/app.js'), 'utf8')
 assert.match(app, /const APP_ID = 'domestic'/);
 assert.match(app, /const MARKET_PROFILE = 'domestic'/);
 assert.doesNotMatch(app, /PAGE_PARAMS\.get\(['"]market['"]\)/);
-assert.match(app, /switchUrl: '\/global\/'/);
+assert.doesNotMatch(app, /switchUrl: '\/global\/'/);
 
 const sites = await readFile(path.join(root, 'collector/logic/sites.ts'), 'utf8');
 for (const key of ['joonggonara', 'bunjang', 'daangn']) assert.match(sites, new RegExp(`key: ["']${key}["']`));

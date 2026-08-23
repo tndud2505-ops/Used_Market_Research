@@ -42,7 +42,7 @@
     "cloudflare:deploy": "node cloudflare/deploy.mjs",
     "cloudflare:release": "node cloudflare/release.mjs",
     "target-site:compare": "node harness/target-site-compare.mjs",
-    "test": "npm run build && node harness/app-isolation-contract.mjs && node harness/runtime-isolation-contract.mjs && node harness/category-contract.mjs && node harness/category-harness-contract.mjs && node harness/web-contract.mjs && node harness/ui-pagination-contract.mjs && npm run search-session:contract && npm run search-only:build && node harness/search-source-contract.mjs && npm run harness && npm run http:contract"
+    "test": "npm run build && node harness/app-isolation-contract.mjs && node harness/runtime-isolation-contract.mjs && node harness/category-contract.mjs && node harness/category-harness-contract.mjs && node harness/web-contract.mjs && node harness/ui-pagination-contract.mjs && node harness/ui-pagination-summary-contract.mjs && npm run search-session:contract && npm run search-only:build && node harness/search-source-contract.mjs && npm run harness && npm run http:contract"
   },
   "dependencies": {
     "commander": "^14.0.0",

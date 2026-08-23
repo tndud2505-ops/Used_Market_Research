@@ -30,7 +30,8 @@
       }
     </script>
     <link rel="icon" href="/assets/mark.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css?v=global-english-v5" />
+    <link rel="stylesheet" href="/styles.css?v=domestic-pagination-v6" />
+    <link rel="stylesheet" href="/pagination-toolbar.css?v=summary-pagination-v1" />
     <style>
       .source-summary { display: flex; flex-wrap: wrap; gap: 5px 12px; min-width: 0; max-width: 100%; margin-top: 6px; color: #888a84; font-size: 10px; line-height: 1.35; overflow-wrap: anywhere; }
       .source-summary-item { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; white-space: nowrap; }
@@ -102,7 +103,10 @@
             <section class="results-section" aria-busy="false">
               <div class="results-toolbar">
                 <div class="result-count">
-                  <strong id="result-count">0개</strong>
+                  <div class="result-summary-row">
+                    <strong id="result-count">0개</strong>
+                    <nav class="result-summary-pagination" id="result-summary-pagination" aria-label="현재 검색 결과 페이지 이동" hidden></nav>
+                  </div>
                   <div id="freshness-status" class="freshness-status" aria-live="polite" hidden>
                     <span id="freshness-message"></span>
                     <button id="apply-refresh-results" type="button" hidden>새 매물 보기</button>
@@ -167,6 +171,6 @@
         </nav>
       </footer>
     </div>
-    <script type="module" src="/app.js?v=search-session-v7"></script>
+    <script type="module" src="/app.js?v=search-session-v8"></script>
   </body>
 </html>

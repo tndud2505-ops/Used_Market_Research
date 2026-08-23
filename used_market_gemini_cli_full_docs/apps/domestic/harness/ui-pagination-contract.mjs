@@ -42,13 +42,15 @@ assert.deepEqual(paginationItems(5, 27, 7), [0, "ellipsis", 4, 5, 6, 7, "ellipsi
 const html = await readFile(new URL("../web-backend/public/index.html", import.meta.url), "utf8");
 const app = await readFile(new URL("../web-backend/public/app.js", import.meta.url), "utf8");
 const styles = await readFile(new URL("../web-backend/public/styles.css", import.meta.url), "utf8");
-assert.match(html, /\/styles\.css\?v=global-english-v5/);
-assert.match(html, /\/app\.js\?v=search-session-v7/);
+assert.match(html, /\/styles\.css\?v=domestic-pagination-v6/);
+assert.match(html, /\/app\.js\?v=search-session-v8/);
 assert.match(app, /pagination\.mjs\?v=pagination-v7/);
 assert.doesNotMatch(html, /data-site-tab="daangn"/u);
 assert.doesNotMatch(app, /DEFAULT_SITES\s*=\s*\[[^\]]*daangn/u);
 assert.match(html, /id="pagination-controls"/);
 assert.doesNotMatch(html, /id="load-more-button"/);
+assert.doesNotMatch(app, /해외 시안/u);
+assert.doesNotMatch(app, /market-profile-switch/u);
 assert.match(app, /pagination-page/);
 assert.match(app, /pagination-page-preview/);
 assert.match(app, /pagination-page-preview[\s\S]{0,180}aria-disabled="true"/u);
@@ -60,8 +62,11 @@ assert.match(loadResultPageSource, /if \(loadedCount >= targetItemCount\) \{[\s\
 assert.doesNotMatch(loadResultPageSource, /while \(/u);
 assert.equal((loadResultPageSource.match(/await requestSearchPage\(/gu) || []).length, 1);
 assert.match(styles, /\.result-pagination \{[^}]*flex-wrap:\s*wrap;/u);
+assert.doesNotMatch(styles, /body \{[^}]*min-width:\s*320px/u);
 assert.match(app, /aria-current/);
 assert.doesNotMatch(app, /다음 매물 더 찾기/u);
+assert.match(app, />\$\{uiText\('이전', 'Previous'\)\}<\/button>/u);
+assert.match(app, />\$\{uiText\('다음', 'Next'\)\}<\/button>/u);
 assert.match(app, /if \(!canExpandResultWindow\(\) \|\| state\.loading \|\| state\.viewCollectionController\) return;/u);
 assert.match(app, /SITE_RESULT_WINDOW_INITIAL = 160/u);
 assert.match(app, /SITE_RESULT_WINDOW_MAX = 640/u);
@@ -79,4 +84,4 @@ assert.match(app, /\$\$\('\[data-sort\]'\)[\s\S]{0,120}if \(state\.loading\) ret
 assert.match(app, /function setLoading\([\s\S]{0,500}if \(state\.data\) renderPagination\(\);/u);
 assert.doesNotMatch(app, /\$\$\('#pagination-controls button'\)[\s\S]{0,160}pageButton\.disabled/u);
 
-console.log(JSON.stringify({ status: "passed", checks: 62 }, null, 2));
+console.log(JSON.stringify({ status: "passed", checks: 67 }, null, 2));

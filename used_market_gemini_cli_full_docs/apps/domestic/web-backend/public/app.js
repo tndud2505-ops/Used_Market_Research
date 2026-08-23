@@ -9,9 +9,7 @@ const storageKey = (base) => IS_GLOBAL ? `${base}:global` : base;
 const MARKET_PROFILES = {
   domestic: {
     sites: ['joonggonara', 'bunjang', 'hellomarket', 'rethinkmall'],
-    idleText: '중고나라·번개장터·헬로마켓·리씽크몰의 중고매물을 한 번에 비교해 보세요.',
-    switchLabel: '해외 시안',
-    switchUrl: '/global/'
+    idleText: '중고나라·번개장터·헬로마켓·리씽크몰의 중고매물을 한 번에 비교해 보세요.'
   },
   global: {
     defaultCountry: 'jp',
@@ -220,6 +218,7 @@ function applyMarketShellCopy() {
   text('[data-sort="price_desc"]', 'Price: High to Low');
   text('[data-sort="recent"]', 'Newest');
   attr('#pagination-controls', 'aria-label', 'Search result pages');
+  attr('#result-summary-pagination', 'aria-label', 'Current search result page navigation');
   text('#recent-viewed-title', 'Recently Viewed');
   attr('#recent-viewed', 'aria-label', 'Recently viewed listings');
   $('.coupang-banner')?.remove();
@@ -285,8 +284,7 @@ function renderMarketProfile() {
       ...DEFAULT_SITES.map((site) => {
         const active = state.activeSite === site;
         return `<button class="${active ? 'active' : ''}" type="button" aria-pressed="${active}" data-site-tab="${escapeHtml(site)}">${escapeHtml(labels[site] || site)}</button>`;
-      }),
-      `<a class="market-profile-switch" href="${escapeHtml(profile.switchUrl)}">${escapeHtml(profile.switchLabel)}</a>`
+      })
     ].join('');
   }
   const idleDescription = $('#idle-description');
@@ -1199,10 +1197,12 @@ function resetRenderedResultSummary() {
 }
 
 function hidePagination() {
-  const pagination = $('#pagination-controls');
-  if (!pagination) return;
-  pagination.hidden = true;
-  pagination.innerHTML = '';
+  ['#pagination-controls', '#result-summary-pagination'].forEach((selector) => {
+    const pagination = $(selector);
+    if (!pagination) return;
+    pagination.hidden = true;
+    pagination.innerHTML = '';
+  });
 }
 
 function syncPriceRangeFromInputs() {
@@ -1361,6 +1361,9 @@ async function executeSearch({ keyword = '', categoryId = 'all', categoryIds = n
     state.appendError = '';
     trackSearchRefresh(data, fingerprint);
     renderAll();
+    if (reason === 'search' && MARKET_PROFILE !== 'global' && data.pagination?.next_cursor) {
+      void prefetchActiveResultPages();
+    }
     if (reason === 'price_filter') {
       $('#search-status').textContent = '';
       $('#search-status').classList.remove('visible');
@@ -1379,6 +1382,50 @@ async function executeSearch({ keyword = '', categoryId = 'all', categoryIds = n
     if (state.requestController === requestController) {
       state.requestController = null;
       setLoading(false);
+    }
+  }
+}
+
+async function prefetchActiveResultPages() {
+  if (MARKET_PROFILE === 'global' || !state.data?.pagination?.next_cursor || !state.collectionSites.length) return false;
+  state.viewCollectionController?.abort();
+  const requestController = new AbortController();
+  state.viewCollectionController = requestController;
+  renderPagination();
+  try {
+    let data = state.data;
+    const targetItemCount = Math.min(availableResultCount(data), SITE_PREFETCH_PAGES * RESULT_PAGE_SIZE);
+    while ((data.items || []).length < targetItemCount && data.pagination?.next_cursor) {
+      const previousCount = data.items.length;
+      const requestedCursor = data.pagination.next_cursor;
+      const nextData = await requestSearchPage({
+        keyword: state.query,
+        categoryIds: selectedCategoryIds(),
+        sites: state.collectionSites,
+        viewSites: activeViewSites(),
+        cursor: requestedCursor,
+        signal: requestController.signal,
+        refreshIndex: false
+      });
+      if (state.viewCollectionController !== requestController) return false;
+      if (!pageResponseMatchesCursor(data.pagination?.next_cursor, requestedCursor)) return false;
+      data = mergeSearchData(data, nextData);
+      if (data.items.length <= previousCount) break;
+    }
+    if (state.viewCollectionController !== requestController) return false;
+    state.data = data;
+    rememberViewData(data);
+    renderAll();
+    return true;
+  } catch (error) {
+    if (error.name === 'AbortError') return false;
+    state.appendError = formatSourceMessage(error.message);
+    renderPagination();
+    return false;
+  } finally {
+    if (state.viewCollectionController === requestController) {
+      state.viewCollectionController = null;
+      renderPagination();
     }
   }
 }
@@ -1757,9 +1804,16 @@ function visibleItems() {
   return items.slice(start, start + RESULT_PAGE_SIZE);
 }
 
+function renderPaginationControls(root, markup) {
+  if (!root) return;
+  root.innerHTML = markup;
+  root.hidden = false;
+}
+
 function renderPagination(totalCount = availableResultCount()) {
   const root = $('#pagination-controls');
-  if (!root) return;
+  const summaryRoot = $('#result-summary-pagination');
+  if (!root && !summaryRoot) return;
   const pageCount = resultPageCount(totalCount);
   state.currentPage = clampResultPage(state.currentPage, pageCount);
   const canExpand = canExpandResultWindow(totalCount);
@@ -1780,8 +1834,10 @@ function renderPagination(totalCount = availableResultCount()) {
   const nextUnavailable = !nextLoadsMore && (atLastPage || state.currentPage + 1 > maxNavigablePage);
   const controlsBusy = state.loading || Boolean(state.viewCollectionController);
   const nextAction = nextLoadsMore ? 'data-expand-results' : `data-result-page="${state.currentPage + 1}"`;
-  root.innerHTML = `<button class="pagination-direction" type="button" data-result-page="${state.currentPage - 1}" aria-label="${uiText('이전 페이지', 'Previous page')}"${state.currentPage === 0 || controlsBusy ? ' disabled' : ''}>${uiText('이전', 'Previous')}</button>${pageButtons}<button class="pagination-direction" type="button" ${nextAction} aria-label="${uiText('다음 페이지', 'Next page')}"${nextUnavailable || controlsBusy ? ' disabled' : ''}>${uiText('다음', 'Next')}</button>`;
-  root.hidden = false;
+  const previousButton = `<button class="pagination-direction" type="button" data-result-page="${state.currentPage - 1}" aria-label="${uiText('이전 페이지', 'Previous page')}"${state.currentPage === 0 || controlsBusy ? ' disabled' : ''}>${uiText('이전', 'Previous')}</button>`;
+  const nextButton = `<button class="pagination-direction" type="button" ${nextAction} aria-label="${uiText('다음 페이지', 'Next page')}"${nextUnavailable || controlsBusy ? ' disabled' : ''}>${uiText('다음', 'Next')}</button>`;
+  renderPaginationControls(root, `${previousButton}${pageButtons}${nextButton}`);
+  renderPaginationControls(summaryRoot, `${previousButton}<span class="result-summary-pagination-separator" aria-hidden="true">·</span>${nextButton}`);
 }
 
 function focusCurrentPage() {
@@ -2126,15 +2182,17 @@ $('#apply-refresh-results').addEventListener('click', () => {
   renderAll();
   $('.results-toolbar')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 });
-$('#pagination-controls').addEventListener('click', (event) => {
-  const expandButton = event.target.closest('[data-expand-results]');
-  if (expandButton && !expandButton.disabled) {
-    expandResultWindow();
-    return;
-  }
-  const button = event.target.closest('[data-result-page]');
-  if (!button || button.disabled) return;
-  loadResultPage(Number(button.dataset.resultPage));
+['#pagination-controls', '#result-summary-pagination'].forEach((selector) => {
+  $(selector)?.addEventListener('click', (event) => {
+    const expandButton = event.target.closest('[data-expand-results]');
+    if (expandButton && !expandButton.disabled) {
+      expandResultWindow();
+      return;
+    }
+    const button = event.target.closest('[data-result-page]');
+    if (!button || button.disabled) return;
+    loadResultPage(Number(button.dataset.resultPage));
+  });
 });
 
 renderCategories();
