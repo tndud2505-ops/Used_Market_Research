@@ -69,6 +69,9 @@ try {
   assert.match(requests[0].url, /\/identity\/v1\/oauth2\/token/u);
   assert.match(String(requests[0].init.headers.authorization), /^Basic /u);
   assert.equal(requests[1].init.headers.authorization, 'Bearer runner-oauth-token');
+
+  await collectOne('ebay', '아이폰 13', 'all', 10);
+  assert.equal(new URL(requests[2].url).searchParams.get('q'), 'iPhone 13');
 } finally {
   globalThis.fetch = previousFetch;
   resetEbayAccessTokenCacheForTests();
@@ -80,4 +83,4 @@ try {
   else process.env.EBAY_BROWSE_API_TOKEN = previousToken;
 }
 
-console.log(JSON.stringify({ status: 'passed', checks: 24 }, null, 2));
+console.log(JSON.stringify({ status: 'passed', checks: 25 }, null, 2));

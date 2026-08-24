@@ -1209,6 +1209,14 @@ async function collectRethinkLivewire(html, pageResponse, pageUrl, categoryId, l
 
 let ebayAccessTokenCache = null;
 
+function ebaySearchKeyword(value) {
+  return clean(value, 300)
+    .replace(/아이폰/giu, "iPhone")
+    .replace(/갤럭시/giu, "Galaxy")
+    .replace(/에어팟/giu, "AirPods")
+    .replace(/맥북/giu, "MacBook");
+}
+
 export function resetEbayAccessTokenCacheForTests() {
   ebayAccessTokenCache = null;
 }
@@ -1252,6 +1260,7 @@ async function getEbayAccessToken() {
 
 async function collectEbay(keyword, categoryId, limit) {
   const token = await getEbayAccessToken();
+  const searchKeyword = ebaySearchKeyword(keyword);
   const targetCount = Math.min(Math.max(Number(limit) || 1, 1), SOURCE_CANDIDATE_MAX_ITEMS);
   const items = [];
   let offset = 0;
@@ -1259,7 +1268,7 @@ async function collectEbay(keyword, categoryId, limit) {
   while (items.length < targetCount && offset < total) {
     const pageLimit = Math.min(200, targetCount - items.length);
     const url = new URL("https://api.ebay.com/buy/browse/v1/item_summary/search");
-    url.searchParams.set("q", keyword);
+    url.searchParams.set("q", searchKeyword);
     url.searchParams.set("limit", String(pageLimit));
     if (offset > 0) url.searchParams.set("offset", String(offset));
     const response = await fetch(url, {
