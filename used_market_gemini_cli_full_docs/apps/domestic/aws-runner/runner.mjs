@@ -26,7 +26,7 @@ const SEARCH_CURSOR_SECRET = process.env.RUNNER_CURSOR_SECRET || RUNNER_TOKEN ||
 const IMPORT_URL = (process.env.D1_IMPORT_URL || "").trim();
 const IMPORT_TOKEN = process.env.CLOUDFLARE_MANUAL_RUN_TOKEN || process.env.IMPORT_TOKEN || "";
 const MAX_BODY_BYTES = 1_048_576;
-const TARGET_SITES = Object.freeze(["bunjang", "joonggonara", "hellomarket", "rethinkmall"]);
+const TARGET_SITES = Object.freeze(["bunjang", "joonggonara", "hellomarket", "rethinkmall", "ebay"]);
 const configuredSearchCacheTtl = Number(process.env.RUNNER_SEARCH_CACHE_TTL_MS);
 const SEARCH_CACHE_TTL_MS = Number.isFinite(configuredSearchCacheTtl)
   ? Math.min(Math.max(configuredSearchCacheTtl, 0), 10 * 60 * 1000)

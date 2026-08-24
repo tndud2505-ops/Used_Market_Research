@@ -3,6 +3,7 @@
 | 작업 | 코드 | 검증 |
 | --- | --- | --- |
 | 사이트 검색 | `collector/logic/sites/`, `collector/logic/browserCollector.ts` | live harness |
+| eBay 공식 API | `collector/logic/publicSearchExtractors.ts`, `cloudflare/live-search.mjs` | `node harness/ebay-contract.mjs`, `node harness/ebay-domestic-integration-contract.mjs` |
 | 검색 세션·사이트 보기·정렬·페이지 | `web-backend/public/app.js`, `web-backend/public/pagination.mjs`, `cloudflare/live-search.mjs`, `aws-runner/search-index.mjs`, `aws-runner/runner.mjs` | `npm run search-session:contract`, `node harness/ui-pagination-contract.mjs`, `npm run index:harness`; 정책은 `docs/wiki/08-cache-search-ux.md` |
 | 카테고리 연결 | `market/logic/category-catalog.ts`, `market/logic/category-harness.ts` | `npm run category:harness`, `npm run category:live` |
 | 부품 정규화 | `market/logic/componentCatalog.ts`, `market/logic/normalize.ts` | `npm test`, live harness |

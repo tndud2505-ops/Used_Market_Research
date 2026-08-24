@@ -8,4 +8,4 @@ curl -fsS http://127.0.0.1:8789/health
 curl -I http://127.0.0.1:8789/
 ```
 
-Host Nginx routes `/` and `/api/*` here. Never mount or import the global app directory, its result volume, or its release path.
+Host Nginx routes `/` and `/api/*` here. Store eBay credentials only in the protected runtime environment; never bake them into the image or repository.

@@ -36,7 +36,8 @@ const IMPORT_ALLOWED_SITES = new Set([
   "bunjang",
   "joonggonara",
   "hellomarket",
-  "rethinkmall"
+  "rethinkmall",
+  "ebay"
 ]);
 const IMPORT_ALLOWED_HOSTS = new Set([
   "m.bunjang.co.kr",
@@ -44,7 +45,9 @@ const IMPORT_ALLOWED_HOSTS = new Set([
   "www.bunjang.co.kr",
   "web.joongna.com",
   "www.hellomarket.com",
-  "web.rethinkmall.com"
+  "web.rethinkmall.com",
+  "ebay.com",
+  "www.ebay.com"
 ]);
 
 class PayloadTooLargeError extends Error {}
@@ -79,7 +82,7 @@ async function serveAssets(request, env) {
 function augmentCategoryCatalog(catalog) {
   const sitePlans = Object.fromEntries(TARGET_SITES.map((site) => [site, { ...(catalog?.site_plans?.[site] || {}) }]));
   const sourceBindings = Object.fromEntries(TARGET_SITES.map((site) => [site, { ...(catalog?.source_bindings?.[site] || {}) }]));
-  for (const site of ["hellomarket", "rethinkmall"]) {
+  for (const site of ["hellomarket", "rethinkmall", "ebay"]) {
     sitePlans[site] = Object.fromEntries((catalog?.categories || [])
       .filter((category) => category.id !== "all")
       .map((category) => [category.id, {

@@ -35,10 +35,10 @@ export class WebSearchValidationError extends Error {
   }
 }
 
-// The local legacy collector only owns these two sources. Production search
-// adds Hello Market and Rethink Mall through the AWS runner/search-only path.
-const DEFAULT_SITES = ['joonggonara', 'bunjang'];
-const KEYWORD_ONLY_SITES = new Set<string>();
+// The local collector supports domestic sources plus eBay through its official
+// Browse API. Production also adds Hello Market and Rethink Mall via AWS.
+const DEFAULT_SITES = ['joonggonara', 'bunjang', 'ebay'];
+const KEYWORD_ONLY_SITES = new Set<string>(['ebay']);
 const SUPPORTED_WEB_SEARCH_SITES = new Set(DEFAULT_SITES);
 const MAX_KEYWORD_LENGTH = 80;
 const MAX_LIMIT = 40;

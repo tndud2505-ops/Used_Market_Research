@@ -137,6 +137,17 @@ type EbayBrowseSearchResponse = {
   itemSummaries?: EbayBrowseItemSummary[];
 };
 
+type EbayTokenResponse = {
+  access_token?: string;
+  expires_in?: number;
+};
+
+let ebayTokenCache: { token: string; expiresAt: number } | null = null;
+
+export function resetEbayTokenCacheForTests() {
+  ebayTokenCache = null;
+}
+
 type SearchPaginationDraft = {
   has_more: boolean;
   next_cursor: string | null;
@@ -223,7 +234,7 @@ function parseNumericPrice(value: string | number | null | undefined): number | 
   const normalized = value.replace(/,/g, "").trim();
   if (/^\d+(?:\.\d+)?$/.test(normalized)) {
     const parsedNumeric = Number(normalized);
-    return Number.isFinite(parsedNumeric) ? Math.round(parsedNumeric) : null;
+    return Number.isFinite(parsedNumeric) ? parsedNumeric : null;
   }
 
   const digits = value.replace(/[^\d]/g, "");
@@ -416,8 +427,36 @@ function getBunjangOverfetchMultiplier() {
   return readPositiveIntegerEnv("PUBLIC_SEARCH_BUNJANG_OVERFETCH_MULTIPLIER", 3);
 }
 
-function getEbayBrowseToken() {
-  return process.env.EBAY_BROWSE_API_TOKEN?.trim() ?? "";
+async function getEbayBrowseToken(): Promise<string> {
+  const configuredToken = process.env.EBAY_BROWSE_API_TOKEN?.trim();
+  if (configuredToken) return configuredToken;
+  if (ebayTokenCache && ebayTokenCache.expiresAt > Date.now() + 60_000) return ebayTokenCache.token;
+
+  const clientId = process.env.EBAY_CLIENT_ID?.trim() ?? "";
+  const clientSecret = process.env.EBAY_CLIENT_SECRET?.trim() ?? "";
+  if (!clientId || !clientSecret) return "";
+
+  const credentials = Buffer.from(`${clientId}:${clientSecret}`, "utf8").toString("base64");
+  const body = new URLSearchParams({
+    grant_type: "client_credentials",
+    scope: "https://api.ebay.com/oauth/api_scope"
+  });
+  const response = await fetch("https://api.ebay.com/identity/v1/oauth2/token", {
+    method: "POST",
+    headers: {
+      accept: "application/json",
+      authorization: `Basic ${credentials}`,
+      "content-type": "application/x-www-form-urlencoded"
+    },
+    body
+  });
+  if (!response.ok) throw new Error(`EBAY_OAUTH_ERROR: HTTP ${response.status}`);
+  const payload = await response.json() as EbayTokenResponse;
+  const token = typeof payload.access_token === "string" ? payload.access_token.trim() : "";
+  if (!token) throw new Error("EBAY_OAUTH_ERROR: token response did not include access_token");
+  const expiresIn = Number.isFinite(payload.expires_in) ? Math.max(120, Number(payload.expires_in)) : 7200;
+  ebayTokenCache = { token, expiresAt: Date.now() + expiresIn * 1000 };
+  return token;
 }
 
 function parsePageCursor(cursor: string | null | undefined) {
@@ -517,21 +556,20 @@ async function tryExtractEbayBrowseApiResult(
   adapter: BrowserSiteAdapter,
   input: SearchCommandInput
 ): Promise<SearchResult | null> {
-  const token = getEbayBrowseToken();
-  if (!token) {
-    return SearchResultSchema.parse({
-      ...buildResult(adapter, input, [], ["CATEGORY_COLLECTION_UNAVAILABLE: eBay Browse API token is not configured"]),
-      next_action: "configure_ebay_token"
-    });
-  }
-
-  const url = new URL("https://api.ebay.com/buy/browse/v1/item_summary/search");
-  url.searchParams.set("q", input.keyword.trim() || input.category?.label || "");
-  url.searchParams.set("limit", String(Math.min(Math.max(input.limit, 1), 200)));
-  const offset = parseOffsetCursor(input.cursor);
-  if (offset > 0) url.searchParams.set("offset", String(offset));
-
   try {
+    const token = await getEbayBrowseToken();
+    if (!token) {
+      return SearchResultSchema.parse({
+        ...buildResult(adapter, input, [], ["EBAY_CREDENTIALS_REQUIRED: eBay Client ID and Client Secret are not configured"]),
+        next_action: "configure_ebay_credentials"
+      });
+    }
+
+    const url = new URL("https://api.ebay.com/buy/browse/v1/item_summary/search");
+    url.searchParams.set("q", input.keyword.trim() || input.category?.label || "");
+    url.searchParams.set("limit", String(Math.min(Math.max(input.limit, 1), 200)));
+    const offset = parseOffsetCursor(input.cursor);
+    if (offset > 0) url.searchParams.set("offset", String(offset));
     const response = await fetch(url, {
       headers: {
         accept: "application/json",
@@ -568,13 +606,16 @@ async function tryExtractEbayBrowseApiResult(
       buildSearchPagination(adapter, input, items.length, payload.total)
     );
   } catch (error) {
+    const message = error instanceof Error && /^EBAY_[A-Z_]+:/u.test(error.message)
+      ? error.message
+      : "EBAY_BROWSE_API_ERROR: request failed";
     return buildResult(
       adapter,
       input,
       [],
-      ["EBAY_BROWSE_API_ERROR: request failed"],
+      [message],
       0,
-      [`EBAY_BROWSE_API_ERROR: ${error instanceof Error ? error.message : String(error)}`]
+      [message]
     );
   }
 }

@@ -43,14 +43,12 @@ const html = await readFile(new URL("../web-backend/public/index.html", import.m
 const app = await readFile(new URL("../web-backend/public/app.js", import.meta.url), "utf8");
 const styles = await readFile(new URL("../web-backend/public/styles.css", import.meta.url), "utf8");
 assert.match(html, /\/styles\.css\?v=domestic-pagination-v6/);
-assert.match(html, /\/app\.js\?v=search-session-v9/);
+assert.match(html, /\/app\.js\?v=domestic-ebay-v10/);
 assert.match(app, /pagination\.mjs\?v=pagination-v7/);
 assert.doesNotMatch(html, /data-site-tab="daangn"/u);
 assert.doesNotMatch(app, /DEFAULT_SITES\s*=\s*\[[^\]]*daangn/u);
 assert.match(html, /id="pagination-controls"/);
 assert.doesNotMatch(html, /id="load-more-button"/);
-assert.doesNotMatch(app, /해외 시안/u);
-assert.doesNotMatch(app, /market-profile-switch/u);
 assert.match(app, /pagination-page/);
 assert.match(app, /pagination-page-preview/);
 assert.match(app, /pagination-page-preview[\s\S]{0,180}aria-disabled="true"/u);
@@ -71,7 +69,7 @@ assert.match(app, /if \(!canExpandResultWindow\(\) \|\| state\.loading \|\| stat
 assert.match(app, /SITE_RESULT_WINDOW_INITIAL = 160/u);
 assert.match(app, /SITE_RESULT_WINDOW_MAX = 640/u);
 assert.match(app, /data-expand-results/u);
-assert.match(app, /expand_index: MARKET_PROFILE === 'global' \? undefined : expandIndex/u);
+assert.match(app, /expand_index: expandIndex/u);
 assert.match(app, /async function expandResultWindow\(\)/u);
 assert.match(app, /SEARCH_ONLY_SITES/);
 assert.match(app, /hasExplicitKeyword && SEARCH_ONLY_SITES\.has\(site\)/);

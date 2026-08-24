@@ -1,7 +1,0 @@
-User-agent: *
-Allow: /
-Disallow: /api/
-Disallow: /admin/
-Disallow: /run
-
-Sitemap: https://used-pick.com/sitemap.xml

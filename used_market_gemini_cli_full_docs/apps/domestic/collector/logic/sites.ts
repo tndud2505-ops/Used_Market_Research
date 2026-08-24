@@ -3,7 +3,8 @@ import { SiteConfigSchema, type SiteConfig } from "../../MCP/logic/types.js";
 const SITE_LIST: SiteConfig[] = [
   SiteConfigSchema.parse({ key: "joonggonara", name: "중고나라", siteType: "used_market", locale: "ko-KR", currency: "KRW", loginRequired: false }),
   SiteConfigSchema.parse({ key: "bunjang", name: "번개장터", siteType: "used_market", locale: "ko-KR", currency: "KRW", loginRequired: false }),
-  SiteConfigSchema.parse({ key: "daangn", name: "당근", siteType: "marketplace", locale: "ko-KR", currency: "KRW", loginRequired: false })
+  SiteConfigSchema.parse({ key: "daangn", name: "당근", siteType: "marketplace", locale: "ko-KR", currency: "KRW", loginRequired: false }),
+  SiteConfigSchema.parse({ key: "ebay", name: "eBay", siteType: "marketplace", locale: "en-US", currency: "USD", loginRequired: false })
 ];
 
 export function listSupportedSites(): SiteConfig[] {

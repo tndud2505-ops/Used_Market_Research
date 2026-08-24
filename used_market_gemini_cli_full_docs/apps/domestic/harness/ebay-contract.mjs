@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
-import { tryExtractPublicSearchResult } from '../dist/collector/logic/publicSearchExtractors.js';
+import { resetEbayTokenCacheForTests, tryExtractPublicSearchResult } from '../dist/collector/logic/publicSearchExtractors.js';
 import { ebayAdapter } from '../dist/collector/logic/sites/ebay.js';
 import { bunjangAdapter } from '../dist/collector/logic/sites/bunjang.js';
 
 const previousFetch = globalThis.fetch;
 const previousToken = process.env.EBAY_BROWSE_API_TOKEN;
+const previousClientId = process.env.EBAY_CLIENT_ID;
+const previousClientSecret = process.env.EBAY_CLIENT_SECRET;
 let requestedUrl = '';
 let requestedHeaders = {};
 
@@ -37,7 +39,7 @@ try {
   );
 
   assert.equal(result?.items.length, 1);
-  assert.equal(result?.items[0].price, 500);
+  assert.equal(result?.items[0].price, 499.99);
   assert.equal(result?.items[0].currency, 'USD');
   assert.equal(result?.items[0].url, 'https://www.ebay.com/itm/fixture-1');
   assert.equal(result?.items[0].image_url.includes('ebayimg.com'), true);
@@ -124,6 +126,39 @@ try {
   assert.ok(failedBunjangResult?.errors.some((error) => error.startsWith('BUNJANG_SEARCH_API_ERROR:')));
 
   delete process.env.EBAY_BROWSE_API_TOKEN;
+  process.env.EBAY_CLIENT_ID = 'fixture-client-id';
+  process.env.EBAY_CLIENT_SECRET = 'fixture-client-secret';
+  resetEbayTokenCacheForTests();
+  const oauthRequests = [];
+  globalThis.fetch = async (url, init = {}) => {
+    oauthRequests.push({ url: String(url), init });
+    if (String(url).includes('/identity/v1/oauth2/token')) {
+      return new Response(JSON.stringify({ access_token: 'oauth-token', expires_in: 7200 }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      });
+    }
+    return new Response(JSON.stringify({
+      total: 1,
+      itemSummaries: [
+        { itemId: 'v1|oauth-fixture|0', title: 'OAuth eBay item', price: { value: '99.99', currency: 'USD' }, itemWebUrl: 'https://www.ebay.com/itm/oauth-fixture' }
+      ]
+    }), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  const oauthResult = await tryExtractPublicSearchResult(
+    ebayAdapter,
+    { site: 'ebay', keyword: 'RTX 3070', limit: 2 },
+    ''
+  );
+  assert.equal(oauthResult?.items.length, 1);
+  assert.equal(oauthRequests.length, 2);
+  assert.match(oauthRequests[0].url, /\/identity\/v1\/oauth2\/token/u);
+  assert.match(String(oauthRequests[0].init.headers.authorization), /^Basic /u);
+  assert.equal(oauthRequests[1].init.headers.authorization, 'Bearer oauth-token');
+
+  delete process.env.EBAY_CLIENT_ID;
+  delete process.env.EBAY_CLIENT_SECRET;
+  resetEbayTokenCacheForTests();
   const tokenlessResult = await tryExtractPublicSearchResult(
     ebayAdapter,
     { site: 'ebay', keyword: 'RTX 3070', limit: 2 },
@@ -131,16 +166,22 @@ try {
   );
   assert.equal(tokenlessResult?.items.length, 0);
   assert.equal(tokenlessResult?.errors.length, 0);
-  assert.ok(tokenlessResult?.warnings.some((warning) => warning.startsWith('CATEGORY_COLLECTION_UNAVAILABLE:')));
-  assert.equal(tokenlessResult?.next_action, 'configure_ebay_token');
+  assert.ok(tokenlessResult?.warnings.some((warning) => warning.startsWith('EBAY_CREDENTIALS_REQUIRED:')));
+  assert.equal(tokenlessResult?.next_action, 'configure_ebay_credentials');
 } finally {
   globalThis.fetch = previousFetch;
+  resetEbayTokenCacheForTests();
   if (previousToken === undefined) delete process.env.EBAY_BROWSE_API_TOKEN;
   else process.env.EBAY_BROWSE_API_TOKEN = previousToken;
+  if (previousClientId === undefined) delete process.env.EBAY_CLIENT_ID;
+  else process.env.EBAY_CLIENT_ID = previousClientId;
+  if (previousClientSecret === undefined) delete process.env.EBAY_CLIENT_SECRET;
+  else process.env.EBAY_CLIENT_SECRET = previousClientSecret;
 }
 
 console.log(JSON.stringify({
   status: 'passed',
   api_mapping: true,
-  auth_header_contract: true
+  auth_header_contract: true,
+  oauth_client_credentials: true
 }, null, 2));

@@ -2,10 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-apps=(
-  "$repo_root/used_market_gemini_cli_full_docs/apps/domestic"
-  "$repo_root/used_market_gemini_cli_full_docs/apps/global"
-)
+app="$repo_root/used_market_gemini_cli_full_docs/apps/domestic"
 
 node_major="$(node --version | sed 's/^v//' | cut -d. -f1)"
 if [[ "$node_major" -lt 22 ]]; then
@@ -19,16 +16,11 @@ if [[ "$npm_major" -lt 10 ]]; then
   exit 1
 fi
 
-for app in "${apps[@]}"; do
-  echo "[setup] Installing $app"
-  npm --prefix "$app" ci
-  if [[ ! -f "$app/.env" ]]; then
-    cp "$app/.env.example" "$app/.env"
-    echo "[setup] Created local $app/.env from the safe example."
-  fi
-done
+echo "[setup] Installing $app"
+npm --prefix "$app" ci
+if [[ ! -f "$app/.env" ]]; then
+  cp "$app/.env.example" "$app/.env"
+  echo "[setup] Created local $app/.env from the safe example."
+fi
 
-echo '[setup] Installing the Chromium browser used by the global UI harness'
-node "${apps[1]}/node_modules/@playwright/cli/playwright-cli.js" install-browser chromium
-
-echo '[setup] Complete. Add private values only to each ignored .env file.'
+echo '[setup] Complete. Add private values only to the ignored .env file.'

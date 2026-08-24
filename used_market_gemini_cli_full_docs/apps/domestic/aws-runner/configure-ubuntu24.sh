@@ -33,6 +33,8 @@ read_env_value() {
 existing_runner_token="$(read_env_value CLOUDFLARE_RUNNER_TOKEN)"
 existing_import_url="$(read_env_value D1_IMPORT_URL)"
 existing_import_token="$(read_env_value CLOUDFLARE_MANUAL_RUN_TOKEN)"
+existing_ebay_client_id="$(read_env_value EBAY_CLIENT_ID)"
+existing_ebay_client_secret="$(read_env_value EBAY_CLIENT_SECRET)"
 existing_chromium_path="$(read_env_value CHROMIUM_PATH)"
 existing_node_options="$(read_env_value NODE_OPTIONS)"
 existing_search_cache_ttl="$(read_env_value RUNNER_SEARCH_CACHE_TTL_MS)"
@@ -50,6 +52,15 @@ read -r -s -p 'CLOUDFLARE_RUNNER_TOKEN (비워두면 기존값 유지): ' runner
 printf '\n'
 runner_token="${runner_token_input:-$existing_runner_token}"
 [[ -n "$runner_token" ]] || fail 'CLOUDFLARE_RUNNER_TOKEN은 비워둘 수 없습니다.'
+
+printf 'eBay Browse API 애플리케이션 인증정보를 입력하세요.\n'
+read -r -p 'EBAY_CLIENT_ID (비워두면 기존값 유지): ' ebay_client_id_input
+ebay_client_id="${ebay_client_id_input:-$existing_ebay_client_id}"
+read -r -s -p 'EBAY_CLIENT_SECRET (비워두면 기존값 유지): ' ebay_client_secret_input
+printf '\n'
+ebay_client_secret="${ebay_client_secret_input:-$existing_ebay_client_secret}"
+[[ -n "$ebay_client_id" ]] || fail 'EBAY_CLIENT_ID는 비워둘 수 없습니다.'
+[[ -n "$ebay_client_secret" ]] || fail 'EBAY_CLIENT_SECRET은 비워둘 수 없습니다.'
 
 printf 'D1_IMPORT_URL은 선택입니다. 비워두면 수집 결과를 D1로 import하지 않습니다.\n'
 read -r -p "D1_IMPORT_URL [${existing_import_url}]: " import_url_input
@@ -86,6 +97,8 @@ env_tmp="${RUNNER_ENV_FILE}.tmp.$$"
 cat > "$env_tmp" <<EOF
 RUNNER_PORT=8787
 CLOUDFLARE_RUNNER_TOKEN=${runner_token}
+EBAY_CLIENT_ID=${ebay_client_id}
+EBAY_CLIENT_SECRET=${ebay_client_secret}
 RUNNER_SEARCH_CACHE_TTL_MS=${search_cache_ttl}
 RUNNER_INDEX_ENABLED=${index_enabled}
 RUNNER_INDEX_MODE=${index_mode}

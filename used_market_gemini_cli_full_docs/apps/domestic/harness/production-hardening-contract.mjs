@@ -106,34 +106,7 @@ try {
   });
   assert.equal(privatePreflight.status, 404);
 
-  for (const country of ['jp', 'us']) {
-    const response = await fetch(`${baseUrl}/?market=global&country=${country}`);
-    assert.equal(response.status, 200);
-    const html = await response.text();
-    const canonical = `https://used-pick.com/?market=global&amp;country=${country}`;
-    assert.match(html, /<html lang="en"/u);
-    assert.match(html, /<title>Global Used Listings Search \| USED MARKET<\/title>/u);
-    assert.match(html, /<meta name="description" content="Search and compare public used listings from marketplaces in Japan and the United States\."/u);
-    assert.match(html, /<meta property="og:locale" content="en_US"/u);
-    assert.match(html, /<meta property="og:title" content="Global Used Listings Search \| USED MARKET"/u);
-    assert.match(html, /<meta property="og:description" content="Search and compare public used listings/u);
-    assert.match(html, new RegExp(`<meta property="og:url" content="${escapeRegExp(canonical)}"`, 'u'));
-    assert.match(html, /<meta name="twitter:title" content="Global Used Listings Search \| USED MARKET"/u);
-    assert.match(html, /<meta name="twitter:description" content="Search and compare public used listings/u);
-    assert.match(html, new RegExp(`<link rel="canonical" href="${escapeRegExp(canonical)}"`, 'u'));
-
-    const jsonLdMatch = html.match(/<script type="application\/ld\+json">\s*([\s\S]*?)\s*<\/script>/u);
-    assert.ok(jsonLdMatch);
-    const jsonLd = JSON.parse(jsonLdMatch[1]);
-    const rawCanonical = canonical.replace('&amp;', '&');
-    assert.equal(jsonLd.inLanguage, 'en-US');
-    assert.equal(jsonLd.name, 'Global Used Listings Search | USED MARKET');
-    assert.equal(jsonLd.url, rawCanonical);
-    assert.equal(jsonLd['@id'], `${rawCanonical}#website`);
-    assert.match(jsonLd.description, /^Search and compare/u);
-  }
-
-  const domestic = await fetch(`${baseUrl}/?market=domestic`).then((response) => response.text());
+  const domestic = await fetch(`${baseUrl}/`).then((response) => response.text());
   assert.match(domestic, /<html lang="ko">/u);
   assert.match(domestic, /<title>중고매물 통합검색 \| USED MARKET<\/title>/u);
   assert.match(domestic, /<link rel="canonical" href="https:\/\/used-pick\.com\/"/u);
@@ -141,14 +114,14 @@ try {
   const firstSearch = fetch(`${baseUrl}/api/search`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ keyword: 'slow', sites: ['rakuma'] })
+    body: JSON.stringify({ keyword: 'slow', sites: ['joonggonara'] })
   });
   await slowSearchStarted;
 
   const rejected = await fetch(`${baseUrl}/api/search`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ keyword: 'second', sites: ['rakuma'] })
+    body: JSON.stringify({ keyword: 'second', sites: ['joonggonara'] })
   });
   assert.equal(rejected.status, 429);
   assert.equal(rejected.headers.get('retry-after'), '7');
@@ -164,14 +137,14 @@ try {
   const afterRelease = await fetch(`${baseUrl}/api/search`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ keyword: 'after-release', sites: ['rakuma'] })
+    body: JSON.stringify({ keyword: 'after-release', sites: ['joonggonara'] })
   });
   assert.equal(afterRelease.status, 200);
 
   const hiddenError = await fetch(`${baseUrl}/api/search`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ keyword: 'explode', sites: ['rakuma'] })
+    body: JSON.stringify({ keyword: 'explode', sites: ['joonggonara'] })
   });
   assert.equal(hiddenError.status, 500);
   const errorRequestId = hiddenError.headers.get('x-request-id');

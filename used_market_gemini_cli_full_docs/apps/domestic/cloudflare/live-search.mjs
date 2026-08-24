@@ -29,6 +29,7 @@ const SITE_SEARCH_POLICIES = Object.freeze({
   joonggonara: Object.freeze({ minimumPrice: 1_000, priceMaxAgeDays: 45, recommendedMaxAgeDays: 21 }),
   hellomarket: Object.freeze({ minimumPrice: 500, priceMaxAgeDays: 90, recommendedMaxAgeDays: 45 }),
   rethinkmall: Object.freeze({ minimumPrice: 100, priceMaxAgeDays: null, recommendedMaxAgeDays: null }),
+  ebay: Object.freeze({ minimumPrice: 1, priceMaxAgeDays: null, recommendedMaxAgeDays: null })
 });
 
 const SOURCE_NAMES = Object.freeze({
@@ -39,7 +40,7 @@ const SOURCE_NAMES = Object.freeze({
   rethinkmall: "RethinkMall"
 });
 
-const SUPPORTED_LIVE_SITES = new Set(["bunjang", "joonggonara", "hellomarket", "rethinkmall"]);
+const SUPPORTED_LIVE_SITES = new Set(["bunjang", "joonggonara", "hellomarket", "rethinkmall", "ebay"]);
 // Some official source categories are intentionally broad (for example,
 // Joongna's mobile category includes memory cards and its furniture category
 // includes desk accessories). For these categories, a title signal is safer
@@ -110,7 +111,13 @@ function isLikelyProductImage(value) {
 
 function parsePrice(value) {
   if (value === null || value === undefined) return null;
-  const digits = String(value).replace(/[^\d]/g, "");
+  if (typeof value === "number") return Number.isFinite(value) && value >= 0 ? value : null;
+  const normalized = String(value).trim();
+  if (/^\d+(?:\.\d+)?$/u.test(normalized)) {
+    const parsedDecimal = Number(normalized);
+    return Number.isFinite(parsedDecimal) ? parsedDecimal : null;
+  }
+  const digits = normalized.replace(/[^\d]/g, "");
   if (!digits) return null;
   const parsed = Number(digits);
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
@@ -175,7 +182,7 @@ function requestedSites(body) {
   // normalized result set is category-filtered after collection.
   return sites.filter((site) => (
     categoryIds.every((categoryId) => hasOfficialCategory(site, categoryId))
-    || (hasExplicitKeyword && (site === "hellomarket" || site === "rethinkmall"))
+    || (hasExplicitKeyword && (site === "hellomarket" || site === "rethinkmall" || site === "ebay"))
   ));
 }
 
@@ -326,13 +333,14 @@ function sourceFetchLimit(limit, categoryId, queryKeyword) {
   return Math.min(Math.max(limit, 40), SOURCE_CANDIDATE_MAX_ITEMS);
 }
 
-function sourceItem({ site, categoryId, title, price, url, imageUrl, seller, postedAt, searchText, description, location }) {
+function sourceItem({ site, categoryId, title, price, currency = "KRW", url, imageUrl, seller, postedAt, searchText, description, location }) {
   const cleanTitle = clean(title, 500);
   const baseBySite = {
     joonggonara: "https://web.joongna.com",
     bunjang: "https://m.bunjang.co.kr",
     hellomarket: "https://www.hellomarket.com",
-    rethinkmall: "https://web.rethinkmall.com"
+    rethinkmall: "https://web.rethinkmall.com",
+    ebay: "https://www.ebay.com"
   };
   const cleanUrl = absoluteUrl(url, baseBySite[site]);
   if (!cleanTitle || !cleanUrl) return null;
@@ -343,7 +351,7 @@ function sourceItem({ site, categoryId, title, price, url, imageUrl, seller, pos
     category_id: categoryId,
     title: cleanTitle,
     price: parsePrice(price),
-    currency: "KRW",
+    currency,
     url: cleanUrl,
     image_url: absoluteUrl(imageUrl, cleanUrl) || null,
     seller_name: clean(seller, 200) || null,
@@ -1199,6 +1207,100 @@ async function collectRethinkLivewire(html, pageResponse, pageUrl, categoryId, l
   return { items: uniqueItems.slice(0, maximumItems), error: "", total_count: totalCount };
 }
 
+let ebayAccessTokenCache = null;
+
+export function resetEbayAccessTokenCacheForTests() {
+  ebayAccessTokenCache = null;
+}
+
+function runtimeEnvironmentValue(name) {
+  return typeof globalThis.process?.env?.[name] === "string" ? globalThis.process.env[name].trim() : "";
+}
+
+async function getEbayAccessToken() {
+  const configuredToken = runtimeEnvironmentValue("EBAY_BROWSE_API_TOKEN");
+  if (configuredToken) return configuredToken;
+  if (ebayAccessTokenCache && ebayAccessTokenCache.expiresAt > Date.now() + 60_000) return ebayAccessTokenCache.token;
+
+  const clientId = runtimeEnvironmentValue("EBAY_CLIENT_ID");
+  const clientSecret = runtimeEnvironmentValue("EBAY_CLIENT_SECRET");
+  if (!clientId || !clientSecret) throw new Error("EBAY_CREDENTIALS_REQUIRED: eBay Client ID and Client Secret are not configured");
+  const rawCredentials = `${clientId}:${clientSecret}`;
+  const credentials = typeof Buffer !== "undefined"
+    ? Buffer.from(rawCredentials, "utf8").toString("base64")
+    : btoa(rawCredentials);
+  const response = await fetch("https://api.ebay.com/identity/v1/oauth2/token", {
+    method: "POST",
+    headers: {
+      accept: "application/json",
+      authorization: `Basic ${credentials}`,
+      "content-type": "application/x-www-form-urlencoded"
+    },
+    body: new URLSearchParams({
+      grant_type: "client_credentials",
+      scope: "https://api.ebay.com/oauth/api_scope"
+    })
+  });
+  if (!response.ok) throw new Error(`EBAY_OAUTH_ERROR: HTTP ${response.status}`);
+  const payload = await response.json();
+  const token = clean(payload?.access_token, 8_000);
+  if (!token) throw new Error("EBAY_OAUTH_ERROR: token response did not include access_token");
+  const expiresIn = Number.isFinite(Number(payload?.expires_in)) ? Math.max(120, Number(payload.expires_in)) : 7_200;
+  ebayAccessTokenCache = { token, expiresAt: Date.now() + expiresIn * 1_000 };
+  return token;
+}
+
+async function collectEbay(keyword, categoryId, limit) {
+  const token = await getEbayAccessToken();
+  const targetCount = Math.min(Math.max(Number(limit) || 1, 1), SOURCE_CANDIDATE_MAX_ITEMS);
+  const items = [];
+  let offset = 0;
+  let total = targetCount;
+  while (items.length < targetCount && offset < total) {
+    const pageLimit = Math.min(200, targetCount - items.length);
+    const url = new URL("https://api.ebay.com/buy/browse/v1/item_summary/search");
+    url.searchParams.set("q", keyword);
+    url.searchParams.set("limit", String(pageLimit));
+    if (offset > 0) url.searchParams.set("offset", String(offset));
+    const response = await fetch(url, {
+      headers: {
+        accept: "application/json",
+        authorization: `Bearer ${token}`,
+        "x-ebay-c-marketplace-id": "EBAY_US"
+      }
+    });
+    if (!response.ok) throw new Error(`EBAY_BROWSE_API_ERROR: HTTP ${response.status}`);
+    const payload = await response.json();
+    const summaries = Array.isArray(payload?.itemSummaries) ? payload.itemSummaries : [];
+    total = Number.isFinite(Number(payload?.total)) ? Number(payload.total) : offset + summaries.length;
+    for (const summary of summaries) {
+      const location = [summary?.itemLocation?.city, summary?.itemLocation?.stateOrProvince, summary?.itemLocation?.country]
+        .map((value) => clean(value, 80))
+        .filter(Boolean)
+        .join(", ");
+      const item = sourceItem({
+        site: "ebay",
+        categoryId,
+        title: summary?.title,
+        price: summary?.price?.value,
+        currency: clean(summary?.price?.currency, 12) || "USD",
+        url: summary?.itemWebUrl || (summary?.itemId ? `https://www.ebay.com/itm/${encodeURIComponent(summary.itemId)}` : ""),
+        imageUrl: summary?.image?.imageUrl,
+        seller: summary?.seller?.username,
+        postedAt: summary?.itemOriginDate,
+        searchText: `${clean(summary?.title, 500)} ${clean(summary?.condition, 120)}`,
+        description: clean(summary?.condition, 120),
+        location
+      });
+      if (item) items.push(item);
+      if (items.length >= targetCount) break;
+    }
+    if (!summaries.length) break;
+    offset += summaries.length;
+  }
+  return items;
+}
+
 async function collectOne(site, keyword, categoryId, limit, queryKeyword = keyword, sortMode = "price_asc", priceRange = { min: null, max: null }) {
   const key = JSON.stringify({ site, keyword, categoryId, limit, queryKeyword, sortMode, priceRange });
   const cached = sourceSearchCache.get(key);
@@ -1215,6 +1317,8 @@ async function collectOne(site, keyword, categoryId, limit, queryKeyword = keywo
           ? await collectHelloMarket(keyword, categoryId, limit, queryKeyword, sortMode, priceRange)
           : site === "rethinkmall"
             ? await collectRethinkMall(keyword, categoryId, limit, queryKeyword, sortMode, priceRange)
+            : site === "ebay"
+              ? await collectEbay(keyword, categoryId, limit)
             : null;
     return filterItemsByPriceRange(items, priceRange);
   })();

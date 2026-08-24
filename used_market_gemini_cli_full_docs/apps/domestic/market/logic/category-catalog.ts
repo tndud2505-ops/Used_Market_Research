@@ -302,7 +302,8 @@ const SOURCE_CATEGORY_BINDINGS: Record<string, Partial<Record<CanonicalCategoryI
 export const CATEGORY_SITE_REGISTRY: readonly CategoryHarnessSite[] = [
   { siteKey: "joonggonara", bindings: SOURCE_CATEGORY_BINDINGS.joonggonara ?? {} },
   { siteKey: "bunjang", bindings: SOURCE_CATEGORY_BINDINGS.bunjang ?? {} },
-  { siteKey: "daangn", bindings: {} }
+  { siteKey: "daangn", bindings: {} },
+  { siteKey: "ebay", bindings: {} }
 ];
 
 export const CATEGORY_SITE_KEYS = CATEGORY_SITE_REGISTRY.map((site) => site.siteKey);

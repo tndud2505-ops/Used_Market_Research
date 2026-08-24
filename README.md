@@ -1,6 +1,6 @@
 # USED MARKET workspace
 
-국내 검색과 해외 검색을 서로 참조하지 않는 두 개의 독립 애플리케이션으로 관리합니다. Git에는 소스·하네스·문서·안전한 설정 예시만 포함하며, 실제 키·토큰·검색 결과·브라우저 캐시·백업 파일은 포함하지 않습니다.
+국내 중고 검색 애플리케이션 하나로 운영하며 eBay를 검색 사이트로 포함합니다. Git에는 소스·하네스·문서·안전한 설정 예시만 포함하며, 실제 키·토큰·검색 결과·브라우저 캐시·백업 파일은 포함하지 않습니다.
 
 ## Clone and prepare
 
@@ -20,22 +20,17 @@ cd Used_Market_Research
 bash scripts/setup.sh
 ```
 
-The setup script runs `npm ci` independently in both apps and creates local `.env` files from the committed examples only when they do not already exist. Add private values only to those ignored `.env` files.
+The setup script runs `npm ci` and creates a local `.env` from the committed example only when it does not already exist. Add private values only to that ignored `.env` file.
 
 ## Applications
 
 | App | Path | Main verification |
 | --- | --- | --- |
-| Domestic | `used_market_gemini_cli_full_docs/apps/domestic` | `npm test` |
-| Global | `used_market_gemini_cli_full_docs/apps/global` | `npm test` and `npm run test:ui` |
+| USED MARKET | `used_market_gemini_cli_full_docs/apps/domestic` | `npm test` |
 
-Run both deterministic suites with `powershell -File .\scripts\verify.ps1` or `bash scripts/verify.sh`.
+Run the deterministic suite with `powershell -File .\scripts\verify.ps1` or `bash scripts/verify.sh`.
 
 Configuration and deployment details:
 
 - [Portable setup](used_market_gemini_cli_full_docs/SETUP.md)
-- [Domestic app](used_market_gemini_cli_full_docs/apps/domestic/README.md)
-- [Global app](used_market_gemini_cli_full_docs/apps/global/README.md)
-- [Global project wiki](used_market_gemini_cli_full_docs/apps/global/docs/WIKI.md)
-
-The two app directories must remain independent. Do not add cross-app imports, shared runtime packages, shared harnesses, or shared result storage.
+- [Application](used_market_gemini_cli_full_docs/apps/domestic/README.md)

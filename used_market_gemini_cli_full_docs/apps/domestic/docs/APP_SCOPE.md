@@ -1,3 +1,3 @@
-# Domestic app boundary
+# Application boundary
 
-This folder owns the domestic source, UI copy, fixtures, harness, Docker image, release scripts, and result volume. Cross-app imports and shared runtime mounts are forbidden and checked by `harness/app-isolation-contract.mjs`.
+This folder owns the complete application: domestic marketplace sources, the eBay Browse API source, Korean UI copy, fixtures, harnesses, Docker image, release scripts, and result volume. eBay credentials must stay in ignored local environment files or protected runner configuration.

@@ -94,8 +94,8 @@ try {
   assert.match(app, /!\['price_filter', 'sort', 'pagination', 'site_filter'\]\.includes\(reason\)/u);
   assert.match(app, /view_sites: viewSites\.length \? viewSites : undefined/u);
   assert.match(app, /focus_sites: focusSites\.length \? focusSites : undefined/u);
-  assert.match(app, /collect_view: MARKET_PROFILE === 'global' \? undefined : collectView/u);
-  assert.match(app, /acquisition_mode: MARKET_PROFILE === 'global' \? undefined : acquisitionMode/u);
+  assert.match(app, /collect_view: collectView/u);
+  assert.match(app, /acquisition_mode: acquisitionMode/u);
   assert.match(app, /const SITE_PREFETCH_PAGES = 3;/u);
   assert.match(app, /state\.sort === 'price_asc'[\s\S]{0,300}items\.sort/u);
   assert.match(
@@ -116,7 +116,7 @@ try {
   const sortHandler = app.slice(app.indexOf("$$('[data-sort]')"), app.indexOf("$('#result-list').addEventListener", app.indexOf("$$('[data-sort]')")));
   assert.match(sortHandler, /renderAll\(\);[\s\S]{0,500}reason: 'sort'/u);
   assert.doesNotMatch(sortHandler, /collectActiveView/u);
-  const activeSiteHandler = app.slice(app.indexOf('async function setActiveSite'), app.indexOf('function setActiveCountry'));
+  const activeSiteHandler = app.slice(app.indexOf('async function setActiveSite'), app.indexOf('function setCategory'));
   assert.match(activeSiteHandler, /acquisitionMode: 'recent'/u);
   assert.doesNotMatch(activeSiteHandler, /acquisitionMode = state\.sort/u);
   const expansionHandler = app.slice(app.indexOf('async function expandResultWindow'), app.indexOf('function search'));

@@ -7,7 +7,7 @@
 - Cloudflare Worker: 화면·검색 API·Cron Trigger·수동 실행 인증·AWS 러너 호출
 - AWS Node 러너: 번개장터·중고나라·헬로마켓·리씽크몰 검색·수집
 - `POST /api/runner/run`: 허용된 스케줄러 작업 하나 또는 묶음을 실행하는 인증된 Node 엔드포인트
-- `POST /api/search`: AWS 러너의 4개 사이트 검색·색인 응답을 Worker가 인증 프록시
+- `POST /api/search`: AWS 러너의 5개 사이트 검색·색인 응답을 Worker가 인증 프록시
 
 수동 실행도 작업 결과 저장 뒤 알림 dispatch와 reporter 후처리를 실행한다. 후처리 경고가 있으면 전체 응답은 `partial_success`가 되며 `postprocess.warnings`에서 원인을 확인할 수 있다.
 

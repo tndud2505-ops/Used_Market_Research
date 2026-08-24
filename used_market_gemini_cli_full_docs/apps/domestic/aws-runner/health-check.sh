@@ -56,7 +56,7 @@ check_health() {
       .ok == true and
       .service == "used-market-aws-runner" and
       .search_index.enabled == true and
-      ([.target_sites[]] | sort) == ["bunjang", "hellomarket", "joonggonara", "rethinkmall"]
+      ([.target_sites[]] | sort) == ["bunjang", "ebay", "hellomarket", "joonggonara", "rethinkmall"]
     ' >/dev/null || {
       printf '[health] FAIL: %s 응답의 서비스명·대상 사이트가 예상과 다릅니다.\n' "$label" >&2
       printf '%s\n' "$payload" >&2

@@ -20,15 +20,10 @@ try {
   const home = await fetch(`${base}/`);
   assert.equal(home.status, 200);
   assert.equal(home.headers.get('x-used-market-app'), 'domestic');
-  assert.match(await home.text(), /<html lang="ko">/u);
-  assert.equal((await fetch(`${base}/global/`)).status, 404);
-  const rejected = await fetch(`${base}/api/search`, {
-    method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ keyword: 'iphone 13', sites: ['mercari_jp'] })
-  });
-  assert.equal(rejected.status, 400);
-  assert.match(await rejected.text(), /Unsupported site: mercari_jp/u);
-  console.log('domestic runtime isolation contract: 8 checks passed');
+  const html = await home.text();
+  assert.match(html, /<html lang="ko">/u);
+  assert.match(html, /data-site-tab="ebay">eBay</u);
+  console.log('domestic runtime contract: 7 checks passed');
 } finally {
   child.kill();
 }

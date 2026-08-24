@@ -2,12 +2,13 @@
 
 이 디렉터리는 현재 `runner.mjs`를 AWS Ubuntu 24.04에서 실행하기 위한 설치·환경·systemd·Cloudflare Tunnel·헬스체크 파일만 담는다.
 
-현재 러너의 대상 사이트는 다음 4곳이다.
+현재 러너의 대상 사이트는 다음 5곳이다.
 
 - 번개장터: `bunjang`
 - 중고나라: `joonggonara`
 - 헬로마켓: `hellomarket`
 - 리싱크몰: `rethinkmall`
+- eBay: `ebay` (공식 Browse API)
 
 `runner.mjs`는 위 사이트를 사이트별 동시성 제한 안에서 병렬 수집한다. 서로 다른 검색은 최대 4개가 동시에 실행되고 16개까지 대기하며, 한 검색의 소스 작업은 최대 16개다. AWS 로컬 SQLite가 주 검색 색인이고 D1에는 변경된 최근 핵심 매물만 백업한다.
 
@@ -75,6 +76,8 @@ sudo bash /opt/used-market-runner/aws-runner/configure-ubuntu24.sh
 입력값:
 
 - `CLOUDFLARE_RUNNER_TOKEN`: Cloudflare Worker가 `/api/runner/run` 호출 때 쓰는 긴 랜덤 토큰
+- `EBAY_CLIENT_ID`: eBay Developer 애플리케이션 Client ID
+- `EBAY_CLIENT_SECRET`: eBay Developer 애플리케이션 Client Secret
 - `D1_IMPORT_URL`: 선택. `{ "items": [...] }`를 받는 HTTPS import API
 - `CLOUDFLARE_MANUAL_RUN_TOKEN`: 선택한 import API의 Bearer 토큰
 - `Cloudflare Tunnel token`: Dashboard에서 복사한 Tunnel 토큰
@@ -120,7 +123,7 @@ RUNNER_PUBLIC_URL=https://runner.example.com \
   bash /opt/used-market-runner/aws-runner/health-check.sh
 ```
 
-실제 수집 작업 1개까지 검증하려면 토큰을 환경변수로 주고 실행한다. 이 명령은 번개장터·중고나라·헬로마켓·리싱크몰을 실제로 요청하므로 점검할 때만 사용한다.
+실제 수집 작업 1개까지 검증하려면 토큰을 환경변수로 주고 실행한다. 이 명령은 번개장터·중고나라·헬로마켓·리싱크몰·eBay를 실제로 요청하므로 점검할 때만 사용한다.
 
 ```bash
 RUNNER_TOKEN='<CLOUDFLARE_RUNNER_TOKEN>' \
@@ -134,10 +137,10 @@ journalctl -u used-market-runner.service -n 100 --no-pager
 journalctl -u used-market-tunnel.service -n 100 --no-pager
 ```
 
-공개 URL이 로컬 `/health`와 같은 JSON을 반환해야 한다. `target_sites`에 다음 4개가 모두 있어야 한다.
+공개 URL이 로컬 `/health`와 같은 JSON을 반환해야 한다. `target_sites`에 다음 5개가 모두 있어야 한다.
 
 ```json
-["bunjang", "hellomarket", "joonggonara", "rethinkmall"]
+["bunjang", "ebay", "hellomarket", "joonggonara", "rethinkmall"]
 ```
 
 ## 6. 운영 점검표
@@ -146,7 +149,7 @@ journalctl -u used-market-tunnel.service -n 100 --no-pager
 - [ ] Worker의 `CLOUDFLARE_RUNNER_URL`이 Tunnel URL의 `/api/runner/run`까지 포함한다.
 - [ ] Worker `RUNNER_TOKEN`과 AWS `CLOUDFLARE_RUNNER_TOKEN`이 동일하다.
 - [ ] `used-market-runner.service`와 `used-market-tunnel.service`가 active다.
-- [ ] `/health`의 대상 사이트가 4개이고 `search_index.enabled`가 `true`다.
+- [ ] `/health`의 대상 사이트가 5개이고 `search_index.enabled`가 `true`다.
 - [ ] AWS 여유 디스크가 5GB 이상이다. 미만이면 배포 전에 EBS를 확장한다.
 - [ ] 현재 운영 모드는 `cache_first`이며 stale 비율·갱신 지연·자원 경고를 모니터링한다.
 - [ ] D1 저장이 필요하면 `D1_IMPORT_URL`과 import token을 모두 설정했다.
@@ -157,14 +160,14 @@ journalctl -u used-market-tunnel.service -n 100 --no-pager
 
 | 파일 | 역할 |
 |---|---|
-| `runner.mjs` | 4개 사이트 제한 병렬 수집·캐시 우선 검색 HTTP 서버 |
+| `runner.mjs` | 5개 사이트 제한 병렬 수집·캐시 우선 검색 HTTP 서버 |
 | `search-index.mjs` | SQLite WAL·FTS5 색인, 갱신·보관·백업·비교 지표 |
 | `install-ubuntu24.sh` | Ubuntu 24.04 설치·파일 배치·systemd 등록 |
 | `configure-ubuntu24.sh` | 비밀값 입력·권한 설정·서비스 시작 |
 | `used-market-runner.service` | Node 러너 systemd 템플릿 |
 | `used-market-tunnel.service` | 토큰 파일 기반 cloudflared systemd 템플릿 |
 | `health-check.sh` | 로컬·공개 URL·선택적 실제 수집 검사 |
-| `smoke-search.sh` | 인증 토큰을 출력하지 않는 4개 사이트 실검색 점검 |
+| `smoke-search.sh` | 인증 토큰을 출력하지 않는 5개 사이트 실검색 점검 |
 | `reset-shadow-metrics.mjs` | 첫 배포 점검값만 지우는 명시 확인형 shadow 지표 초기화 |
 | `configure-d1-backup.sh` | stdin 토큰으로 D1 변경분 백업 경계를 설정 |
 | `seed-d1-backup.mjs` | 활성 색인의 사이트별 최근 2,500개를 D1에 1회 시드 |

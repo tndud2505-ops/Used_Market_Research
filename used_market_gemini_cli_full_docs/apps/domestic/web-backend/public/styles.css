@@ -54,13 +54,6 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .search-status:not(.visible) { display: none; }
 
 main { width: min(1280px, calc(100% - 48px)); margin: 0 auto; }
-.country-tabs { display: flex; align-items: center; gap: 24px; min-height: 38px; border-bottom: 1px solid #e7e8e2; }
-.country-tabs[hidden] { display: none; }
-.country-tabs button { position: relative; height: 38px; padding: 0; border: 0; color: var(--muted); background: transparent; font-size: 11px; font-weight: 800; }
-.country-tabs button::after { position: absolute; right: 0; bottom: -1px; left: 0; height: 2px; background: transparent; content: ""; }
-.country-tabs button:hover { color: var(--ink); }
-.country-tabs button.active { color: var(--ink); }
-.country-tabs button.active::after { background: var(--ink); }
 .site-tabs { display: flex; align-items: center; gap: 28px; width: 100%; min-height: 54px; border-bottom: 1px solid var(--line); }
 .site-tabs button { position: relative; height: 54px; padding: 0 0 1px; border: 0; color: #74766f; background: transparent; font-size: 12px; }
 .site-tabs button::after { position: absolute; right: 0; bottom: -1px; left: 0; height: 2px; background: transparent; content: ""; }
@@ -71,8 +64,6 @@ main { width: min(1280px, calc(100% - 48px)); margin: 0 auto; }
 .market-profile-switch::before { margin-right: 14px; color: var(--line); content: "/"; }
 .market-profile-switch:hover { color: var(--ink); }
 .catalog-layout { display: grid; grid-template-columns: 224px minmax(0, 1fr) 174px; gap: 28px; align-items: start; margin-top: 28px; }
-html[data-market-profile="global"] .catalog-layout { grid-template-columns: minmax(0, 1fr) 174px; }
-html[data-market-profile="global"] .category-sidebar { display: none; }
 .category-sidebar, .results-column, .recent-viewed-panel { min-width: 0; border-top: 2px solid var(--ink); }
 .category-sidebar, .recent-viewed-panel { position: sticky; top: 98px; align-self: start; }
 .category-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 76px; padding: 16px 0 12px; }
@@ -146,7 +137,6 @@ html[data-market-profile="global"] .category-sidebar { display: none; }
 .result-sort-tabs button:hover, .result-sort-tabs button.active { color: var(--ink); }
 .result-sort-tabs button.active { font-weight: 800; text-decoration: underline; text-decoration-color: var(--accent); text-decoration-thickness: 2px; text-underline-offset: 6px; }
 .result-sort-tabs button:disabled { color: #b3b5af; cursor: not-allowed; text-decoration: none; }
-html[data-market-profile="global"] .result-sort-tabs button { min-height: 40px; padding: 4px 5px; font-size: 10px; line-height: 1.2; white-space: normal; }
 .result-list { display: none; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 32px 18px; padding-top: 24px; }
 .market-app.has-results .result-list { display: grid; }
 .market-app.is-loading .results-toolbar { display: none; }
@@ -201,7 +191,6 @@ html[data-market-profile="global"] .result-sort-tabs button { min-height: 40px; 
 .coupang-banner-link img { display: block; width: 100%; height: auto; aspect-ratio: 2 / 3; object-fit: cover; }
 .coupang-banner-link:hover img { opacity: .94; }
 .coupang-banner p { margin: 9px 0 0; color: var(--muted); font-size: 9px; line-height: 1.55; word-break: keep-all; }
-html[data-market-profile="global"] .coupang-banner { display: none; }
 .recent-viewed-empty { display: grid; place-items: center; min-height: 180px; padding: 18px 8px; color: var(--soft); text-align: center; }
 .recent-viewed-empty-icon { display: block; margin-bottom: 10px; color: #c7c9c2; font-size: 29px; line-height: 1; transform: rotate(-20deg); }
 .recent-viewed-empty p { margin: 0; font-size: 10px; line-height: 1.5; }
@@ -241,7 +230,6 @@ html[data-market-profile="global"] .coupang-banner { display: none; }
 @media (max-width: 1080px) {
   main { width: min(100% - 40px, 1280px); }
   .catalog-layout { grid-template-columns: 200px minmax(0, 1fr) 154px; gap: 22px; }
-  html[data-market-profile="global"] .catalog-layout { grid-template-columns: minmax(0, 1fr) 154px; }
   .result-list { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .filter-dock input[type="number"] { width: 92px; }
   .result-toolbar-actions { grid-template-columns: minmax(220px, auto) minmax(220px, 1fr); gap: 14px; }
@@ -249,7 +237,6 @@ html[data-market-profile="global"] .coupang-banner { display: none; }
 
 @media (max-width: 900px) {
   .catalog-layout { grid-template-columns: 200px minmax(0, 1fr); gap: 24px; }
-  html[data-market-profile="global"] .catalog-layout { grid-template-columns: minmax(0, 1fr); }
   .recent-viewed-panel { position: static; grid-column: 1 / -1; min-height: 0; }
   .recent-viewed-list { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
   .recent-viewed-item { border-bottom: 0; }
@@ -261,8 +248,8 @@ html[data-market-profile="global"] .coupang-banner { display: none; }
   .header-search { width: 100%; }
   .header-search { grid-row: 2; }
   main { width: calc(100% - 24px); }
-  .country-tabs, .site-tabs { gap: 20px; overflow-x: auto; overflow-y: hidden; white-space: nowrap; scrollbar-width: none; }
-  .country-tabs::-webkit-scrollbar, .site-tabs::-webkit-scrollbar { display: none; }
+  .site-tabs { gap: 20px; overflow-x: auto; overflow-y: hidden; white-space: nowrap; scrollbar-width: none; }
+  .site-tabs::-webkit-scrollbar { display: none; }
   .site-tabs button, .market-profile-switch { flex: 0 0 auto; font-size: 11px; }
   .market-profile-switch { margin-left: 0; }
   .catalog-layout { display: block; margin-top: 18px; }
@@ -299,8 +286,6 @@ html[data-market-profile="global"] .coupang-banner { display: none; }
   .result-list { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px 10px; padding-top: 18px; }
   .filter-dock input[type="number"] { width: 88px; }
   .result-sort-tabs button { font-size: 9px; }
-  html[data-market-profile="global"] .result-sort-tabs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  html[data-market-profile="global"] .result-sort-tabs button { min-height: 44px; padding: 4px 6px; font-size: 11px; }
   .recent-viewed-panel { display: block; min-height: 0; border-top: 0; border-bottom: 0; }
   .recent-viewed-heading, .recent-viewed-list { display: none; }
   .coupang-banner { max-width: 360px; margin: 28px auto 0; padding: 0 0 12px; border-top: 0; }

@@ -1,8 +1,0 @@
-[Unit]
-Description=USED MARKET Global result retention
-Requires=docker.service
-After=docker.service
-
-[Service]
-Type=oneshot
-ExecStart=/opt/used-market-global/current/deploy/retention.sh

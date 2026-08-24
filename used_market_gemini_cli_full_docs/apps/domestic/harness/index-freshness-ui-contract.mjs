@@ -13,7 +13,7 @@ assert.match(app, /const elapsed = Date\.now\(\) - state\.refreshPollStartedAt;[
 assert.match(app, /\/api\/search\/refresh\/\$\{encodeURIComponent\(token\)\}/u);
 assert.match(app, /fingerprint !== state\.refreshFingerprint/u);
 assert.match(app, /state\.currentPage === 0/u);
-assert.match(app, /refreshIndex: MARKET_PROFILE === 'global'[\s\S]*?\? false[\s\S]*?: !\['price_filter', 'sort', 'pagination', 'site_filter'\]\.includes\(reason\)/u);
+assert.match(app, /refreshIndex: !\['price_filter', 'sort', 'pagination', 'site_filter'\]\.includes\(reason\)/u);
 assert.match(app, /새 매물 \$\{added\}개/u);
 assert.match(app, /pendingResultKind === 'stale'/u);
 assert.match(app, /오래된 결과 보기/u);

@@ -38,6 +38,8 @@
 
 정렬과 가격 필터는 수집 요청이 아니다. `낮은 가격`과 `높은 가격`은 확인한 스냅샷 안에서 숫자 가격을 1차 키로 사용하며, 원 사이트 전체에서 절대 최저가·최고가를 보장한다는 뜻은 아니다.
 
+eBay 결과는 USD, 나머지 운영 사이트는 KRW다. 전체 결과에 두 통화가 섞이면 환율 환산 없이 숫자를 직접 비교하지 않도록 가격순·가격 범위를 비활성화하고 안내를 표시한다. eBay 또는 국내 사이트 하나를 선택하면 해당 통화 안에서 같은 스냅샷을 정렬·필터링한다.
+
 ## 페이지 UX 계약
 
 - 결과는 PC·모바일 모두 30개씩 표시한다.
@@ -67,6 +69,6 @@
 - SQLite 스냅샷: `aws-runner/search-index.mjs`
 - 원 사이트 단기 캐시: `cloudflare/live-search.mjs`
 - D1 장애 대체: `cloudflare/worker.mjs`, `cloudflare/d1-search.mjs`
-- 결정론 검증: `harness/ui-pagination-contract.mjs`, `harness/ui-pagination-summary-contract.mjs`, `harness/search-session-policy-contract.mjs`, `aws-runner/search-index-harness.mjs`, `cloudflare/harness.mjs`
+- 결정론 검증: `harness/ui-pagination-contract.mjs`, `harness/ui-pagination-summary-contract.mjs`, `harness/search-session-policy-contract.mjs`, `harness/ebay-domestic-integration-contract.mjs`, `aws-runner/search-index-harness.mjs`, `cloudflare/harness.mjs`
 
 운영 브라우저 검증은 `전체 검색 → 1페이지에서 3페이지 → 중고나라 → 전체 → 낮은 가격 → 높은 가격 → 가격 범위 → 다른 사이트` 순서로 반복한다. 각 전체 보기 전환에서 `1 2 3 4`가 다시 열리는지, 상단·하단 방향 버튼이 같은 페이지로 움직이는지, 결과 수·정렬 방향·콘솔 오류를 확인한다.

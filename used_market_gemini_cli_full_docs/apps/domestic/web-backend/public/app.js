@@ -1,50 +1,15 @@
 import { RESULT_PAGE_SIZE, clampResultPage, maxNavigableResultPage, pageResponseMatchesCursor, paginationItems, resultPageCount } from './pagination.mjs?v=pagination-v7';
 
 const APP_ID = 'domestic';
-const PAGE_PARAMS = new URLSearchParams(window.location.search);
-const MARKET_PROFILE = 'domestic';
-const IS_GLOBAL = MARKET_PROFILE === 'global';
-const uiText = (korean, english) => IS_GLOBAL ? english : korean;
-const storageKey = (base) => IS_GLOBAL ? `${base}:global` : base;
-const MARKET_PROFILES = {
-  domestic: {
-    sites: ['joonggonara', 'bunjang', 'hellomarket', 'rethinkmall'],
-    idleText: '중고나라·번개장터·헬로마켓·리씽크몰의 중고매물을 한 번에 비교해 보세요.'
-  },
-  global: {
-    defaultCountry: 'jp',
-    countries: {
-      jp: {
-        label: 'Japan',
-        sites: ['mercari_jp', 'yahoo_auction_jp', 'rakuma'],
-        idleText: 'Search and compare public resale listings from Japan.'
-      },
-      us: {
-        label: 'United States',
-        sites: ['poshmark', 'vinted', 'unclaimed_baggage'],
-        idleText: 'Search and compare public resale listings from the United States.'
-      }
-    },
-    switchLabel: 'Korea Search',
-    switchUrl: '/?market=domestic'
-  }
-};
-const INITIAL_COUNTRY = MARKET_PROFILE === 'global' && PAGE_PARAMS.get('country') === 'us' ? 'us' : 'jp';
-let DEFAULT_SITES = MARKET_PROFILE === 'global'
-  ? MARKET_PROFILES.global.countries[INITIAL_COUNTRY].sites
-  : MARKET_PROFILES.domestic.sites;
-const SEARCH_ONLY_SITES = new Set(['hellomarket', 'rethinkmall', 'mercari_jp', 'yahoo_auction_jp', 'rakuma', 'poshmark', 'vinted', 'unclaimed_baggage']);
+const uiText = (korean) => korean;
+const storageKey = (base) => base;
+const DEFAULT_SITES = ['joonggonara', 'bunjang', 'hellomarket', 'rethinkmall', 'ebay'];
+const SEARCH_ONLY_SITES = new Set(['hellomarket', 'rethinkmall', 'ebay']);
 const LISTING_HOSTS_BY_SITE = {
   joonggonara: ['joongna.com'],
   bunjang: ['bunjang.co.kr'],
   hellomarket: ['hellomarket.com'],
   rethinkmall: ['rethinkmall.com'],
-  mercari_jp: ['mercari.com'],
-  yahoo_auction_jp: ['auctions.yahoo.co.jp'],
-  rakuma: ['fril.jp'],
-  poshmark: ['poshmark.com'],
-  vinted: ['vinted.com'],
-  unclaimed_baggage: ['unclaimedbaggage.com'],
   ebay: ['ebay.com'],
   daangn: ['daangn.com']
 };
@@ -57,14 +22,6 @@ const IMAGE_HOSTS = [
   'ccimg.hellomarket.com',
   'static.rethinkmall.com',
   'assets.rethinkmall.com',
-  'static.mercdn.net',
-  'auc-pctr.c.yimg.jp',
-  'auctions.c.yimg.jp',
-  'img.fril.jp',
-  'images.poshmark.com',
-  'dnvefa72aowie.cloudfront.net',
-  'vinted.net',
-  'unclaimedbaggage.com',
   'img.kr.gcp-karroter.net'
 ];
 const SITE_RESULT_WINDOW_INITIAL = 160;
@@ -83,7 +40,6 @@ const state = {
   categories: [],
   categoryCatalogStatus: 'pending',
   sitePlans: {},
-  activeCountry: INITIAL_COUNTRY,
   activeSite: 'all',
   sort: 'recommended',
   minPrice: null,
@@ -122,12 +78,7 @@ const labels = {
   bunjang: '번개장터',
   hellomarket: '헬로마켓',
   rethinkmall: '리씽크몰',
-  mercari_jp: 'Mercari JP',
-  yahoo_auction_jp: 'Yahoo! Auctions',
-  rakuma: 'Rakuma',
-  poshmark: 'Poshmark',
-  vinted: 'Vinted US',
-  unclaimed_baggage: 'Unclaimed Baggage'
+  ebay: 'eBay'
 };
 
 const fallbackCategories = [
@@ -168,7 +119,7 @@ function safeImageUrl(value) {
 }
 
 function prioritizeImageResults(items) {
-  if (IS_GLOBAL || state.showFavorites || state.sort !== 'recommended') return items;
+  if (state.showFavorites || state.sort !== 'recommended') return items;
   const withImages = [];
   const withoutImages = [];
   items.forEach((item) => {
@@ -177,110 +128,11 @@ function prioritizeImageResults(items) {
   return [...withImages, ...withoutImages];
 }
 
-function applyMarketShellCopy() {
-  document.documentElement.lang = IS_GLOBAL ? 'en' : 'ko';
-  if (!IS_GLOBAL) return;
-  const text = (selector, value) => {
-    const node = $(selector);
-    if (node) node.textContent = value;
-  };
-  const attr = (selector, name, value) => {
-    const node = $(selector);
-    if (node) node.setAttribute(name, value);
-  };
-  text('.skip-link', 'Skip to content');
-  attr('.brand', 'aria-label', 'USED Market home');
-  text('label[for="keyword"]', 'Search products');
-  text('#search-button span', 'Search');
-  text('#recent-searches-title', 'Recent Searches');
-  text('#clear-recent-searches', 'Clear All');
-  text('.category-heading .eyebrow', 'BROWSE');
-  text('.category-heading h2', 'Categories');
-  attr('#category-panel-toggle', 'aria-label', 'Show categories');
-  attr('#country-tabs', 'aria-label', 'Search country');
-  attr('#site-tabs', 'aria-label', 'Search sites');
-  attr('.idle-mascot', 'alt', 'USED Market search assistant');
-  const idleTitle = $('#idle-title');
-  if (idleTitle) idleTitle.innerHTML = 'Global used listings<br />search';
-  text('#result-count', '0 results');
-  text('#apply-refresh-results', 'View new listings');
-  attr('.filter-dock', 'aria-label', 'Price range');
-  text('label[for="keyword"]', 'Search products');
-  text('.filter-dock label:nth-of-type(1) .sr-only', 'Minimum price');
-  text('.filter-dock label:nth-of-type(2) .sr-only', 'Maximum price');
-  attr('#min-price', 'aria-label', 'Minimum price');
-  attr('#max-price', 'aria-label', 'Maximum price');
-  text('#apply-price-filter', 'Apply');
-  text('#reset-filters', 'Reset');
-  attr('#sort-tabs', 'aria-label', 'Sort results');
-  text('[data-sort="recommended"]', 'Recommended');
-  text('[data-sort="price_asc"]', 'Price: Low to High');
-  text('[data-sort="price_desc"]', 'Price: High to Low');
-  text('[data-sort="recent"]', 'Newest');
-  attr('#pagination-controls', 'aria-label', 'Search result pages');
-  attr('#result-summary-pagination', 'aria-label', 'Current search result page navigation');
-  text('#recent-viewed-title', 'Recently Viewed');
-  attr('#recent-viewed', 'aria-label', 'Recently viewed listings');
-  $('.coupang-banner')?.remove();
-  text('.site-footer p', 'Public used listings from verified marketplace pages.');
-  attr('.site-footer nav', 'aria-label', 'Service information');
-  const footerNav = $('.site-footer nav');
-  if (footerNav) {
-    footerNav.innerHTML = [
-      ['Japan Search', '/?market=global&country=jp'],
-      ['United States Search', '/?market=global&country=us'],
-      ['Korea Search', '/?market=domestic']
-    ].map(([label, href]) => `<a href="${href}">${label}</a>`).join('');
-  }
-  const description = 'Search and compare public used listings from marketplaces in Japan and the United States.';
-  const title = 'Global Used Listings Search | USED MARKET';
-  const canonicalUrl = `https://used-pick.com/?market=global&country=${state.activeCountry}`;
-  document.title = title;
-  attr('meta[name="description"]', 'content', description);
-  attr('meta[property="og:title"]', 'content', title);
-  attr('meta[property="og:description"]', 'content', description);
-  attr('meta[property="og:locale"]', 'content', 'en_US');
-  attr('meta[property="og:url"]', 'content', canonicalUrl);
-  attr('meta[name="twitter:title"]', 'content', title);
-  attr('meta[name="twitter:description"]', 'content', description);
-  attr('link[rel="canonical"]', 'href', canonicalUrl);
-  const structuredData = document.querySelector('script[type="application/ld+json"]');
-  if (structuredData) {
-    try {
-      const data = JSON.parse(structuredData.textContent || '{}');
-      data.name = title;
-      data.inLanguage = 'en-US';
-      data.description = description;
-      data.url = canonicalUrl;
-      data['@id'] = `${canonicalUrl}#website`;
-      structuredData.textContent = JSON.stringify(data);
-    } catch {
-      // Static metadata remains usable if an extension rewrites the JSON-LD block.
-    }
-  }
-}
-
-function renderMarketProfile() {
-  applyMarketShellCopy();
-  const profile = MARKET_PROFILES[MARKET_PROFILE];
-  const countryTabs = $('#country-tabs');
-  const countryProfile = MARKET_PROFILE === 'global'
-    ? profile.countries[state.activeCountry] || profile.countries[profile.defaultCountry]
-    : null;
-  DEFAULT_SITES = countryProfile ? countryProfile.sites : profile.sites;
-  if (countryTabs) {
-    countryTabs.hidden = MARKET_PROFILE !== 'global';
-    countryTabs.innerHTML = MARKET_PROFILE === 'global'
-      ? Object.entries(profile.countries).map(([country, details]) => {
-          const active = state.activeCountry === country;
-          return `<button class="${active ? 'active' : ''}" type="button" aria-pressed="${active}" data-country-tab="${escapeHtml(country)}">${escapeHtml(details.label)}</button>`;
-        }).join('')
-      : '';
-  }
+function renderSiteTabs() {
   const tabs = $('#site-tabs');
   if (tabs) {
     tabs.innerHTML = [
-      `<button class="${state.activeSite === 'all' ? 'active' : ''}" type="button" aria-pressed="${state.activeSite === 'all'}" data-site-tab="all">${uiText('전체', 'All')}</button>`,
+      `<button class="${state.activeSite === 'all' ? 'active' : ''}" type="button" aria-pressed="${state.activeSite === 'all'}" data-site-tab="all">전체</button>`,
       ...DEFAULT_SITES.map((site) => {
         const active = state.activeSite === site;
         return `<button class="${active ? 'active' : ''}" type="button" aria-pressed="${active}" data-site-tab="${escapeHtml(site)}">${escapeHtml(labels[site] || site)}</button>`;
@@ -288,18 +140,11 @@ function renderMarketProfile() {
     ].join('');
   }
   const idleDescription = $('#idle-description');
-  if (idleDescription) idleDescription.textContent = countryProfile?.idleText || profile.idleText;
+  if (idleDescription) idleDescription.textContent = '중고나라·번개장터·헬로마켓·리씽크몰·eBay 매물을 한 번에 비교해 보세요.';
   const keyword = $('#keyword');
-  if (keyword) keyword.placeholder = MARKET_PROFILE === 'global'
-    ? 'Search by product, brand, or model (e.g. iPhone 13)'
-    : '무엇을 찾으시나요?';
+  if (keyword) keyword.placeholder = '무엇을 찾으시나요?';
   const brand = $('.brand');
-  if (brand) brand.href = MARKET_PROFILE === 'global' ? `/?market=global&country=${state.activeCountry}` : '/';
-  if (MARKET_PROFILE === 'global') {
-    document.title = 'Global Used Listings Search | USED MARKET';
-  }
-  document.documentElement.dataset.marketProfile = MARKET_PROFILE;
-  document.documentElement.dataset.marketCountry = MARKET_PROFILE === 'global' ? state.activeCountry : 'kr';
+  if (brand) brand.href = '/';
 }
 
 function escapeHtml(value) {
@@ -334,7 +179,6 @@ function resultCurrency(data = state.data) {
 }
 
 function hasAbsoluteListingDate(item) {
-  if (item?.site === 'yahoo_auction_jp') return false;
   const timestamp = Date.parse(String(item?.posted_at || ''));
   return Number.isFinite(timestamp);
 }
@@ -395,21 +239,16 @@ function updateResultControls() {
   const maxInput = $('#max-price');
   if (minInput) {
     minInput.step = priceStep;
-    minInput.placeholder = IS_GLOBAL ? 'Minimum price' : `최소 (${currencyHint})`;
+    minInput.placeholder = `최소 (${currencyHint})`;
   }
   if (maxInput) {
     maxInput.step = priceStep;
-    maxInput.placeholder = IS_GLOBAL ? 'Maximum price' : `최대 (${currencyHint})`;
+    maxInput.placeholder = `최대 (${currencyHint})`;
   }
 }
 
 function formatNoiseReason(value) {
-  const reasons = IS_GLOBAL ? {
-    guide_or_advertisement: 'Guide or promotional listing',
-    placeholder_price: 'Price needs verification',
-    bundled_part_offer: 'Bundle details need verification',
-    part_build_leak: 'Parts configuration needs verification'
-  } : {
+  const reasons = {
     guide_or_advertisement: '광고·안내성 매물',
     placeholder_price: '기준가 확인 필요',
     bundled_part_offer: '묶음·구성 확인 필요',
@@ -426,11 +265,11 @@ function formatPostedAt(value) {
   if (Number.isNaN(date.getTime())) return raw;
   const elapsed = Math.max(0, Date.now() - date.getTime());
   if (elapsed < 60 * 1000) return uiText('방금 전', 'Just now');
-  if (elapsed < 60 * 60 * 1000) return IS_GLOBAL ? `${Math.floor(elapsed / (60 * 1000))} min ago` : `${Math.floor(elapsed / (60 * 1000))}분 전`;
-  if (elapsed < 24 * 60 * 60 * 1000) return IS_GLOBAL ? `${Math.floor(elapsed / (60 * 60 * 1000))} hr ago` : `${Math.floor(elapsed / (60 * 60 * 1000))}시간 전`;
+  if (elapsed < 60 * 60 * 1000) return `${Math.floor(elapsed / (60 * 1000))}분 전`;
+  if (elapsed < 24 * 60 * 60 * 1000) return `${Math.floor(elapsed / (60 * 60 * 1000))}시간 전`;
   if (elapsed < 7 * 24 * 60 * 60 * 1000) {
     const days = Math.floor(elapsed / (24 * 60 * 60 * 1000));
-    return IS_GLOBAL ? `${days} ${days === 1 ? 'day' : 'days'} ago` : `${days}일 전`;
+    return `${days}일 전`;
   }
   return `${String(date.getMonth() + 1).padStart(2, '0')}.${String(date.getDate()).padStart(2, '0')}`;
 }
@@ -444,7 +283,7 @@ function formatCondition(value) {
   if (/demo|display unit/.test(normalized)) return uiText('전시·데모 기기', 'Demo / Display unit');
   if (/new without tags/.test(normalized)) return uiText('택 없는 새 상품', 'New without tags');
   if (/like new/.test(normalized)) return uiText('새것에 가까움', 'Like new');
-  if (/near mint/.test(normalized)) return IS_GLOBAL ? raw : '새것에 가까움';
+  if (/near mint/.test(normalized)) return '새것에 가까움';
   if (/excellent/.test(normalized)) return uiText('최상', 'Excellent');
   if (/very good/.test(normalized)) return uiText('매우 양호', 'Very good');
   if (/satisfactory/.test(normalized)) return uiText('사용감 있음', 'Satisfactory');
@@ -457,42 +296,25 @@ function formatShipping(value) {
   const raw = String(value || '').trim();
   if (!raw) return '';
   if (/^(free_shipping|free shipping)$/i.test(raw)) return uiText('무료배송', 'Free Shipping');
-  if (/送料未定/.test(raw)) return uiText('배송비 미정', 'Shipping TBD');
-  const yen = raw.match(/送料\s*([\d,]+)\s*円/i);
-  if (yen) return IS_GLOBAL ? `Shipping ¥${yen[1]}` : `배송비 ¥${yen[1]}`;
   return raw;
 }
 
 function formatListingTime(item) {
   const raw = String(item?.posted_at || '').trim();
-  if (item?.site === 'yahoo_auction_jp' && raw) {
-    const day = raw.match(/(\d+)\s*日/);
-    if (day) return IS_GLOBAL ? `Ends in ${day[1]} ${Number(day[1]) === 1 ? 'day' : 'days'}` : `마감까지 ${day[1]}일`;
-    const hour = raw.match(/(\d+)\s*時間/);
-    if (hour) return IS_GLOBAL ? `Ends in ${hour[1]} ${Number(hour[1]) === 1 ? 'hour' : 'hours'}` : `마감까지 ${hour[1]}시간`;
-    const minute = raw.match(/(\d+)\s*分/);
-    if (minute) return IS_GLOBAL ? `Ends in ${minute[1]} ${Number(minute[1]) === 1 ? 'minute' : 'minutes'}` : `마감까지 ${minute[1]}분`;
-    if (/終了|ended/i.test(raw)) return uiText('경매 종료', 'Auction ended');
-  }
   return formatPostedAt(raw);
 }
 
 function formatMarketComparison(item) {
   if (item.price_suspect) return uiText('가격 확인', 'Price needs verification');
-  if (item.site === 'yahoo_auction_jp' || /입찰|bid/i.test(String(item.price_label || ''))) return uiText('최종가 아님', 'Final price may change');
   const rate = Number(item.deviation_rate);
   if (!Number.isFinite(rate) || rate === 0) return '';
   return rate > 0
-    ? IS_GLOBAL ? `${Math.round(rate * 100)}% below market` : `시세 대비 ${Math.round(rate * 100)}% 낮음`
-    : IS_GLOBAL ? `${Math.round(Math.abs(rate) * 100)}% above market` : `시세 대비 ${Math.round(Math.abs(rate) * 100)}% 높음`;
+    ? `시세 대비 ${Math.round(rate * 100)}% 낮음`
+    : `시세 대비 ${Math.round(Math.abs(rate) * 100)}% 높음`;
 }
 
 function formatPriceLabel(value) {
-  const raw = String(value || '').trim();
-  if (!IS_GLOBAL) return raw;
-  if (/^(판매가|sale price|listing price)$/i.test(raw)) return 'Sale price';
-  if (/^(현재 입찰가|current bid)$/i.test(raw)) return 'Current bid';
-  return raw;
+  return String(value || '').trim();
 }
 
 function formatCheckedAge(freshness) {
@@ -501,14 +323,14 @@ function formatCheckedAge(freshness) {
     seconds = Math.max(0, Math.floor((Date.now() - Date.parse(freshness.refreshed_at)) / 1000));
   }
   if (!Number.isFinite(seconds) || seconds < 60) return uiText('방금 확인', 'Checked just now');
-  if (seconds < 60 * 60) return IS_GLOBAL ? `Checked ${Math.floor(seconds / 60)} min ago` : `${Math.floor(seconds / 60)}분 전 확인`;
-  if (seconds < 24 * 60 * 60) return IS_GLOBAL ? `Checked ${Math.floor(seconds / (60 * 60))} hr ago` : `${Math.floor(seconds / (60 * 60))}시간 전 확인`;
+  if (seconds < 60 * 60) return `${Math.floor(seconds / 60)}분 전 확인`;
+  if (seconds < 24 * 60 * 60) return `${Math.floor(seconds / (60 * 60))}시간 전 확인`;
   const days = Math.floor(seconds / (24 * 60 * 60));
-  return IS_GLOBAL ? `Checked ${days} ${days === 1 ? 'day' : 'days'} ago` : `${days}일 전 확인`;
+  return `${days}일 전 확인`;
 }
 
-function originalLanguageAttr(value) {
-  return IS_GLOBAL && /[\u3040-\u30ff\u3400-\u9fff]/u.test(String(value || '')) ? ' lang="ja"' : '';
+function originalLanguageAttr() {
+  return '';
 }
 
 function loadFavorites() {
@@ -817,11 +639,6 @@ function rememberViewData(data) {
 }
 
 function renderCategories() {
-  if (IS_GLOBAL) {
-    const root = $('#category-list');
-    if (root) root.innerHTML = '';
-    return;
-  }
   const categories = state.categories.length ? state.categories : fallbackCategories;
   const selectedIds = new Set(selectedCategoryIds());
   const openParentIds = new Set(selectedIds);
@@ -925,7 +742,7 @@ function renderFreshnessStatus() {
     } else {
       const added = Math.max(0, Number(state.pendingRefreshData?.refresh?.added_count) || 0);
       button.textContent = added > 0
-        ? IS_GLOBAL ? `View ${added} new ${added === 1 ? 'listing' : 'listings'}` : `새 매물 ${added}개 보기`
+        ? `새 매물 ${added}개 보기`
         : uiText('업데이트 보기', 'View update');
     }
   }
@@ -979,7 +796,7 @@ async function pollRefreshResult() {
     state.refreshTimer = null;
     state.refreshPollStartedAt = 0;
     state.refreshMessage = added > 0
-      ? IS_GLOBAL ? `Checked just now · ${added} new ${added === 1 ? 'listing' : 'listings'}` : `방금 확인 · 새 매물 ${added}개`
+      ? `방금 확인 · 새 매물 ${added}개`
       : uiText('방금 확인 · 새 매물 없음', 'Checked just now · No new listings');
     if (state.currentPage === 0) {
       state.data = refreshedData;
@@ -1007,9 +824,7 @@ function trackSearchRefresh(data, fingerprint) {
   if (data?.stale_fallback?.items?.length) {
     state.pendingRefreshData = data.stale_fallback;
     state.pendingResultKind = 'stale';
-    state.refreshMessage = IS_GLOBAL
-      ? `Marketplace check failed · Showing results ${formatCheckedAge(data.stale_fallback.freshness).toLowerCase()}`
-      : `원본 사이트 확인 실패 · ${formatCheckedAge(data.stale_fallback.freshness)} 결과 보관 중`;
+    state.refreshMessage = `원본 사이트 확인 실패 · ${formatCheckedAge(data.stale_fallback.freshness)} 결과 보관 중`;
   }
   const token = String(data?.freshness?.refresh_token || data?.refresh?.token || '').trim();
   const refreshState = String(data?.freshness?.refresh_state || data?.refresh?.state || '');
@@ -1021,17 +836,6 @@ function trackSearchRefresh(data, fingerprint) {
 }
 
 async function setActiveSite(site) {
-  const enteringMixedJapanAggregate = MARKET_PROFILE === 'global'
-    && state.activeCountry === 'jp'
-    && site === 'all';
-  if (enteringMixedJapanAggregate) {
-    state.sort = 'recommended';
-    state.minPrice = null;
-    state.maxPrice = null;
-    $('#min-price').value = '';
-    $('#max-price').value = '';
-    updateSortTabs();
-  }
   state.activeSite = site;
   state.showFavorites = false;
   $$('.site-tabs [data-site-tab]').forEach((tab) => {
@@ -1090,25 +894,6 @@ async function setActiveSite(site) {
   resetRenderedResultSummary();
   hidePagination();
   $('#result-list').innerHTML = '<div class="empty-state" aria-hidden="true"></div>';
-}
-
-function setActiveCountry(country) {
-  if (MARKET_PROFILE !== 'global' || !MARKET_PROFILES.global.countries[country] || state.activeCountry === country) return;
-  state.activeCountry = country;
-  state.activeSite = 'all';
-  state.sort = 'recommended';
-  state.minPrice = null;
-  state.maxPrice = null;
-  state.showFavorites = false;
-  $('#min-price').value = '';
-  $('#max-price').value = '';
-  updateSortTabs();
-  const url = new URL(window.location.href);
-  url.searchParams.set('market', 'global');
-  url.searchParams.set('country', country);
-  window.history.replaceState({}, '', `${url.pathname}${url.search}`);
-  renderMarketProfile();
-  setActiveSite('all');
 }
 
 function setCategory(categoryId) {
@@ -1176,9 +961,7 @@ function showUnavailableSelection(categoryId = '') {
   const categoryLabel = categoryId
     ? (state.categories.find((category) => category.id === categoryId) || fallbackCategories.find((category) => category.id === categoryId))?.label
     : selectedCategoryIds().map((id) => (state.categories.find((category) => category.id === id) || fallbackCategories.find((category) => category.id === id))?.label).filter(Boolean).join(', ');
-  $('#search-status').textContent = IS_GLOBAL
-    ? `The selected category is unavailable on ${labels[state.activeSite] || state.activeSite}.`
-    : `${categoryLabel || '선택한 카테고리'}는 현재 ${labels[state.activeSite] || state.activeSite}에서 제공되지 않습니다.`;
+  $('#search-status').textContent = `${categoryLabel || '선택한 카테고리'}는 현재 ${labels[state.activeSite] || state.activeSite}에서 제공되지 않습니다.`;
   $('#search-status').classList.add('visible');
   resetRenderedResultSummary();
   $('#result-list').innerHTML = `<div class="empty-state" role="status"><span>${uiText('지원하지 않는 카테고리', 'Category unavailable')}</span></div>`;
@@ -1261,11 +1044,11 @@ async function requestSearchPage({ keyword, categoryIds, sites, viewSites = acti
       min_price: state.minPrice ?? undefined,
       max_price: state.maxPrice ?? undefined,
       limit: RESULT_PAGE_SIZE,
-      site_window: MARKET_PROFILE === 'global' ? undefined : siteWindow,
+      site_window: siteWindow,
       refresh_index: refreshIndex,
-      expand_index: MARKET_PROFILE === 'global' ? undefined : expandIndex,
-      collect_view: MARKET_PROFILE === 'global' ? undefined : collectView,
-      acquisition_mode: MARKET_PROFILE === 'global' ? undefined : acquisitionMode,
+      expand_index: expandIndex,
+      collect_view: collectView,
+      acquisition_mode: acquisitionMode,
       cursor: cursor || undefined
     })
   });
@@ -1351,9 +1134,7 @@ async function executeSearch({ keyword = '', categoryId = 'all', categoryIds = n
       sites: selectedSites,
       viewSites: activeViewSites(),
       signal: requestController.signal,
-      refreshIndex: MARKET_PROFILE === 'global'
-        ? false
-        : !['price_filter', 'sort', 'pagination', 'site_filter'].includes(reason)
+      refreshIndex: !['price_filter', 'sort', 'pagination', 'site_filter'].includes(reason)
     });
     if (state.requestController !== requestController) return false;
     state.data = data;
@@ -1363,7 +1144,7 @@ async function executeSearch({ keyword = '', categoryId = 'all', categoryIds = n
     renderAll();
     const shouldPrefetchAllView = state.activeSite === 'all'
       && ['search', 'sort', 'price_filter', 'site_filter'].includes(reason);
-    if (shouldPrefetchAllView && MARKET_PROFILE !== 'global' && data.pagination?.next_cursor) {
+    if (shouldPrefetchAllView && data.pagination?.next_cursor) {
       void prefetchActiveResultPages();
     }
     if (reason === 'price_filter') {
@@ -1389,7 +1170,7 @@ async function executeSearch({ keyword = '', categoryId = 'all', categoryIds = n
 }
 
 async function prefetchActiveResultPages() {
-  if (MARKET_PROFILE === 'global' || !state.data?.pagination?.next_cursor || !state.collectionSites.length) return false;
+  if (!state.data?.pagination?.next_cursor || !state.collectionSites.length) return false;
   state.viewCollectionController?.abort();
   const requestController = new AbortController();
   state.viewCollectionController = requestController;
@@ -1433,7 +1214,7 @@ async function prefetchActiveResultPages() {
 }
 
 async function collectActiveView({ acquisitionMode = 'recent', targetWindow = currentResultWindow(), statusText = '' } = {}) {
-  if (MARKET_PROFILE === 'global' || !state.data || !state.collectionSites.length) return false;
+  if (!state.data || !state.collectionSites.length) return false;
   const viewSites = activeViewSites();
   const focusSites = viewSites.length ? viewSites : [...state.collectionSites];
   const fingerprint = JSON.stringify({
@@ -1560,7 +1341,7 @@ async function loadResultPage(pageIndex) {
   } catch (error) {
     if (error.name === 'AbortError') return;
     state.appendError = formatSourceMessage(error.message);
-    $('#search-status').textContent = IS_GLOBAL ? `Could not load this page: ${state.appendError}` : `페이지를 불러오지 못했습니다: ${state.appendError}`;
+    $('#search-status').textContent = `페이지를 불러오지 못했습니다: ${state.appendError}`;
     $('#search-status').classList.add('visible');
   } finally {
     if (state.requestController === requestController) {
@@ -1573,8 +1354,7 @@ async function loadResultPage(pageIndex) {
 }
 
 function canExpandResultWindow(totalCount = availableResultCount()) {
-  return MARKET_PROFILE !== 'global'
-    && !state.showFavorites
+  return !state.showFavorites
     && !state.expansionExhausted
     && currentResultWindow() < SITE_RESULT_WINDOW_MAX
     && totalCount < SEARCH_SESSION_MAX_ITEMS
@@ -1642,14 +1422,14 @@ async function expandResultWindow() {
     const addedCount = Math.max(0, availableResultCount() - previousCount);
     state.expansionExhausted = addedCount === 0 || nextWindow >= SITE_RESULT_WINDOW_MAX;
     $('#search-status').textContent = addedCount > 0
-      ? IS_GLOBAL ? `Found ${addedCount} more ${addedCount === 1 ? 'listing' : 'listings'}.` : `새 매물 ${addedCount}개를 더 찾았습니다.`
+      ? `새 매물 ${addedCount}개를 더 찾았습니다.`
       : uiText('추가로 확인된 매물이 없습니다.', 'No additional listings were found.');
   } catch (error) {
     if (error.name === 'AbortError') return;
     if (viewSites.length === 1) state.focusedSiteWindows[viewSites[0]] = previousWindow;
     else state.siteWindow = previousWindow;
     state.appendError = formatSourceMessage(error.message);
-    $('#search-status').textContent = IS_GLOBAL ? `Could not load more listings: ${state.appendError}` : `다음 매물을 찾지 못했습니다: ${state.appendError}`;
+    $('#search-status').textContent = `다음 매물을 찾지 못했습니다: ${state.appendError}`;
   } finally {
     if (state.requestController === requestController) {
       state.requestController = null;
@@ -1677,38 +1457,6 @@ function renderAll() {
 
 function formatSourceMessage(message) {
   const text = String(message || '');
-  if (IS_GLOBAL) {
-    if (text.startsWith('SEARCH_BUSY:')) {
-      const retryAfter = Number(text.slice('SEARCH_BUSY:'.length));
-      return Number.isFinite(retryAfter) && retryAfter > 0
-        ? `The search service is busy. Please try again in about ${retryAfter} ${retryAfter === 1 ? 'second' : 'seconds'}.`
-        : 'The search service is busy. Please try again shortly.';
-    }
-    if (text.startsWith('CURSOR_EXPIRED:')) return 'These search results expired. Start a new search.';
-    if (text.startsWith('CATEGORY_KEYWORD_FALLBACK:')) return 'The category name was used because a marketplace subcategory is unavailable.';
-    if (text.startsWith('CATEGORY_PARENT_FALLBACK:')) return 'A verified parent category was used because a marketplace subcategory is unavailable.';
-    if (text.startsWith('CATEGORY_KEYWORD_FILTER:') || text.startsWith('CATEGORY_TEXT_FILTER:') || text.startsWith('CATEGORY_SOURCE_FILTER:')) return 'Listings assigned to other categories were excluded.';
-    if (/Failed to fetch|NetworkError|Load failed/i.test(text)) return 'Could not connect to the search server. Try again.';
-    if (text.startsWith('CATEGORY_COLLECTION_UNAVAILABLE:')) return 'This marketplace does not support that category yet.';
-    if (/public search aggregated across \d+ areas/i.test(text)) return 'Public search results were combined across multiple areas.';
-    if (text.startsWith('PAGINATION_UNAVAILABLE:')) return 'This marketplace does not provide a reliable next-page cursor.';
-    if (text.startsWith('EBAY_SALE_STATUS_UNAVAILABLE')) return 'Check the original listing for its sale status.';
-    if (text.startsWith('Dropped item due to weak keyword relevance:')) return 'A listing with weak search relevance was excluded.';
-    if (text.startsWith('Dropped item due to missing required fields')) return 'A listing missing required information was excluded.';
-    if (text.startsWith('Dropped duplicate URL:')) return 'Duplicate listings were combined.';
-    if (text.startsWith('BLOCKED_PAGE:') || /blocked page detected|access challenge/i.test(text)) return 'The marketplace limited automated access. Try again or open the marketplace directly.';
-    if (text.startsWith('BROWSER_RUNTIME_UNAVAILABLE:')) return 'The local browser collector is unavailable. Check the collection environment.';
-    if (text.startsWith('EMPTY_RESULTS:')) return 'No listings were found. The marketplace may have changed its page structure.';
-    if (text.startsWith('UNSUPPORTED_EVIDENCE_SHAPE:')) return 'The marketplace response format is not currently supported.';
-    if (text.startsWith('SELECTOR_DRIFT:')) return 'The marketplace page structure changed and listing fields could not be read.';
-    if (text.startsWith('SEARCH_EXTRACTION_FAILED:')) return 'Listings could not be extracted. Try again.';
-    if (text.startsWith('LOGIN_STATE_UNCLEAR:')) return 'The marketplace login state could not be verified.';
-    if (text.startsWith('No search rows matched selector:') || text.startsWith('Browser-first extraction unavailable') || text.startsWith('Unsupported evidence shape for')) return 'No listing rows could be read from the marketplace. Try again.';
-    if (text.startsWith('Selectors prepared:') || text.startsWith('Adapter notes:')) return 'The marketplace collection rules need review.';
-    if (text.startsWith('Keyword fallback was not used')) return 'The search could not run because no category mapping was available.';
-    if (text === 'Internal error' || text.startsWith('Internal error')) return 'The search server encountered an error. Try again.';
-    return 'The search could not be completed. Try again.';
-  }
   if (text.startsWith('SEARCH_BUSY:')) {
     const retryAfter = Number(text.slice('SEARCH_BUSY:'.length));
     return Number.isFinite(retryAfter) && retryAfter > 0
@@ -1723,7 +1471,8 @@ function formatSourceMessage(message) {
   if (text.startsWith('BUNJANG_CATEGORY_API_ERROR:')) return '번개장터 공식 카테고리 응답을 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.';
   if (text.startsWith('BUNJANG_SEARCH_API_ERROR:')) return '번개장터 검색 응답을 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.';
   if (/Failed to fetch|NetworkError|Load failed/i.test(text)) return '검색 서버에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.';
-  if (/eBay Browse API token is not configured/i.test(text)) return 'eBay 공식 API 토큰이 설정되지 않았습니다. EBAY_BROWSE_API_TOKEN을 설정한 뒤 다시 시도해 주세요.';
+  if (text.startsWith('EBAY_CREDENTIALS_REQUIRED:') || /eBay Browse API token is not configured/i.test(text)) return 'eBay API 인증정보가 설정되지 않았습니다. EBAY_CLIENT_ID와 EBAY_CLIENT_SECRET을 설정한 뒤 다시 시도해 주세요.';
+  if (text.startsWith('EBAY_OAUTH_ERROR:')) return 'eBay API 인증에 실패했습니다. Client ID와 Client Secret을 확인해 주세요.';
   if (text.startsWith('CATEGORY_COLLECTION_UNAVAILABLE:')) return '이 사이트는 해당 카테고리 조회를 아직 지원하지 않습니다.';
   if (/public search aggregated across \d+ areas/i.test(text)) return '공개 검색 결과를 여러 지역에서 합산했습니다.';
   if (text.startsWith('PAGINATION_UNAVAILABLE:')) return '이 사이트는 안정적인 다음 페이지 커서를 제공하지 않아 현재 페이지까지만 표시합니다.';
@@ -1827,7 +1576,7 @@ function renderPagination(totalCount = availableResultCount()) {
   const maxNavigablePage = maxNavigableResultPage(loadedCount, totalCount, Boolean(state.data?.pagination?.next_cursor));
   const pageButtons = paginationItems(state.currentPage, pageCount, maxNavigablePage).map((item, index) => {
     if (item === 'ellipsis') return `<span class="pagination-ellipsis" aria-hidden="true" data-pagination-gap="${index}">…</span>`;
-    const label = IS_GLOBAL ? `Page ${item + 1}` : `${item + 1}페이지`;
+    const label = `${item + 1}페이지`;
     if (item > maxNavigablePage) return `<span class="pagination-page-preview" aria-label="${label} · ${uiText('아직 이동할 수 없음', 'Not available yet')}" aria-disabled="true">${item + 1}</span>`;
     return `<button class="pagination-page" type="button" data-result-page="${item}" aria-label="${label}"${item === state.currentPage ? ' aria-current="page"' : ''}>${item + 1}</button>`;
   }).join('');
@@ -1855,7 +1604,7 @@ function bindThumbnailFallbacks() {
       image.hidden = true;
       const fallback = image.nextElementSibling;
       if (fallback) fallback.hidden = false;
-      if (IS_GLOBAL || state.showFavorites || state.sort !== 'recommended') return;
+      if (state.showFavorites || state.sort !== 'recommended') return;
       const row = image.closest('.item-row');
       if (!row || row.dataset.imageFailed === 'true' || !row.parentElement) return;
       row.dataset.imageFailed = 'true';
@@ -1917,10 +1666,10 @@ function renderSourceSummary() {
       || Number(source.filtered_count) > 0));
     const statusText = failure && !count
       ? rateLimited ? uiText('원 사이트 접속 제한', 'Marketplace access limited') : uiText('원 사이트 확인 실패', 'Marketplace unavailable')
-      : partial ? IS_GLOBAL ? `${count} ${count === 1 ? 'result' : 'results'} · Partial` : `${count}개 · 일부 확인`
-      : filterWarning && count ? IS_GLOBAL ? `${count} ${count === 1 ? 'result' : 'results'} · Filtered` : `${count}개 · 조건 적용`
-          : suggested ? (count ? IS_GLOBAL ? `${count} ${count === 1 ? 'result' : 'results'} · ${suggestedLabel}` : `${count}개 · ${suggestedLabel}` : suggestedLabel)
-            : count ? IS_GLOBAL ? `${count} ${count === 1 ? 'result' : 'results'}` : `${count}개` : uiText('결과 없음', 'No results');
+      : partial ? `${count}개 · 일부 확인`
+      : filterWarning && count ? `${count}개 · 조건 적용`
+          : suggested ? (count ? `${count}개 · ${suggestedLabel}` : suggestedLabel)
+            : count ? `${count}개` : uiText('결과 없음', 'No results');
     const statusClass = failure || partial ? 'is-warning' : count ? '' : 'is-empty';
     const detail = failure || partial ? uiText('원 사이트 응답 중 확인 가능한 매물만 표시합니다.', 'Showing only listings that could be verified from this marketplace.') : '';
     return `<span class="source-summary-item ${statusClass}" title="${escapeHtml(detail)}">${escapeHtml(labels[site] || site)} ${escapeHtml(statusText)}</span>`;
@@ -1931,10 +1680,8 @@ function renderResults() {
   const items = visibleItems();
   const availableCount = availableResultCount();
   const pageCount = resultPageCount(availableCount);
-  const pageText = pageCount > 1 ? IS_GLOBAL ? ` · Page ${state.currentPage + 1} of ${pageCount}` : ` · ${state.currentPage + 1}/${pageCount}페이지` : '';
-  $('#result-count').textContent = IS_GLOBAL
-    ? `${availableCount} ${availableCount === 1 ? 'result' : 'results'}${pageText}`
-    : `총 ${availableCount}개${pageText}`;
+  const pageText = pageCount > 1 ? ` · ${state.currentPage + 1}/${pageCount}페이지` : '';
+  $('#result-count').textContent = `총 ${availableCount}개${pageText}`;
   renderPagination(availableCount);
   renderSourceSummary();
   renderControlNotice();
@@ -1947,12 +1694,11 @@ function renderResults() {
     const warning = item.price_suspect || item.quality_suspect || (item.fraud_risk != null && item.fraud_risk > .45);
     const comparison = formatMarketComparison(item);
     const flag = warning ? `<span class="item-flag">${uiText('확인', 'Review')}</span>` : item.noise_filtered ? `<span class="item-flag">${escapeHtml(formatNoiseReason(item.noise_filter_reason))}</span>` : '';
-    const listingTag = (IS_GLOBAL ? { part: 'Parts', full_pc: 'Device', bundle: 'Bundle' } : { part: '부품', full_pc: '본체', bundle: '묶음' })[item.listing_type] || '';
+    const listingTag = ({ part: '부품', full_pc: '본체', bundle: '묶음' })[item.listing_type] || '';
     const shipping = formatShipping(item.shipping);
     const tag = shipping || listingTag;
     const priceLabel = formatPriceLabel(item.price_label);
-    const feeNote = item.site === 'vinted' ? uiText('구매자 수수료 별도', 'Buyer protection fee may apply') : '';
-    const priceHint = [priceLabel, comparison, feeNote].filter(Boolean).join(' · ');
+    const priceHint = [priceLabel, comparison].filter(Boolean).join(' · ');
     const itemKey = escapeHtml(favoriteKey(item));
     const sourceLabel = labels[item.site] || uiText('출처 미상', 'Unknown source');
     const location = String(item.location || '').trim();
@@ -2062,12 +1808,8 @@ function median(values) {
   return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
 }
 
-renderMarketProfile();
+renderSiteTabs();
 $('#search-form').addEventListener('submit', (event) => { event.preventDefault(); search($('#keyword').value); });
-$('#country-tabs').addEventListener('click', (event) => {
-  const tab = event.target.closest('[data-country-tab]');
-  if (tab) setActiveCountry(tab.dataset.countryTab || 'jp');
-});
 $('#site-tabs').addEventListener('click', (event) => {
   const tab = event.target.closest('[data-site-tab]');
   if (tab) setActiveSite(tab.dataset.siteTab || 'all');

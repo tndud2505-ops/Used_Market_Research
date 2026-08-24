@@ -1,5 +1,6 @@
 import { bunjangAdapter } from "./bunjang.js";
 import { daangnAdapter } from "./daangn.js";
+import { ebayAdapter } from "./ebay.js";
 import { joonggonaraAdapter } from "./joonggonara.js";
 import { firstDefined, firstMatchingSelector } from "./shared.js";
 import type { BrowserSiteAdapter } from "./shared.js";
@@ -7,7 +8,8 @@ import type { BrowserSiteAdapter } from "./shared.js";
 const SITE_ADAPTERS: BrowserSiteAdapter[] = [
   joonggonaraAdapter,
   bunjangAdapter,
-  daangnAdapter
+  daangnAdapter,
+  ebayAdapter
 ];
 
 export function listBrowserSiteAdapters(): BrowserSiteAdapter[] {

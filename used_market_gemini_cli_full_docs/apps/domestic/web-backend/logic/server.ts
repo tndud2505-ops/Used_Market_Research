@@ -90,9 +90,6 @@ interface NormalizedItemView {
 const DEALER_SELLER_PATTERN = /(store|dealer|shop|official|mall|컴퓨터|업체|매입|총판|상사|리퍼|도소매)/i;
 
 const MAX_REQUEST_BODY_BYTES = 1_048_576;
-const GLOBAL_PAGE_TITLE = 'Global Used Listings Search | USED MARKET';
-const GLOBAL_PAGE_DESCRIPTION = 'Search and compare public used listings from marketplaces in Japan and the United States.';
-const PUBLIC_SITE_ORIGIN = 'https://used-pick.com';
 
 function positiveInteger(value: number | undefined, fallback: number) {
   return Number.isInteger(value) && (value as number) > 0 ? value as number : fallback;
@@ -1493,41 +1490,6 @@ async function serveStaticAsset(pathname: string, requestUrl: URL, res: http.Ser
   res.setHeader('Cache-Control', extension === '.html' ? 'no-store' : 'public, max-age=300');
   res.setHeader('Content-Length', content.length);
   res.end(headOnly ? undefined : content);
-}
-
-function renderGlobalIndexHtml(html: string, country: 'jp' | 'us') {
-  const canonicalUrl = `${PUBLIC_SITE_ORIGIN}/?market=global&country=${country}`;
-  const canonicalAttribute = escapeHtmlAttribute(canonicalUrl);
-  let output = html
-    .replace(/<html\b[^>]*>/u, '<html lang="en">')
-    .replace(/<title>[\s\S]*?<\/title>/u, `<title>${GLOBAL_PAGE_TITLE}</title>`)
-    .replace(/<meta name="description"[^>]*>/u, `<meta name="description" content="${GLOBAL_PAGE_DESCRIPTION}" />`)
-    .replace(/<link rel="canonical"[^>]*>/u, `<link rel="canonical" href="${canonicalAttribute}" />`)
-    .replace(/<meta property="og:locale"[^>]*>/u, '<meta property="og:locale" content="en_US" />')
-    .replace(/<meta property="og:title"[^>]*>/u, `<meta property="og:title" content="${GLOBAL_PAGE_TITLE}" />`)
-    .replace(/<meta property="og:description"[^>]*>/u, `<meta property="og:description" content="${GLOBAL_PAGE_DESCRIPTION}" />`)
-    .replace(/<meta property="og:url"[^>]*>/u, `<meta property="og:url" content="${canonicalAttribute}" />`)
-    .replace(/<meta name="twitter:title"[^>]*>/u, `<meta name="twitter:title" content="${GLOBAL_PAGE_TITLE}" />`)
-    .replace(/<meta name="twitter:description"[^>]*>/u, `<meta name="twitter:description" content="${GLOBAL_PAGE_DESCRIPTION}" />`);
-
-  output = output.replace(
-    /(<script type="application\/ld\+json">)\s*[\s\S]*?\s*(<\/script>)/u,
-    `$1\n${JSON.stringify({
-      '@context': 'https://schema.org',
-      '@type': 'WebSite',
-      '@id': `${canonicalUrl}#website`,
-      url: canonicalUrl,
-      name: GLOBAL_PAGE_TITLE,
-      alternateName: ['USED MARKET', 'USED PICK'],
-      inLanguage: 'en-US',
-      description: GLOBAL_PAGE_DESCRIPTION
-    }, null, 2)}\n    $2`
-  );
-  return output;
-}
-
-function escapeHtmlAttribute(value: string) {
-  return value.replaceAll('&', '&amp;').replaceAll('"', '&quot;');
 }
 
 function validateTransactionInput(input: JsonRecord): TransactionRecordInput {

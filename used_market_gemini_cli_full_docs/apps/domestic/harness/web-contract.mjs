@@ -106,10 +106,8 @@ assert.equal(validBunjangSliceCursor.siteCursors.bunjang.startsWith('slice:v1:')
 const mobileBunjang = validateWebSearchRequest({ category_id: 'mobile', sites: ['bunjang'], limit: 4 });
 assert.equal(mobileBunjang.categories[0].id, 'mobile');
 assert.deepEqual(validateWebSearchRequest({ category_id: 'mobile' }).sites, ['joonggonara', 'bunjang']);
-assert.throws(
-  () => validateWebSearchRequest({ category_id: 'mobile', sites: ['ebay'] }),
-  /Unsupported site: ebay/
-);
+const ebayKeywordRequest = validateWebSearchRequest({ keyword: 'RTX 3070', category_id: 'mobile', sites: ['ebay'] });
+assert.deepEqual(ebayKeywordRequest.sites, ['ebay']);
 assert.throws(
   () => validateSearchOnlyRequest({ source: 'hellomarket', keyword: 'RTX 3070', limit: 10 }),
   /stable pagination cursor/
@@ -268,10 +266,8 @@ for (const invalidCursor of ['bogus', 'offset:2']) {
     (error) => error instanceof WebSearchValidationError
   );
 }
-assert.throws(
-  () => validateWebSearchRequest({ keyword: 'RTX 3070', sites: ['ebay'], cursor: encodeCursor({ version: 1, site_cursors: { ebay: 'page:2' } }) }),
-  (error) => error instanceof WebSearchValidationError
-);
+const ebayCursorRequest = validateWebSearchRequest({ keyword: 'RTX 3070', sites: ['ebay'], cursor: encodeCursor({ version: 1, site_cursors: { ebay: 'page:2' } }) });
+assert.equal(ebayCursorRequest.siteCursors.ebay, 'page:2');
 
 const searchOnlyRequest = validateSearchOnlyRequest({ source: 'hellomarket', keyword: 'RTX 3070' });
 assert.equal(searchOnlyRequest.sourceKey, 'hellomarket');

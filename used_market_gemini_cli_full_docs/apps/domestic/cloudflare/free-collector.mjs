@@ -19,7 +19,7 @@ export const FREE_COLLECTION_SITES = Object.freeze([
   "rethinkmall"
 ]);
 
-export const FREE_COLLECTION_EXCLUDED_SITES = Object.freeze([]);
+export const FREE_COLLECTION_EXCLUDED_SITES = Object.freeze(["ebay"]);
 
 const JOB_PLANS = Object.freeze({
   "gpu-fast-scan": { category_id: "pc", keyword: "RTX 3060" },

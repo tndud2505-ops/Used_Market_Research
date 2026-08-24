@@ -41,7 +41,7 @@ Browser (used-pick.com)
 
 운영 확인에서는 사이트 탭 변경 직후 AWS `index_page_reads`가 증가하고, 이어지는 집중 보강에서 `source_collection_attempts`가 선택 사이트 수만큼만 증가해야 한다. 낮은 가격 전환은 `index_page_reads`만 증가하고 `live_collection_runs`·`source_collection_attempts`·`index_ingest_commits`는 증가하지 않아야 한다.
 
-Cloudflare만으로 이 경로를 대체하지 않는 이유는 Workers 런타임이 현재 프로젝트의 Node 서비스·원 사이트 수집 경계를 그대로 소유하지 않기 때문이다. AWS SQLite가 최대 100,000개 활성 상품의 주 색인이다. D1은 4개 사이트별 최근 2,500개, 전체 최대 10,000개만 보관한다. AWS 러너가 없으면 UI 자체는 열리지만 D1의 제한된 최근 결과만 반환하거나, 대체 데이터가 없으면 오류를 표시한다.
+Cloudflare만으로 이 경로를 대체하지 않는 이유는 Workers 런타임이 현재 프로젝트의 Node 서비스·원 사이트 수집 경계를 그대로 소유하지 않기 때문이다. AWS SQLite가 최대 100,000개 활성 상품의 주 색인이다. D1은 5개 사이트별 최근 2,500개, 전체 최대 10,000개만 보관한다. AWS 러너가 없으면 UI 자체는 열리지만 D1의 제한된 최근 결과만 반환하거나, 대체 데이터가 없으면 오류를 표시한다.
 
 ## 코드 위치
 
@@ -97,7 +97,7 @@ Quick Tunnel은 운영 경로가 아니다. 배포 시 `CLOUDFLARE_TUNNEL_MODE=n
 
 2026-08-17 4사이트 배포 확인에서 AWS의 `used-market-runner.service`와 `used-market-tunnel.service`는 모두 `active`였다. 공개 runner·두 사용자 도메인의 health는 모두 HTTP 200이고, 검색 용량은 동시 4개·대기열 16개·확장 스냅샷 최대 1,000개다. 당시에는 `shadow` 모드를 유지했다.
 
-2026-08-20 배포부터 `shadow`에서도 `refresh_index=false`인 사이트 보기·정렬 요청은 같은 SQLite 스냅샷을 읽는다. `collect_view=true` 또는 `expand_index=true`만 원 사이트 수집으로 넘어가므로 비교 모드를 유지하면서도 사이트 탭 자체가 4개 사이트를 재수집하지 않는다.
+2026-08-20 배포부터 `shadow`에서도 `refresh_index=false`인 사이트 보기·정렬 요청은 같은 SQLite 스냅샷을 읽는다. `collect_view=true` 또는 `expand_index=true`만 원 사이트 수집으로 넘어가므로 비교 모드를 유지하면서도 사이트 탭 자체가 5개 사이트를 재수집하지 않는다.
 
 같은 날 2차 속도 배포에서 운영 모드를 `cache_first`로 전환했다. 전체 검색은 저장 결과를 먼저 반환하고, 사이트 탭은 같은 스냅샷의 해당 사이트 결과를 먼저 보여준 뒤 선택 사이트만 보강한다. 브라우저는 보강 결과 최대 90개를 미리 읽어 3페이지까지의 이동 대기를 줄인다. 정렬은 SQLite 조회만 사용하며 원 사이트 수집을 시작하지 않는다. 이 2차 정책이 위 `shadow` 설명보다 우선한다.
 
