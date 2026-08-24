@@ -5,7 +5,7 @@
 ## 역할 분리
 
 - Cloudflare Worker: 화면·검색 API·Cron Trigger·수동 실행 인증·AWS 러너 호출
-- AWS Node 러너: 번개장터·중고나라·헬로마켓·리씽크몰 검색·수집
+- AWS Node 러너: 번개장터·중고나라·헬로마켓·리씽크몰·eBay 검색·수집
 - `POST /api/runner/run`: 허용된 스케줄러 작업 하나 또는 묶음을 실행하는 인증된 Node 엔드포인트
 - `POST /api/search`: AWS 러너의 5개 사이트 검색·색인 응답을 Worker가 인증 프록시
 
@@ -105,12 +105,13 @@ The AWS profile intentionally keeps the collection boundary outside Cloudflare. 
 
 ### Live search result budget
 
-The search path collects up to 160 source candidates per selected market,
-quality-filters them, and keeps up to 40 qualified listings per market in a
-stable five-minute search window. The browser returns 16-item pages and can
-page through up to 200 combined listings when five markets are selected.
-Opening a later page requests another slice of the same cached window; it does
-not rerun or reshuffle the upstream search.
+The search path starts with a bounded 160-candidate window per selected market.
+When a user reaches the stored boundary, the selected market can deepen in
+160-item steps up to 640 candidates; one combined SQLite snapshot keeps at most
+1,000 listings. The browser renders 30-item pages and prefetches the first three
+pages of a focused site view. Opening a loaded page is local, while the next
+reachable page reads one more cursor slice from the same server snapshot. It
+does not rerun or reshuffle the upstream search.
 The runner executes at most four uncached
 searches at once and queues sixteen more; an overloaded request receives
 HTTP 429 with `Retry-After: 2`. Source work is also bounded, which protects a
@@ -127,11 +128,13 @@ a bounded price-ordered/page-limited window and filtered again locally because
 no verified upstream price-range contract is used. Every source is checked
 again before merge, so a listing outside the requested range is never exposed.
 
-The user-facing sort modes are `recommended`, `price_asc`, and `recent`.
-`price_asc` keeps price as the primary key and marks suspicious listings instead
-of silently moving a higher-priced item ahead. `recent` still enforces source
-freshness and price policy. See `docs/wiki/02-search-verification.md` for the
-per-site table.
+The user-facing sort modes are `recommended`, `price_asc`, `price_desc`, and
+`recent`. Sort and price-bound changes reset the cursor and read page 1 from the
+same SQLite snapshot; they do not trigger a new marketplace collection.
+`price_asc` and `price_desc` are disabled in the all-site view when KRW and USD
+results are mixed without an exchange-rate contract. See
+`docs/wiki/02-search-verification.md` and `docs/wiki/08-cache-search-ux.md` for
+the verified source and cache policies.
 
 ## Named Tunnel public hostname
 
