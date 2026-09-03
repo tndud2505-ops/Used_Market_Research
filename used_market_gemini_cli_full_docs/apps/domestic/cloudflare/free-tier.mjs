@@ -19,6 +19,8 @@ export const FREE_TIER_POLICY = Object.freeze({
   maxSearchLimit: 60
 });
 
+const D1_LISTING_CACHE_TTL_SECONDS = 60;
+
 const CACHEABLE_GET_PATHS = new Set([
   "/api/categories",
   "/api/pc/catalog",
@@ -298,11 +300,24 @@ export async function browsePcListingsD1(request, env) {
     `ORDER BY ${orderBy} LIMIT ?`, publicIndexHint);
   const rawRows = asArray(result.results);
   page = rawRows.slice(0, query.limit);
-  const summary = await env.DB.prepare(`SELECT COUNT(*) AS total, MAX(updated_at) AS latest_observed_at
-    FROM listings${publicIndexHint} WHERE ${whereClause}`).bind(...bindings).first();
-  total = Number(summary?.total || 0);
-  latestObservedAt = summary?.latest_observed_at || null;
-  const runtimeFreshness = await pcListingCollectionFreshness(env.DB, requestedPcFreshnessScopes(query), asOf);
+  let runtimeFreshness;
+  if (cursorState?.summary) {
+    total = cursorState.summary.total;
+    latestObservedAt = cursorState.summary.latestObservedAt;
+    runtimeFreshness = {
+      lastCollectedAt: cursorState.summary.lastCollectedAt,
+      requiredTargetCount: cursorState.summary.requiredTargetCount,
+      coveredTargetCount: cursorState.summary.coveredTargetCount,
+      complete: cursorState.summary.requiredTargetCount > 0
+        && cursorState.summary.requiredTargetCount === cursorState.summary.coveredTargetCount
+    };
+  } else {
+    const summary = await env.DB.prepare(`SELECT COUNT(*) AS total, MAX(updated_at) AS latest_observed_at
+      FROM listings${publicIndexHint} WHERE ${whereClause}`).bind(...bindings).first();
+    total = Number(summary?.total || 0);
+    latestObservedAt = summary?.latest_observed_at || null;
+    runtimeFreshness = await pcListingCollectionFreshness(env.DB, requestedPcFreshnessScopes(query), asOf);
+  }
   const runtimeCollectedAt = runtimeFreshness.lastCollectedAt;
   const freshnessBasis = runtimeCollectedAt
     ? "SOURCE_TARGET_COLLECTION_MANIFEST"
@@ -311,7 +326,17 @@ export async function browsePcListingsD1(request, env) {
       : "NO_MATCHING_LISTINGS";
   hasMoreCandidates = rawRows.length > query.limit;
   const nextAfter = hasMoreCandidates && page.length > 0 ? { item_id: page.at(-1).item_id } : null;
-  const nextCursor = nextAfter ? encodePcListingsCursor(query, { asOf, after: nextAfter },
+  const nextCursor = nextAfter ? encodePcListingsCursor(query, {
+    asOf,
+    after: nextAfter,
+    summary: {
+      total,
+      latestObservedAt,
+      lastCollectedAt: runtimeCollectedAt,
+      requiredTargetCount: runtimeFreshness.requiredTargetCount,
+      coveredTargetCount: runtimeFreshness.coveredTargetCount
+    }
+  },
     env.SEARCH_CURSOR_SECRET || env.RUNNER_TOKEN || "used-market-local-cursor-v2") : null;
   return new Response(JSON.stringify({
     status: "success",
@@ -344,8 +369,12 @@ export async function browsePcListingsD1(request, env) {
     status: 200,
     headers: {
       "content-type": "application/json; charset=utf-8",
-      "cache-control": "no-store",
-      "x-free-tier-data-source": "d1"
+        "cache-control": `public, max-age=${readPositiveInteger(
+          env.D1_LISTING_CACHE_TTL_SECONDS,
+          D1_LISTING_CACHE_TTL_SECONDS,
+          300
+        )}`,
+        "x-free-tier-data-source": "d1"
     }
   });
 }
@@ -462,6 +491,26 @@ export async function fetchThroughFreeCache(request, env, originFetch) {
     : config.static_cache_ttl_seconds;
   await globalThis.caches.default.put(cacheKey, responseForCache(response.clone(), ttlSeconds));
   return responseWithHeader(response, "x-free-tier-cache", "MISS");
+}
+
+export async function fetchThroughD1ListingCache(request, env, originFetch) {
+  const url = new URL(request.url);
+  if (request.method !== "GET" || url.pathname !== "/api/pc/listings"
+    || url.searchParams.has("reconciliation_audit") || !globalThis.caches?.default) {
+    return originFetch(request);
+  }
+  const cacheKey = await buildCacheKey(request, url);
+  if (!cacheKey) return originFetch(request);
+  const cached = await globalThis.caches.default.match(cacheKey);
+  if (cached) return responseWithHeader(cached, "x-d1-listing-cache", "HIT");
+
+  const response = await originFetch(request);
+  if (response.status < 200 || response.status >= 300
+    || response.headers.get("x-free-tier-data-source") !== "d1") {
+    return response;
+  }
+  await globalThis.caches.default.put(cacheKey, response.clone());
+  return responseWithHeader(response, "x-d1-listing-cache", "MISS");
 }
 
 async function shouldCacheResponse(response) {

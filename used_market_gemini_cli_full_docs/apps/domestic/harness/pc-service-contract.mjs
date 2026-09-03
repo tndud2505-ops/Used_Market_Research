@@ -8,7 +8,7 @@ import { DatabaseSync } from "node:sqlite";
 import { spawn } from "node:child_process";
 
 import worker from "../cloudflare/worker.mjs";
-import { buildCacheKey, isCacheableRequest } from "../cloudflare/free-tier.mjs";
+import { buildCacheKey, fetchThroughD1ListingCache, isCacheableRequest } from "../cloudflare/free-tier.mjs";
 import { statsChecksum, statsPublicationKey } from "../cloudflare/public-product-stats.mjs";
 import {
   comparePcListingRows,
@@ -1212,6 +1212,34 @@ const auditCacheKeyTwo = await buildCacheKey(new Request(auditBase.replace("audi
   new URL(auditBase.replace("audit-one", "audit-two")));
 assert.notEqual(auditCacheKeyOne.url, auditCacheKeyTwo.url,
   "each reconciliation audit key isolates its free-tier cache namespace");
+const originalCaches = globalThis.caches;
+const listingCacheEntries = new Map();
+try {
+  globalThis.caches = {
+    default: {
+      async match(request) { return listingCacheEntries.get(request.url)?.clone() || undefined; },
+      async put(request, response) { listingCacheEntries.set(request.url, response.clone()); }
+    }
+  };
+  const cachedListingRequest = new Request("https://used-pick.test/api/pc/listings?sites=danawa");
+  let listingReads = 0;
+  const originRead = async () => {
+    listingReads += 1;
+    return new Response(JSON.stringify({ status: "success" }), {
+      headers: { "cache-control": "public, max-age=60", "x-free-tier-data-source": "d1" }
+    });
+  };
+  const firstCachedListing = await fetchThroughD1ListingCache(cachedListingRequest, {}, originRead);
+  const secondCachedListing = await fetchThroughD1ListingCache(cachedListingRequest, {}, originRead);
+  assert.equal(firstCachedListing.headers.get("x-d1-listing-cache"), "MISS");
+  assert.equal(secondCachedListing.headers.get("x-d1-listing-cache"), "HIT");
+  assert.equal(listingReads, 1, "identical public listing reads must share a D1 cache entry");
+  await fetchThroughD1ListingCache(new Request(`${cachedListingRequest.url}&reconciliation_audit=fixture`), {}, originRead);
+  assert.equal(listingReads, 2, "reconciliation audit reads must remain uncached");
+} finally {
+  if (originalCaches === undefined) delete globalThis.caches;
+  else globalThis.caches = originalCaches;
+}
 
 const insertBindingFixture = paginationD1.prepare(`INSERT INTO listings(
   item_id, site, category_id, title, search_text, price_value, currency, url, updated_at, active,
@@ -1260,6 +1288,10 @@ const normalPageSelects = bindingObservations.filter((observation) => (
 assert.equal(normalPageSelects.length, 2);
 assert.equal(normalPageSelects.every((observation) => /\bORDER BY\b[\s\S]*\bLIMIT \?/iu.test(observation.sql)), true,
   "normal D1 listing reads must be bounded limit+1 keyset statements");
+assert.equal(bindingObservations.filter((observation) => /SELECT COUNT\(\*\) AS total, MAX\(updated_at\)/iu.test(observation.sql)).length, 1,
+  "a signed continuation cursor must reuse the first-page summary instead of rescanning D1");
+assert.equal(bindingObservations.filter((observation) => /FROM pc_listing_collection_target_runtime/iu.test(observation.sql)).length, 1,
+  "a signed continuation cursor must reuse the first-page collection freshness");
 assert.equal(bindingObservations.some((observation) => (
   /\bSELECT item_id, site, url, price_value, updated_at\b/iu.test(observation.sql)
   && !/\bLIMIT\b/iu.test(observation.sql)
@@ -1310,7 +1342,7 @@ assert.equal(workerListingsPayload.data.items[0].price_eligible, true);
 assert.deepEqual(workerListingsPayload.data.items[0].exclusion_reasons, []);
 assert.equal(Object.hasOwn(workerListingsPayload.data.pagination, "next_cursor"), true);
 assert.equal(workerListings.headers.get("x-free-tier-data-source"), "d1");
-assert.equal(workerListings.headers.get("cache-control"), "no-store");
+assert.equal(workerListings.headers.get("cache-control"), "public, max-age=60");
 assert.equal(isCacheableRequest(new Request("https://used-pick.test/api/pc/listings"),
   new URL("https://used-pick.test/api/pc/listings")), false,
 "a FRESH listing response must never enter the 24-hour static cache");

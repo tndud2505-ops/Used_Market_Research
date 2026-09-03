@@ -198,16 +198,45 @@ export function decodePcListingsCursor(query, secret) {
   const asOf = text(state.after?.as_of, 80);
   const itemId = text(state.after?.item_id, 700);
   if (!asOf || !Number.isFinite(Date.parse(asOf)) || !itemId) throw new Error("CURSOR_INVALID: listing continuation is invalid");
-  return { asOf, after: { item_id: itemId } };
+  const total = Number(state.after?.total);
+  const latestObservedAt = text(state.after?.latest_observed_at, 80);
+  const lastCollectedAt = text(state.after?.last_collected_at, 80);
+  const requiredTargetCount = Number(state.after?.required_target_count);
+  const coveredTargetCount = Number(state.after?.covered_target_count);
+  const hasSummary = Number.isSafeInteger(total) && total >= 0
+    && (!latestObservedAt || Number.isFinite(Date.parse(latestObservedAt)))
+    && (!lastCollectedAt || Number.isFinite(Date.parse(lastCollectedAt)))
+    && Number.isSafeInteger(requiredTargetCount) && requiredTargetCount >= 0
+    && Number.isSafeInteger(coveredTargetCount) && coveredTargetCount >= 0
+    && coveredTargetCount <= requiredTargetCount;
+  return {
+    asOf,
+    after: { item_id: itemId },
+    summary: hasSummary ? {
+      total,
+      latestObservedAt: latestObservedAt || null,
+      lastCollectedAt: lastCollectedAt || null,
+      requiredTargetCount,
+      coveredTargetCount
+    } : null
+  };
 }
 
-export function encodePcListingsCursor(query, { asOf, after }, secret) {
+export function encodePcListingsCursor(query, { asOf, after, summary = null }, secret) {
   if (!after?.item_id) return null;
+  const continuation = { item_id: after.item_id, as_of: asOf };
+  if (summary) {
+    continuation.total = summary.total;
+    continuation.latest_observed_at = summary.latestObservedAt;
+    continuation.last_collected_at = summary.lastCollectedAt;
+    continuation.required_target_count = summary.requiredTargetCount;
+    continuation.covered_target_count = summary.coveredTargetCount;
+  }
   return encodeSearchCursor({
     cacheKey: pcListingsIdentity(query),
     sort: query.sort,
     snapshotVersion: Math.max(1, Date.parse(asOf)),
-    after: { item_id: after.item_id, as_of: asOf }
+    after: continuation
   }, secret);
 }
 

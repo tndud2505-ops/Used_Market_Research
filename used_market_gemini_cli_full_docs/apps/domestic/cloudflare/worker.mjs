@@ -1,5 +1,6 @@
 import {
   fetchThroughFreeCache,
+  fetchThroughD1ListingCache,
   freeTierConfig,
   browsePcListingsD1,
   hasD1,
@@ -1235,7 +1236,8 @@ export default {
     }
     if (request.method === "GET" && url.pathname === "/api/pc/listings") {
       try {
-        if (hasD1(env)) return await browsePcListingsD1(request, env);
+        if (hasD1(env)) return await fetchThroughD1ListingCache(request, env,
+          (listingRequest) => browsePcListingsD1(listingRequest, env));
         if (searchRunnerIsConfigured(env)) return await proxyToSearchRunner(request, env, url.pathname);
         return json(503, { status: "error", error: "Stored PC listings are unavailable" });
       } catch (error) {
