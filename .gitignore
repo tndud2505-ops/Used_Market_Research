@@ -13,6 +13,7 @@ playwright-report/
 **/.playwright-cli/
 .wrangler/
 **/.wrangler/
+**/.wrangler-dry-run-merge-review/
 .codex-remote-attachments/
 %SystemDrive%/
 
@@ -48,6 +49,7 @@ logs/
 tmp_*
 tmp-*.json
 **/tmp-*.json
+.tmp-pc*
 tmp_startup_backup/
 tmp/
 **/tmp/

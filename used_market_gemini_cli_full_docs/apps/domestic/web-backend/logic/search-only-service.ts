@@ -11,8 +11,19 @@ import {
   type SearchOnlySourceConfig,
   type SearchOnlySourceKey
 } from '../../collector/logic/searchOnlySources.js';
+// Shared source policy is authored as ESM JavaScript and enforced here so a
+// legacy endpoint cannot bypass the same approval gate as the PC directory.
+// @ts-ignore no declaration file for the canonical source registry
+import { PC_SOURCE_REGISTRY } from '../../../collector/logic/pc-source-registry.mjs';
 
 const MAX_KEYWORD_LENGTH = 80;
+const OPERATIONAL_SEARCH_ONLY_KEYS = new Set(
+  (PC_SOURCE_REGISTRY as Array<Record<string, unknown>>)
+    .filter((source) => source.public_search === true
+      && source.policy_status === 'APPROVED'
+      && source.runtime_status === 'ENABLED')
+    .map((source) => String(source.key))
+);
 
 function median(values: number[]) {
   if (!values.length) return null;
@@ -54,6 +65,9 @@ export function validateSearchOnlyRequest(input: Record<string, unknown>) {
   const source = sourceKey ? findSource(sourceKey) : null;
   if (!source) {
     throw new SearchOnlyValidationError('source must be one of: hellomarket, rethinkmall');
+  }
+  if (!OPERATIONAL_SEARCH_ONLY_KEYS.has(source.key)) {
+    throw new SearchOnlyValidationError(`source is not approved for live collection: ${source.key}`);
   }
 
   const keyword = typeof input.keyword === 'string' ? input.keyword.trim() : '';
@@ -150,7 +164,7 @@ export async function runSearchOnly(input: Record<string, unknown>) {
 
 export function listSearchOnlySourceCatalog() {
   return {
-    sources: listSearchOnlySources(),
+    sources: listSearchOnlySources().filter((source) => OPERATIONAL_SEARCH_ONLY_KEYS.has(source.key)),
     mode: 'search_only' as const,
     note: '메인 검색에 통합되어 있으며, 공식 카테고리 ID 대신 명시 검색어와 결과 분류 필터를 사용합니다.'
   };

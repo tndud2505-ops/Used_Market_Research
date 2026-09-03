@@ -6,12 +6,25 @@ import { getPriceHistory } from './price-history-service.js';
 import { getSourceCategoryBinding, isCategorySelectableForSite, resolveCategory } from '../../market/logic/category-catalog.js';
 import { deriveCollectionState } from '../../MCP/logic/collection-state.js';
 import { WEB_BACKEND_CONFIG } from './config.js';
+import { runSearchOnly } from './search-only-service.js';
+// @ts-ignore the legacy live collector is shared with the Cloudflare runner
+import { collectOne as collectOneLiveSite } from '../../../cloudflare/live-search.mjs';
+// Shared deterministic PC domain modules are authored as ESM JavaScript and
+// consumed here so the local app and AWS runner expose the same projection.
+// @ts-ignore no declaration file for the shared ESM classifier
+import { classifyPcPartListing, classifyPcPartListingPublic } from '../../../market/logic/pc-parts-classifier.mjs';
+// @ts-ignore no declaration file for the versioned product master
+import { PC_PRODUCT_MASTER_V1 } from '../../../market/data/pc-product-master-v1.mjs';
+// @ts-ignore no declaration file for the canonical source registry
+import { PC_SOURCE_REGISTRY } from '../../../collector/logic/pc-source-registry.mjs';
 
 export interface WebSearchRequest {
   keyword?: string;
   category_id?: string;
   category_ids?: string[];
   sites?: string[];
+  pc_category_code?: string;
+  manufacturer?: string;
   limit?: number;
   cursor?: string;
   sort?: SearchSort;
@@ -35,10 +48,17 @@ export class WebSearchValidationError extends Error {
   }
 }
 
-// The local collector supports domestic sources plus eBay through its official
-// Browse API. Production also adds Hello Market and Rethink Mall via AWS.
-const DEFAULT_SITES = ['joonggonara', 'bunjang', 'ebay'];
-const KEYWORD_ONLY_SITES = new Set<string>(['ebay']);
+// PC search exposes only sources approved and enabled by the canonical source
+// registry. Hello Market and Rethink Mall keep their existing site scripts;
+// they are not forced through the browser-adapter orchestrator.
+const DEFAULT_SITES = (PC_SOURCE_REGISTRY as Array<Record<string, unknown>>)
+  .filter((source) => source.public_search === true && source.policy_status === 'APPROVED' && source.runtime_status === 'ENABLED')
+  .sort((left, right) => Number(left.public_search_order || 0) - Number(right.public_search_order || 0))
+  .map((source) => String(source.key));
+const ORCHESTRATOR_SITES = new Set<string>(['joonggonara', 'ebay']);
+const SEARCH_ONLY_SITES = new Set<string>(['hellomarket', 'rethinkmall']);
+const COLLECT_ONE_SITES = new Set<string>(['bunjang']);
+const KEYWORD_ONLY_SITES = new Set<string>(['hellomarket', 'rethinkmall', 'ebay']);
 const SUPPORTED_WEB_SEARCH_SITES = new Set(DEFAULT_SITES);
 const MAX_KEYWORD_LENGTH = 80;
 const MAX_LIMIT = 40;
@@ -52,13 +72,24 @@ export interface WebSearchRunnerOptions {
   cacheMaxEntries?: number;
   now?: () => number;
   collect?: (request: ValidatedWebSearchRequest) => Promise<Record<string, unknown>>;
+  collectOne?: LegacyCollectOne;
 }
+
+type LegacyCollectOne = (
+  site: string,
+  keyword: string,
+  categoryId: string,
+  limit: number,
+  queryKeyword?: string,
+  sortMode?: string,
+  priceRange?: { min: number | null; max: number | null }
+) => Promise<unknown[] | null>;
 
 export function createWebSearchRunner(options: WebSearchRunnerOptions = {}) {
   const cacheTtlMs = positiveInteger(options.cacheTtlMs, WEB_BACKEND_CONFIG.search_cache_ttl_ms);
   const cacheMaxEntries = positiveInteger(options.cacheMaxEntries, WEB_BACKEND_CONFIG.search_cache_max_entries);
   const now = options.now ?? Date.now;
-  const collect = options.collect ?? collectWebSearch;
+  const collect = options.collect ?? ((request) => collectWebSearch(request, options.collectOne ?? collectOneLiveSite));
   const cache = new Map<string, { expiresAt: number; payload: Record<string, unknown> }>();
   const inFlight = new Map<string, Promise<Record<string, unknown>>>();
 
@@ -116,7 +147,10 @@ export function webSearchCollectionKey(input: Record<string, unknown>) {
   return collectionKeyForValidatedRequest(validateWebSearchRequest(input));
 }
 
-async function collectWebSearch(request: ValidatedWebSearchRequest): Promise<Record<string, unknown>> {
+async function collectWebSearch(
+  request: ValidatedWebSearchRequest,
+  collectOne: LegacyCollectOne = collectOneLiveSite
+): Promise<Record<string, unknown>> {
   if (request.categories.length > 1) {
     const categoryResults: Array<{ categoryId: string; payload: Record<string, unknown> }> = [];
     for (const category of request.categories) {
@@ -137,7 +171,7 @@ async function collectWebSearch(request: ValidatedWebSearchRequest): Promise<Rec
         seenItemKeys: categoryCursorState.seenItemKeys,
         includeSeenCursorItems: false,
         siteCursors: Object.fromEntries(request.sites.map((site) => [site, categoryCursorState.siteCursors[site] ?? null]))
-      });
+      }, collectOne);
       categoryResults.push({ categoryId: category.id, payload: asRecord(result.data) });
     }
     const data: Record<string, unknown> = mergeCombinedSearchPayload(
@@ -150,7 +184,7 @@ async function collectWebSearch(request: ValidatedWebSearchRequest): Promise<Rec
     data.price_history = await getPriceHistory(request.effectiveKeyword, 90);
     return { status: 'success', data };
   }
-  return runSingleWebSearch(request);
+  return runSingleWebSearch(request, collectOne);
 }
 
 function collectionKeyForValidatedRequest(request: ValidatedWebSearchRequest) {
@@ -158,6 +192,8 @@ function collectionKeyForValidatedRequest(request: ValidatedWebSearchRequest) {
     keyword: request.keyword,
     effective_keyword: request.effectiveKeyword,
     category_ids: request.categoryIds,
+    pc_category_code: request.pcCategoryCode,
+    manufacturer: request.manufacturer,
     sites: request.sites,
     limit: request.limit,
     site_cursors: request.siteCursors,
@@ -222,17 +258,55 @@ function applyControlsToSearchPayload(payload: Record<string, unknown>, controls
 }
 
 async function runSingleWebSearch(
-  request: ReturnType<typeof validateWebSearchRequest> & { includeSeenCursorItems?: boolean }
+  request: ReturnType<typeof validateWebSearchRequest> & { includeSeenCursorItems?: boolean },
+  collectOne: LegacyCollectOne = collectOneLiveSite
 ): Promise<Record<string, unknown>> {
-  const workflow = await orchestrator.fullWorkflow({
-    keyword: request.effectiveKeyword,
-    keywordIsExplicit: Boolean(request.keyword),
-    sites: request.sites,
-    limit: request.limit,
-    category: request.category ?? undefined,
-    siteCursors: request.siteCursors,
-    persistMarketResult: true
-  });
+  const orchestratorSites = request.sites.filter((site) => ORCHESTRATOR_SITES.has(site));
+  const searchOnlySites = request.sites.filter((site) => SEARCH_ONLY_SITES.has(site));
+  const collectOneSites = request.sites.filter((site) => COLLECT_ONE_SITES.has(site));
+  const [workflow, searchOnlyResults, collectOneResults] = await Promise.all([
+    orchestratorSites.length > 0
+      ? orchestrator.fullWorkflow({
+          keyword: request.effectiveKeyword,
+          keywordIsExplicit: Boolean(request.keyword),
+          sites: orchestratorSites,
+          limit: request.limit,
+          category: request.category ?? undefined,
+          siteCursors: Object.fromEntries(orchestratorSites.map((site) => [site, request.siteCursors[site] ?? null])),
+          persistMarketResult: true
+        })
+      : Promise.resolve({
+          search_results: [],
+          normalized_results: [],
+          merged_result: { merged_items: [] },
+          market_snapshot: {},
+          market_result_ref: {}
+        }),
+    Promise.all(searchOnlySites.map(async (site) => ({
+      site,
+      result: await runSearchOnly({ source: site, keyword: request.effectiveKeyword })
+    }))),
+    Promise.all(collectOneSites.map(async (site) => {
+      try {
+        const items = await collectOne(
+          site,
+          request.effectiveKeyword,
+          request.category?.id || 'all',
+          request.limit,
+          request.effectiveKeyword,
+          'recommended',
+          { min: null, max: null }
+        );
+        return { site, items: Array.isArray(items) ? items : [], errors: [] as string[] };
+      } catch (error) {
+        return {
+          site,
+          items: [] as unknown[],
+          errors: [error instanceof Error ? error.message : String(error)]
+        };
+      }
+    }))
+  ]);
 
   const searchResults = asArray(workflow.search_results);
   const normalizedResults = asArray(workflow.normalized_results);
@@ -244,8 +318,47 @@ async function runSingleWebSearch(
     const item = asRecord(value);
     return [readString(item.site, 'unknown'), item] as const;
   }));
+  const searchOnlyMap = new Map(searchOnlyResults.map(({ site, result }) => [site, asRecord(result.data)] as const));
+  const collectOneMap = new Map(collectOneResults.map((result) => [result.site, result] as const));
 
   const sourceSummaries = request.sites.map((siteKey) => {
+    const collected = collectOneMap.get(siteKey);
+    if (collected) {
+      return {
+        key: siteKey,
+        name: siteName(siteKey),
+        search_url: sourceSearchUrl(siteKey, request.effectiveKeyword, request.category?.id),
+        search_urls: sourceSearchUrls(siteKey, request.effectiveKeyword, request.category?.id),
+        count: collected.items.length,
+        normalized_count: collected.items.length,
+        extracted_count: collected.items.length,
+        filtered_count: 0,
+        collection_state: collected.errors.length > 0 ? 'error' : collected.items.length > 0 ? 'ready' : 'empty',
+        warnings: [],
+        errors: collected.errors
+      };
+    }
+    const searchOnly = searchOnlyMap.get(siteKey);
+    if (searchOnly) {
+      const validation = asRecord(searchOnly.validation);
+      const sourceItems = asArray(searchOnly.items);
+      const warnings = asArray(validation.warnings).map(String);
+      const errors = asArray(validation.errors).map(String);
+      const extractedCount = readNumber(validation.extracted_count, sourceItems.length);
+      return {
+        key: siteKey,
+        name: siteName(siteKey),
+        search_url: readString(searchOnly.requested_url, ''),
+        search_urls: [readString(searchOnly.requested_url, '')].filter(Boolean),
+        count: sourceItems.length,
+        normalized_count: sourceItems.length,
+        extracted_count: extractedCount,
+        filtered_count: Math.max(0, extractedCount - sourceItems.length),
+        collection_state: readString(searchOnly.state, sourceItems.length > 0 ? 'ready' : 'empty'),
+        warnings,
+        errors
+      };
+    }
     const raw = sourceMap.get(siteKey) ?? {};
     const normalized = normalizedResults
       .map(asRecord)
@@ -296,8 +409,16 @@ async function runSingleWebSearch(
       if (!collectionOrder.has(key)) collectionOrder.set(key, collectionOrder.size);
     }
   }
-  const baseItems = mergedItems
-    .map(toWebItem)
+  const searchOnlyItems = searchOnlyResults.flatMap(({ site, result }) => (
+    asArray(asRecord(result.data).items).map((item) => toSearchOnlyWebItem(site, item))
+  ));
+  const collectOneItems = collectOneResults.flatMap(({ site, items }) => (
+    items.map((item) => toSearchOnlyWebItem(site, item))
+  ));
+  const baseItems = [...mergedItems.map(toWebItem), ...searchOnlyItems, ...collectOneItems]
+    .map(enrichPcWebItem)
+    .filter((item) => !request.pcCategoryCode || String(item.category_code || '').toUpperCase() === request.pcCategoryCode)
+    .filter((item) => !request.manufacturer || String(item.canonical_manufacturer || '') === request.manufacturer)
     .filter((item) => (item.url || item.title) && !previouslySeen.has(canonicalWebItemKey(item)))
     .map((item, index) => ({ item, index }))
     .sort((left, right) => (
@@ -376,15 +497,25 @@ async function runSingleWebSearch(
       market_snapshot: snapshot,
       price_history: await getPriceHistory(request.effectiveKeyword, 90),
       quality: {
-        raw_count: searchResults.reduce<number>((sum, result) => sum + asArray(asRecord(result).items).length, 0),
+        raw_count: searchResults.reduce<number>((sum, result) => sum + asArray(asRecord(result).items).length, 0)
+          + searchOnlyResults.reduce((sum, entry) => (
+            sum + readNumber(asRecord(asRecord(entry.result.data).validation).extracted_count, 0)
+          ), 0)
+          + collectOneResults.reduce((sum, entry) => sum + entry.items.length, 0),
         normalized_count: normalizedResults.reduce<number>(
           (sum, result) => sum + asArray(asRecord(result).normalized_items).length,
           0
-        ),
+        ) + searchOnlyItems.length + collectOneItems.length,
         merged_count: markedItems.length,
         available_count: controlled.available_count,
         filtered_out_count: markedItems.length - controlled.available_count,
-        warnings: searchResults.flatMap((result) => asArray(asRecord(result).warnings).map(String)).slice(0, 8)
+        warnings: [
+          ...searchResults.flatMap((result) => asArray(asRecord(result).warnings).map(String)),
+          ...searchOnlyResults.flatMap((entry) => (
+            asArray(asRecord(asRecord(entry.result.data).validation).warnings).map(String)
+          )),
+          ...collectOneResults.flatMap((entry) => entry.errors)
+        ].slice(0, 8)
       }
     }
   };
@@ -525,6 +656,23 @@ export function mergeCombinedSearchPayload(
 
 export function validateWebSearchRequest(input: Record<string, unknown>) {
   const keyword = typeof input.keyword === 'string' ? input.keyword.trim() : '';
+  const pcCategoryCode = typeof input.pc_category_code === 'string' ? input.pc_category_code.trim().toUpperCase() : '';
+  const manufacturer = typeof input.manufacturer === 'string' ? input.manufacturer.trim() : '';
+  const knownCategoryCodes = new Set((PC_PRODUCT_MASTER_V1 as Array<Record<string, unknown>>)
+    .map((product) => String(product.category || '').toUpperCase()).filter(Boolean));
+  const knownManufacturers = new Set((PC_PRODUCT_MASTER_V1 as Array<Record<string, unknown>>)
+    .map((product) => String(product.manufacturer || '')).filter(Boolean));
+  if (pcCategoryCode && !knownCategoryCodes.has(pcCategoryCode)) {
+    throw new WebSearchValidationError(`Unknown pc_category_code: ${pcCategoryCode}`);
+  }
+  if (manufacturer && (!knownManufacturers.has(manufacturer) || manufacturer.length > 80)) {
+    throw new WebSearchValidationError(`Unknown manufacturer: ${manufacturer}`);
+  }
+  if (manufacturer && pcCategoryCode && !(PC_PRODUCT_MASTER_V1 as Array<Record<string, unknown>>).some((product) => (
+    String(product.category || '').toUpperCase() === pcCategoryCode && String(product.manufacturer || '') === manufacturer
+  ))) {
+    throw new WebSearchValidationError('manufacturer is unavailable for the selected PC part category');
+  }
   const categoryId = typeof input.category_id === 'string' ? input.category_id.trim() : '';
   if (input.category_ids !== undefined && !Array.isArray(input.category_ids)) {
     throw new WebSearchValidationError('category_ids must be an array');
@@ -536,7 +684,10 @@ export function validateWebSearchRequest(input: Record<string, unknown>) {
       ? input.category_ids.filter((value): value is string => typeof value === 'string').map((value) => value.trim())
       : [])
   ].filter(Boolean);
-  const categoryIds = Array.from(new Set(requestedCategoryIds));
+  const categoryIds = Array.from(new Set(requestedCategoryIds.length ? requestedCategoryIds : ['pc']));
+  if (categoryIds.some((requestedId) => requestedId !== 'pc')) {
+    throw new WebSearchValidationError('Only the pc category is available');
+  }
   if (categoryIds.length > 8) {
     throw new WebSearchValidationError('category_ids must contain between 1 and 8 categories');
   }
@@ -575,10 +726,12 @@ export function validateWebSearchRequest(input: Record<string, unknown>) {
     if (!SUPPORTED_WEB_SEARCH_SITES.has(site)) {
       throw new WebSearchValidationError(`Unsupported site: ${site}`);
     }
-    try {
-      resolveSite(site);
-    } catch {
-      throw new WebSearchValidationError(`Unsupported site: ${site}`);
+    if (ORCHESTRATOR_SITES.has(site)) {
+      try {
+        resolveSite(site);
+      } catch {
+        throw new WebSearchValidationError(`Unsupported site: ${site}`);
+      }
     }
   }
   const hasExplicitSites = Array.isArray(input.sites);
@@ -655,7 +808,9 @@ export function validateWebSearchRequest(input: Record<string, unknown>) {
 
   return {
     keyword,
-    effectiveKeyword: keyword || categories.map((candidate) => candidate.label).join(' / '),
+    effectiveKeyword: keyword || manufacturer || pcCategoryCode || categories.map((candidate) => candidate.label).join(' / '),
+    pcCategoryCode,
+    manufacturer,
     category,
     categoryIds,
     categories,
@@ -722,6 +877,119 @@ function toWebItem(value: unknown) {
   };
 }
 
+export function toSearchOnlyWebItem(site: string, value: unknown) {
+  const item = asRecord(value);
+  const price = typeof item.price === 'number' && Number.isFinite(item.price)
+    ? item.price
+    : typeof item.sale_price === 'number' && Number.isFinite(item.sale_price)
+      ? item.sale_price
+      : null;
+  return {
+    id: readString(item.id, readString(item.url, cryptoSafeId(item))),
+    title: readString(item.title, '제목 없음'),
+    price,
+    site,
+    price_label: price === null ? '' : `${price.toLocaleString('ko-KR')}원`,
+    seller: readString(item.seller, ''),
+    condition: readString(item.condition_grade, ''),
+    location: '',
+    posted_at: readString(item.posted_at, ''),
+    image_url: readString(item.image_url, ''),
+    shipping: readString(item.shipping, ''),
+    currency: readString(item.currency, 'KRW'),
+    status: readString(item.status, 'active'),
+    listing_type: site === 'rethinkmall' ? 'refurb_retail' : 'used_market',
+    score: null,
+    baseline_price: null,
+    deviation_rate: null,
+    fraud_risk: null,
+    net_profit: null,
+    demand: '',
+    noise_filtered: false,
+    noise_reason: '',
+    components: [],
+    price_suspect: false,
+    url: readString(item.url, ''),
+    category_id: readString(item.canonical_category_id, ''),
+    category_path: asArray(item.canonical_category_path).map(String),
+    source_category_id: '',
+    source_category_ids: [],
+    source_category_path: [],
+    category_mapping_mode: readString(item.category_classification_mode, 'keyword_inferred'),
+    category_mapping_confidence: readString(item.category_inference_confidence, 'unknown')
+  };
+}
+
+function normalizedMasterText(value: unknown) {
+  return String(value ?? '').normalize('NFKC').toUpperCase().replace(/[^A-Z0-9가-힣]+/gu, ' ').trim();
+}
+
+export function enrichPcWebItem<T extends Record<string, unknown>>(item: T): T & Record<string, unknown> {
+  const classified = classifyPcPartListing({
+    title: readString(item.title, ''),
+    description: readString(item.description, ''),
+    price: typeof item.price === 'number' ? item.price : null,
+    currency: readString(item.currency, 'KRW'),
+    seller_type: readString(item.seller_type, '')
+  }) as Record<string, any>;
+  const publicClassified = classifyPcPartListingPublic({
+    title: readString(item.title, ''),
+    description: readString(item.description, ''),
+    price: typeof item.price === 'number' ? item.price : null,
+    currency: readString(item.currency, 'KRW'),
+    seller_type: readString(item.seller_type, '')
+  }) as Record<string, any>;
+  const model = normalizedMasterText(classified.canonical_model);
+  const product = (PC_PRODUCT_MASTER_V1 as Array<Record<string, any>>).find((candidate) => (
+    [candidate.name, ...(Array.isArray(candidate.aliases) ? candidate.aliases : [])]
+      .some((alias) => normalizedMasterText(alias) === model)
+  ));
+  const exclusions = Array.from(new Set<string>([
+    ...(Array.isArray(classified.exclusion_reasons) ? classified.exclusion_reasons.map(String) : []),
+    ...(Array.isArray(publicClassified.statistics_exclusion_reasons) ? publicClassified.statistics_exclusion_reasons.map(String) : []),
+    ...(!product ? ['MODEL_NOT_IN_MASTER'] : [])
+  ]));
+  const lifecycleStatus = String(item.status || classified.lifecycle_status || 'ACTIVE').toUpperCase();
+  const source = (PC_SOURCE_REGISTRY as Array<Record<string, any>>).find((candidate) => candidate.key === item.site);
+  const publicCategory = String(publicClassified.category_code || 'UNSUPPORTED_CATEGORY');
+  const priceEligible = publicClassified.statistics_eligible === true && Boolean(product) && lifecycleStatus === 'ACTIVE';
+  return {
+    ...item,
+    canonical_product_id: product?.id ?? null,
+    canonical_display_name: product?.name ?? null,
+    canonical_manufacturer: product?.manufacturer ?? null,
+    canonical_brand: product?.brand ?? null,
+    listing_kind: classified.listing_kind || 'UNKNOWN',
+    category_code: publicCategory,
+    legacy_category_code: classified.category_code || 'UNKNOWN',
+    market_segment: publicClassified.market_segment || 'UNKNOWN',
+    listing_type: publicClassified.listing_type || 'UNKNOWN',
+    condition_group: publicClassified.condition_group || 'UNKNOWN',
+    spec_group_id: publicClassified.spec_group_id || null,
+    classification_confidence: Number(publicClassified.classification_confidence || 0),
+    model_confidence: Number(publicClassified.model_confidence || 0),
+    quantity_confidence: Number(publicClassified.quantity_confidence || 0),
+    price_scope_confidence: Number(publicClassified.price_scope_confidence || 0),
+    statistics_eligible: priceEligible,
+    statistics_exclusion_reasons: exclusions,
+    parser_version: publicClassified.parser_version || 'pc-parser-public-v1',
+    rule_version: publicClassified.rule_version || 'pc-rules-public-v1',
+    pc_category_code: publicCategory,
+    public_classification: publicClassified,
+    quantity: Number.isInteger(classified.quantity) ? classified.quantity : null,
+    price_scope: classified.price_scope || 'UNKNOWN',
+    condition_code: classified.condition || 'UNKNOWN',
+    lifecycle_status: lifecycleStatus,
+    market_pool: source?.market_pool ?? null,
+    confidence: classified.confidence || {},
+    evidence: Array.isArray(classified.evidence) ? classified.evidence : [],
+    price_eligible: priceEligible,
+    exclusion_reasons: exclusions,
+    good_listing_eligible: false,
+    reference_price: null
+  };
+}
+
 function encodeCursorEnvelope(siteCursors: Record<string, string>, seenItemKeys: string[] = []) {
   const payload: Record<string, unknown> = { version: 1, site_cursors: siteCursors };
   if (seenItemKeys.length > 0) payload.seen_items = seenItemKeys.slice(-512);
@@ -777,6 +1045,8 @@ function validateSiteCursor(site: string, cursor: string) {
 }
 
 function siteName(siteKey: string) {
+  if (siteKey === 'hellomarket') return '헬로마켓';
+  if (siteKey === 'rethinkmall') return '리씽크몰';
   return listSupportedSites().find((site) => site.key === siteKey)?.name || siteKey;
 }
 

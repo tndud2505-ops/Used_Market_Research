@@ -31,6 +31,10 @@
     "FREE_TIER_STATIC_CACHE_TTL_SECONDS": "86400",
     "FREE_TIER_MAX_SEARCH_LIMIT": "60",
     "SEARCH_RUNNER_TIMEOUT_MS": "60000",
+    "AWS_PC_SCHEDULER_AUTHORITY": "true",
+    "MONETIZATION_ENABLED": "false",
+    "AFFILIATE_ALLOWED_ORIGINS": "",
+    "AFFILIATE_OFFERS_JSON": "[]",
     "RUNNER_URL": "https://runner.used-pick.com/api/runner/run",
     "SEARCH_RUNNER_URL": "https://runner.used-pick.com/api/search",
     "ORIGIN_URL": "https://runner.used-pick.com"

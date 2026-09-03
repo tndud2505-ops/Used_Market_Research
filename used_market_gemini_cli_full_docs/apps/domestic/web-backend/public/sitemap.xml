@@ -2,7 +2,43 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
     <loc>https://used-pick.com/</loc>
-    <lastmod>2026-08-17</lastmod>
+    <lastmod>2026-09-02</lastmod>
+  </url>
+  <url>
+    <loc>https://used-pick.com/used-market-integration.html</loc>
+    <lastmod>2026-09-02</lastmod>
+  </url>
+  <url>
+    <loc>https://used-pick.com/categories</loc>
+    <lastmod>2026-09-02</lastmod>
+  </url>
+  <url>
+    <loc>https://used-pick.com/categories/cpu</loc>
+    <lastmod>2026-09-02</lastmod>
+  </url>
+  <url>
+    <loc>https://used-pick.com/categories/gpu</loc>
+    <lastmod>2026-09-02</lastmod>
+  </url>
+  <url>
+    <loc>https://used-pick.com/categories/ram</loc>
+    <lastmod>2026-09-02</lastmod>
+  </url>
+  <url>
+    <loc>https://used-pick.com/categories/motherboard</loc>
+    <lastmod>2026-09-02</lastmod>
+  </url>
+  <url>
+    <loc>https://used-pick.com/categories/ssd</loc>
+    <lastmod>2026-09-02</lastmod>
+  </url>
+  <url>
+    <loc>https://used-pick.com/categories/hdd</loc>
+    <lastmod>2026-09-02</lastmod>
+  </url>
+  <url>
+    <loc>https://used-pick.com/categories/psu</loc>
+    <lastmod>2026-09-02</lastmod>
   </url>
   <url>
     <loc>https://used-pick.com/guide.html</loc>
@@ -15,17 +51,5 @@
   <url>
     <loc>https://used-pick.com/terms.html</loc>
     <lastmod>2026-08-13</lastmod>
-  </url>
-  <url>
-    <loc>https://used-pick.com/used-market-integration.html</loc>
-    <lastmod>2026-08-17</lastmod>
-  </url>
-  <url>
-    <loc>https://used-pick.com/iphone-used-items.html</loc>
-    <lastmod>2026-08-17</lastmod>
-  </url>
-  <url>
-    <loc>https://used-pick.com/used-market-categories.html</loc>
-    <lastmod>2026-08-17</lastmod>
   </url>
 </urlset>

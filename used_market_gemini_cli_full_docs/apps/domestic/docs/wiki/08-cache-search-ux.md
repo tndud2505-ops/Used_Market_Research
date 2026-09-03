@@ -1,5 +1,7 @@
 # 캐시와 검색 UX
 
+> rollback 기간의 범용 검색 UX 기록이다. 현재 PC 서비스 검증은 `npm test`와 `npm run index:harness`를 사용하며, 아래 삭제된 하네스 파일명은 역사적 기록으로만 남긴다. 신규 `/api/pc/catalog`, `/api/pc/products`, `/api/pc/listings`는 사용자 요청으로 원 사이트 수집이나 백그라운드 보강을 실행하지 않는다.
+
 기준일: 2026-08-24
 
 이 문서는 검색 뒤 사이트·정렬·가격·페이지를 바꿀 때 어떤 데이터를 재사용하고 언제 원 사이트를 다시 확인하는지 정한다.
@@ -69,6 +71,6 @@ eBay 결과는 USD, 나머지 운영 사이트는 KRW다. 전체 결과에 두 �
 - SQLite 스냅샷: `aws-runner/search-index.mjs`
 - 원 사이트 단기 캐시: `cloudflare/live-search.mjs`
 - D1 장애 대체: `cloudflare/worker.mjs`, `cloudflare/d1-search.mjs`
-- 결정론 검증: `harness/ui-pagination-contract.mjs`, `harness/ui-pagination-summary-contract.mjs`, `harness/search-session-policy-contract.mjs`, `harness/ebay-domestic-integration-contract.mjs`, `aws-runner/search-index-harness.mjs`, `cloudflare/harness.mjs`
+- 결정론 검증: `harness/ui-pagination-contract.mjs`, `harness/ui-pagination-summary-contract.mjs`, `harness/pc-search-delivery-contract.mjs`, `harness/ebay-domestic-integration-contract.mjs`, `aws-runner/search-index-harness.mjs`, `harness/pc-cloudflare-price-stats-contract.mjs`
 
 운영 브라우저 검증은 `전체 검색 → 1페이지에서 3페이지 → 중고나라 → 전체 → 낮은 가격 → 높은 가격 → 가격 범위 → 다른 사이트` 순서로 반복한다. 각 전체 보기 전환에서 `1 2 3 4`가 다시 열리는지, 상단·하단 방향 버튼이 같은 페이지로 움직이는지, 결과 수·정렬 방향·콘솔 오류를 확인한다.

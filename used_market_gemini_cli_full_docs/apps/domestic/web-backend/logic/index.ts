@@ -1,10 +1,15 @@
 import { createServer } from './server.js';
 import { WEB_BACKEND_CONFIG } from './config.js';
 import { ROUTE_DRAFTS } from './routes.js';
+import { createLocalPcPublicationReader } from './pc-local-publication.js';
 
 // Start the server
 const port = WEB_BACKEND_CONFIG.port;
-const server = createServer(port);
+const localPublication = createLocalPcPublicationReader();
+const server = createServer(port, {
+  listPcListings: localPublication.listPcListings,
+  getPcPriceStats: localPublication.getPriceStats
+});
 
 console.log(`
 ====================================

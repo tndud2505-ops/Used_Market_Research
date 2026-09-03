@@ -39,6 +39,12 @@
   cursor: default;
 }
 
+.result-summary-pagination .pagination-jump {
+  min-width: 30px;
+  color: #847443;
+  font-variant-numeric: tabular-nums;
+}
+
 .result-summary-pagination-separator {
   color: var(--soft);
   font-size: 9px;

@@ -9,7 +9,6 @@
 | [가격 이력](./03-price-history.md) | 컴퓨터 부품 로직과 가격 변동 그래프의 연결 |
 | [Cloudflare Runner](./04-cloudflare-runner.md) | Cron·Node 수집기·인증 경계 |
 | [하네스 운영](./05-harness-loop.md) | fixture/live 검증과 개선 루프 |
-| [카테고리 연결 하네스](./07-category-harness.md) | canonical 카테고리·사이트 등록·회색 비활성 계약 |
 | [캐시와 검색 UX](./08-cache-search-ux.md) | 사이트·정렬·가격·페이지 전환의 캐시와 수집 경계 |
 
 ## 현재 진실 (2026-08-24)

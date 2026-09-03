@@ -3,11 +3,22 @@ import { URL } from 'node:url';
 import { resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { WEB_BACKEND_CONFIG } from './config.js';
 import { ROUTE_DRAFTS, parseListingTypes, parseSiteFilters, splitListingTypeTokens } from './routes.js';
 import { FeedbackValidationError, getUxFeedbackSummary, saveUxFeedback } from './feedback-service.js';
 import { runWebSearch, webSearchCollectionKey, WebSearchValidationError } from './search-service.js';
 import { categoryCatalogForApi } from '../../market/logic/category-catalog.js';
+// Shared PC facet catalog lives outside dist so the web server and worker use one registry.
+// @ts-ignore shared runtime ESM module is loaded from the application root
+import { pcPartsCatalogForApi } from '../../../market/logic/pc-parts-catalog.mjs';
+// @ts-ignore shared runtime ESM module is loaded from the application root
+import { pcCatalogResponse, pcProductsResponse } from '../../../cloudflare/pc-directory-http.mjs';
+// Public catalog APIs expose only the seven supported PC-part categories.
+// @ts-ignore shared runtime ESM module is loaded from the application root
+import { publicPcCatalogForApi, publicPcFacetsForApi, publicPcModelsForApi } from '../../../market/logic/pc-public-catalog.mjs';
+// @ts-ignore canonical PC-directory source policy is authored as shared ESM JavaScript
+import { OPERATIONAL_PC_DIRECTORY_SITES } from '../../../cloudflare/target-sites.mjs';
 import { getPriceHistory } from './price-history-service.js';
 import { getEngineStatus } from './engine-status-service.js';
 import { getRunnerState, runNamedSchedulerJobs, RunnerIdempotencyConflictError, RunnerValidationError } from './runner-service.js';
@@ -33,6 +44,65 @@ import {
 
 let serverStartTime = Date.now();
 const PUBLIC_CATEGORY_SITES = ['joonggonara', 'bunjang', 'hellomarket', 'rethinkmall'] as const;
+type PcCategorySeo = {
+  label: string;
+  title: string;
+  description: string;
+  canonical: string;
+  intro: string;
+};
+
+const PC_CATEGORY_SEO: Record<string, PcCategorySeo> = Object.freeze({
+  cpu: {
+    label: 'CPU',
+    title: '중고 CPU 검색 | CPU 중고시세 비교 | USED PICK',
+    description: '중고 CPU를 모델별로 검색하세요. AMD Ryzen, Intel Core 등 중고 CPU 매물과 최근 30일 가격을 비교합니다.',
+    canonical: 'https://used-pick.com/categories/cpu',
+    intro: '중고 CPU 모델을 검색하고 출처별 매물과 최근 30일 CPU 중고시세를 비교하세요.'
+  },
+  gpu: {
+    label: '그래픽카드',
+    title: '중고 그래픽카드 검색 | GPU 중고시세 비교 | USED PICK',
+    description: '중고 그래픽카드와 GPU를 모델별로 검색하세요. RTX, RX 등 그래픽카드 매물과 최근 30일 중고시세를 비교합니다.',
+    canonical: 'https://used-pick.com/categories/gpu',
+    intro: '중고 그래픽카드 모델을 검색하고 RTX·RX 등 GPU 매물과 중고시세를 비교하세요.'
+  },
+  ram: {
+    label: 'RAM',
+    title: '중고 RAM 검색 | DDR4·DDR5 메모리 중고시세 | USED PICK',
+    description: '중고 RAM과 메모리를 DDR 세대·용량별로 검색하세요. DDR4, DDR5 중고 램 매물과 가격을 비교합니다.',
+    canonical: 'https://used-pick.com/categories/ram',
+    intro: '중고 RAM과 메모리를 DDR 세대·용량별로 검색하고 중고시세를 비교하세요.'
+  },
+  motherboard: {
+    label: '메인보드',
+    title: '중고 메인보드 검색 | 메인보드 중고시세 비교 | USED PICK',
+    description: '중고 메인보드를 CPU 소켓·칩셋·제조사별로 검색하세요. AM5, AM4, LGA 등 메인보드 매물과 가격을 비교합니다.',
+    canonical: 'https://used-pick.com/categories/motherboard',
+    intro: '중고 메인보드를 CPU 소켓·칩셋·제조사별로 검색하고 매물과 중고시세를 비교하세요.'
+  },
+  ssd: {
+    label: 'SSD',
+    title: '중고 SSD 검색 | NVMe·SATA SSD 중고시세 | USED PICK',
+    description: '중고 SSD를 용량·제조사별로 검색하세요. NVMe, M.2, SATA SSD 매물과 최근 중고가격을 비교합니다.',
+    canonical: 'https://used-pick.com/categories/ssd',
+    intro: '중고 SSD를 용량·제조사별로 검색하고 NVMe·M.2·SATA 매물의 중고시세를 비교하세요.'
+  },
+  hdd: {
+    label: 'HDD',
+    title: '중고 HDD 검색 | 하드디스크 중고가격 비교 | USED PICK',
+    description: '중고 HDD와 하드디스크를 용량·제조사별로 검색하세요. 1TB, 2TB 등 HDD 중고 매물과 가격을 비교합니다.',
+    canonical: 'https://used-pick.com/categories/hdd',
+    intro: '중고 HDD와 하드디스크를 용량·제조사별로 검색하고 매물과 중고가격을 비교하세요.'
+  },
+  psu: {
+    label: '파워서플라이',
+    title: '중고 파워서플라이 검색 | 중고 파워 시세 비교 | USED PICK',
+    description: '중고 파워서플라이와 PC 파워를 정격 출력·제조사별로 검색하세요. 500W, 750W 등 매물과 중고시세를 비교합니다.',
+    canonical: 'https://used-pick.com/categories/psu',
+    intro: '중고 파워서플라이를 정격 출력·제조사별로 검색하고 PC 파워 매물과 중고시세를 비교하세요.'
+  }
+});
 
 function publicCategoryCatalog() {
   const catalog = categoryCatalogForApi();
@@ -57,6 +127,7 @@ function publicCategoryCatalog() {
   }
   return {
     ...catalog,
+    pc_parts: pcPartsCatalogForApi(),
     site_plans: sitePlans,
     source_bindings: sourceBindings
   };
@@ -120,6 +191,10 @@ function allowedMethodsForPath(pathname: string, publicApiOnly: boolean) {
   if (!pathname.startsWith('/api/')) return ['GET', 'HEAD'];
   if (pathname === '/api/search') return ['POST'];
   if (pathname === '/api/categories') return ['GET'];
+  if (pathname === '/api/catalog/categories' || pathname === '/api/catalog/facets' || pathname === '/api/catalog/models') return ['GET'];
+  if (pathname === '/api/pc/catalog' || pathname === '/api/pc/products' || pathname === '/api/pc/listings') return ['GET'];
+  if (/^\/api\/products\/[^/]+\/price-stats$/u.test(pathname)) return ['GET'];
+  if (pathname === '/api/monetization/contextual-offer' || pathname === '/api/monetization/event') return ['POST'];
   if (publicApiOnly) return [];
 
   const postRoutes = new Set([
@@ -170,6 +245,24 @@ export function createServer(
     publicApiOnly?: boolean;
     runWebSearch?: typeof runWebSearch;
     runSearchOnly?: typeof runSearchOnly;
+    listPcListings?: (query: {
+      canonicalProductId: string | null;
+      manufacturer: string | null;
+      boardManufacturer: string | null;
+      sites: string[];
+      sort: string;
+      minPrice: number | null;
+      maxPrice: number | null;
+      limit: number;
+      cursor: string | null;
+    }) => Promise<Record<string, unknown>> | Record<string, unknown>;
+    getPcPriceStats?: (query: {
+      canonicalProductId: string;
+      marketPool: string;
+      condition: string;
+      currency: string;
+      days: number;
+    }) => Record<string, unknown> | null;
   } = {}
 ) {
   const resolvedOptions = {
@@ -180,7 +273,18 @@ export function createServer(
     corsAllowedOrigins: normalizeOrigins(options.corsAllowedOrigins ?? WEB_BACKEND_CONFIG.cors_allowed_origins),
     publicApiOnly: options.publicApiOnly ?? WEB_BACKEND_CONFIG.public_api_only,
     runWebSearch: options.runWebSearch ?? runWebSearch,
-    runSearchOnly: options.runSearchOnly ?? runSearchOnly
+    runSearchOnly: options.runSearchOnly ?? runSearchOnly,
+    listPcListings: options.listPcListings ?? (() => {
+      const asOf = new Date().toISOString();
+      return {
+        items: [],
+        total: 0,
+        pagination: { has_more: false, next_cursor: null },
+        as_of: asOf,
+        freshness: { as_of: asOf, last_collected_at: null, age_seconds: null, state: 'EMPTY' }
+      };
+    }),
+    getPcPriceStats: options.getPcPriceStats
   };
 
   const activeSearchKeys = new Map<string, number>();
@@ -216,6 +320,14 @@ export function createServer(
       res.setHeader('Content-Type', 'application/json; charset=utf-8');
       if (statusCode !== 204) res.setHeader('Content-Length', Buffer.byteLength(body));
       res.end(req.method === 'HEAD' || statusCode === 204 ? undefined : body);
+    };
+    const sendRedirect = (location: string, statusCode = 301) => {
+      res.statusCode = statusCode;
+      res.setHeader('Location', location);
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      const body = `Moved to ${location}`;
+      res.setHeader('Content-Length', Buffer.byteLength(body));
+      res.end(req.method === 'HEAD' ? undefined : body);
     };
 
     const sendSearchCapacityError = () => {
@@ -283,6 +395,26 @@ export function createServer(
         });
       }
 
+      if (pathname === '/used-market-categories.html') {
+        return sendRedirect('/categories');
+      }
+      if (pathname === '/iphone-used-items.html') {
+        return sendJson(410, {
+          status: 'error',
+          error: 'This legacy category is no longer provided',
+          replacement: '/'
+        });
+      }
+      const categoryRoute = pathname.match(/^\/categories\/([a-z-]+)$/u);
+      if (categoryRoute) {
+        const supportedRoutes = new Set(['cpu', 'gpu', 'ram', 'motherboard', 'ssd', 'hdd', 'psu']);
+        if (!supportedRoutes.has(categoryRoute[1])) return sendJson(410, { status: 'error', error: 'Unsupported category route' });
+        return await serveStaticAsset('/index.html', urlObj, res, req.method === 'HEAD', PC_CATEGORY_SEO[categoryRoute[1]]);
+      }
+      if (pathname === '/categories') {
+        return await serveStaticAsset('/used-market-categories.html', urlObj, res, req.method === 'HEAD');
+      }
+
       if (pathname === '/api/search') {
         if (req.method !== 'POST') {
           throw new ApiError(404, 'Not found', `Unsupported method: ${req.method ?? 'unknown'}`);
@@ -329,6 +461,147 @@ export function createServer(
         }
 
         return sendJson(200, { status: 'success', data: publicCategoryCatalog() });
+      }
+
+      if (pathname === '/api/catalog/categories') {
+        if (req.method !== 'GET') {
+          throw new ApiError(404, 'Not found', `Unsupported method: ${req.method ?? 'unknown'}`);
+        }
+        const catalog = publicPcCatalogForApi();
+        return sendJson(200, { status: 'success', categories: catalog.categories, data: { categories: catalog.categories } });
+      }
+
+      if (pathname === '/api/catalog/facets') {
+        if (req.method !== 'GET') {
+          throw new ApiError(404, 'Not found', `Unsupported method: ${req.method ?? 'unknown'}`);
+        }
+        try {
+          const result = publicPcFacetsForApi(searchParams);
+          return sendJson(200, { status: 'success', ...result, data: result });
+        } catch (error) {
+          throw new ApiError(400, error instanceof Error ? error.message : String(error));
+        }
+      }
+
+      if (pathname === '/api/catalog/models') {
+        if (req.method !== 'GET') {
+          throw new ApiError(404, 'Not found', `Unsupported method: ${req.method ?? 'unknown'}`);
+        }
+        try {
+          const result = publicPcModelsForApi(searchParams);
+          const facets = publicPcFacetsForApi(searchParams);
+          const payload = { ...result, available_facets: facets.available_facets };
+          return sendJson(200, { status: 'success', ...payload, data: payload });
+        } catch (error) {
+          throw new ApiError(400, error instanceof Error ? error.message : String(error));
+        }
+      }
+
+      if (pathname === '/api/pc/catalog') {
+        return sendJson(200, { status: 'success', data: pcCatalogResponse() });
+      }
+
+      if (pathname === '/api/pc/products') {
+        try {
+          return sendJson(200, { status: 'success', data: pcProductsResponse(urlObj) });
+        } catch (error) {
+          throw new ApiError(400, error instanceof Error ? error.message : String(error));
+        }
+      }
+
+      if (pathname === '/api/pc/listings') {
+        const sites = [...new Set([...urlObj.searchParams.getAll('sites'), ...urlObj.searchParams.getAll('site')]
+          .flatMap((value) => value.split(',')).map((value) => value.trim()).filter(Boolean))];
+        const allowedSites = new Set<string>(OPERATIONAL_PC_DIRECTORY_SITES);
+        if (sites.some((site) => !allowedSites.has(site))) throw new ApiError(400, 'unsupported site filter');
+        const sort = urlObj.searchParams.get('sort') || 'recent';
+        if (!new Set(['recent', 'price_asc', 'price_desc']).has(sort)) throw new ApiError(400, 'invalid sort');
+        const parsePrice = (name: string) => {
+          const raw = urlObj.searchParams.get(name);
+          if (raw === null || raw === '') return null;
+          const value = Number(raw);
+          if (!Number.isFinite(value) || value < 0) throw new ApiError(400, `${name} must be a non-negative number`);
+          return value;
+        };
+        const parseCanonicalPrice = (canonical: string, alias: string) => {
+          const canonicalValue = urlObj.searchParams.get(canonical);
+          return canonicalValue !== null ? parsePrice(canonical) : parsePrice(alias);
+        };
+        const minPrice = parseCanonicalPrice('price_min', 'min_price');
+        const maxPrice = parseCanonicalPrice('price_max', 'max_price');
+        if (minPrice !== null && maxPrice !== null && minPrice > maxPrice) throw new ApiError(400, 'price_min must be <= price_max');
+        const requestedLimit = Number(urlObj.searchParams.get('limit') || 30);
+        if (!Number.isInteger(requestedLimit) || requestedLimit < 1) throw new ApiError(400, 'limit must be a positive integer');
+        const data = await resolvedOptions.listPcListings({
+          canonicalProductId: urlObj.searchParams.get('canonical_product_id'),
+          manufacturer: urlObj.searchParams.get('manufacturer'),
+          boardManufacturer: urlObj.searchParams.get('board_manufacturer'),
+          sites,
+          sort,
+          minPrice,
+          maxPrice,
+          limit: Math.min(100, requestedLimit),
+          cursor: urlObj.searchParams.get('cursor')
+        });
+        return sendJson(200, { status: 'success', data });
+      }
+
+      if (/^\/api\/products\/[^/]+\/price-stats$/u.test(pathname)) {
+        if (req.method !== 'GET') {
+          throw new ApiError(404, 'Not found', `Unsupported method: ${req.method ?? 'unknown'}`);
+        }
+        const originUrl = String(process.env.CLOUDFLARE_ORIGIN_URL || '').trim();
+        const canonicalProductId = decodeURIComponent(pathname.split('/')[3] || '');
+        const daysValue = Number(urlObj.searchParams.get('days') || 30);
+        const days = Number.isInteger(daysValue) && daysValue > 0 ? daysValue : 30;
+        const marketPool = urlObj.searchParams.get('market_pool') || 'KR_C2C_USED';
+        const condition = urlObj.searchParams.get('condition') || 'USED_WORKING';
+        const currency = urlObj.searchParams.get('currency') || 'KRW';
+        const localStats = resolvedOptions.getPcPriceStats?.({
+          canonicalProductId, marketPool, condition, currency, days
+        });
+        if (localStats) return sendJson(200, { status: 'success', data: localStats });
+        const emptyStats = (reason: string) => ({
+          status: 'success',
+          data: {
+            canonical_product_id: canonicalProductId,
+            active: { sample_count: 0, median: null, mean: null },
+            sold: { sample_count: 0, median: null, mean: null, disclosure: '실제 거래가격이 아니라 판매완료 직전 마지막 표시가격입니다.' },
+            confirmed_transactions: { sample_count: 0, median: null, mean: null },
+            by_source: [],
+            by_manufacturer: [],
+            daily: [],
+            reference_price: { amount: null, currency, label: '최근 30일 판매완료 중앙값' },
+            confidence: { level: '자료 부족', reasons: ['공개된 30일 표본이 없습니다.'] },
+            exclusions: { total: 0, reasons: {} },
+            availability: { status: 'unavailable', reason },
+            as_of: new Date().toISOString()
+          }
+        });
+        if (!/^https:\/\//u.test(originUrl)) return sendJson(200, emptyStats('LOCAL_PUBLICATION_NOT_CONFIGURED'));
+        try {
+          const target = new URL(`${pathname}${urlObj.search}`, originUrl);
+          const response = await fetch(target, { headers: { accept: 'application/json' } });
+          if (!response.ok) return sendJson(200, emptyStats(`PUBLICATION_UPSTREAM_${response.status}`));
+          const responseBody = await response.text();
+          res.statusCode = 200;
+          res.setHeader('Content-Type', response.headers.get('content-type') || 'application/json; charset=utf-8');
+          res.setHeader('Cache-Control', response.headers.get('cache-control') || 'no-store');
+          res.end(responseBody);
+          return;
+        } catch {
+          return sendJson(200, emptyStats('PUBLICATION_UPSTREAM_UNREACHABLE'));
+        }
+      }
+
+      if (pathname === '/api/monetization/contextual-offer') {
+        if (req.method !== 'POST') throw new ApiError(404, 'Not found');
+        return sendJson(200, { status: 'success', data: { offer: null } });
+      }
+
+      if (pathname === '/api/monetization/event') {
+        if (req.method !== 'POST') throw new ApiError(404, 'Not found');
+        return sendJson(202, { status: 'accepted' });
       }
 
       if (pathname === '/api/feedback') {
@@ -1452,8 +1725,57 @@ async function readJsonBody(req: http.IncomingMessage): Promise<TransactionRecor
   return validateTransactionInput(await readRequestJson(req));
 }
 
-async function serveStaticAsset(pathname: string, requestUrl: URL, res: http.ServerResponse, headOnly = false) {
-  const publicRoot = resolve(process.cwd(), 'web-backend/public');
+function escapeHtml(value: string) {
+  return value.replace(/&/gu, '&amp;').replace(/</gu, '&lt;').replace(/>/gu, '&gt;').replace(/"/gu, '&quot;');
+}
+
+function applyPcCategorySeo(html: string, seo: PcCategorySeo) {
+  const title = escapeHtml(seo.title);
+  const description = escapeHtml(seo.description);
+  const canonical = escapeHtml(seo.canonical);
+  const intro = escapeHtml(seo.intro);
+  let result = html
+    .replace(/<meta name="description" content="[^"]*" \/>/u, `<meta name="description" content="${description}" />`)
+    .replace(/<link rel="canonical" href="[^"]*" \/>/u, `<link rel="canonical" href="${canonical}" />`)
+    .replace(/<meta property="og:title" content="[^"]*" \/>/u, `<meta property="og:title" content="${title}" />`)
+    .replace(/<meta property="og:description" content="[^"]*" \/>/u, `<meta property="og:description" content="${description}" />`)
+    .replace(/<meta property="og:url" content="[^"]*" \/>/u, `<meta property="og:url" content="${canonical}" />`)
+    .replace(/<meta name="twitter:title" content="[^"]*" \/>/u, `<meta name="twitter:title" content="${title}" />`)
+    .replace(/<meta name="twitter:description" content="[^"]*" \/>/u, `<meta name="twitter:description" content="${description}" />`)
+    .replace(/<title>[^<]*<\/title>/u, `<title>${title}</title>`)
+    .replace(/<h1 id="workspace-title">[^<]*<\/h1>/u, `<h1 id="workspace-title">${escapeHtml(`중고 ${seo.label} 검색`)}</h1>`)
+    .replace(/<p class="workspace-intro" id="workspace-intro">[^<]*<\/p>/u, `<p class="workspace-intro" id="workspace-intro">${intro}</p>`);
+
+  const structuredDataMatch = result.match(/(<script type="application\/ld\+json">\s*)([\s\S]*?)(\s*<\/script>)/u);
+  if (structuredDataMatch) {
+    try {
+      const structuredData = JSON.parse(structuredDataMatch[2]) as Record<string, unknown>;
+      structuredData.url = seo.canonical;
+      structuredData['@id'] = `${seo.canonical}#website`;
+      structuredData.name = seo.title;
+      structuredData.description = seo.description;
+      result = result.replace(
+        structuredDataMatch[0],
+        `${structuredDataMatch[1]}${JSON.stringify(structuredData, null, 2)}${structuredDataMatch[3]}`
+      );
+    } catch {
+      // Keep the original document if structured-data parsing ever encounters a hand-edited page.
+    }
+  }
+
+  return result;
+}
+
+async function serveStaticAsset(
+  pathname: string,
+  requestUrl: URL,
+  res: http.ServerResponse,
+  headOnly = false,
+  pageSeo?: PcCategorySeo
+) {
+  const defaultPublic = resolve(process.cwd(), 'web-backend/public');
+  const domesticPublic = resolve(process.cwd(), 'used_market_gemini_cli_full_docs/apps/domestic/web-backend/public');
+  const publicRoot = existsSync(defaultPublic) ? defaultPublic : domesticPublic;
   const requestedPath = pathname === '/' ? '/index.html' : pathname;
   const filePath = resolve(publicRoot, `.${requestedPath}`);
   if (filePath !== publicRoot && !filePath.startsWith(`${publicRoot}\\`) && !filePath.startsWith(`${publicRoot}/`)) {
@@ -1485,6 +1807,9 @@ async function serveStaticAsset(pathname: string, requestUrl: URL, res: http.Ser
   };
   const extension = filePath.slice(filePath.lastIndexOf('.')).toLowerCase();
   let content = await readFile(filePath);
+  if (pageSeo && extension === '.html') {
+    content = Buffer.from(applyPcCategorySeo(content.toString('utf8'), pageSeo), 'utf8');
+  }
   res.statusCode = 200;
   res.setHeader('Content-Type', contentTypes[extension] ?? 'application/octet-stream');
   res.setHeader('Cache-Control', extension === '.html' ? 'no-store' : 'public, max-age=300');

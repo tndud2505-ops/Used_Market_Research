@@ -1,0 +1,33 @@
+export const PC_PRODUCT_MASTER_VERSION = 1;
+
+export const PC_PRODUCT_MASTER_V1 = Object.freeze([
+  { id: "gpu:nvidia:rtx-3080", name: "NVIDIA GeForce RTX 3080", manufacturer: "NVIDIA", brand: "GeForce", category: "GPU", group: "nvidia-geforce-rtx-3080", aliases: ["RTX 3080"], forbidden: ["RTX 3080 박스", "RTX 3080 쿨러"], spec: { chip_manufacturer: "NVIDIA" } },
+  { id: "gpu:nvidia:rtx-3070", name: "NVIDIA GeForce RTX 3070", manufacturer: "NVIDIA", brand: "GeForce", category: "GPU", group: "nvidia-geforce-rtx-3070", aliases: ["RTX 3070"], spec: { chip_manufacturer: "NVIDIA" } },
+  { id: "gpu:nvidia:rtx-3060-ti", name: "NVIDIA GeForce RTX 3060 Ti", manufacturer: "NVIDIA", brand: "GeForce", category: "GPU", group: "nvidia-geforce-rtx-3060-ti", aliases: ["RTX 3060 TI"], spec: { chip_manufacturer: "NVIDIA" } },
+  { id: "gpu:nvidia:rtx-5090", name: "NVIDIA GeForce RTX 5090", manufacturer: "NVIDIA", brand: "GeForce", category: "GPU", group: "nvidia-geforce-rtx-5090", aliases: ["RTX 5090"], spec: { chip_manufacturer: "NVIDIA" } },
+  { id: "gpu:nvidia:rtx-4080", name: "NVIDIA GeForce RTX 4080", manufacturer: "NVIDIA", brand: "GeForce", category: "GPU", group: "nvidia-geforce-rtx-4080", aliases: ["RTX 4080"], spec: { chip_manufacturer: "NVIDIA" } },
+  { id: "gpu:nvidia:rtx-4070", name: "NVIDIA GeForce RTX 4070", manufacturer: "NVIDIA", brand: "GeForce", category: "GPU", group: "nvidia-geforce-rtx-4070", aliases: ["RTX 4070"], spec: { chip_manufacturer: "NVIDIA" } },
+  { id: "gpu:nvidia:rtx-4070-ti-super", name: "NVIDIA GeForce RTX 4070 Ti SUPER", manufacturer: "NVIDIA", brand: "GeForce", category: "GPU", group: "nvidia-geforce-rtx-4070-ti-super", aliases: ["RTX 4070 TI SUPER"], spec: { chip_manufacturer: "NVIDIA" } },
+  { id: "gpu:nvidia:rtx-4070-super", name: "NVIDIA GeForce RTX 4070 SUPER", manufacturer: "NVIDIA", brand: "GeForce", category: "GPU", group: "nvidia-geforce-rtx-4070-super", aliases: ["RTX 4070 SUPER"], spec: { chip_manufacturer: "NVIDIA" } },
+  { id: "gpu:nvidia:rtx-3090", name: "NVIDIA GeForce RTX 3090", manufacturer: "NVIDIA", brand: "GeForce", category: "GPU", group: "nvidia-geforce-rtx-3090", aliases: ["RTX 3090", "3090 24GB"], spec: { chip_manufacturer: "NVIDIA" } },
+  { id: "gpu:amd:rx-7900-xtx", name: "AMD Radeon RX 7900 XTX", manufacturer: "AMD", brand: "Radeon", category: "GPU", group: "amd-radeon-rx-7900-xtx", aliases: ["RX 7900 XTX"], spec: { chip_manufacturer: "AMD" } },
+  { id: "gpu:amd:rx-9070-xt", name: "AMD Radeon RX 9070 XT", manufacturer: "AMD", brand: "Radeon", category: "GPU", group: "amd-radeon-rx-9070-xt", aliases: ["RX 9070 XT"], spec: { chip_manufacturer: "AMD" } },
+  { id: "cpu:amd:ryzen-7-7800x3d", name: "AMD Ryzen 7 7800X3D", manufacturer: "AMD", brand: "Ryzen", category: "CPU", group: "amd-ryzen-7-7800x3d", aliases: ["7800X3D"] },
+  { id: "cpu:amd:ryzen-7-5700x3d", name: "AMD Ryzen 7 5700X3D", manufacturer: "AMD", brand: "Ryzen", category: "CPU", group: "amd-ryzen-7-5700x3d", aliases: ["5700X3D"] },
+  { id: "cpu:amd:ryzen-7-9800x3d", name: "AMD Ryzen 7 9800X3D", manufacturer: "AMD", brand: "Ryzen", category: "CPU", group: "amd-ryzen-7-9800x3d", aliases: ["9800X3D"] },
+  { id: "cpu:intel:i7-14700k", name: "Intel Core i7-14700K", manufacturer: "Intel", brand: "Core", category: "CPU", group: "intel-core-i7-14700k", aliases: ["I7 14700K", "14700K"] },
+  { id: "cpu:intel:i7-14700kf", name: "Intel Core i7-14700KF", manufacturer: "Intel", brand: "Core", category: "CPU", group: "intel-core-i7-14700kf", aliases: ["I7 14700KF", "14700KF"] },
+  { id: "ram:ddr5:16gb", name: "DDR5 16GB 메모리 모듈", category: "RAM", group: "ram-ddr5-16gb", aliases: ["DDR5 16GB"], spec: { module_capacity_gb: 16 } },
+  { id: "ram:ddr4:16gb", name: "DDR4 16GB 메모리 모듈", category: "RAM", group: "ram-ddr4-16gb", aliases: ["DDR4 16GB"], spec: { module_capacity_gb: 16 } },
+  { id: "ram:ddr4:8gb", name: "DDR4 8GB 메모리 모듈", category: "RAM", group: "ram-ddr4-8gb", aliases: ["DDR4 8GB"], spec: { module_capacity_gb: 8 } },
+  { id: "motherboard:amd:b650m", name: "AMD B650M 메인보드", category: "MOTHERBOARD", group: "motherboard-amd-b650m", aliases: ["B650M"] },
+  { id: "ssd:samsung:980-pro-1tb", name: "Samsung 980 PRO 1TB", manufacturer: "Samsung", category: "SSD", group: "samsung-980-pro-1tb", aliases: ["980 PRO 1TB"], spec: { capacity_gb: 1000 } },
+  { id: "ssd:samsung:990-pro-2tb", name: "Samsung 990 PRO 2TB", manufacturer: "Samsung", category: "SSD", group: "samsung-990-pro-2tb", aliases: ["990 PRO 2TB"], spec: { capacity_gb: 2000 } },
+  { id: "hdd:wd:blue-4tb", name: "WD Blue 4TB", manufacturer: "Western Digital", category: "HDD", group: "wd-blue-4tb", aliases: ["WD BLUE 4TB"], spec: { capacity_gb: 4000 } },
+  { id: "psu:seasonic:gx-850", name: "Seasonic GX-850 850W", manufacturer: "Seasonic", category: "PSU", group: "seasonic-gx-850", aliases: ["GX-850 850W"], spec: { watts: 850 } },
+  { id: "psu:corsair:rm850x", name: "Corsair RM850x 850W", manufacturer: "Corsair", category: "PSU", group: "corsair-rm850x", aliases: ["RM850X 850W"], spec: { watts: 850 } },
+  { id: "case:fractal:north", name: "Fractal Design North", manufacturer: "Fractal Design", category: "CASE", group: "fractal-design-north", aliases: ["FRACTAL DESIGN NORTH"] },
+  { id: "cooling:noctua:nh-d15", name: "Noctua NH-D15", manufacturer: "Noctua", category: "COOLING", group: "noctua-nh-d15", aliases: ["NH-D15"] },
+  { id: "expansion:asus:xg-c100c", name: "ASUS XG-C100C", manufacturer: "ASUS", category: "EXPANSION_CARD", group: "asus-xg-c100c", aliases: ["XG-C100C"] },
+  { id: "odd:lg:gp60nb50", name: "LG GP60NB50", manufacturer: "LG", category: "ODD", group: "lg-gp60nb50", aliases: ["GP60NB50"] }
+]);

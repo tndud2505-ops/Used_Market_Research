@@ -1,7 +1,8 @@
 [Unit]
 Description=Used Market AWS Node Runner
-Wants=network-online.target
+Wants=network-online.target used-market-tunnel.service
 After=network-online.target
+Before=used-market-tunnel.service
 
 [Service]
 Type=simple

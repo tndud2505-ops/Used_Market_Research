@@ -1,5 +1,7 @@
 # 사이트별 검색 검증
 
+> `legacy_general` rollback projection의 과거 검증 기록이다. 현재 PC 제품 디렉터리는 사전수집 publication만 조회하며 검색 요청에서 원 사이트를 호출하지 않는다. 현재 기본 계약과 실행 명령은 `05-harness-loop.md`를 기준으로 하며, 아래의 삭제된 범용 하네스 명령은 실행하지 않는다.
+
 마지막 갱신: 2026-08-24
 상태: 코드·fixture 계약과 운영 live·브라우저 검증 완료
 
@@ -63,15 +65,11 @@ SQLite와 live 병합 모두 숫자 가격을 첫 정렬 키로 사용한다. `p
 
 ## 현재 회귀 계약
 
-- `harness/search-session-policy-contract.mjs`: 같은 수집 키의 사이트 보기, 선택 사이트 집중 수집·3페이지 선읽기, 정렬의 원 사이트 재수집 금지, stale 캐시 우선 계약
-- `cloudflare/live-search-harness.mjs`: 사이트별 정렬·가격·신선도·노이즈·이미지·카테고리 정책
-- `harness/ui-pagination-contract.mjs`: 30개/페이지, 90개 선읽기 뒤 1~4 직접 도달, 먼 페이지 비활성 표시, 긴 도달 범위 축약, 로딩 해제 후 방향 버튼 상태, `다음` 문구 통일
-- `harness/ui-pagination-summary-contract.mjs`: 상단·하단 방향 버튼 공유, 전체 검색·정렬·가격·사이트 복귀의 90개 선읽기 계약
-- `aws-runner/search-index-harness.mjs`: 정규화·가격 조회·갱신 등급·누락·만료·백업
-- `harness/index-freshness-ui-contract.mjs`: 서버 확인 간격·최대 20초 backoff·3분 절대 기한·검색 이동 방지·첫 페이지 자동 반영
-- `aws-runner/search-index-load-harness.mjs`: 100,000개·동시 사용자 4명 조회 부하
-- `harness/browser-contract.mjs`: 실화면 가격 범위, 가격순, 페이지 이동, 이미지 대체, 모바일 카테고리 접기
-- `npm test`: 위 fixture 계약 중 외부 사이트 호출이 없는 검사를 모두 실행
+- `harness/pc-domain-contract.mjs`: 분류·원장·PII·SOLD·시장군·통계 구성원
+- `harness/pc-source-policy-contract.mjs`: 승인 소스·격리·scheduler authority·eBay OAuth/USD
+- `harness/pc-publication-contract.mjs`: 공개 통계 범위·checksum·원자적 active pointer·실패 복구
+- `harness/pc-service-contract.mjs`: 인증·서명 cursor·snapshot·backup·Worker→D1 fallback
+- `npm test`: 위 네 결정론 계약을 빌드 후 실행
 
 ## 2026-08-14 운영 검증
 
@@ -191,18 +189,14 @@ live 실행 결과는 다음을 함께 확인한다.
 
 카테고리 클릭과 통합 검색은 같은 canonical category ID와 같은 `resolveCategoryCollectionPlan()`을 재사용한다. 카테고리 분류가 공식 ID 기반인지 검색어 추론인지의 차이는 `category_confidence`와 `category_mapping_mode`로 분리한다.
 
-회귀 계약은 `harness/category-contract.mjs`에서 모든 canonical 카테고리와 기본 사이트의 수집 계획을 확인하며, 실행은 `npm test`에 포함된다.
+회귀 계약은 `harness/pc-domain-contract.mjs`와 `harness/pc-source-policy-contract.mjs`에서 PC taxonomy와 승인 사이트 수집 계획을 확인하며, 실행은 `npm test`에 포함된다.
 
 웹 요청 검증 실패는 500 내부 오류가 아니라 400 입력 오류로 반환한다. 원 사이트가 차단되거나 추출기와 응답 구조가 맞지 않는 경우에는 매물을 `0개`로 성공 처리하지 않고 사이트별 `확인 필요` 상태와 재시도/원문 확인 안내를 표시한다.
 
 페이지네이션은 사이트별 계약을 따른다. 중고나라는 첫 페이지 다음에 `page:2`부터 사용하고, 번개장터 키워드 검색은 공개 API의 `page:1`부터 사용한다. 번개장터 공식 카테고리는 `slice:v1` 내부 위치와 공식 opaque cursor를 함께 보존한다. 헬로마켓·리씽크몰 원본 페이지를 모아 만든 결과도 AWS 스냅샷 커서로 30개씩 제공한다.
 
 2026-08-12 live 확인에서 중고나라는 여성 바지 `1026`, 남성 바지 `1035`, 여성 상의 묶음 `1023/1024/1025`, 남성 아우터 묶음 `1030/1031` 등 공식 하위 ID를 사용하며 원문 이미지 URL까지 반환한다. 번개장터는 공식 MDMS 목록을 기준으로 의류·패션잡화·모바일·PC·가전·뷰티·유아동·가구·도서·티켓·스포츠·공구 등의 단일/복수 카테고리 ID를 사용하며, 카테고리 검색은 `pw.product.category` opaque cursor와 페이지 내부 slice 위치를 이어간다. 당근은 현재 공개 검색 응답의 증거 구조가 맞지 않으면 `UNSUPPORTED_EVIDENCE_SHAPE`로 표시하고, 일부 지역만 성공한 경우 부분 결과 경고를 표시하며, 판매 상태를 읽지 못한 매물은 `unknown`으로 둔다. eBay는 `EBAY_CLIENT_ID`와 `EBAY_CLIENT_SECRET`으로 OAuth 토큰을 자동 발급하고, Browse API가 판매 상태를 제공하지 않는 경우 원문 확인 경고와 `unknown` 상태를 사용한다.
-번개장터 매핑 ID는 코드에만 고정하지 않는다. `npm run bunjang:taxonomy`가 공식 MDMS 분류 목록의 하위 노드까지 펼쳐 우리 41개 매핑 ID의 존재 여부와 활성 상태를 확인한다. 이 검사는 외부 네트워크가 필요한 별도 운영 검증이며, 실패하면 해당 매핑을 공식 분류로 간주하지 않고 회색 비활성 후보로 재검토한다.
-
-중고나라도 `npm run joonggonara:taxonomy`로 매핑된 공식 검색 URL을 일괄 요청해 HTTP 200 여부를 확인한다. 2026-08-12 확인에서는 36개 ID가 모두 200을 반환했다.
-
-실제 웹 API 카테고리 회귀는 `npm run category:live`로 수행한다. 여성 바지 단일 조회, 여성 바지+모바일/태블릿 다중 조회, 공식 카테고리 ID가 없는 헬로마켓·리씽크몰의 검색어 없는 카테고리 제외 계약을 함께 확인한다.
+범용 taxonomy와 live 카테고리 하네스는 PC 전용 전환 때 제거했다. 현재 정책·대상 사이트·PC 단일 카테고리 경계는 `npm test`의 `pc-source-policy`와 `pc-service` 계약을 기준으로 한다. 실사이트 canary는 운영자 승인 뒤 별도로 실행한다.
 
 공식 번개장터 카테고리 API는 카테고리 상품을 반환하지만 검색어를 함께 제한하지 않을 수 있다. 따라서 검색어가 명시된 경우 모델·핵심어 일치 필터를 추가하고, 카테고리만 눌렀을 때는 해당 카테고리 전체를 보여준다. 카테고리 선택 전 입력한 검색어도 단일·다중 선택 모두 유지한다.
 

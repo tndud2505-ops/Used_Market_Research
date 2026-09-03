@@ -27,7 +27,7 @@ if [[ "$mode" == "proxy" ]]; then
   grep -Eqi '^Content-Security-Policy:' "$tmp_dir/headers" || { echo 'FAIL missing CSP header' >&2; exit 1; }
   grep -Eqi '^X-Content-Type-Options:[[:space:]]*nosniff' "$tmp_dir/headers" || { echo 'FAIL missing nosniff header' >&2; exit 1; }
   request GET /api/not-public 404
-  request GET /api/search 405
+  request GET /api/search 404
 
   if [[ "$base_url" == https://* ]]; then
     grep -Eqi '^Strict-Transport-Security:' "$tmp_dir/headers" || { echo 'FAIL missing HSTS on HTTPS' >&2; exit 1; }

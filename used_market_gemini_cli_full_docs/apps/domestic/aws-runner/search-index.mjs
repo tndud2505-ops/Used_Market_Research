@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { dedupePcListingRows } from "../cloudflare/pc-listings-contract.mjs";
 
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
@@ -20,6 +21,9 @@ const MAX_SNAPSHOT_ITEMS = 1_000;
 const SITE_RESULT_WINDOW_INITIAL = 160;
 const SITE_RESULT_WINDOW_MAX = 640;
 const MISSING_PRICE_SORT_VALUE = 9_007_199_254_740_991;
+const PC_COLLECTION_NAMESPACE = "pc_parts_v1";
+const LEGACY_COLLECTION_NAMESPACE = "legacy_general";
+export const SEARCH_INDEX_SCHEMA_VERSION = 8;
 
 const DEFAULT_LIMITS = Object.freeze({
   maxActiveListings: 100_000,
@@ -37,6 +41,12 @@ const QUERY_ALIASES = Object.freeze([
 
 function cleanText(value, maximum = 2_000) {
   return String(value ?? "").replace(/\s+/gu, " ").trim().slice(0, maximum);
+}
+
+function redactStoredText(value, maximum = 2_000) {
+  return cleanText(value, maximum)
+    .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/giu, "[EMAIL]")
+    .replace(/(?<!\d)(?:\+?82[-.\s]?)?0?1[016789][-.\s]?\d{3,4}[-.\s]?\d{4}(?!\d)/gu, "[PHONE]");
 }
 
 function requestedSiteWindow(body = {}) {
@@ -85,13 +95,25 @@ export function collectionIdentity(body = {}) {
   const canonicalQuery = normalizeSearchQuery(body.keyword);
   const categoryIds = categoryIdsFromBody(body);
   const sites = sortedStrings(body.sites);
-  const identity = JSON.stringify({ canonicalQuery, categoryIds, sites });
+  const pcCategoryCode = cleanText(body.pc_category_code, 80).toUpperCase();
+  const manufacturer = cleanText(body.manufacturer, 120);
+  const namespace = body.collection_namespace === PC_COLLECTION_NAMESPACE || categoryIds.includes("pc")
+    ? PC_COLLECTION_NAMESPACE
+    : LEGACY_COLLECTION_NAMESPACE;
+  // legacy_general deliberately keeps the pre-refactor hash shape so existing
+  // cache rows and signed cursor snapshots remain valid during the parallel run.
+  const identity = namespace === PC_COLLECTION_NAMESPACE
+    ? JSON.stringify({ namespace, canonicalQuery, categoryIds, sites, pcCategoryCode, manufacturer })
+    : JSON.stringify({ canonicalQuery, categoryIds, sites });
   return {
     key: createHash("sha256").update(identity).digest("base64url").slice(0, 24),
     collectionQuery,
     canonicalQuery,
     categoryIds,
-    sites
+    sites,
+    pcCategoryCode,
+    manufacturer,
+    namespace
   };
 }
 
@@ -113,6 +135,53 @@ function jsonArray(value) {
   }
 }
 
+function jsonObject(value) {
+  try {
+    const parsed = JSON.parse(String(value || "{}"));
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function pcProjection(item = {}) {
+  const exclusionReasons = Array.isArray(item.exclusion_reasons)
+    ? item.exclusion_reasons.map((value) => cleanText(value, 80)).filter(Boolean)
+    : [];
+  const quantity = Number(item.quantity);
+  return {
+    canonical_product_id: cleanText(item.canonical_product_id, 200) || null,
+    canonical_display_name: cleanText(item.canonical_display_name, 300) || null,
+    canonical_manufacturer: cleanText(item.canonical_manufacturer, 120) || null,
+    chip_manufacturer: cleanText(item.chip_manufacturer, 120) || null,
+    board_manufacturer: cleanText(item.board_manufacturer, 120) || null,
+    listing_kind: cleanText(item.listing_kind, 80) || "UNKNOWN",
+    category_code: cleanText(item.pc_category_code || item.category_code, 80) || null,
+    market_segment: cleanText(item.market_segment, 80) || "UNKNOWN",
+    listing_type: cleanText(item.listing_type, 80) || "UNKNOWN",
+    condition_group: cleanText(item.condition_group, 80) || "UNKNOWN",
+    spec_group_id: cleanText(item.spec_group_id, 300) || null,
+    classification_confidence: Number.isFinite(Number(item.classification_confidence)) ? Number(item.classification_confidence) : 0,
+    model_confidence: Number.isFinite(Number(item.model_confidence)) ? Number(item.model_confidence) : 0,
+    quantity_confidence: Number.isFinite(Number(item.quantity_confidence)) ? Number(item.quantity_confidence) : 0,
+    price_scope_confidence: Number.isFinite(Number(item.price_scope_confidence)) ? Number(item.price_scope_confidence) : 0,
+    statistics_eligible: item.statistics_eligible === true,
+    statistics_exclusion_reasons: Array.isArray(item.statistics_exclusion_reasons) ? item.statistics_exclusion_reasons.map((value) => cleanText(value, 80)).filter(Boolean) : [],
+    quantity: Number.isInteger(quantity) && quantity > 0 ? quantity : null,
+    price_scope: cleanText(item.price_scope, 80) || "UNKNOWN",
+    condition_code: cleanText(item.condition_code, 80) || "UNKNOWN",
+    lifecycle_status: cleanText(item.lifecycle_status, 80) || "ACTIVE",
+    market_pool: cleanText(item.market_pool, 80) || null,
+    confidence: item.confidence && typeof item.confidence === "object" ? item.confidence : {},
+    evidence: item.evidence && typeof item.evidence === "object" ? item.evidence : {},
+    price_eligible: item.price_eligible === true,
+    exclusion_reasons: exclusionReasons,
+    good_listing_eligible: item.good_listing_eligible === true,
+    reference_price: item.reference_price !== null && item.reference_price !== undefined && item.reference_price !== ""
+      && Number.isFinite(Number(item.reference_price)) ? Number(item.reference_price) : null
+  };
+}
+
 function contentHash(item) {
   return createHash("sha256").update(JSON.stringify({
     title: cleanText(item.title, 500),
@@ -122,7 +191,15 @@ function contentHash(item) {
     image_url: cleanText(item.image_url, 2_000),
     location: cleanText(item.location, 300),
     description: cleanText(item.description, 2_000),
-    posted_at: cleanText(item.posted_at, 80)
+    posted_at: cleanText(item.posted_at, 80),
+    pc: pcProjection(item),
+    quality: {
+      price_suspect: item.price_suspect === true,
+      quality_suspect: item.quality_suspect === true,
+      noise_filtered: item.noise_filtered === true,
+      noise_filter_reason: cleanText(item.noise_filter_reason, 200) || null,
+      fraud_risk: Number.isFinite(Number(item.fraud_risk)) ? Number(item.fraud_risk) : null
+    }
   })).digest("base64url").slice(0, 24);
 }
 
@@ -131,6 +208,7 @@ function sqlPlaceholders(values) {
 }
 
 function publicItem(row) {
+  const pc = jsonObject(row.pc_metadata_json);
   return {
     id: row.item_id,
     item_id: row.item_id,
@@ -152,7 +230,36 @@ function publicItem(row) {
     fraud_risk: typeof row.query_fraud_risk === "number" ? row.query_fraud_risk : null,
     indexed_first_seen_at: row.first_seen_at,
     indexed_last_seen_at: row.last_seen_at,
-    indexed_last_checked_at: row.last_checked_at
+    indexed_last_checked_at: row.last_checked_at,
+    canonical_product_id: pc.canonical_product_id || null,
+    canonical_display_name: pc.canonical_display_name || null,
+    canonical_manufacturer: pc.canonical_manufacturer || null,
+    chip_manufacturer: pc.chip_manufacturer || null,
+    board_manufacturer: pc.board_manufacturer || null,
+    listing_kind: pc.listing_kind || "UNKNOWN",
+    category_code: pc.category_code || null,
+    market_segment: pc.market_segment || "UNKNOWN",
+    listing_type: pc.listing_type || "UNKNOWN",
+    condition_group: pc.condition_group || "UNKNOWN",
+    spec_group_id: pc.spec_group_id || null,
+    classification_confidence: pc.classification_confidence || 0,
+    model_confidence: pc.model_confidence || 0,
+    quantity_confidence: pc.quantity_confidence || 0,
+    price_scope_confidence: pc.price_scope_confidence || 0,
+    statistics_eligible: pc.statistics_eligible === true,
+    statistics_exclusion_reasons: Array.isArray(pc.statistics_exclusion_reasons) ? pc.statistics_exclusion_reasons : [],
+    quantity: Number.isInteger(pc.quantity) ? pc.quantity : null,
+    price_scope: pc.price_scope || "UNKNOWN",
+    condition_code: pc.condition_code || "UNKNOWN",
+    lifecycle_status: pc.lifecycle_status || "ACTIVE",
+    market_pool: pc.market_pool || null,
+    confidence: pc.confidence && typeof pc.confidence === "object" ? pc.confidence : {},
+    evidence: pc.evidence && typeof pc.evidence === "object" ? pc.evidence : {},
+    price_eligible: pc.price_eligible === true,
+    exclusion_reasons: Array.isArray(pc.exclusion_reasons) ? pc.exclusion_reasons : [],
+    good_listing_eligible: pc.good_listing_eligible === true,
+    reference_price: pc.reference_price !== null && pc.reference_price !== undefined && pc.reference_price !== ""
+      && Number.isFinite(Number(pc.reference_price)) ? Number(pc.reference_price) : null
   };
 }
 
@@ -162,10 +269,15 @@ export class SearchIndex {
     this.filePath = options.filePath || path.join(process.cwd(), "search-index.sqlite");
     this.backupDir = options.backupDir || (this.filePath === ":memory:" ? "" : path.join(path.dirname(this.filePath), "backups"));
     this.limits = { ...DEFAULT_LIMITS, ...(options.limits || {}) };
+    const existingFileNeedsInspection = this.filePath !== ":memory:" && existsSync(this.filePath) && statSync(this.filePath).size > 0;
     if (this.filePath !== ":memory:") mkdirSync(path.dirname(this.filePath), { recursive: true });
     this.db = new DatabaseSync(this.filePath);
     try {
       this.configure();
+      const currentVersion = Number(this.db.prepare("PRAGMA user_version").get()?.user_version || 0);
+      if (existingFileNeedsInspection && currentVersion < SEARCH_INDEX_SCHEMA_VERSION) {
+        this.createMigrationBackup(currentVersion);
+      }
       this.migrate();
     } catch (error) {
       this.db.close();
@@ -210,7 +322,8 @@ export class SearchIndex {
         last_checked_at TEXT NOT NULL,
         inactive_at TEXT,
         active INTEGER NOT NULL DEFAULT 1 CHECK(active IN (0, 1)),
-        content_hash TEXT NOT NULL
+        content_hash TEXT NOT NULL,
+        pc_metadata_json TEXT NOT NULL DEFAULT '{}'
       ) STRICT;
 
       CREATE INDEX IF NOT EXISTS idx_listings_active_seen
@@ -227,6 +340,7 @@ export class SearchIndex {
 
       CREATE TABLE IF NOT EXISTS query_index (
         query_key TEXT PRIMARY KEY,
+        collection_namespace TEXT NOT NULL DEFAULT 'legacy_general' CHECK(collection_namespace IN ('legacy_general', 'pc_parts_v1')),
         canonical_query TEXT NOT NULL,
         keyword TEXT NOT NULL,
         category_ids_json TEXT NOT NULL,
@@ -352,6 +466,15 @@ export class SearchIndex {
         ON comparison_runs(created_at DESC);
       `);
       const queryColumns = new Set(this.db.prepare("PRAGMA table_info(query_index)").all().map((row) => row.name));
+      const listingColumns = new Set(this.db.prepare("PRAGMA table_info(listings)").all().map((row) => row.name));
+      if (!listingColumns.has("pc_metadata_json")) {
+        this.db.exec("ALTER TABLE listings ADD COLUMN pc_metadata_json TEXT NOT NULL DEFAULT '{}'");
+      }
+      if (initialUserVersion < 8) {
+        this.db.prepare(`UPDATE listings
+          SET active = 0, inactive_at = COALESCE(inactive_at, ?)
+          WHERE site = 'ebay' AND item_id LIKE 'ebay:http%'`).run(iso(this.now()));
+      }
       if (!queryColumns.has("snapshot_version")) {
         this.db.exec("ALTER TABLE query_index ADD COLUMN snapshot_version INTEGER NOT NULL DEFAULT 0");
       }
@@ -366,6 +489,11 @@ export class SearchIndex {
       }
       if (!queryColumns.has("refresh_disabled_reason")) {
         this.db.exec("ALTER TABLE query_index ADD COLUMN refresh_disabled_reason TEXT");
+      }
+      if (!queryColumns.has("collection_namespace")) {
+        this.db.exec("ALTER TABLE query_index ADD COLUMN collection_namespace TEXT NOT NULL DEFAULT 'legacy_general'");
+        this.db.exec(`UPDATE query_index SET collection_namespace = 'pc_parts_v1'
+          WHERE category_ids_json LIKE '%"pc"%'`);
       }
       const querySiteRows = this.db.prepare("SELECT query_key, sites_json FROM query_index").all();
       const quarantineQuery = this.db.prepare(`
@@ -462,13 +590,13 @@ export class SearchIndex {
       }
       // Full database checks are migration gates. Running them on every service
       // restart keeps the HTTP port closed for minutes once the index grows.
-      if (initialUserVersion < 5) {
+      if (initialUserVersion < SEARCH_INDEX_SCHEMA_VERSION) {
         const foreignKeyFailures = this.db.prepare("PRAGMA foreign_key_check").all();
         if (foreignKeyFailures.length > 0) throw new Error("SQLite migration failed foreign_key_check");
         const integrity = this.db.prepare("PRAGMA integrity_check").get()?.integrity_check;
         if (integrity !== "ok") throw new Error(`SQLite migration failed integrity_check: ${integrity || "unknown"}`);
       }
-      this.db.exec("PRAGMA user_version = 5; COMMIT");
+      this.db.exec(`PRAGMA user_version = ${SEARCH_INDEX_SCHEMA_VERSION}; COMMIT`);
     } catch (error) {
       try {
         this.db.exec("ROLLBACK");
@@ -577,11 +705,12 @@ export class SearchIndex {
     if (!existing) {
       this.db.prepare(`
         INSERT INTO query_index (
-          query_key, canonical_query, keyword, category_ids_json, sites_json,
+          query_key, collection_namespace, canonical_query, keyword, category_ids_json, sites_json,
           first_requested_at, last_requested_at, request_window_started_at, site_window
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         identity.key,
+        identity.namespace,
         identity.canonicalQuery,
         identity.collectionQuery,
         JSON.stringify(identity.categoryIds),
@@ -597,6 +726,7 @@ export class SearchIndex {
       this.db.prepare(`
         UPDATE query_index
            SET canonical_query = ?,
+               collection_namespace = ?,
                keyword = ?,
                category_ids_json = ?,
                sites_json = ?,
@@ -609,6 +739,7 @@ export class SearchIndex {
          WHERE query_key = ?
       `).run(
         identity.canonicalQuery,
+        identity.namespace,
         identity.collectionQuery,
         JSON.stringify(identity.categoryIds),
         JSON.stringify(identity.sites),
@@ -623,7 +754,8 @@ export class SearchIndex {
     if (queryCount > this.limits.maxQueries) {
       this.db.prepare(`
         DELETE FROM query_index WHERE query_key IN (
-          SELECT query_key FROM query_index ORDER BY last_requested_at ASC LIMIT ?
+          SELECT query_key FROM query_index WHERE collection_namespace = 'pc_parts_v1'
+          ORDER BY last_requested_at ASC LIMIT ?
         )
       `).run(queryCount - this.limits.maxQueries);
     }
@@ -708,6 +840,190 @@ export class SearchIndex {
     return "cold";
   }
 
+  applyLifecycleProjection(item) {
+    const itemId = cleanText(item?.item_id || item?.id, 700);
+    if (!itemId) return 0;
+    const row = this.db.prepare("SELECT pc_metadata_json FROM listings WHERE item_id = ?").get(itemId);
+    if (!row) return 0;
+    const metadata = { ...jsonObject(row.pc_metadata_json), ...pcProjection(item) };
+    const active = String(item.lifecycle_status || "ACTIVE").toUpperCase() === "ACTIVE" ? 1 : 0;
+    const timestamp = cleanText(item.updated_at, 80) || iso(this.now());
+    return this.db.prepare(`UPDATE listings SET active = ?, inactive_at = ?, last_checked_at = ?,
+      pc_metadata_json = ? WHERE item_id = ?`)
+      .run(active, active ? null : timestamp, timestamp, JSON.stringify(metadata), itemId).changes;
+  }
+
+  upsertPublicProjections(items, options = {}) {
+    const observedAt = cleanText(options.observedAt, 80) || iso(this.now());
+    const normalizedItems = (Array.isArray(items) ? items : [])
+      .filter((item) => item && cleanText(item.title) && cleanText(item.url) && cleanText(item.site))
+      .map((item) => {
+        const site = cleanText(item.site, 40);
+        const sourceListingId = cleanText(item.source_listing_id || item.item_id || item.id || item.url, 700);
+        return {
+          ...item,
+          item_id: cleanText(item.item_id || item.id || `${site}:${sourceListingId}`, 700),
+          site,
+          category_id: cleanText(item.category_id || "pc", 120),
+          title: redactStoredText(item.title, 500),
+          search_text: redactStoredText(item.search_text || `${item.title} ${item.description || ""}`, 1_000),
+          description: redactStoredText(item.description, 2_000),
+          location: redactStoredText(item.location, 300),
+          url: cleanText(item.url, 2_000)
+        };
+      });
+    let inserted = 0;
+    let updated = 0;
+    const changedItemIds = [];
+    this.transaction(() => {
+      const selectListing = this.db.prepare("SELECT content_hash FROM listings WHERE item_id = ?");
+      const upsertListing = this.db.prepare(`INSERT INTO listings(
+        item_id, site, category_id, title, search_text, normalized_text, compact_text,
+        price_value, currency, url, image_url, location, description, posted_at,
+        first_seen_at, last_seen_at, last_checked_at, inactive_at, active, content_hash, pc_metadata_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(item_id) DO UPDATE SET
+        site = excluded.site,
+        category_id = excluded.category_id,
+        title = excluded.title,
+        search_text = excluded.search_text,
+        normalized_text = excluded.normalized_text,
+        compact_text = excluded.compact_text,
+        price_value = excluded.price_value,
+        currency = excluded.currency,
+        url = excluded.url,
+        image_url = excluded.image_url,
+        location = excluded.location,
+        description = excluded.description,
+        posted_at = COALESCE(excluded.posted_at, listings.posted_at),
+        last_seen_at = excluded.last_seen_at,
+        last_checked_at = excluded.last_checked_at,
+        inactive_at = excluded.inactive_at,
+        active = excluded.active,
+        content_hash = excluded.content_hash,
+        pc_metadata_json = excluded.pc_metadata_json`);
+      const deleteFts = this.db.prepare("DELETE FROM listing_fts WHERE item_id = ?");
+      const insertFts = this.db.prepare("INSERT INTO listing_fts(item_id, normalized_text, compact_text) VALUES (?, ?, ?)");
+      for (const item of normalizedItems) {
+        const normalizedText = cleanText(`${item.title} ${item.search_text} ${item.description || ""}`, 4_000).normalize("NFKC").toLowerCase();
+        const compactText = normalizeSearchQuery(normalizedText);
+        const hash = contentHash(item);
+        const previous = selectListing.get(item.item_id);
+        if (!previous) inserted += 1;
+        else if (previous.content_hash !== hash) updated += 1;
+        if (!previous || previous.content_hash !== hash) changedItemIds.push(item.item_id);
+        const status = cleanText(item.lifecycle_status || "ACTIVE", 80).toUpperCase();
+        const active = status === "ACTIVE" || status === "RESERVED" ? 1 : 0;
+        const price = Number.isFinite(Number(item.price)) ? Number(item.price) : null;
+        upsertListing.run(
+          item.item_id, item.site, item.category_id, item.title, item.search_text, normalizedText, compactText,
+          price, cleanText(item.currency || "KRW", 12), item.url, cleanText(item.image_url, 2_000) || null,
+          item.location || null, item.description || null, cleanText(item.posted_at, 80) || null,
+          observedAt, observedAt, observedAt, active ? null : observedAt, active, hash, JSON.stringify(pcProjection(item))
+        );
+        if (!previous || previous.content_hash !== hash) {
+          deleteFts.run(item.item_id);
+          insertFts.run(item.item_id, normalizedText, compactText);
+        }
+      }
+    });
+    return { inserted, updated, changedItemIds };
+  }
+
+  browsePcListings(options = {}) {
+    const canonicalProductId = cleanText(options.canonicalProductId, 300);
+    const manufacturer = cleanText(options.manufacturer, 120);
+    const boardManufacturer = cleanText(options.boardManufacturer, 120);
+    const marketPool = cleanText(options.marketPool, 80);
+    const currency = cleanText(options.currency, 12).toUpperCase();
+    const sites = sortedStrings(options.sites);
+    const minPrice = options.minPrice !== null && options.minPrice !== undefined && options.minPrice !== ""
+      && Number.isFinite(Number(options.minPrice)) ? Number(options.minPrice) : null;
+    const maxPrice = options.maxPrice !== null && options.maxPrice !== undefined && options.maxPrice !== ""
+      && Number.isFinite(Number(options.maxPrice)) ? Number(options.maxPrice) : null;
+    const sort = new Set(["recent", "price_asc", "price_desc"]).has(options.sort) ? options.sort : "recent";
+    const limit = Math.min(100, Math.max(1, Number(options.limit) || 30));
+    const asOf = cleanText(options.asOf, 80) || iso(this.now());
+    const where = [
+      "active = 1",
+      "last_checked_at <= ?",
+      "price_value IS NOT NULL",
+      "price_value > 0",
+      "json_extract(pc_metadata_json, '$.canonical_product_id') IS NOT NULL",
+      "(json_extract(pc_metadata_json, '$.category_code') IN ('CPU', 'GPU', 'RAM', 'MOTHERBOARD', 'SSD', 'HDD', 'PSU') OR json_extract(pc_metadata_json, '$.category_code') IS NULL)",
+      "json_extract(pc_metadata_json, '$.listing_kind') IN ('SINGLE_COMPONENT', 'SAME_PRODUCT_LOT')",
+      "json_extract(pc_metadata_json, '$.lifecycle_status') = 'ACTIVE'",
+      "json_extract(pc_metadata_json, '$.price_eligible') = 1",
+      "json_extract(pc_metadata_json, '$.condition_code') = 'USED_WORKING'",
+      "CAST(json_extract(pc_metadata_json, '$.quantity') AS INTEGER) >= 1",
+      "json_extract(pc_metadata_json, '$.price_scope') IN ('TOTAL', 'UNIT')",
+      "((json_extract(pc_metadata_json, '$.market_pool') IN ('KR_C2C_USED', 'KR_DEALER_USED', 'KR_REFURB_RETAIL') AND currency = 'KRW') OR (json_extract(pc_metadata_json, '$.market_pool') = 'OVERSEAS_USED' AND currency = 'USD'))"
+    ];
+    const params = [asOf];
+    if (canonicalProductId) {
+      where.push("json_extract(pc_metadata_json, '$.canonical_product_id') = ?");
+      params.push(canonicalProductId);
+    }
+    if (manufacturer) {
+      where.push("(json_extract(pc_metadata_json, '$.canonical_manufacturer') = ? OR json_extract(pc_metadata_json, '$.board_manufacturer') = ?)");
+      params.push(manufacturer, manufacturer);
+    }
+    if (boardManufacturer) {
+      where.push("json_extract(pc_metadata_json, '$.category_code') = 'GPU'");
+      where.push("json_extract(pc_metadata_json, '$.board_manufacturer') = ?");
+      params.push(boardManufacturer);
+    }
+    if (sites.length > 0) {
+      where.push(`site IN (${sqlPlaceholders(sites)})`);
+      params.push(...sites);
+    }
+    if (minPrice !== null) {
+      where.push("price_value >= ?");
+      params.push(minPrice);
+    }
+    if (maxPrice !== null) {
+      where.push("price_value <= ?");
+      params.push(maxPrice);
+    }
+    if (marketPool) {
+      where.push("json_extract(pc_metadata_json, '$.market_pool') = ?");
+      params.push(marketPool);
+    }
+    if (currency) {
+      where.push("currency = ?");
+      params.push(currency);
+    }
+    const rows = dedupePcListingRows(this.db.prepare(`SELECT * FROM listings WHERE ${where.join(" AND ")}`).all(...params));
+    const compare = (left, right) => {
+      if (sort !== "recent") {
+        const leftMissing = Number.isFinite(left.price_value) ? 0 : 1;
+        const rightMissing = Number.isFinite(right.price_value) ? 0 : 1;
+        if (leftMissing !== rightMissing) return leftMissing - rightMissing;
+        if (!leftMissing && left.price_value !== right.price_value) {
+          return sort === "price_desc" ? right.price_value - left.price_value : left.price_value - right.price_value;
+        }
+      }
+      const checked = String(right.last_checked_at).localeCompare(String(left.last_checked_at));
+      return checked || String(left.item_id).localeCompare(String(right.item_id));
+    };
+    rows.sort(compare);
+    const after = options.after && typeof options.after === "object" ? options.after : null;
+    const afterIndex = after?.item_id ? rows.findIndex((row) => row.item_id === after.item_id) : null;
+    const start = afterIndex === null ? 0 : afterIndex >= 0 ? afterIndex + 1 : 0;
+    const page = rows.slice(start, start + limit);
+    const hasMore = start + page.length < rows.length;
+    const last = page.at(-1);
+    const latestObservedAt = rows.reduce((latest, row) => String(row.last_checked_at) > latest ? String(row.last_checked_at) : latest, "");
+    return {
+      items: page.map(publicItem),
+      total: rows.length,
+      asOf,
+      latestObservedAt: latestObservedAt || null,
+      cursorFound: afterIndex === null || afterIndex >= 0,
+      nextAfter: hasMore && last ? { item_id: last.item_id } : null
+    };
+  }
+
   queryFreshness(queryKey) {
     const query = this.getQuery(queryKey);
     if (!query?.last_refreshed_at) return { query, ageMs: Infinity, fresh: false, due: true };
@@ -735,8 +1051,10 @@ export class SearchIndex {
         item_id: cleanText(item.item_id || item.id || `${item.site}:${item.url}`, 700),
         site: cleanText(item.site, 40),
         category_id: cleanText(item.category_id || identity.categoryIds[0] || "all", 120),
-        title: cleanText(item.title, 500),
-        search_text: cleanText(item.search_text || `${item.title} ${item.description || ""}`, 1_000),
+        title: redactStoredText(item.title, 500),
+        search_text: redactStoredText(item.search_text || `${item.title} ${item.description || ""}`, 1_000),
+        description: redactStoredText(item.description, 2_000),
+        location: redactStoredText(item.location, 300),
         url: cleanText(item.url, 2_000)
       }));
     const seenBySite = new Map();
@@ -751,11 +1069,11 @@ export class SearchIndex {
         INSERT INTO listings (
           item_id, site, category_id, title, search_text, normalized_text, compact_text,
           price_value, currency, url, image_url, location, description, posted_at,
-          first_seen_at, last_seen_at, last_checked_at, inactive_at, active, content_hash
+          first_seen_at, last_seen_at, last_checked_at, inactive_at, active, content_hash, pc_metadata_json
         ) VALUES (
           ?, ?, ?, ?, ?, ?, ?,
           ?, ?, ?, ?, ?, ?, ?,
-          ?, ?, ?, NULL, 1, ?
+          ?, ?, ?, ?, ?, ?, ?
         )
         ON CONFLICT(item_id) DO UPDATE SET
           site = excluded.site,
@@ -773,9 +1091,10 @@ export class SearchIndex {
           posted_at = COALESCE(excluded.posted_at, listings.posted_at),
           last_seen_at = excluded.last_seen_at,
           last_checked_at = excluded.last_checked_at,
-          inactive_at = NULL,
-          active = 1,
-          content_hash = excluded.content_hash
+          inactive_at = excluded.inactive_at,
+          active = excluded.active,
+          content_hash = excluded.content_hash,
+          pc_metadata_json = excluded.pc_metadata_json
       `);
       const upsertMapping = this.db.prepare(`
         INSERT INTO query_listings(
@@ -799,6 +1118,7 @@ export class SearchIndex {
 
       for (const item of normalizedItems) {
         const price = Number.isFinite(Number(item.price)) ? Number(item.price) : null;
+        const listingActive = String(item.lifecycle_status || "ACTIVE").toUpperCase() === "ACTIVE" ? 1 : 0;
         const rawFraudRisk = Number(item.fraud_risk);
         const fraudRisk = Number.isFinite(rawFraudRisk) && rawFraudRisk >= 0 && rawFraudRisk <= 1 ? rawFraudRisk : null;
         const normalizedText = cleanText(`${item.title} ${item.search_text} ${item.description || ""}`, 4_000).normalize("NFKC").toLowerCase();
@@ -808,7 +1128,8 @@ export class SearchIndex {
         if (!previous) inserted += 1;
         else if (previous.content_hash !== hash) updated += 1;
         if (!previous || previous.content_hash !== hash) changedItemIds.push(item.item_id);
-        if (previous && Number.isFinite(previous.price_value) && Number.isFinite(price) && previous.price_value !== price) {
+        if (identity.namespace !== PC_COLLECTION_NAMESPACE
+          && previous && Number.isFinite(previous.price_value) && Number.isFinite(price) && previous.price_value !== price) {
           insertPrice.run(item.item_id, price, nowText);
           priceChanges += 1;
         }
@@ -817,7 +1138,8 @@ export class SearchIndex {
           price, cleanText(item.currency || "KRW", 12), item.url, cleanText(item.image_url, 2_000) || null,
           cleanText(item.location, 300) || null, cleanText(item.description, 2_000) || null,
           cleanText(item.posted_at, 80) || null,
-          nowText, nowText, nowText, hash
+          nowText, nowText, nowText, listingActive ? null : nowText, listingActive,
+          hash, JSON.stringify(pcProjection(item))
         );
         upsertMapping.run(
           identity.key,
@@ -892,7 +1214,17 @@ export class SearchIndex {
       if (activeCount > this.limits.maxActiveListings) {
         this.db.prepare(`
           DELETE FROM listings WHERE item_id IN (
-            SELECT item_id FROM listings WHERE active = 1 ORDER BY last_seen_at ASC LIMIT ?
+            SELECT l.item_id FROM listings l
+             WHERE l.active = 1
+               AND NOT EXISTS (
+                 SELECT 1
+                   FROM query_listings ql
+                   JOIN query_index qi ON qi.query_key = ql.query_key
+                  WHERE ql.item_id = l.item_id
+                    AND ql.missing_count < 2
+                    AND qi.collection_namespace = 'legacy_general'
+               )
+             ORDER BY l.last_seen_at ASC LIMIT ?
           )
         `).run(activeCount - this.limits.maxActiveListings);
       }
@@ -965,6 +1297,14 @@ export class SearchIndex {
       const placeholders = requestedViewSites.map(() => "?").join(", ");
       conditions.push(`si.site IN (${placeholders})`);
       bindings.push(...requestedViewSites);
+    }
+    if (identity.pcCategoryCode) {
+      conditions.push("json_extract(si.item_json, '$.category_code') = ?");
+      bindings.push(identity.pcCategoryCode);
+    }
+    if (identity.manufacturer) {
+      conditions.push("json_extract(si.item_json, '$.canonical_manufacturer') = ?");
+      bindings.push(identity.manufacturer);
     }
     const minPrice = body?.min_price === undefined || body?.min_price === null || body?.min_price === "" ? null : Number(body.min_price);
     const maxPrice = body?.max_price === undefined || body?.max_price === null || body?.max_price === "" ? null : Number(body.max_price);
@@ -1230,9 +1570,10 @@ export class SearchIndex {
       const job = this.getRefreshJob(row.token);
       const identity = job?.request ? collectionIdentity(job.request) : null;
       const hasSearch = Boolean(identity?.collectionQuery || identity?.categoryIds.length);
+      const isPcCollection = identity?.namespace === PC_COLLECTION_NAMESPACE;
       const sitesSupported = Boolean(identity?.sites.length)
         && (!allowed || identity.sites.every((site) => allowed.has(site)));
-      if (hasSearch && sitesSupported) return job;
+      if (hasSearch && isPcCollection && sitesSupported) return job;
       const error = job?.request_error === "invalid_request_json"
         ? new Error("refresh job request JSON is invalid")
         : !hasSearch
@@ -1328,6 +1669,7 @@ export class SearchIndex {
        LIMIT 200
     `).all(cutoff)
       .filter((row) => jsonArray(row.sites_json).length > 0)
+      .filter((row) => options.includeLegacy === true || jsonArray(row.category_ids_json).includes("pc"))
       .filter((row) => includeBackoff || !row.next_refresh_attempt_at || parseTime(row.next_refresh_attempt_at) <= now)
       .map((row) => {
       const tier = this.queryTier(row);
@@ -1352,35 +1694,38 @@ export class SearchIndex {
   maintenance(options = {}) {
     const now = this.now();
     const inactiveCutoff = iso(now - INACTIVE_RETENTION_MS);
-    const priceCutoff = iso(now - PRICE_HISTORY_RETENTION_MS);
     const queryCutoff = iso(now - QUERY_RETENTION_MS);
     const jobCutoff = iso(now);
     this.transaction(() => {
       this.db.prepare("DELETE FROM refresh_jobs WHERE expires_at < ?").run(jobCutoff);
       this.db.prepare("DELETE FROM query_snapshots WHERE expires_at < ?").run(jobCutoff);
       this.db.prepare("DELETE FROM comparison_runs WHERE created_at < ?").run(iso(now - 7 * DAY_MS));
-      this.db.prepare("DELETE FROM query_index WHERE last_requested_at < ?").run(queryCutoff);
-      this.db.prepare("DELETE FROM price_history WHERE observed_at < ?").run(priceCutoff);
-      this.db.exec(`
-        DELETE FROM price_history
-         WHERE id IN (
-           SELECT id FROM (
-             SELECT id, ROW_NUMBER() OVER (PARTITION BY item_id ORDER BY observed_at DESC) AS position
-               FROM price_history
-           ) WHERE position > 10
-         );
-      `);
+      this.db.prepare(`DELETE FROM query_index
+        WHERE collection_namespace = 'pc_parts_v1' AND last_requested_at < ?`).run(queryCutoff);
+      // Legacy price_history is a rollback-only, read-only dataset. PC price
+      // changes are recorded in listing_snapshots and this table is not mutated.
       this.db.prepare("DELETE FROM listings WHERE active = 0 AND inactive_at < ?").run(inactiveCutoff);
       if (options.pressure === true) {
         this.db.prepare("DELETE FROM listings WHERE active = 0").run();
-        this.db.prepare("DELETE FROM query_index WHERE last_requested_at < ?").run(iso(now - QUERY_ACTIVE_MS));
+        this.db.prepare(`DELETE FROM query_index
+          WHERE collection_namespace = 'pc_parts_v1' AND last_requested_at < ?`).run(iso(now - QUERY_ACTIVE_MS));
       }
       const activeCount = Number(this.db.prepare("SELECT COUNT(*) AS count FROM listings WHERE active = 1").get()?.count || 0);
       if (activeCount > this.limits.maxActiveListings) {
         const overflow = activeCount - this.limits.maxActiveListings;
         this.db.prepare(`
           DELETE FROM listings WHERE item_id IN (
-            SELECT item_id FROM listings WHERE active = 1 ORDER BY last_seen_at ASC LIMIT ?
+            SELECT l.item_id FROM listings l
+             WHERE l.active = 1
+               AND NOT EXISTS (
+                 SELECT 1
+                   FROM query_listings ql
+                   JOIN query_index qi ON qi.query_key = ql.query_key
+                  WHERE ql.item_id = l.item_id
+                    AND ql.missing_count < 2
+                    AND qi.collection_namespace = 'legacy_general'
+               )
+             ORDER BY l.last_seen_at ASC LIMIT ?
           )
         `).run(overflow);
       }
@@ -1388,7 +1733,8 @@ export class SearchIndex {
       if (queryCount > this.limits.maxQueries) {
         this.db.prepare(`
           DELETE FROM query_index WHERE query_key IN (
-            SELECT query_key FROM query_index ORDER BY last_requested_at ASC LIMIT ?
+            SELECT query_key FROM query_index WHERE collection_namespace = 'pc_parts_v1'
+            ORDER BY last_requested_at ASC LIMIT ?
           )
         `).run(queryCount - this.limits.maxQueries);
       }
@@ -1409,6 +1755,22 @@ export class SearchIndex {
     const backups = readdirSync(this.backupDir)
       .filter((name) => /^search-index-\d{4}-\d{2}-\d{2}\.sqlite$/.test(name))
       .map((name) => ({ name, path: path.join(this.backupDir, name), modified: statSync(path.join(this.backupDir, name)).mtimeMs }))
+      .sort((left, right) => right.modified - left.modified);
+    for (const backup of backups.slice(3)) unlinkSync(backup.path);
+    return destination;
+  }
+
+  createMigrationBackup(fromVersion) {
+    if (!this.backupDir || this.filePath === ":memory:") return null;
+    mkdirSync(this.backupDir, { recursive: true });
+    const timestamp = iso(this.now()).replace(/[:.]/gu, "-");
+    const destination = path.join(this.backupDir, `search-index-pre-migration-v${Number(fromVersion) || 0}-${timestamp}.sqlite`);
+    const escaped = destination.replaceAll("'", "''");
+    this.db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+    this.db.exec(`VACUUM INTO '${escaped}'`);
+    const backups = readdirSync(this.backupDir)
+      .filter((name) => /^search-index-pre-migration-v\d+-.*\.sqlite$/u.test(name))
+      .map((name) => ({ path: path.join(this.backupDir, name), modified: statSync(path.join(this.backupDir, name)).mtimeMs }))
       .sort((left, right) => right.modified - left.modified);
     for (const backup of backups.slice(3)) unlinkSync(backup.path);
     return destination;

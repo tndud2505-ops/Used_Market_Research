@@ -3,174 +3,263 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="description" content="중고나라·번개장터·헬로마켓·리씽크몰·eBay 매물을 한 번에 검색하고 가격과 출처를 비교하는 통합검색 서비스입니다." />
+    <meta name="description" content="중고 PC와 컴퓨터 부품을 모델별로 검색하세요. 중고 그래픽카드, CPU, RAM, SSD, 메인보드, 파워서플라이 매물과 최근 30일 중고 시세를 비교합니다." />
     <meta name="robots" content="index, follow, max-image-preview:large" />
     <meta name="google-site-verification" content="3DaGcd7QWP0wz8ZE1kklG8d728HZDpGBb_g4pU-gh7M" />
     <link rel="canonical" href="https://used-pick.com/" />
     <meta property="og:type" content="website" />
-    <meta property="og:site_name" content="USED MARKET" />
+    <meta property="og:site_name" content="USED PICK" />
     <meta property="og:locale" content="ko_KR" />
-    <meta property="og:title" content="중고매물 통합검색 | USED MARKET" />
-    <meta property="og:description" content="중고나라·번개장터·헬로마켓·리씽크몰·eBay 매물을 한 번에 검색하고 가격과 출처를 비교하세요." />
+    <meta property="og:title" content="중고 PC·컴퓨터 부품 검색 | 중고 시세 비교 | USED PICK" />
+    <meta property="og:description" content="중고 그래픽카드, CPU, RAM, SSD 등 컴퓨터 부품 매물과 최근 중고 시세를 모델별로 비교하세요." />
     <meta property="og:url" content="https://used-pick.com/" />
     <meta name="twitter:card" content="summary" />
-    <meta name="twitter:title" content="중고매물 통합검색 | USED MARKET" />
-    <meta name="twitter:description" content="여러 중고마켓의 중고매물을 한 번에 검색하고 가격과 출처를 비교합니다." />
-    <title>중고매물 통합검색 | USED MARKET</title>
+    <meta name="twitter:title" content="중고 PC·컴퓨터 부품 검색 | 중고 시세 비교 | USED PICK" />
+    <meta name="twitter:description" content="중고 그래픽카드, CPU, RAM, SSD 등 컴퓨터 부품 매물과 최근 중고 시세를 모델별로 비교하세요." />
+    <title>중고 PC·컴퓨터 부품 검색 | 중고 시세 비교 | USED PICK</title>
     <script type="application/ld+json">
       {
         "@context": "https://schema.org",
         "@type": "WebSite",
         "@id": "https://used-pick.com/#website",
         "url": "https://used-pick.com/",
-        "name": "중고매물 통합검색 | USED MARKET",
+        "name": "중고 PC·컴퓨터 부품 검색 | USED PICK",
         "alternateName": ["USED MARKET", "USED PICK"],
         "inLanguage": "ko-KR",
-        "description": "여러 중고마켓의 중고매물을 한 번에 검색하고 가격과 출처를 비교하는 중고매물 통합검색 서비스입니다."
+        "description": "중고 PC와 컴퓨터 부품의 공개 매물, 모델별 가격, 최근 30일 중고 시세를 비교하는 검색 서비스입니다.",
+        "potentialAction": {
+          "@type": "SearchAction",
+          "target": "https://used-pick.com/?q={search_term_string}",
+          "query-input": "required name=search_term_string"
+        }
       }
     </script>
     <link rel="icon" href="/assets/mark.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css?v=domestic-pagination-v6" />
-    <link rel="stylesheet" href="/pagination-toolbar.css?v=summary-pagination-v1" />
-    <style>
-      .source-summary { display: flex; flex-wrap: wrap; gap: 5px 12px; min-width: 0; max-width: 100%; margin-top: 6px; color: #888a84; font-size: 10px; line-height: 1.35; overflow-wrap: anywhere; }
-      .source-summary-item { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; white-space: nowrap; }
-      .source-summary-item::before { width: 5px; height: 5px; border-radius: 50%; background: #368264; content: ""; }
-      .source-summary-item.is-empty::before { background: #b2b4ad; }
-      .source-summary-item.is-warning { color: #b55448; font-weight: 800; }
-      .source-summary-item.is-warning::before { background: #b55448; }
-      .item-source-badge { display: inline-block; margin-right: 3px; padding: 3px 5px; color: #50534c; background: #edf1f2; font-size: 9px; font-weight: 800; line-height: 1; }
-    </style>
+    <link rel="stylesheet" href="/styles.css?v=pc-directory-v25" />
   </head>
   <body>
     <a class="skip-link" href="#main">본문으로 건너뛰기</a>
-    <div class="market-app">
-      <header class="site-header">
-        <a class="brand" href="/" aria-label="USED Market 홈"><img src="/assets/mark.svg" alt="" /><span>USED MARKET</span></a>
-        <div class="header-search">
-          <form class="top-search" id="search-form">
-            <label class="sr-only" for="keyword">상품 검색</label>
-            <span aria-hidden="true">⌕</span>
-            <input id="keyword" name="keyword" autocomplete="off" placeholder="상품명, 브랜드, 모델 검색" />
-            <button id="search-button" type="submit"><span>검색</span><b>↵</b></button>
+
+    <header class="site-header">
+      <a class="brand" href="/" aria-label="USED PICK 홈">
+        <span class="brand-used">USED</span><span class="brand-pick">PICK</span>
+      </a>
+      <form class="catalog-search" id="catalog-search" role="search">
+        <label class="sr-only" for="catalog-query">중고 PC 부품 모델 검색</label>
+        <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"></circle><path d="m15.5 15.5 5 5"></path></svg>
+        <input id="catalog-query" name="q" type="search" autocomplete="off" placeholder="중고 PC 부품 검색: RTX 4070 SUPER, 7800X3D, DDR5 32GB" />
+        <button type="submit">검색</button>
+      </form>
+      <div class="catalog-meta" id="catalog-meta" aria-live="polite" hidden>제품 목록을 불러오는 중</div>
+    </header>
+
+    <main id="main" class="directory-shell">
+      <aside class="filter-rail" aria-label="카테고리 탐색">
+        <div class="filter-rail-sticky">
+          <div class="rail-title">
+            <strong>중고 PC 부품</strong>
+          </div>
+          <nav id="category-rail" class="category-rail" aria-label="부품 카테고리">
+            <a class="category-button" href="/categories/cpu" aria-pressed="true"><span class="category-marker" aria-hidden="true"></span><span class="category-label">CPU</span><span class="category-count">186개</span></a>
+            <a class="category-button" href="/categories/gpu" aria-pressed="false"><span class="category-marker" aria-hidden="true"></span><span class="category-label">그래픽카드</span><span class="category-count">94개</span></a>
+            <a class="category-button" href="/categories/ram" aria-pressed="false"><span class="category-marker" aria-hidden="true"></span><span class="category-label">RAM</span><span class="category-count">216개</span></a>
+            <a class="category-button" href="/categories/motherboard" aria-pressed="false"><span class="category-marker" aria-hidden="true"></span><span class="category-label">메인보드</span><span class="category-count">12개</span></a>
+            <a class="category-button" href="/categories/ssd" aria-pressed="false"><span class="category-marker" aria-hidden="true"></span><span class="category-label">SSD</span><span class="category-count">66개</span></a>
+            <a class="category-button" href="/categories/hdd" aria-pressed="false"><span class="category-marker" aria-hidden="true"></span><span class="category-label">HDD</span><span class="category-count">31개</span></a>
+            <a class="category-button" href="/categories/psu" aria-pressed="false"><span class="category-marker" aria-hidden="true"></span><span class="category-label">파워서플라이</span><span class="category-count">34개</span></a>
+          </nav>
+        </div>
+      </aside>
+
+      <section class="catalog-workspace" aria-labelledby="workspace-title">
+        <div class="workspace-heading">
+          <div>
+            <h1 id="workspace-title">중고 PC 부품 검색</h1>
+            <p class="workspace-intro" id="workspace-intro">중고 컴퓨터 부품을 모델별로 검색하고 현재 매물과 최근 중고 시세를 비교하세요.</p>
+          </div>
+          <p class="workspace-count" id="product-count">—</p>
+        </div>
+
+        <section class="model-filters" id="model-filters" aria-label="상품 필터">
+          <div class="model-filters-heading">
+            <h2>필터</h2>
+            <div class="filter-heading-actions">
+              <span class="filter-context" id="filter-context" aria-live="polite"></span>
+              <button class="reset-filters" id="reset-filters" type="button" hidden>초기화</button>
+            </div>
+          </div>
+          <div id="facet-rows"></div>
+        </section>
+
+        <div class="catalog-message" id="catalog-message" role="status" aria-live="polite" hidden></div>
+
+        <section class="model-directory" id="model-directory" aria-labelledby="model-list-title">
+          <div class="section-bar">
+            <h2 id="model-list-title">중고 PC 부품 모델 목록</h2>
+            <span id="model-list-context">카테고리를 선택하세요</span>
+          </div>
+          <div class="model-table-wrap">
+            <table class="model-table">
+              <thead>
+                <tr>
+                  <th scope="col">모델</th>
+                  <th scope="col">주요 사양</th>
+                  <th id="model-brand-header" scope="col">브랜드</th>
+                  <th scope="col" class="numeric">판매중</th>
+                  <th scope="col" class="numeric">중앙값</th>
+                  <th scope="col" class="numeric">판매완료 표시가</th>
+                </tr>
+              </thead>
+              <tbody id="product-rows"></tbody>
+            </table>
+            <div class="directory-empty" id="product-empty" hidden>
+              <strong>표시할 중고 PC 부품이 없습니다</strong>
+              <p>다른 부품 카테고리나 모델을 검색해 보세요.</p>
+            </div>
+          </div>
+          <button class="load-more" id="load-more-products" type="button" hidden>모델 더 보기</button>
+        </section>
+
+        <section class="listing-section" id="listing-section" hidden aria-labelledby="listing-title">
+          <div class="listing-heading">
+            <div>
+              <button class="back-to-models" id="back-to-models" type="button">← 다른 모델 선택</button>
+              <h2 id="listing-title">중고 PC 부품 현재 매물</h2>
+              <p class="listing-scope-note" id="listing-scope-note">묶음·고장·박스만·수량 불명확 매물은 가격 통계에서 제외합니다.</p>
+            </div>
+            <span id="listing-freshness"></span>
+          </div>
+          <form class="listing-controls" id="listing-controls">
+            <label>
+              <span>정렬</span>
+              <select id="listing-sort" name="sort">
+                <option value="recent">최근 수집순</option>
+                <option value="price_asc">낮은 가격순</option>
+                <option value="price_desc">높은 가격순</option>
+              </select>
+            </label>
+            <label>
+              <span>최저가</span>
+              <input id="price-min" name="price_min" inputmode="numeric" placeholder="0" />
+            </label>
+            <label>
+              <span>최고가</span>
+              <input id="price-max" name="price_max" inputmode="numeric" placeholder="제한 없음" />
+            </label>
+            <button type="submit">적용</button>
           </form>
-          <div class="recent-searches" aria-labelledby="recent-searches-title">
-            <div class="recent-searches-heading">
-              <h2 id="recent-searches-title">최근 검색</h2>
-              <button id="clear-recent-searches" type="button" hidden>전체 삭제</button>
-            </div>
-            <div class="recent-search-list" id="recent-search-list" aria-live="polite"></div>
+          <div class="listing-table-head" aria-hidden="true">
+            <span>사이트·매물</span><span>브랜드·상태</span><span>관측 시각</span><span>가격</span>
           </div>
-          <span class="search-status" id="search-status" role="status"></span>
-        </div>
-      </header>
-
-      <main id="main">
-        <nav class="site-tabs" id="site-tabs" aria-label="검색 사이트">
-          <button class="active" type="button" aria-pressed="true" data-site-tab="all">전체</button>
-          <button type="button" aria-pressed="false" data-site-tab="joonggonara">중고나라</button>
-          <button type="button" aria-pressed="false" data-site-tab="bunjang">번개장터</button>
-          <button type="button" aria-pressed="false" data-site-tab="hellomarket">헬로마켓</button>
-          <button type="button" aria-pressed="false" data-site-tab="rethinkmall">리씽크몰</button>
-          <button type="button" aria-pressed="false" data-site-tab="ebay">eBay</button>
-        </nav>
-
-          <div class="catalog-layout">
-            <aside class="category-sidebar is-collapsed" aria-label="상품 카테고리">
-              <div class="category-heading">
-              <div class="category-heading-copy"><span class="eyebrow">BROWSE</span><h2>카테고리</h2></div>
-              <button class="category-disclosure" id="category-panel-toggle" type="button" aria-expanded="false" aria-controls="category-list" aria-label="카테고리 선택 펼치기">
-                <span class="category-summary" id="category-summary">전체</span>
-                <span class="category-disclosure-icon" aria-hidden="true"></span>
-              </button>
-            </div>
-            <nav class="category-list" id="category-list" aria-label="상품 카테고리 목록 (여러 개 선택 가능)" aria-hidden="true">
-              <button class="active" type="button" data-category-id="all" aria-current="page">전체</button>
-            </nav>
+          <div id="listing-rows" class="listing-rows"></div>
+            <div class="detail-empty" id="listing-empty" hidden>조건에 맞는 매물이 없습니다.</div>
+          <div id="pagination-controls">
+            <button class="load-more" id="load-more-listings" type="button" hidden>매물 더 보기</button>
+          </div>
+          <aside class="contextual-offer" id="contextual-offer" hidden aria-label="관련 광고">
+            <span class="contextual-offer-label">광고</span>
+            <strong id="contextual-offer-title"></strong>
+            <span id="contextual-offer-provider"></span>
+            <a id="contextual-offer-link" target="_blank" rel="sponsored noopener noreferrer"></a>
+            <p>이 링크를 통해 구매하면 USED PICK이 수수료를 받을 수 있습니다. 시세와 추천순에는 영향을 주지 않습니다.</p>
           </aside>
+        </section>
+      </section>
 
-          <div class="results-column">
-            <section class="idle-panel" id="idle-panel" aria-labelledby="idle-title">
-              <div class="idle-message">
-                <img class="idle-mascot" src="/assets/empty-search-mascot.png" alt="검색을 돕는 USED Market 마스코트" width="128" height="128" />
-                <div class="idle-speech">
-                  <span class="eyebrow">USED MARKET</span>
-                  <h1 id="idle-title">중고매물<br />통합검색</h1>
-                  <p id="idle-description">중고나라·번개장터·헬로마켓·리씽크몰·eBay 매물을 한 번에 비교해 보세요.</p>
-                </div>
-              </div>
-            </section>
-            <section class="results-section" aria-busy="false">
-              <div class="results-toolbar">
-                <div class="result-count">
-                  <div class="result-summary-row">
-                    <strong id="result-count">0개</strong>
-                    <nav class="result-summary-pagination" id="result-summary-pagination" aria-label="현재 검색 결과 페이지 이동" hidden></nav>
-                  </div>
-                  <div id="freshness-status" class="freshness-status" aria-live="polite" hidden>
-                    <span id="freshness-message"></span>
-                    <button id="apply-refresh-results" type="button" hidden>새 매물 보기</button>
-                  </div>
-                  <div id="source-summary" class="source-summary" aria-live="polite"></div>
-                  <p id="control-notice" class="control-notice" role="status" hidden></p>
-                </div>
-                <div class="result-toolbar-actions">
-                  <div class="filter-dock" aria-label="검색 가격 범위">
-                    <label><span class="sr-only">최소 가격</span><input id="min-price" type="number" min="0" max="100000000000" step="10000" placeholder="최소 가격" aria-label="최소 가격" /></label>
-                    <span class="filter-range-separator" aria-hidden="true">~</span>
-                    <label><span class="sr-only">최대 가격</span><input id="max-price" type="number" min="0" max="100000000000" step="10000" placeholder="최대 가격" aria-label="최대 가격" /></label>
-                    <button class="apply-price-filter" id="apply-price-filter" type="button">적용</button>
-                    <button id="reset-filters" type="button">초기화</button>
-                  </div>
-                <nav class="result-sort-tabs" id="sort-tabs" aria-label="정렬 방식">
-                  <button class="active" type="button" data-sort="recommended" aria-pressed="true">추천순</button>
-                  <button type="button" data-sort="price_asc" aria-pressed="false">낮은 가격순</button>
-                  <button type="button" data-sort="price_desc" aria-pressed="false">높은 가격순</button>
-                  <button type="button" data-sort="recent" aria-pressed="false">최신순</button>
-                </nav>
-                </div>
-              </div>
-              <div class="result-list" id="result-list">
-                <div class="empty-state" aria-hidden="true"></div>
-              </div>
-              <nav class="result-pagination" id="pagination-controls" aria-label="검색 결과 페이지" hidden></nav>
-            </section>
-
+      <aside class="price-panel" aria-labelledby="price-panel-title">
+        <div class="price-panel-sticky">
+          <div class="price-panel-toolbar">
+            <span class="price-panel-label">30일 평균 가격 차트</span>
+            <button class="price-panel-toggle" id="price-panel-toggle" type="button" aria-expanded="false" aria-controls="price-panel-content" aria-label="30일 평균 가격 차트 펼치기" disabled>
+              <span class="price-panel-toggle-icon" aria-hidden="true">+</span>
+              <span class="price-panel-toggle-text">차트 보기</span>
+            </button>
           </div>
 
-          <aside class="recent-viewed-panel" id="recent-viewed" aria-labelledby="recent-viewed-title">
-            <div class="recent-viewed-heading">
-              <span class="eyebrow">RECENT</span>
-              <h2 id="recent-viewed-title">최근 본 상품</h2>
+          <div class="price-panel-content" id="price-panel-content" hidden>
+            <div class="selection-head">
+              <h2 id="price-panel-title">모델을 선택하세요</h2>
+              <p id="selected-product-meta">표준 모델과 출처별 가격 통계를 확인할 수 있습니다.</p>
             </div>
-            <div class="recent-viewed-list" id="recent-viewed-list" aria-live="polite">
-              <div class="recent-viewed-empty"><span class="recent-viewed-empty-icon" aria-hidden="true">⌕</span><p>최근 본 상품이 없습니다.</p></div>
-            </div>
-            <section class="coupang-banner" aria-label="쿠팡 파트너스 광고">
-              <a class="coupang-banner-link" href="https://link.coupang.com/a/gbzRxu5ZU4" target="_blank" rel="sponsored noopener" referrerpolicy="unsafe-url" aria-describedby="coupang-banner-disclosure">
-                <img src="https://ads-partners.coupang.com/banners/1017393?trackingCode=AF1654530&amp;subId=&amp;traceId=V0-301-969b06e95b87326d-I1017393&amp;w=600&amp;h=900" alt="로켓와우 회원전용 매일 오전 7시 공개 프로모션" loading="lazy" decoding="async">
-              </a>
-              <p id="coupang-banner-disclosure">이 게시물은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.</p>
-            </section>
-          </aside>
 
+            <div class="price-source-scope">
+              <div class="facet-row source-facet" id="source-facet-row" hidden>
+                <h2>사이트 범위</h2>
+                <div class="facet-values" id="source-filters"></div>
+              </div>
+            </div>
+
+            <div class="detail-message" id="detail-message" role="status" aria-live="polite"></div>
+
+            <section class="reference-price" id="reference-price" hidden aria-labelledby="reference-title">
+              <div>
+                <span id="reference-title">최근 30일 기준가격</span>
+                <strong id="reference-value">—</strong>
+              </div>
+              <p id="reference-note">판매완료 직전 마지막 표시가격 중앙값</p>
+            </section>
+
+            <section class="price-summary" id="price-summary" hidden aria-label="가격 요약">
+              <article class="summary-block active-summary">
+                <h3>현재 판매중</h3>
+                <dl>
+                  <div><dt>평균</dt><dd id="active-mean">—</dd></div>
+                  <div><dt>중앙값</dt><dd id="active-median">—</dd></div>
+                  <div><dt>표본</dt><dd id="active-count">0건</dd></div>
+                </dl>
+              </article>
+              <article class="summary-block reserved-summary">
+                <h3>예약중 표시가격</h3>
+                <dl>
+                  <div><dt>평균</dt><dd id="reserved-mean">—</dd></div>
+                  <div><dt>중앙값</dt><dd id="reserved-median">—</dd></div>
+                  <div><dt>표본</dt><dd id="reserved-count">0건</dd></div>
+                </dl>
+                <p>예약중 매물에 표시된 가격이며 실제 체결가가 아닙니다.</p>
+              </article>
+              <article class="summary-block sold-summary">
+                <h3>판매완료 마지막 표시가격</h3>
+                <dl>
+                  <div><dt>평균</dt><dd id="sold-mean">—</dd></div>
+                  <div><dt>중앙값</dt><dd id="sold-median">—</dd></div>
+                  <div><dt>표본</dt><dd id="sold-count">0건</dd></div>
+                </dl>
+                <p>실제 체결가와 다를 수 있습니다.</p>
+              </article>
+              <article class="summary-block confirmed-summary">
+                <h3>확인된 실제 거래</h3>
+                <dl>
+                  <div><dt>평균</dt><dd id="confirmed-mean">—</dd></div>
+                  <div><dt>중앙값</dt><dd id="confirmed-median">—</dd></div>
+                  <div><dt>표본</dt><dd id="confirmed-count">0건</dd></div>
+                </dl>
+                <p>거래 근거가 확인된 체결가만 포함 · 예약중은 제외</p>
+              </article>
+            </section>
+
+            <section class="stats-section" id="stats-section" hidden aria-labelledby="stats-title">
+              <div class="section-bar compact">
+                <h3 id="stats-title">최근 30일 평균 가격 차트</h3>
+                <time id="stats-as-of"></time>
+              </div>
+              <div id="stats-groups" class="stats-groups"></div>
+              <p class="method-note">예약중·판매완료 값은 각 상태에서 표시된 가격이며 실제 체결가가 아닙니다. 확인된 체결가는 출처가 구조적으로 제공한 경우에만 별도로 집계합니다.</p>
+            </section>
+          </div>
         </div>
-      </main>
-      <footer class="site-footer">
-        <div>
-          <strong>USED MARKET</strong>
-          <p>공개 중고상품 목록을 비교하는 검색 서비스입니다.</p>
-        </div>
-        <nav aria-label="서비스 문서">
-          <a href="/guide.html">이용 안내</a>
-          <a href="/used-market-integration.html">통합검색 소개</a>
-          <a href="/iphone-used-items.html">아이폰 중고매물</a>
-          <a href="/used-market-categories.html">중고매물 카테고리</a>
-          <a href="/privacy.html">개인정보처리방침</a>
-          <a href="/terms.html">이용약관</a>
-        </nav>
-      </footer>
-    </div>
-    <script type="module" src="/app.js?v=domestic-ebay-v10"></script>
+      </aside>
+    </main>
+
+    <footer class="site-footer">
+      <p>USED PICK은 중고 PC와 컴퓨터 부품의 공개 표시가격을 비교하며 거래를 중개하지 않습니다.</p>
+      <nav aria-label="정책 문서">
+        <a href="/categories">중고 PC 부품 카테고리</a>
+        <a href="/guide.html">중고 PC 검색 이용 안내</a>
+        <a href="/privacy.html">개인정보처리방침</a>
+        <a href="/terms.html">이용약관</a>
+      </nav>
+    </footer>
+
+    <script type="module" src="/app.js?v=pc-directory-v25"></script>
   </body>
 </html>

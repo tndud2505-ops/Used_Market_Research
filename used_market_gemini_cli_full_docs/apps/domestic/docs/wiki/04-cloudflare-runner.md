@@ -14,7 +14,7 @@ Cloudflare Cron Trigger
   -> market snapshot + scheduler result
 ```
 
-Cloudflare Worker는 현재 Node/CDP 브라우저 수집기를 직접 실행하지 않는다. Worker는 주기·인증·호출 경계를 담당하고, 실제 브라우저 세션과 기존 부품 로직은 Node 러너가 담당한다.
+Cloudflare Worker는 Node/CDP 브라우저 수집기를 직접 실행하지 않는다. PC 전용 고주기 수집을 전환하면 AWS Runner가 cadence를 소유하고 Worker cron은 watchdog·복구 경계만 담당한다. 전환 전에는 기존 cron dispatch를 유지한다.
 
 사용자 실시간 검색은 별도 흐름이다.
 
@@ -47,7 +47,7 @@ Cloudflare만으로 이 경로를 대체하지 않는 이유는 Workers 런타�
 
 - Worker: `cloudflare/worker.mjs`
 - 배포 설정: `cloudflare/wrangler.jsonc`
-- Worker 자체 하네스: `cloudflare/harness.mjs`
+- Worker 계약: `npm run cloudflare:harness`
 - Node 실행 서비스: `web-backend/logic/runner-service.ts`
 - 인증 엔드포인트: `POST /api/runner/run`
 - 상태 확인: `GET /api/runner/status`
@@ -70,6 +70,18 @@ Cloudflare만으로 이 경로를 대체하지 않는 이유는 Workers 런타�
 - 웹/Cloudflare 수동 실행도 스케줄러 데몬과 동일하게 알림 dispatch와 reporter 후처리를 수행하며, 후처리 실패는 `partial_success`와 `postprocess.warnings`로 노출한다.
 
 ## 시간대
+
+PC 전용 source cadence는 AWS에서 KST로 계산하며 0~120초 jitter를 적용한다. Runner의 `PC_PARTS_SCHEDULER_ENABLED=true`를 먼저 확인한 뒤 Worker를 배포한다. Worker 배포 설정은 `AWS_PC_SCHEDULER_AUTHORITY=true`이므로 Cloudflare cron은 중복 수집을 하지 않고 watchdog과 일일 통계 publication만 수행한다. 번개장터·다나와·쿨엔조이는 registry 정책이 `REVIEW_REQUIRED`라 이 플래그만 켜도 호출되지 않으며, 별도의 governance JSON과 운영자 승인이 필요하다.
+
+| 소스 | KST 분 |
+| --- | --- |
+| 중고나라 | 04, 34 |
+| 번개장터 | 11, 41 |
+| 다나와 | 19, 49 |
+| 헬로마켓 | 27 |
+| 리씽크몰 | 36 |
+| eBay | 44 |
+| 쿨엔조이 | 52 |
 
 Cloudflare Cron은 UTC 기준으로 해석된다. 현재 Node 스케줄러의 `Asia/Seoul` 표기와 완전히 같은 시각이 필요하면 Cron 표현식을 UTC로 변환하고 배포 후 실제 실행 로그를 확인한다.
 
@@ -94,6 +106,8 @@ Free 플랜의 5개 Cron 제한 때문에 `daily-price-refresh`는 `0 */2 * * *`
 - Workers Logs: `observability.enabled=true`, 요청 100% sampling (트래픽 증가 시 비율 재조정)
 
 Quick Tunnel은 운영 경로가 아니다. 배포 시 `CLOUDFLARE_TUNNEL_MODE=named`를 사용하고, `/health`의 `collection_window: 1000`과 `search_index.enabled`, 공개 `/api/search`의 `x-search-data-source: aws-runner`, 가격 범위와 페이지 cursor를 함께 확인한다.
+
+AWS release 배포는 `install-ubuntu24.sh`를 반복 실행한다. 스크립트는 Runner를 먼저 재시작하고 Named Tunnel을 enable·재시작한 다음 로컬·공개 `/health`의 `process_instance.id`가 같은지 확인한다. Runner만 stop/start하면 `Requires=` 관계로 내려간 Tunnel이 복구되지 않을 수 있으므로 배포 완료로 인정하지 않는다.
 
 2026-08-17 4사이트 배포 확인에서 AWS의 `used-market-runner.service`와 `used-market-tunnel.service`는 모두 `active`였다. 공개 runner·두 사용자 도메인의 health는 모두 HTTP 200이고, 검색 용량은 동시 4개·대기열 16개·확장 스냅샷 최대 1,000개다. 당시에는 `shadow` 모드를 유지했다.
 

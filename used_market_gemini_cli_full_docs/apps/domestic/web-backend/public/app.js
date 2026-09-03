@@ -1,1960 +1,1949 @@
-import { RESULT_PAGE_SIZE, clampResultPage, maxNavigableResultPage, pageResponseMatchesCursor, paginationItems, resultPageCount } from './pagination.mjs?v=pagination-v7';
-
-const APP_ID = 'domestic';
-const uiText = (korean) => korean;
-const storageKey = (base) => base;
-const DEFAULT_SITES = ['joonggonara', 'bunjang', 'hellomarket', 'rethinkmall', 'ebay'];
-const SEARCH_ONLY_SITES = new Set(['hellomarket', 'rethinkmall', 'ebay']);
-const LISTING_HOSTS_BY_SITE = {
-  joonggonara: ['joongna.com'],
-  bunjang: ['bunjang.co.kr'],
-  hellomarket: ['hellomarket.com'],
-  rethinkmall: ['rethinkmall.com'],
-  ebay: ['ebay.com'],
-  daangn: ['daangn.com']
-};
-const IMAGE_HOSTS = [
-  'i.ebayimg.com',
-  'img2.joongna.com',
-  'media.bunjang.co.kr',
-  'img.bunjang.co.kr',
-  'ccimage.hellomarket.com',
-  'ccimg.hellomarket.com',
-  'static.rethinkmall.com',
-  'assets.rethinkmall.com',
-  'img.kr.gcp-karroter.net'
+const PRODUCT_QUERY_KEYS = new Set([
+  "manufacturer", "model", "gpu_model", "board_brand", "usage", "configuration", "socket", "chipset", "form_interface", "capacity", "purpose", "rated_wattage",
+  "chip_manufacturer", "market_segment", "family", "generation", "vram_gb",
+  "platform_vendor", "socket", "suffix", "memory_generation", "module_capacity_gb", "form_factor", "ecc", "buffering",
+  "chipset", "capacity_bucket", "interface", "protocol", "pcie_generation", "use_class", "recording_technology",
+  "watts_bucket", "atx_spec", "modularity", "efficiency", "subtype", "radiator_mm", "fan_mm", "chassis_class",
+  "motherboard_support", "side_panel", "host_interface", "bracket", "media_family", "capability", "placement",
+]);
+const DEFAULT_BROWSE_FLOWS = Object.freeze({
+  CPU: Object.freeze([
+    Object.freeze({ key: "manufacturer", label: "제조사" }),
+    Object.freeze({ key: "generation", label: "CPU 시리즈", depends_on: Object.freeze(["manufacturer"]) }),
+  ]),
+  GPU: Object.freeze([
+    Object.freeze({ key: "manufacturer", label: "제조사" }),
+    Object.freeze({ key: "generation", label: "GPU 시리즈", depends_on: Object.freeze(["manufacturer"]) }),
+  ]),
+  RAM: Object.freeze([
+    Object.freeze({ key: "usage", label: "사용 유형" }),
+    Object.freeze({ key: "module_capacity_gb", label: "용량(GB)", depends_on: Object.freeze(["usage"]) }),
+    Object.freeze({ key: "memory_generation", label: "DDR 세대", depends_on: Object.freeze(["usage", "module_capacity_gb"]) }),
+  ]),
+  MOTHERBOARD: Object.freeze([
+    Object.freeze({ key: "socket", label: "CPU 소켓" }),
+    Object.freeze({ key: "chipset", label: "칩셋", depends_on: Object.freeze(["socket"]) }),
+    Object.freeze({ key: "form_factor", label: "폼팩터", depends_on: Object.freeze(["socket", "chipset"]) }),
+    Object.freeze({ key: "manufacturer", label: "제조사", depends_on: Object.freeze(["socket", "chipset", "form_factor"]) }),
+  ]),
+  SSD: Object.freeze([
+    Object.freeze({ key: "capacity", label: "용량" }),
+    Object.freeze({ key: "manufacturer", label: "제조사", depends_on: Object.freeze(["capacity"]) }),
+  ]),
+  HDD: Object.freeze([
+    Object.freeze({ key: "capacity", label: "용량" }),
+    Object.freeze({ key: "manufacturer", label: "제조사", depends_on: Object.freeze(["capacity"]) }),
+  ]),
+  PSU: Object.freeze([
+    Object.freeze({ key: "rated_wattage", label: "정격 출력" }),
+    Object.freeze({ key: "manufacturer", label: "제조사", depends_on: Object.freeze(["rated_wattage"]) }),
+  ]),
+});
+const COHORTS = [
+  { marketPool: "KR_C2C_USED", condition: "USED_WORKING", currency: "KRW", label: "국내 개인 중고" },
+  { marketPool: "KR_DEALER_USED", condition: "USED_WORKING", currency: "KRW", label: "국내 업자 중고" },
+  { marketPool: "KR_REFURB_RETAIL", condition: "REFURBISHED", currency: "KRW", label: "국내 리퍼비시" },
+  { marketPool: "OVERSEAS_USED", condition: "USED_WORKING", currency: "USD", label: "해외 중고" },
 ];
-const SITE_RESULT_WINDOW_INITIAL = 160;
-const SITE_RESULT_WINDOW_STEP = 160;
-const SITE_RESULT_WINDOW_MAX = 640;
-const SITE_PREFETCH_PAGES = 3;
-const SEARCH_SESSION_MAX_ITEMS = 1000;
-const REFRESH_POLL_MAX_MS = 180_000;
+
 const state = {
-  data: null,
-  loading: false,
-  appendError: '',
-  query: '',
-  categoryId: 'all',
-  categoryIds: [],
+  catalog: null,
   categories: [],
-  categoryCatalogStatus: 'pending',
-  sitePlans: {},
-  activeSite: 'all',
-  sort: 'recommended',
-  minPrice: null,
-  maxPrice: null,
-  showFavorites: false,
-  requestController: null,
-  favorites: loadFavorites(),
-  favoriteItems: loadFavoriteItems(),
-  recentItems: loadRecentItems(),
-  recentSearches: loadRecentSearches(),
-  priceFilterIgnored: false,
-  priceFilterCurrency: 'KRW',
-  categoryPanelOpen: false,
-  currentPage: 0,
-  siteWindow: SITE_RESULT_WINDOW_INITIAL,
-  focusedSiteWindows: {},
-  collectionSites: [],
-  collectionData: null,
-  viewData: new Map(),
-  expansionExhausted: false,
-  viewCollectionController: null,
-  completedViewCollections: new Set(),
-  refreshTimer: null,
-  refreshToken: '',
-  refreshAttempt: 0,
-  refreshPollStartedAt: 0,
-  refreshFingerprint: '',
-  refreshMessage: '',
-  pendingRefreshData: null,
-  pendingResultKind: ''
+  facetSchema: null,
+  browseFlows: {},
+  availableFacets: {},
+  sources: [],
+  sourceCandidates: [],
+  seedProducts: [],
+  categoryCode: "",
+  facets: {},
+  openSeries: new Set(),
+  selectedSites: new Set(),
+  query: "",
+  products: [],
+  productTotal: 0,
+  productCursor: "",
+  selectedProduct: null,
+  listings: [],
+  listingCursor: "",
+  listingSort: "recent",
+  priceMin: "",
+  priceMax: "",
+  detailStats: [],
+  visibleStatsCount: 0,
+  productRequest: null,
+  detailRequest: null,
+  offerRequest: null,
+  pricePanelOpen: false,
 };
 
-const labels = {
-  all: '전체',
-  joonggonara: '중고나라',
-  bunjang: '번개장터',
-  hellomarket: '헬로마켓',
-  rethinkmall: '리씽크몰',
-  ebay: 'eBay'
+const dom = {
+  catalogSearch: document.querySelector("#catalog-search"),
+  catalogQuery: document.querySelector("#catalog-query"),
+  catalogMeta: document.querySelector("#catalog-meta"),
+  categoryRail: document.querySelector("#category-rail"),
+  workspaceTitle: document.querySelector("#workspace-title"),
+  workspaceIntro: document.querySelector("#workspace-intro"),
+  productCount: document.querySelector("#product-count"),
+  modelBrandHeader: document.querySelector("#model-brand-header"),
+  modelFilters: document.querySelector("#model-filters"),
+  filterContext: document.querySelector("#filter-context"),
+  facetRows: document.querySelector("#facet-rows"),
+  sourceFacetRow: document.querySelector("#source-facet-row"),
+  sourceFilters: document.querySelector("#source-filters"),
+  resetFilters: document.querySelector("#reset-filters"),
+  catalogMessage: document.querySelector("#catalog-message"),
+  modelDirectory: document.querySelector("#model-directory"),
+  modelListContext: document.querySelector("#model-list-context"),
+  productRows: document.querySelector("#product-rows"),
+  productEmpty: document.querySelector("#product-empty"),
+  loadMoreProducts: document.querySelector("#load-more-products"),
+  pricePanelToggle: document.querySelector("#price-panel-toggle"),
+  pricePanelContent: document.querySelector("#price-panel-content"),
+  pricePanelTitle: document.querySelector("#price-panel-title"),
+  selectedProductMeta: document.querySelector("#selected-product-meta"),
+  detailMessage: document.querySelector("#detail-message"),
+  referencePrice: document.querySelector("#reference-price"),
+  referenceValue: document.querySelector("#reference-value"),
+  referenceNote: document.querySelector("#reference-note"),
+  priceSummary: document.querySelector("#price-summary"),
+  activeMean: document.querySelector("#active-mean"),
+  activeMedian: document.querySelector("#active-median"),
+  activeCount: document.querySelector("#active-count"),
+  reservedMean: document.querySelector("#reserved-mean"),
+  reservedMedian: document.querySelector("#reserved-median"),
+  reservedCount: document.querySelector("#reserved-count"),
+  soldMean: document.querySelector("#sold-mean"),
+  soldMedian: document.querySelector("#sold-median"),
+  soldCount: document.querySelector("#sold-count"),
+  confirmedMean: document.querySelector("#confirmed-mean"),
+  confirmedMedian: document.querySelector("#confirmed-median"),
+  confirmedCount: document.querySelector("#confirmed-count"),
+  statsSection: document.querySelector("#stats-section"),
+  statsAsOf: document.querySelector("#stats-as-of"),
+  statsGroups: document.querySelector("#stats-groups"),
+  listingSection: document.querySelector("#listing-section"),
+  listingTitle: document.querySelector("#listing-title"),
+  listingScopeNote: document.querySelector("#listing-scope-note"),
+  backToModels: document.querySelector("#back-to-models"),
+  listingControls: document.querySelector("#listing-controls"),
+  listingSort: document.querySelector("#listing-sort"),
+  priceMin: document.querySelector("#price-min"),
+  priceMax: document.querySelector("#price-max"),
+  listingFreshness: document.querySelector("#listing-freshness"),
+  listingRows: document.querySelector("#listing-rows"),
+  listingEmpty: document.querySelector("#listing-empty"),
+  loadMoreListings: document.querySelector("#load-more-listings"),
+  contextualOffer: document.querySelector("#contextual-offer"),
+  contextualOfferTitle: document.querySelector("#contextual-offer-title"),
+  contextualOfferProvider: document.querySelector("#contextual-offer-provider"),
+  contextualOfferLink: document.querySelector("#contextual-offer-link"),
 };
 
-const fallbackCategories = [
-  ['all', '전체', null], ['fashion', '패션의류', null], ['fashion_women', '여성의류', 'fashion'], ['fashion_men', '남성의류', 'fashion'],
-  ['fashion_women_outer', '여성 아우터', 'fashion_women'], ['fashion_women_tops', '여성 상의', 'fashion_women'],
-  ['fashion_women_bottoms', '여성 바지', 'fashion_women'], ['fashion_women_skirts', '여성 치마', 'fashion_women'],
-  ['fashion_men_outer', '남성 아우터', 'fashion_men'], ['fashion_men_tops', '남성 상의', 'fashion_men'],
-  ['fashion_men_bottoms', '남성 바지', 'fashion_men'], ['fashion_men_jumpsuit', '남성 점프수트', 'fashion_men'],
-  ['fashion_goods', '패션잡화', null], ['luxury', '수입명품', null],
-  ['beauty', '뷰티'], ['kids', '출산/유아동'], ['mobile', '모바일/태블릿'], ['appliances', '가전제품'],
-  ['pc', '노트북/PC'], ['camera', '카메라/캠코더'], ['furniture', '가구/인테리어'], ['living', '리빙/생활'],
-  ['games', '게임'], ['hobby', '반려동물/취미'], ['books', '도서/음반/문구'], ['tickets', '티켓/쿠폰'],
-  ['sports', '스포츠'], ['travel', '레저/여행'], ['vehicles', '중고차'], ['motorcycle', '오토바이'],
-  ['tools', '공구/산업용품'], ['free_share', '무료나눔']
-].map(([id, label, parentId = null]) => ({ id, label, parentId, description: '' }));
-
-const $ = (selector) => document.querySelector(selector);
-const $$ = (selector) => Array.from(document.querySelectorAll(selector));
-
-function allowedHttpsUrl(value, allowedHosts) {
-  try {
-    const url = new URL(String(value || '').trim());
-    const hostname = url.hostname.toLowerCase().replace(/\.$/, '');
-    const allowed = allowedHosts.some((candidate) => hostname === candidate || hostname.endsWith(`.${candidate}`));
-    if (url.protocol !== 'https:' || (url.port && url.port !== '443') || url.username || url.password || !allowed) return '';
-    return url.href;
-  } catch {
-    return '';
-  }
+function createElement(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined && text !== null) node.textContent = String(text);
+  return node;
 }
 
-function safeListingUrl(item) {
-  return allowedHttpsUrl(item?.url, LISTING_HOSTS_BY_SITE[item?.site] || []);
+function toArray(value) {
+  if (Array.isArray(value)) return value;
+  if (value && typeof value === "object") return Object.values(value);
+  return [];
 }
 
-function safeImageUrl(value) {
-  return allowedHttpsUrl(value, IMAGE_HOSTS);
+function firstDefined(...values) {
+  return values.find((value) => value !== undefined && value !== null && value !== "");
 }
 
-function prioritizeImageResults(items) {
-  if (state.showFavorites || state.sort !== 'recommended') return items;
-  const withImages = [];
-  const withoutImages = [];
-  items.forEach((item) => {
-    (safeImageUrl(item?.image_url) ? withImages : withoutImages).push(item);
-  });
-  return [...withImages, ...withoutImages];
-}
-
-function renderSiteTabs() {
-  const tabs = $('#site-tabs');
-  if (tabs) {
-    tabs.innerHTML = [
-      `<button class="${state.activeSite === 'all' ? 'active' : ''}" type="button" aria-pressed="${state.activeSite === 'all'}" data-site-tab="all">전체</button>`,
-      ...DEFAULT_SITES.map((site) => {
-        const active = state.activeSite === site;
-        return `<button class="${active ? 'active' : ''}" type="button" aria-pressed="${active}" data-site-tab="${escapeHtml(site)}">${escapeHtml(labels[site] || site)}</button>`;
-      })
-    ].join('');
-  }
-  const idleDescription = $('#idle-description');
-  if (idleDescription) idleDescription.textContent = '중고나라·번개장터·헬로마켓·리씽크몰·eBay 매물을 한 번에 비교해 보세요.';
-  const keyword = $('#keyword');
-  if (keyword) keyword.placeholder = '무엇을 찾으시나요?';
-  const brand = $('.brand');
-  if (brand) brand.href = '/';
-}
-
-function escapeHtml(value) {
-  return String(value ?? '').replace(/[&<>'"]/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[character]));
-}
-
-function formatPrice(value, currency = 'KRW') {
-  if (currency === 'MIXED') return uiText('통화 혼합', 'Mixed currencies');
-  if (typeof value !== 'number') return uiText('가격 확인', 'Price unavailable');
-  const normalizedCurrency = String(currency || 'KRW').toUpperCase();
-  const locale = { KRW: 'ko-KR', JPY: 'ja-JP', USD: 'en-US', EUR: 'de-DE', GBP: 'en-GB', SGD: 'en-SG' }[normalizedCurrency] || 'en-US';
-  try {
-    return new Intl.NumberFormat(locale, {
-      style: 'currency',
-      currency: normalizedCurrency,
-      currencyDisplay: 'narrowSymbol',
-      maximumFractionDigits: ['KRW', 'JPY'].includes(normalizedCurrency) ? 0 : 2
-    }).format(value);
-  } catch {
-    return `${new Intl.NumberFormat(locale, { maximumFractionDigits: 2 }).format(value)} ${normalizedCurrency}`;
-  }
-}
-
-function resultCurrency(data = state.data) {
-  const items = Array.isArray(data) ? data : data?.items || [];
-  const currencies = new Set(items
-    .map((item) => String(item.currency || '').trim().toUpperCase())
-    .filter(Boolean));
-  if (currencies.size === 1) return currencies.values().next().value;
-  if (currencies.size > 1) return 'MIXED';
-  return 'KRW';
-}
-
-function hasAbsoluteListingDate(item) {
-  const timestamp = Date.parse(String(item?.posted_at || ''));
-  return Number.isFinite(timestamp);
-}
-
-function controlNoticeText() {
-  if (!state.data) return '';
-  const sortMeta = state.data.sort_meta || {};
-  const filterMeta = state.data.filter_meta || {};
-  const mixedCurrency = resultCurrency(state.data) === 'MIXED';
-  if (filterMeta.reason === 'mixed_currency') {
-    return uiText('통화가 섞여 가격 범위를 적용하지 않았습니다. 사이트 하나를 선택한 뒤 다시 설정해 주세요.', 'The price range was not applied because the results use multiple currencies. Select one marketplace and try again.');
-  }
-  if (sortMeta.reason === 'mixed_currency' || mixedCurrency) {
-    return uiText('통화가 섞여 있습니다. 사이트 하나를 선택하면 가격순·가격 범위를 사용할 수 있습니다.', 'These results use multiple currencies. Select one marketplace to sort or filter by price.');
-  }
-  if (['no_valid_dates', 'missing_dates'].includes(sortMeta.reason)) {
-    return uiText('등록일 정보가 없어 최신순을 적용하지 않았습니다.', 'Newest was not applied because listing dates are unavailable.');
-  }
-  if (sortMeta.reason === 'no_comparable_prices') {
-    return uiText('비교 가능한 가격이 없어 가격순을 적용하지 않았습니다.', 'Price sorting was not applied because comparable prices are unavailable.');
-  }
-  return '';
-}
-
-function renderControlNotice() {
-  const root = $('#control-notice');
-  if (!root) return;
-  const message = controlNoticeText();
-  root.textContent = message;
-  root.hidden = !message;
-}
-
-function updateResultControls() {
-  const items = state.data?.items || [];
-  const currency = resultCurrency(items);
-  const mixedCurrency = Boolean(state.data && currency === 'MIXED');
-  const hasDates = items.some(hasAbsoluteListingDate);
-  $$('#sort-tabs [data-sort]').forEach((control) => {
-    const sort = control.dataset.sort;
-    const unavailable = (['price_asc', 'price_desc'].includes(sort) && mixedCurrency)
-      || (sort === 'recent' && Boolean(state.data) && !hasDates);
-    control.disabled = state.loading || unavailable;
-    control.title = unavailable
-      ? sort === 'recent'
-        ? uiText('등록일이 있는 매물이 없습니다.', 'No listings include a usable date.')
-        : uiText('통화가 섞인 결과는 사이트를 선택한 뒤 가격순으로 볼 수 있습니다.', 'Select one marketplace before sorting results that use multiple currencies.')
-      : '';
-  });
-  ['#min-price', '#max-price', '#apply-price-filter'].forEach((selector) => {
-    const control = $(selector);
-    if (control) control.disabled = state.loading || mixedCurrency;
-  });
-  const reset = $('#reset-filters');
-  if (reset) reset.disabled = state.loading;
-  const priceStep = ['USD', 'EUR', 'GBP', 'SGD'].includes(currency) ? '0.01' : '1';
-  const currencyHint = currency === 'MIXED' ? uiText('통화 혼합', 'Mixed') : currency;
-  const minInput = $('#min-price');
-  const maxInput = $('#max-price');
-  if (minInput) {
-    minInput.step = priceStep;
-    minInput.placeholder = `최소 (${currencyHint})`;
-  }
-  if (maxInput) {
-    maxInput.step = priceStep;
-    maxInput.placeholder = `최대 (${currencyHint})`;
-  }
-}
-
-function formatNoiseReason(value) {
-  const reasons = {
-    guide_or_advertisement: '광고·안내성 매물',
-    placeholder_price: '기준가 확인 필요',
-    bundled_part_offer: '묶음·구성 확인 필요',
-    part_build_leak: '부품 구성 확인 필요'
-  };
-  return reasons[String(value || '')] || uiText('참고 제외', 'Excluded reference');
-}
-
-function formatPostedAt(value) {
-  const raw = String(value || '').trim();
-  if (!raw) return uiText('등록일 미상', 'Date unavailable');
-  const normalized = raw.includes('T') ? raw : raw.replace(' ', 'T');
-  const date = new Date(normalized);
-  if (Number.isNaN(date.getTime())) return raw;
-  const elapsed = Math.max(0, Date.now() - date.getTime());
-  if (elapsed < 60 * 1000) return uiText('방금 전', 'Just now');
-  if (elapsed < 60 * 60 * 1000) return `${Math.floor(elapsed / (60 * 1000))}분 전`;
-  if (elapsed < 24 * 60 * 60 * 1000) return `${Math.floor(elapsed / (60 * 60 * 1000))}시간 전`;
-  if (elapsed < 7 * 24 * 60 * 60 * 1000) {
-    const days = Math.floor(elapsed / (24 * 60 * 60 * 1000));
-    return `${days}일 전`;
-  }
-  return `${String(date.getMonth() + 1).padStart(2, '0')}.${String(date.getDate()).padStart(2, '0')}`;
-}
-
-function formatCondition(value) {
-  const raw = String(value || '').trim();
-  if (!raw) return '';
-  const normalized = raw.toLowerCase();
-  if (/for parts|not working|no power/.test(normalized)) return uiText('부품용·작동불가', 'For parts / Not working');
-  if (/locked|restricted/.test(normalized)) return uiText('잠금·사용제한 확인', 'Locked / Restricted');
-  if (/demo|display unit/.test(normalized)) return uiText('전시·데모 기기', 'Demo / Display unit');
-  if (/new without tags/.test(normalized)) return uiText('택 없는 새 상품', 'New without tags');
-  if (/like new/.test(normalized)) return uiText('새것에 가까움', 'Like new');
-  if (/near mint/.test(normalized)) return '새것에 가까움';
-  if (/excellent/.test(normalized)) return uiText('최상', 'Excellent');
-  if (/very good/.test(normalized)) return uiText('매우 양호', 'Very good');
-  if (/satisfactory/.test(normalized)) return uiText('사용감 있음', 'Satisfactory');
-  if (/\bfair\b/.test(normalized)) return uiText('보통', 'Fair');
-  if (/\bgood\b/.test(normalized)) return uiText('양호', 'Good');
-  return raw;
-}
-
-function formatShipping(value) {
-  const raw = String(value || '').trim();
-  if (!raw) return '';
-  if (/^(free_shipping|free shipping)$/i.test(raw)) return uiText('무료배송', 'Free Shipping');
-  return raw;
-}
-
-function formatListingTime(item) {
-  const raw = String(item?.posted_at || '').trim();
-  return formatPostedAt(raw);
-}
-
-function formatMarketComparison(item) {
-  if (item.price_suspect) return uiText('가격 확인', 'Price needs verification');
-  const rate = Number(item.deviation_rate);
-  if (!Number.isFinite(rate) || rate === 0) return '';
-  return rate > 0
-    ? `시세 대비 ${Math.round(rate * 100)}% 낮음`
-    : `시세 대비 ${Math.round(Math.abs(rate) * 100)}% 높음`;
-}
-
-function formatPriceLabel(value) {
-  return String(value || '').trim();
-}
-
-function formatCheckedAge(freshness) {
-  let seconds = Number(freshness?.age_seconds);
-  if (!Number.isFinite(seconds) && freshness?.refreshed_at) {
-    seconds = Math.max(0, Math.floor((Date.now() - Date.parse(freshness.refreshed_at)) / 1000));
-  }
-  if (!Number.isFinite(seconds) || seconds < 60) return uiText('방금 확인', 'Checked just now');
-  if (seconds < 60 * 60) return `${Math.floor(seconds / 60)}분 전 확인`;
-  if (seconds < 24 * 60 * 60) return `${Math.floor(seconds / (60 * 60))}시간 전 확인`;
-  const days = Math.floor(seconds / (24 * 60 * 60));
-  return `${days}일 전 확인`;
-}
-
-function originalLanguageAttr() {
-  return '';
-}
-
-function loadFavorites() {
-  try {
-    const values = JSON.parse(localStorage.getItem(storageKey('used-market:favorites')) || '[]');
-    return new Set(Array.isArray(values) ? values.filter((value) => typeof value === 'string') : []);
-  } catch {
-    return new Set();
-  }
-}
-
-function saveFavorites() {
-  try {
-    localStorage.setItem(storageKey('used-market:favorites'), JSON.stringify(Array.from(state.favorites)));
-  } catch {
-    // 찜 저장이 막힌 브라우저에서도 검색 결과는 계속 사용할 수 있다.
-  }
-}
-
-function loadFavoriteItems() {
-  try {
-    const values = JSON.parse(localStorage.getItem(storageKey('used-market:favorite-items')) || '[]');
-    if (!Array.isArray(values)) return new Map();
-    return new Map(values
-      .filter((item) => item && typeof item === 'object' && (item.url || item.id))
-      .map((item) => [favoriteKey(item), item]));
-  } catch {
-    return new Map();
-  }
-}
-
-function saveFavoriteItems() {
-  try {
-    localStorage.setItem(storageKey('used-market:favorite-items'), JSON.stringify(Array.from(state.favoriteItems.values()).slice(-200)));
-  } catch {
-    // 스냅샷 저장이 막힌 브라우저에서도 하트 상태는 유지한다.
-  }
-}
-
-function loadRecentItems() {
-  try {
-    const values = JSON.parse(localStorage.getItem(storageKey('used-market:recent-items')) || '[]');
-    if (!Array.isArray(values)) return [];
-    const seen = new Set();
-    return values
-      .filter((item) => item && typeof item === 'object' && (item.url || item.id))
-      .filter((item) => {
-        const key = favoriteKey(item);
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      })
-      .slice(0, 6);
-  } catch {
-    return [];
-  }
-}
-
-function saveRecentItems() {
-  try {
-    localStorage.setItem(storageKey('used-market:recent-items'), JSON.stringify(state.recentItems.slice(0, 6)));
-  } catch {
-    // 브라우저 저장 공간이 없으면 이번 세션에서만 최근 목록을 유지합니다.
-  }
-}
-
-function loadRecentSearches() {
-  try {
-    const values = JSON.parse(localStorage.getItem(storageKey('used-market:recent-searches')) || '[]');
-    if (!Array.isArray(values)) return [];
-    return Array.from(new Set(values
-      .filter((value) => typeof value === 'string')
-      .map((value) => value.trim())
-      .filter(Boolean)))
-      .slice(0, 6);
-  } catch {
-    return [];
-  }
-}
-
-function saveRecentSearches() {
-  try {
-    localStorage.setItem(storageKey('used-market:recent-searches'), JSON.stringify(state.recentSearches.slice(0, 6)));
-  } catch {
-    // 저장 공간을 사용할 수 없어도 검색 자체는 계속할 수 있습니다.
-  }
-}
-
-function recordRecentSearch(keyword) {
-  const value = String(keyword || '').trim();
-  if (!value) return;
-  state.recentSearches = [value, ...state.recentSearches.filter((candidate) => candidate.toLowerCase() !== value.toLowerCase())].slice(0, 6);
-  saveRecentSearches();
-  renderRecentSearches();
-}
-
-function renderRecentSearches() {
-  const root = $('#recent-search-list');
-  const clearButton = $('#clear-recent-searches');
-  const panel = root?.closest('.recent-searches');
-  if (!root || !clearButton) return;
-  clearButton.hidden = !state.recentSearches.length;
-  panel?.classList.toggle('has-items', Boolean(state.recentSearches.length));
-  if (!state.recentSearches.length) {
-    root.innerHTML = '';
-    return;
-  }
-  root.innerHTML = state.recentSearches.map((keyword) => `<button type="button" class="recent-search-button" data-recent-search="${escapeHtml(keyword)}">${escapeHtml(keyword)}</button>`).join('');
-}
-
-function favoriteKey(item) {
-  return String(item.url || item.id || `${item.site || 'item'}:${item.title || ''}`);
-}
-
-function recordRecentItem(item) {
-  const listingUrl = safeListingUrl(item);
-  if (!item || !(listingUrl || item.id)) return;
-  const snapshot = {
-    id: item.id,
-    url: listingUrl,
-    title: item.title || uiText('제목 없음', 'Untitled listing'),
-    price: item.price,
-    currency: item.currency || 'KRW',
-    image_url: safeImageUrl(item.image_url),
-    site: item.site
-  };
-  const key = favoriteKey(snapshot);
-  state.recentItems = [snapshot, ...state.recentItems.filter((candidate) => favoriteKey(candidate) !== key)].slice(0, 6);
-  saveRecentItems();
-  renderRecentViewed();
-}
-
-function reloadRecentItems() {
-  state.recentItems = loadRecentItems();
-  renderRecentViewed();
-}
-
-function renderRecentViewed() {
-  const root = $('#recent-viewed-list');
-  if (!root) return;
-  if (!state.recentItems.length) {
-    root.innerHTML = `<div class="recent-viewed-empty"><span class="recent-viewed-empty-icon" aria-hidden="true">⌕</span><p>${uiText('최근 본 상품이 없습니다.', 'No recently viewed items.')}</p></div>`;
-    return;
-  }
-  root.innerHTML = state.recentItems.map((item) => {
-    const imageUrl = safeImageUrl(item.image_url);
-    const listingUrl = safeListingUrl(item);
-    const title = escapeHtml(item.title || uiText('제목 없음', 'Untitled listing'));
-    const key = escapeHtml(favoriteKey(item));
-    const image = imageUrl
-      ? `<img src="${escapeHtml(imageUrl)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.hidden=true;this.nextElementSibling.hidden=false;" /><span class="recent-viewed-thumb-fallback" hidden>${uiText('이미지 없음', 'Image unavailable')}</span>`
-      : `<span class="recent-viewed-thumb-fallback">${uiText('이미지 없음', 'Image unavailable')}</span>`;
-    const content = `<span class="recent-viewed-thumb">${image}</span><span class="recent-viewed-copy"><strong${originalLanguageAttr(item.title)}>${title}</strong><small>${escapeHtml(formatPrice(item.price, item.currency))}</small></span>`;
-    return listingUrl
-      ? `<a class="recent-viewed-item" href="${escapeHtml(listingUrl)}" target="_blank" rel="noreferrer noopener" data-recent-key="${key}">${content}</a>`
-      : `<div class="recent-viewed-item" data-recent-key="${key}">${content}</div>`;
-  }).join('');
-}
-
-function updateSortTabs() {
-  $$('#sort-tabs [data-sort]').forEach((tab) => {
-    const active = tab.dataset.sort === state.sort;
-    tab.classList.toggle('active', active);
-    tab.setAttribute('aria-pressed', String(active));
-  });
-}
-
-function toggleFavorite(button) {
-  const key = button.dataset.favorite;
-  if (!key) return;
-  const item = (state.data?.items || []).find((candidate) => favoriteKey(candidate) === key);
-  if (state.favorites.has(key)) {
-    state.favorites.delete(key);
-    state.favoriteItems.delete(key);
-  } else {
-    state.favorites.add(key);
-    if (item) state.favoriteItems.set(key, { ...item });
-  }
-  saveFavorites();
-  saveFavoriteItems();
-  const saved = state.favorites.has(key);
-  button.classList.toggle('saved', saved);
-  button.setAttribute('aria-pressed', String(saved));
-  button.setAttribute('aria-label', saved ? uiText('찜 해제', 'Remove saved item') : uiText('찜', 'Save item'));
-  button.textContent = saved ? '♥' : '♡';
-  if (state.showFavorites) renderResults();
-}
-
-function selectedCategoryIds() {
-  if (state.categoryIds.length) return [...state.categoryIds];
-  return state.categoryId !== 'all' ? [state.categoryId] : [];
-}
-
-function categoryParentId(categoryId) {
-  return (state.categories.find((category) => category.id === categoryId)
-    || fallbackCategories.find((category) => category.id === categoryId))?.parentId || null;
-}
-
-function isCategoryAncestor(ancestorId, categoryId) {
-  let parentId = categoryParentId(categoryId);
-  while (parentId) {
-    if (parentId === ancestorId) return true;
-    parentId = categoryParentId(parentId);
-  }
-  return false;
-}
-
-function categoryPlanFor(site, categoryId) {
-  return state.sitePlans?.[site]?.[categoryId] || null;
-}
-
-function categorySelectableForSite(site, categoryId) {
-  if (categoryId === 'all') return true;
-  if (state.categoryCatalogStatus !== 'ready') return true;
-  if (!Object.keys(state.sitePlans || {}).length) return true;
-  if (site === 'all') return DEFAULT_SITES.some((candidate) => categorySelectableForSite(candidate, categoryId));
-  return categoryPlanFor(site, categoryId)?.selectable === true;
-}
-
-function categorySelectable(categoryId) {
-  if (categoryId === 'all') return true;
-  const sites = state.activeSite === 'all' ? DEFAULT_SITES : [state.activeSite];
-  const hasExplicitKeyword = Boolean(state.query || $('#keyword')?.value.trim());
-  return sites.some((site) => (
-    categorySelectableForSite(site, categoryId)
-    || (hasExplicitKeyword && SEARCH_ONLY_SITES.has(site))
-  ));
-}
-
-function isMobileViewport() {
-  return window.matchMedia('(max-width: 700px)').matches;
-}
-
-function selectedCategorySummary() {
-  const ids = selectedCategoryIds();
-  if (!ids.length) return '전체';
-  const names = ids
-    .map((id) => (state.categories.find((category) => category.id === id) || fallbackCategories.find((category) => category.id === id))?.label)
-    .filter(Boolean);
-  if (names.length <= 1) return names[0] || '전체';
-  return `${names[0]} 외 ${names.length - 1}개`;
-}
-
-function syncCategoryPanel() {
-  const sidebar = $('.category-sidebar');
-  const toggle = $('#category-panel-toggle');
-  const list = $('#category-list');
-  if (!sidebar || !toggle || !list) return;
-  const mobile = isMobileViewport();
-  const open = mobile ? state.categoryPanelOpen : true;
-  sidebar.classList.toggle('is-collapsed', mobile && !open);
-  toggle.setAttribute('aria-expanded', String(open));
-  toggle.setAttribute('aria-label', open ? '카테고리 선택 접기' : '카테고리 선택 펼치기');
-  list.setAttribute('aria-hidden', String(mobile && !open));
-  $('#category-summary').textContent = selectedCategorySummary();
-}
-
-function getSelectedSites(categoryIds = selectedCategoryIds(), keyword = state.query) {
-  const sites = state.activeSite === 'all' ? DEFAULT_SITES : [state.activeSite];
-  if (!categoryIds.length) return sites;
-  const hasExplicitKeyword = Boolean(String(keyword || '').trim());
-  return sites.filter((site) => (
-    categoryIds.every((categoryId) => categorySelectableForSite(site, categoryId))
-    || (hasExplicitKeyword && SEARCH_ONLY_SITES.has(site))
-  ));
-}
-
-function activeViewSites() {
-  return state.activeSite === 'all' ? [] : [state.activeSite];
-}
-
-function currentResultWindow() {
-  return state.activeSite === 'all'
-    ? state.siteWindow
-    : state.focusedSiteWindows[state.activeSite] || SITE_RESULT_WINDOW_INITIAL;
-}
-
-function viewDataKey(site = state.activeSite) {
-  return JSON.stringify({ site, sort: state.sort, minPrice: state.minPrice, maxPrice: state.maxPrice });
-}
-
-function previewDataForSite(site) {
-  const cached = state.viewData.get(viewDataKey(site));
-  if (cached) return cached;
-  if (!state.collectionData) return null;
-  if (site === 'all') return state.collectionData;
-  const items = (state.collectionData.items || []).filter((item) => item.site === site);
-  const sources = (state.collectionData.sources || []).filter((source) => source.key === site);
-  return {
-    ...state.collectionData,
-    items,
-    sources,
-    pagination: { has_more: false, next_cursor: null },
-    quality: {
-      ...(state.collectionData.quality || {}),
-      available_count: items.length,
-      merged_count: items.length
+function unwrapPayload(payload) {
+  let current = payload;
+  for (let depth = 0; depth < 3; depth += 1) {
+    if (!current || typeof current !== "object") return current;
+    if (current.ok === false || current.status === "error") {
+      throw new Error(firstDefined(current.error?.message, current.message, current.error, "요청을 처리하지 못했습니다."));
     }
-  };
-}
-
-function rememberViewData(data) {
-  if (!data) return;
-  if (state.activeSite === 'all') state.collectionData = data;
-  else state.viewData.set(viewDataKey(), data);
-}
-
-function renderCategories() {
-  const categories = state.categories.length ? state.categories : fallbackCategories;
-  const selectedIds = new Set(selectedCategoryIds());
-  const openParentIds = new Set(selectedIds);
-  selectedIds.forEach((selectedId) => {
-    let parentId = categories.find((category) => category.id === selectedId)?.parentId;
-    while (parentId) {
-      openParentIds.add(parentId);
-      parentId = categories.find((category) => category.id === parentId)?.parentId;
+    const isEnvelope = current.ok === true || current.status === "success";
+    if (isEnvelope && current.data && typeof current.data === "object") {
+      current = current.data;
+      continue;
     }
+    return current;
+  }
+  return current;
+}
+
+async function fetchJson(url, options = {}) {
+  const response = await fetch(url, {
+    method: "GET",
+    headers: { Accept: "application/json" },
+    credentials: "same-origin",
+    signal: options.signal,
   });
-  const childrenByParent = new Map();
-  categories.forEach((category) => {
-    if (!category.parentId) return;
-    const children = childrenByParent.get(category.parentId) || [];
-    children.push(category);
-    childrenByParent.set(category.parentId, children);
-  });
-  const renderNode = (category, depth = 0) => {
-    const active = selectedIds.has(category.id);
-    const unavailable = category.id !== 'all' && !categorySelectable(category.id);
-    const children = childrenByParent.get(category.id) || [];
-    const expanded = children.length > 0 && openParentIds.has(category.id);
-    const branchId = `category-branch-${category.id}`;
-    const title = unavailable ? '현재 선택한 사이트에서 지원하지 않는 카테고리입니다.' : category.description || '';
-    return `<div class="category-node"><div class="category-row"><button class="${active ? 'active ' : ''}${unavailable ? 'is-unavailable ' : ''}category-select category-depth-${depth}" type="button" data-category-id="${escapeHtml(category.id)}"${active ? ' aria-current="page"' : ''} aria-pressed="${active}"${unavailable ? ' disabled aria-disabled="true"' : ''} title="${escapeHtml(title)}">${escapeHtml(category.label)}</button>${children.length ? `<button class="category-toggle-button" type="button" data-category-toggle data-category-branch="${branchId}" aria-expanded="${expanded}" aria-controls="${branchId}" aria-label="${expanded ? '하위 카테고리 접기' : '하위 카테고리 펼치기'}"><span class="category-toggle" aria-hidden="true">${expanded ? '−' : '+'}</span></button>` : ''}</div>${children.length ? `<div class="category-branch" id="${branchId}"${expanded ? '' : ' hidden'}>${children.map((child) => renderNode(child, depth + 1)).join('')}</div>` : ''}</div>`;
-  };
-  $('#category-list').innerHTML = categories.filter((category) => !category.parentId).map((category) => renderNode(category)).join('');
-  syncCategoryPanel();
-}
-
-async function loadCategories() {
-  try {
-    const response = await fetch('/api/categories');
-    const payload = await response.json();
-    const categories = payload?.data?.categories;
-    if (response.ok && payload.status === 'success' && Array.isArray(categories) && categories.length) {
-      state.categories = categories;
-      state.sitePlans = payload?.data?.site_plans || {};
-      state.categoryCatalogStatus = 'ready';
-    } else {
-      state.categoryCatalogStatus = 'unavailable';
-    }
-  } catch {
-    state.categoryCatalogStatus = 'unavailable';
-    // API가 늦거나 없는 환경에서도 기본 카테고리 rail을 먼저 보여준다.
-  }
-  renderCategories();
-}
-
-function cancelPendingSearch() {
-  state.requestController?.abort();
-  state.requestController = null;
-  cancelRefreshTracking();
-  if (state.loading) setLoading(false);
-}
-
-function cancelRefreshTracking({ keepMessage = false } = {}) {
-  if (state.refreshTimer) clearTimeout(state.refreshTimer);
-  state.refreshTimer = null;
-  state.refreshToken = '';
-  state.refreshAttempt = 0;
-  state.refreshPollStartedAt = 0;
-  state.refreshFingerprint = '';
-  state.pendingRefreshData = null;
-  state.pendingResultKind = '';
-  if (!keepMessage) state.refreshMessage = '';
-}
-
-function makeSearchFingerprint({ keyword, categoryIds, sites }) {
-  return JSON.stringify({
-    keyword: String(keyword || '').trim().toLowerCase(),
-    categoryIds: [...categoryIds].sort(),
-    sites: [...sites].sort(),
-    sort: state.sort,
-    minPrice: state.minPrice,
-    maxPrice: state.maxPrice
-  });
-}
-
-function renderFreshnessStatus() {
-  const root = $('#freshness-status');
-  const message = $('#freshness-message');
-  const button = $('#apply-refresh-results');
-  if (!root || !message || !button) return;
-  const freshness = state.data?.freshness;
-  if (!freshness && !state.refreshMessage) {
-    root.hidden = true;
-    root.classList.remove('is-checking');
-    button.hidden = true;
-    return;
-  }
-  const checking = Boolean(state.refreshToken);
-  const base = formatCheckedAge(freshness);
-  message.textContent = state.refreshMessage || (checking ? `${base} · ${uiText('최신 매물 확인 중', 'Checking for new listings')}` : base);
-  root.hidden = false;
-  root.classList.toggle('is-checking', checking);
-  button.hidden = !state.pendingRefreshData;
-  if (state.pendingRefreshData) {
-    if (state.pendingResultKind === 'stale') {
-      button.textContent = uiText('오래된 결과 보기', 'View saved results');
-    } else {
-      const added = Math.max(0, Number(state.pendingRefreshData?.refresh?.added_count) || 0);
-      button.textContent = added > 0
-        ? `새 매물 ${added}개 보기`
-        : uiText('업데이트 보기', 'View update');
-    }
-  }
-}
-
-function refreshPollDelay(serverDelayMs, attempt) {
-  const serverDelay = Math.min(20_000, Math.max(1_000, Number(serverDelayMs) || 2_000));
-  const backoffDelay = Math.min(20_000, 2_000 * (2 ** Math.min(Math.max(0, attempt), 4)));
-  return Math.max(serverDelay, backoffDelay);
-}
-
-function scheduleRefreshPoll(serverDelayMs = 2_000) {
-  if (!state.refreshToken) return;
-  if (!state.refreshPollStartedAt) state.refreshPollStartedAt = Date.now();
-  const elapsed = Date.now() - state.refreshPollStartedAt;
-  if (elapsed >= REFRESH_POLL_MAX_MS) {
-    state.refreshToken = '';
-    state.refreshTimer = null;
-    state.refreshPollStartedAt = 0;
-    state.refreshMessage = `${formatCheckedAge(state.data?.freshness)} · ${uiText('최신 확인 지연', 'Update delayed')}`;
-    renderFreshnessStatus();
-    return;
-  }
-  const delay = Math.min(refreshPollDelay(serverDelayMs, state.refreshAttempt), REFRESH_POLL_MAX_MS - elapsed);
-  state.refreshAttempt += 1;
-  state.refreshTimer = setTimeout(() => { void pollRefreshResult(); }, delay);
-}
-
-async function pollRefreshResult() {
-  const token = state.refreshToken;
-  const fingerprint = state.refreshFingerprint;
-  if (!token || !fingerprint) return;
-  try {
-    const response = await fetch(`/api/search/refresh/${encodeURIComponent(token)}`);
-    const payload = await response.json();
-    if (token !== state.refreshToken || fingerprint !== state.refreshFingerprint) return;
-    if (response.status === 202) {
-      scheduleRefreshPoll(payload.data?.refresh?.poll_after_ms);
-      return;
-    }
-    if (!response.ok || payload.status !== 'success' || !payload.data?.items) {
-      state.refreshToken = '';
-      state.refreshPollStartedAt = 0;
-      state.refreshMessage = `${formatCheckedAge(state.data?.freshness)} · ${uiText('최신 확인 지연', 'Update delayed')}`;
-      renderFreshnessStatus();
-      return;
-    }
-    const refreshedData = payload.data;
-    const added = Math.max(0, Number(refreshedData.refresh?.added_count) || 0);
-    state.refreshToken = '';
-    state.refreshTimer = null;
-    state.refreshPollStartedAt = 0;
-    state.refreshMessage = added > 0
-      ? `방금 확인 · 새 매물 ${added}개`
-      : uiText('방금 확인 · 새 매물 없음', 'Checked just now · No new listings');
-    if (state.currentPage === 0) {
-      state.data = refreshedData;
-      state.pendingRefreshData = null;
-      state.pendingResultKind = '';
-      renderAll();
-    } else {
-      state.pendingRefreshData = refreshedData;
-      state.pendingResultKind = 'refresh';
-      renderFreshnessStatus();
-    }
-  } catch {
-    if (token === state.refreshToken && fingerprint === state.refreshFingerprint) scheduleRefreshPoll();
-  }
-}
-
-function trackSearchRefresh(data, fingerprint) {
-  if (state.refreshTimer) clearTimeout(state.refreshTimer);
-  state.refreshTimer = null;
-  state.refreshAttempt = 0;
-  state.refreshPollStartedAt = 0;
-  state.pendingRefreshData = null;
-  state.pendingResultKind = '';
-  state.refreshMessage = '';
-  if (data?.stale_fallback?.items?.length) {
-    state.pendingRefreshData = data.stale_fallback;
-    state.pendingResultKind = 'stale';
-    state.refreshMessage = `원본 사이트 확인 실패 · ${formatCheckedAge(data.stale_fallback.freshness)} 결과 보관 중`;
-  }
-  const token = String(data?.freshness?.refresh_token || data?.refresh?.token || '').trim();
-  const refreshState = String(data?.freshness?.refresh_state || data?.refresh?.state || '');
-  state.refreshToken = ['queued', 'running'].includes(refreshState) ? token : '';
-  state.refreshFingerprint = state.refreshToken ? fingerprint : '';
-  state.refreshPollStartedAt = state.refreshToken ? Date.now() : 0;
-  if (state.refreshToken) scheduleRefreshPoll(data?.refresh?.poll_after_ms);
-  renderFreshnessStatus();
-}
-
-async function setActiveSite(site) {
-  state.activeSite = site;
-  state.showFavorites = false;
-  $$('.site-tabs [data-site-tab]').forEach((tab) => {
-    const active = tab.dataset.siteTab === site;
-    tab.classList.toggle('active', active);
-    tab.setAttribute('aria-pressed', String(active));
-  });
-  renderCategories();
-  const selected = selectedCategoryIds();
-  if (selected.length) {
-    const keywordFallback = Boolean(state.query) && SEARCH_ONLY_SITES.has(site);
-    const compatible = selected.filter((categoryId) => keywordFallback || categorySelectableForSite(site, categoryId));
-    const removed = selected.filter((categoryId) => !compatible.includes(categoryId));
-    if (removed.length > 0) {
-      state.categoryIds = compatible;
-      state.categoryId = compatible.length === 1 ? compatible[0] : 'all';
-      renderCategories();
-      const removedLabels = removed
-        .map((categoryId) => (state.categories.find((category) => category.id === categoryId) || fallbackCategories.find((category) => category.id === categoryId))?.label)
-        .filter(Boolean);
-      $('#search-status').textContent = `${labels[site] || site}에서 지원하지 않는 ${removedLabels.join(', ')} 카테고리를 제외했습니다.`;
-      $('#search-status').classList.add('visible');
-      if (!compatible.length && !state.query) {
-        showUnavailableSelection(removed[0]);
-        return;
-      }
-    }
-  }
-  const compatibleSelected = selectedCategoryIds();
-  if (state.query || compatibleSelected.length) {
-    const preview = previewDataForSite(site);
-    if (preview) {
-      state.data = preview;
-      state.currentPage = 0;
-      renderAll();
-    } else if (state.data) renderAll();
-    const canReuseCollection = site === 'all'
-      ? state.collectionSites.length > 1
-      : state.collectionSites.includes(site);
-    const searched = await executeSearch({
-      keyword: state.query,
-      categoryIds: compatibleSelected,
-      reason: canReuseCollection ? 'site_filter' : 'search'
-    });
-    if (searched && site !== 'all') {
-      void collectActiveView({
-        acquisitionMode: 'recent',
-        targetWindow: Math.max(currentResultWindow(), SITE_RESULT_WINDOW_INITIAL + SITE_RESULT_WINDOW_STEP),
-        statusText: `${labels[site] || site} 매물을 더 확인하고 있습니다.`
-      });
-    }
-    return;
-  }
-  state.data = null;
-  $('.market-app').classList.remove('has-results');
-  resetRenderedResultSummary();
-  hidePagination();
-  $('#result-list').innerHTML = '<div class="empty-state" aria-hidden="true"></div>';
-}
-
-function setCategory(categoryId) {
-  const nextCategoryId = categoryId || 'all';
-  if (nextCategoryId === 'all') {
-    state.categoryIds = [];
-    state.categoryId = 'all';
-    state.showFavorites = false;
-    state.categoryPanelOpen = false;
-    cancelPendingSearch();
-    state.query = '';
-    $('#keyword').value = '';
-    state.data = null;
-    renderCategories();
-    renderSourceSummary();
-    $('.market-app').classList.remove('has-results');
-    resetRenderedResultSummary();
-    hidePagination();
-    $('#result-list').innerHTML = '<div class="empty-state" aria-hidden="true"></div>';
-    return;
-  }
-  if (!categorySelectable(nextCategoryId)) {
-    showUnavailableSelection(nextCategoryId);
-    return;
-  }
-  const current = selectedCategoryIds();
-  const next = current.includes(nextCategoryId)
-    ? current.filter((categoryId) => categoryId !== nextCategoryId)
-    : [
-        ...current.filter((categoryId) => (
-          categoryId !== nextCategoryId
-          && !isCategoryAncestor(categoryId, nextCategoryId)
-          && !isCategoryAncestor(nextCategoryId, categoryId)
-        )),
-        nextCategoryId
-      ];
-  state.categoryIds = next;
-  state.categoryId = next.length === 1 ? next[0] : 'all';
-  state.showFavorites = false;
-  state.categoryPanelOpen = false;
-  renderCategories();
-  if (!next.length) {
-    cancelPendingSearch();
-    if ($('#keyword').value.trim()) {
-      executeSearch({ keyword: $('#keyword').value.trim(), categoryIds: [] });
-    } else {
-      state.query = '';
-      state.data = null;
-      renderSourceSummary();
-      $('.market-app').classList.remove('has-results');
-      resetRenderedResultSummary();
-      hidePagination();
-      $('#result-list').innerHTML = '<div class="empty-state" aria-hidden="true"></div>';
-    }
-    return;
-  }
-  executeSearch({ keyword: $('#keyword').value.trim(), categoryIds: state.categoryIds });
-}
-
-function showUnavailableSelection(categoryId = '') {
-  cancelPendingSearch();
-  state.data = null;
-  renderSourceSummary();
-  state.showFavorites = false;
-  const categoryLabel = categoryId
-    ? (state.categories.find((category) => category.id === categoryId) || fallbackCategories.find((category) => category.id === categoryId))?.label
-    : selectedCategoryIds().map((id) => (state.categories.find((category) => category.id === id) || fallbackCategories.find((category) => category.id === id))?.label).filter(Boolean).join(', ');
-  $('#search-status').textContent = `${categoryLabel || '선택한 카테고리'}는 현재 ${labels[state.activeSite] || state.activeSite}에서 제공되지 않습니다.`;
-  $('#search-status').classList.add('visible');
-  resetRenderedResultSummary();
-  $('#result-list').innerHTML = `<div class="empty-state" role="status"><span>${uiText('지원하지 않는 카테고리', 'Category unavailable')}</span></div>`;
-  hidePagination();
-  $('.market-app').classList.add('has-results');
-}
-
-function resetRenderedResultSummary() {
-  $('#result-count').textContent = uiText('0개', '0 results');
-  state.priceFilterIgnored = false;
-  state.priceFilterCurrency = 'KRW';
-  cancelRefreshTracking();
-  renderFreshnessStatus();
-  renderControlNotice();
-  updateResultControls();
-}
-
-function hidePagination() {
-  ['#pagination-controls', '#result-summary-pagination'].forEach((selector) => {
-    const pagination = $(selector);
-    if (!pagination) return;
-    pagination.hidden = true;
-    pagination.innerHTML = '';
-  });
-}
-
-function syncPriceRangeFromInputs() {
-  const minInput = $('#min-price');
-  const maxInput = $('#max-price');
-  const parseInput = (input) => {
-    if (!input.value.trim()) return null;
-    const value = Number(input.value);
-    return Number.isFinite(value) && value >= 0 && value <= 100_000_000_000
-      ? value
-      : Number.NaN;
-  };
-  const minPrice = parseInput(minInput);
-  const maxPrice = parseInput(maxInput);
-  const invalid = Number.isNaN(minPrice) || Number.isNaN(maxPrice)
-    || (minPrice !== null && maxPrice !== null && minPrice > maxPrice);
-  minInput.toggleAttribute('aria-invalid', invalid);
-  maxInput.toggleAttribute('aria-invalid', invalid);
-  if (invalid) {
-    $('#search-status').textContent = uiText('가격 범위를 확인해 주세요.', 'Check the price range.');
-    $('#search-status').classList.add('visible');
-    return false;
-  }
-  state.minPrice = minPrice;
-  state.maxPrice = maxPrice;
-  return true;
-}
-
-function setLoading(loading, pageChange = false) {
-  state.loading = loading;
-  $('.market-app').classList.toggle('is-loading', loading && !pageChange);
-  const button = $('#search-button');
-  $('.results-section').setAttribute('aria-busy', String(loading));
-  button.disabled = loading;
-  button.querySelector('span').textContent = loading && !pageChange ? uiText('검색 중', 'Searching') : uiText('검색', 'Search');
-  updateResultControls();
-  if (state.data) renderPagination();
-  if (loading && !pageChange) {
-    $('#result-list').innerHTML = `<div class="loading-state"><div class="loading-ring"></div><strong>${uiText('검색 중', 'Searching')}</strong></div>`;
-  }
-}
-
-async function requestSearchPage({ keyword, categoryIds, sites, viewSites = activeViewSites(), focusSites = [], cursor = null, signal, refreshIndex = false, siteWindow = currentResultWindow(), expandIndex = false, collectView = false, acquisitionMode = 'recent' }) {
-  const response = await fetch('/api/search', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    signal,
-    body: JSON.stringify({
-      keyword,
-      category_id: categoryIds.length === 1 ? categoryIds[0] : undefined,
-      category_ids: categoryIds.length > 1 ? categoryIds : undefined,
-      sites,
-      view_sites: viewSites.length ? viewSites : undefined,
-      focus_sites: focusSites.length ? focusSites : undefined,
-      sort: state.sort,
-      min_price: state.minPrice ?? undefined,
-      max_price: state.maxPrice ?? undefined,
-      limit: RESULT_PAGE_SIZE,
-      site_window: siteWindow,
-      refresh_index: refreshIndex,
-      expand_index: expandIndex,
-      collect_view: collectView,
-      acquisition_mode: acquisitionMode,
-      cursor: cursor || undefined
-    })
-  });
-  let payload = null;
+  let payload;
   try {
     payload = await response.json();
   } catch {
-    payload = null;
+    throw new Error("서버 응답 형식을 확인할 수 없습니다.");
   }
-  if (response.status === 429 || payload?.code === 'SEARCH_BUSY' || String(payload?.error || '').startsWith('SEARCH_BUSY:')) {
-    const retryAfter = parseRetryAfterSeconds(response.headers.get('Retry-After'))
-      ?? parseRetryAfterSeconds(payload?.retry_after_seconds);
-    throw new Error(`SEARCH_BUSY:${retryAfter || ''}`);
+  if (!response.ok) {
+    throw new Error(firstDefined(payload?.error?.message, payload?.message, `요청에 실패했습니다. (${response.status})`));
   }
-  if (!response.ok || payload?.status !== 'success') throw new Error(payload?.error || uiText('검색에 실패했습니다.', 'Search failed.'));
-  return payload.data;
+  return unwrapPayload(payload);
 }
 
-function parseRetryAfterSeconds(value) {
-  const raw = String(value || '').trim();
-  if (!raw) return null;
-  const seconds = Number(raw);
-  if (Number.isFinite(seconds) && seconds >= 0) return Math.min(3600, Math.ceil(seconds));
-  const retryAt = Date.parse(raw);
-  if (!Number.isFinite(retryAt)) return null;
-  return Math.min(3600, Math.max(1, Math.ceil((retryAt - Date.now()) / 1000)));
-}
-
-async function executeSearch({ keyword = '', categoryId = 'all', categoryIds = null, reason = 'search' }) {
-  const trimmed = keyword.trim();
-  if (!syncPriceRangeFromInputs()) return false;
-  const requestedCategoryIds = Array.from(new Set((categoryIds || (categoryId !== 'all' ? [categoryId] : [])).filter(Boolean)));
-  if (!trimmed && !requestedCategoryIds.length) {
-    $('#search-status').textContent = uiText('검색어를 입력하세요', 'Enter a search term.');
-    $('#search-status').classList.add('visible');
-    $('#keyword').setAttribute('aria-invalid', 'true');
-    $('#keyword').focus();
-    return false;
-  }
-  $('#search-status').textContent = reason === 'price_filter' ? uiText('가격 조건으로 다시 검색 중입니다.', 'Updating results for this price range.') : '';
-  $('#search-status').classList.toggle('visible', reason === 'price_filter');
-  $('#keyword').removeAttribute('aria-invalid');
-  state.requestController?.abort();
-  state.viewCollectionController?.abort();
-  state.viewCollectionController = null;
-  cancelRefreshTracking();
-  const requestController = new AbortController();
-  state.requestController = requestController;
-  state.query = trimmed;
-  state.appendError = '';
-  state.showFavorites = false;
-  state.currentPage = 0;
-  if (!['price_filter', 'sort', 'pagination', 'expansion', 'site_filter'].includes(reason)) {
-    state.siteWindow = SITE_RESULT_WINDOW_INITIAL;
-    state.focusedSiteWindows = {};
-    state.collectionSites = [];
-    state.collectionData = null;
-    state.viewData = new Map();
-    state.completedViewCollections = new Set();
-    state.expansionExhausted = false;
-  }
-  recordRecentSearch(trimmed);
-  state.categoryIds = requestedCategoryIds;
-  state.categoryId = requestedCategoryIds.length === 1 ? requestedCategoryIds[0] : 'all';
-  if (trimmed) $('#keyword').value = trimmed;
-  renderCategories();
-  const directlySelectedSites = getSelectedSites(requestedCategoryIds, trimmed);
-  const canReuseCollection = ['price_filter', 'sort', 'pagination', 'expansion', 'site_filter'].includes(reason)
-    && state.collectionSites.length > 0;
-  const selectedSites = canReuseCollection ? [...state.collectionSites] : directlySelectedSites;
-  if (!selectedSites.length) {
-    showUnavailableSelection();
-    return false;
-  }
-  if (!canReuseCollection) state.collectionSites = [...selectedSites];
-  const fingerprint = makeSearchFingerprint({ keyword: trimmed, categoryIds: requestedCategoryIds, sites: selectedSites });
-  setLoading(true, ['price_filter', 'sort', 'site_filter'].includes(reason));
-
-  try {
-    const data = await requestSearchPage({
-      keyword: trimmed,
-      categoryIds: requestedCategoryIds,
-      sites: selectedSites,
-      viewSites: activeViewSites(),
-      signal: requestController.signal,
-      refreshIndex: !['price_filter', 'sort', 'pagination', 'site_filter'].includes(reason)
-    });
-    if (state.requestController !== requestController) return false;
-    state.data = data;
-    rememberViewData(data);
-    state.appendError = '';
-    trackSearchRefresh(data, fingerprint);
-    renderAll();
-    const shouldPrefetchAllView = state.activeSite === 'all'
-      && ['search', 'sort', 'price_filter', 'site_filter'].includes(reason);
-    if (shouldPrefetchAllView && data.pagination?.next_cursor) {
-      void prefetchActiveResultPages();
-    }
-    if (reason === 'price_filter') {
-      $('#search-status').textContent = '';
-      $('#search-status').classList.remove('visible');
-    }
-    return true;
-  } catch (error) {
-    if (error.name === 'AbortError') return false;
-    state.data = null;
-    renderSourceSummary();
-    $('.market-app').classList.add('has-results');
-    resetRenderedResultSummary();
-    hidePagination();
-    $('#result-list').innerHTML = `<div class="error-state" role="alert">${escapeHtml(formatSourceMessage(error.message))}</div>`;
-    return false;
-  } finally {
-    if (state.requestController === requestController) {
-      state.requestController = null;
-      setLoading(false);
-    }
-  }
-}
-
-async function prefetchActiveResultPages() {
-  if (!state.data?.pagination?.next_cursor || !state.collectionSites.length) return false;
-  state.viewCollectionController?.abort();
-  const requestController = new AbortController();
-  state.viewCollectionController = requestController;
-  renderPagination();
-  try {
-    let data = state.data;
-    const targetItemCount = Math.min(availableResultCount(data), SITE_PREFETCH_PAGES * RESULT_PAGE_SIZE);
-    while ((data.items || []).length < targetItemCount && data.pagination?.next_cursor) {
-      const previousCount = data.items.length;
-      const requestedCursor = data.pagination.next_cursor;
-      const nextData = await requestSearchPage({
-        keyword: state.query,
-        categoryIds: selectedCategoryIds(),
-        sites: state.collectionSites,
-        viewSites: activeViewSites(),
-        cursor: requestedCursor,
-        signal: requestController.signal,
-        refreshIndex: false
-      });
-      if (state.viewCollectionController !== requestController) return false;
-      if (!pageResponseMatchesCursor(data.pagination?.next_cursor, requestedCursor)) return false;
-      data = mergeSearchData(data, nextData);
-      if (data.items.length <= previousCount) break;
-    }
-    if (state.viewCollectionController !== requestController) return false;
-    state.data = data;
-    rememberViewData(data);
-    renderAll();
-    return true;
-  } catch (error) {
-    if (error.name === 'AbortError') return false;
-    state.appendError = formatSourceMessage(error.message);
-    renderPagination();
-    return false;
-  } finally {
-    if (state.viewCollectionController === requestController) {
-      state.viewCollectionController = null;
-      renderPagination();
-    }
-  }
-}
-
-async function collectActiveView({ acquisitionMode = 'recent', targetWindow = currentResultWindow(), statusText = '' } = {}) {
-  if (!state.data || !state.collectionSites.length) return false;
-  const viewSites = activeViewSites();
-  const focusSites = viewSites.length ? viewSites : [...state.collectionSites];
-  const fingerprint = JSON.stringify({
-    query: state.query,
-    categories: selectedCategoryIds(),
-    collectionSites: state.collectionSites,
-    viewSites,
-    acquisitionMode,
-    targetWindow,
-    minPrice: state.minPrice,
-    maxPrice: state.maxPrice
+async function postJson(url, body, options = {}) {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { Accept: "application/json", "Content-Type": "application/json" },
+    credentials: "same-origin",
+    body: JSON.stringify(body),
+    keepalive: options.keepalive === true,
+    signal: options.signal,
   });
-  if (state.completedViewCollections.has(fingerprint)) return true;
-  state.viewCollectionController?.abort();
-  const requestController = new AbortController();
-  state.viewCollectionController = requestController;
-  renderPagination();
-  const pageBeforeCollection = state.currentPage;
-  if (statusText) {
-    $('#search-status').textContent = statusText;
-    $('#search-status').classList.add('visible');
-  }
+  if (response.status === 204) return null;
+  let payload = null;
   try {
-    let data = await requestSearchPage({
-      keyword: state.query,
-      categoryIds: selectedCategoryIds(),
-      sites: state.collectionSites,
-      viewSites,
-      focusSites,
-      signal: requestController.signal,
-      refreshIndex: false,
-      siteWindow: targetWindow,
-      collectView: true,
-      acquisitionMode
-    });
-    if (state.viewCollectionController !== requestController) return false;
-    const targetItemCount = Math.min(availableResultCount(data), SITE_PREFETCH_PAGES * RESULT_PAGE_SIZE);
-    while ((data.items || []).length < targetItemCount && data.pagination?.next_cursor) {
-      const previousCount = data.items.length;
-      const nextData = await requestSearchPage({
-        keyword: state.query,
-        categoryIds: selectedCategoryIds(),
-        sites: state.collectionSites,
-        viewSites,
-        cursor: data.pagination.next_cursor,
-        signal: requestController.signal,
-        refreshIndex: false,
-        siteWindow: targetWindow,
-        acquisitionMode
-      });
-      if (state.viewCollectionController !== requestController) return false;
-      data = mergeSearchData(data, nextData);
-      if (data.items.length <= previousCount) break;
-    }
-    state.completedViewCollections.add(fingerprint);
-    if (viewSites.length === 1) state.focusedSiteWindows[viewSites[0]] = targetWindow;
-    else state.siteWindow = targetWindow;
-    state.data = data;
-    rememberViewData(data);
-    const pageToKeep = Number.isInteger(state.currentPage) ? state.currentPage : pageBeforeCollection;
-    state.currentPage = clampResultPage(pageToKeep, resultPageCount(availableResultCount(data)));
-    state.expansionExhausted = false;
-    $('#search-status').textContent = '추가 매물을 반영했습니다.';
-    state.viewCollectionController = null;
-    renderAll();
-    return true;
-  } catch (error) {
-    if (error.name === 'AbortError') return false;
-    $('#search-status').textContent = `추가 매물 확인 실패: ${formatSourceMessage(error.message)}`;
-    $('#search-status').classList.add('visible');
-    return false;
-  } finally {
-    if (state.viewCollectionController === requestController) {
-      state.viewCollectionController = null;
-      renderPagination();
-    }
+    payload = await response.json();
+  } catch {}
+  if (!response.ok) throw new Error(firstDefined(payload?.error?.message, payload?.message, `요청에 실패했습니다. (${response.status})`));
+  return unwrapPayload(payload);
+}
+
+function normalizeText(value) {
+  if (value === undefined || value === null) return "";
+  return String(value).trim();
+}
+
+function categoryCode(category) {
+  return normalizeText(firstDefined(category?.category_code, category?.code, category?.id)).toUpperCase();
+}
+
+function categoryLabel(category) {
+  return normalizeText(firstDefined(category?.display_name, category?.label, category?.name, categoryCode(category)));
+}
+
+function categoryCount(category) {
+  const values = [category?.model_count, category?.product_count, category?.registered_product_count, category?.count];
+  const explicit = values.find((value) => Number.isFinite(Number(value)));
+  if (explicit !== undefined) return Math.max(0, Number(explicit));
+  const registeredNodes = Number(category?.registered_node_count);
+  return Number.isFinite(registeredNodes) ? Math.max(0, registeredNodes) : 0;
+}
+
+function productId(product) {
+  return normalizeText(firstDefined(product?.canonical_product_id, product?.product_id, product?.id));
+}
+
+function productName(product) {
+  return normalizeText(firstDefined(product?.canonical_display_name, product?.display_name, product?.name, "이름 미확인 제품"));
+}
+
+function productCategory(product) {
+  const category = firstDefined(product?.category_code, product?.category, product?.product_category);
+  if (category && typeof category === "object") return categoryCode(category);
+  return normalizeText(category).toUpperCase();
+}
+
+function productManufacturer(product) {
+  const maker = firstDefined(product?.manufacturer, product?.brand, product?.board_manufacturer, product?.key_specs?.board_manufacturer);
+  if (maker && typeof maker === "object") return normalizeText(firstDefined(maker.display_name, maker.name, maker.code));
+  return normalizeText(maker);
+}
+
+function productFamily(product) {
+  return normalizeText(firstDefined(product?.family, product?.product_family, product?.series, product?.generation, product?.key_specs?.family, product?.key_specs?.generation));
+}
+
+function normalizeSources(sources) {
+  return toArray(sources)
+    .filter((source) => source && source.public_enabled !== false && source.enabled !== false)
+    .filter((source) => !["DISABLED", "DENIED"].includes(normalizeText(firstDefined(source.operating_status, source.runtime_status, source.status)).toUpperCase()))
+    .map((source) => ({
+      id: normalizeText(firstDefined(source.source_id, source.key, source.code, source.id)),
+      label: normalizeText(firstDefined(source.display_name, source.label, source.name, source.source_id, source.id)),
+      marketPool: normalizeText(firstDefined(source.market_pool, toArray(source.market_pools)[0])),
+      currency: normalizeText(firstDefined(source.currency, normalizeText(source.market_pool).startsWith("OVERSEAS") ? "USD" : "KRW")).toUpperCase(),
+    }))
+    .filter((source) => source.id && source.label);
+}
+
+function normalizeSourceCandidates(sources) {
+  return toArray(sources)
+    .filter((source) => source && source.public_enabled === false)
+    .map((source) => ({
+      id: normalizeText(firstDefined(source.source_id, source.key, source.code, source.id)),
+      label: normalizeText(firstDefined(source.display_name, source.label, source.name, source.source_id, source.id)),
+      reason: normalizeText(source.availability_reason).toUpperCase(),
+      policyUrl: normalizeText(source.policy_reference_url),
+      activationUrl: normalizeText(source.activation_url),
+      integrationDocsUrl: normalizeText(source.integration_docs_url),
+    }))
+    .filter((source) => source.id && source.label);
+}
+
+function sourceLabel(sourceId) {
+  const normalized = normalizeText(sourceId);
+  const known = {
+    joonggonara: "중고나라",
+    bunjang: "번개장터",
+    hellomarket: "헬로마켓",
+    rethinkmall: "리씽크몰",
+    danawa: "다나와 장터",
+    ebay: "eBay",
+    coolenjoy: "쿨엔조이",
+    daangn: "당근",
+  };
+  return state.sources.find((source) => source.id === normalized)?.label || known[normalized] || normalized || "출처 미확인";
+}
+
+function normalizePrice(value, fallbackCurrency = "KRW") {
+  if (value === undefined || value === null || value === "") return null;
+  if (typeof value === "object") {
+    const amount = Number(firstDefined(value.amount, value.value, value.price, value.median, value.mean));
+    if (!Number.isFinite(amount)) return null;
+    return { amount, currency: normalizeText(firstDefined(value.currency, fallbackCurrency)).toUpperCase() || fallbackCurrency };
+  }
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) return null;
+  return { amount, currency: fallbackCurrency };
+}
+
+function metricValue(block, keys) {
+  if (!block || typeof block !== "object") return null;
+  for (const key of keys) {
+    const price = normalizePrice(block[key], normalizeText(block.currency) || "KRW");
+    if (price) return price;
+  }
+  return null;
+}
+
+function sampleCount(block) {
+  const value = Number(firstDefined(block?.n, block?.count, block?.sample_count, block?.listing_count, block?.total));
+  return Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+function formatMoney(value, fallbackCurrency = "KRW") {
+  const price = normalizePrice(value, fallbackCurrency);
+  if (!price) return "—";
+  const currency = price.currency || fallbackCurrency;
+  try {
+    return new Intl.NumberFormat("ko-KR", {
+      style: "currency",
+      currency,
+      maximumFractionDigits: currency === "KRW" ? 0 : 2,
+    }).format(price.amount);
+  } catch {
+    return `${price.amount.toLocaleString("ko-KR")} ${currency}`;
   }
 }
 
-async function loadResultPage(pageIndex) {
-  if (!state.data || state.loading) return;
-  const pageCount = resultPageCount(availableResultCount());
-  const loadedCount = Array.isArray(state.data.items) ? state.data.items.length : 0;
-  const maxNavigablePage = maxNavigableResultPage(loadedCount, availableResultCount(), Boolean(state.data.pagination?.next_cursor));
-  const targetPage = clampResultPage(Math.min(pageIndex, maxNavigablePage), pageCount);
-  if (targetPage === state.currentPage) return;
-  const targetItemCount = Math.min(availableResultCount(), (targetPage + 1) * RESULT_PAGE_SIZE);
-  if (loadedCount >= targetItemCount) {
-    state.currentPage = targetPage;
-    renderAll();
-    focusCurrentPage();
-    return;
+function formatCount(value) {
+  const count = Number(value);
+  return Number.isFinite(count) ? `${count.toLocaleString("ko-KR")}건` : "—";
+}
+
+function formatDateTime(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return normalizeText(value);
+  return new Intl.DateTimeFormat("ko-KR", {
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+}
+
+function safeHttpsUrl(value) {
+  try {
+    const url = new URL(value, window.location.origin);
+    if (url.protocol === "http:") url.protocol = "https:";
+    if (url.protocol !== "https:") return "";
+    if (url.username || url.password) return "";
+    return url.href;
+  } catch {
+    return "";
+  }
+}
+
+function showCatalogMessage(message, isError = false) {
+  dom.catalogMessage.textContent = message;
+  dom.catalogMessage.classList.toggle("is-error", isError);
+  dom.catalogMessage.hidden = !message;
+}
+
+function showDetailMessage(message, isError = false) {
+  dom.detailMessage.textContent = message;
+  dom.detailMessage.classList.toggle("is-error", isError);
+  dom.detailMessage.hidden = !message;
+}
+
+function setBusy(button, isBusy, busyText) {
+  if (!button) return;
+  if (isBusy) {
+    button.dataset.originalText = button.textContent;
+    button.textContent = busyText;
+    button.disabled = true;
+  } else {
+    button.textContent = button.dataset.originalText || button.textContent;
+    button.disabled = false;
+  }
+}
+
+function catalogCategoryProducts(category) {
+  return state.seedProducts.filter((product) => !category || productCategory(product) === category);
+}
+
+function facetOptionLabel(key, value) {
+  const capacityLabels = {
+    LE_256_GB: "256GB 이하", "480_512_GB": "480~512GB", "960_GB_1_TB": "960GB~1TB",
+    "1_92_2_TB": "1.92~2TB", "3_84_4_TB": "3.84~4TB", "7_68_8_TB": "7.68~8TB", GT_8_TB: "8TB 초과",
+    LE_1_TB: "1TB 이하", "2_TB": "2TB", "3_4_TB": "3~4TB", "5_6_TB": "5~6TB", "8_TB": "8TB",
+    "10_12_TB": "10~12TB", "14_16_TB": "14~16TB", "18_20_TB": "18~20TB", "22_24_TB": "22~24TB", GE_26_TB: "26TB 이상",
+  };
+  const wattsLabels = { LE_500: "500W 이하", "550_650": "550~650W", "700_750": "700~750W", "800_850": "800~850W", "900_1000": "900~1000W", "1100_1200": "1100~1200W", GT_1200: "1200W 초과" };
+  const usageLabels = { LAPTOP: "노트북", CONSUMER_DESKTOP: "데스크탑", DESKTOP: "데스크탑" };
+  if (key === "usage") return usageLabels[value] || value;
+  if (["module_capacity_gb", "vram_gb"].includes(key)) return `${value}GB`;
+  if (["radiator_mm", "fan_mm"].includes(key)) return `${value}mm`;
+  if (key === "pcie_generation") return `PCIe ${value}.0`;
+  if (key === "capacity_bucket") return capacityLabels[value] || value;
+  if (key === "watts_bucket") return wattsLabels[value] || value;
+  return value;
+}
+
+function normalizeFacetOption(option, key = "") {
+  if (option && typeof option === "object") {
+    const value = normalizeText(firstDefined(option.value, option.code, option.id, option.key, option.name));
+    const providedLabel = normalizeText(firstDefined(option.label, option.display_name, option.name));
+    const label = providedLabel && providedLabel !== value ? providedLabel : facetOptionLabel(key, value);
+    return value ? { value, label, ...(option.disabled === true ? { disabled: true } : {}) } : null;
+  }
+  const value = normalizeText(option);
+  return value ? { value, label: facetOptionLabel(key, value) } : null;
+}
+
+function normalizeFacetDefinition(definition, fallbackKey = "") {
+  if (!definition) return null;
+  const key = normalizeText(firstDefined(definition.query_param, definition.param, definition.key, definition.id, fallbackKey)).toLowerCase();
+  if (!PRODUCT_QUERY_KEYS.has(key)) return null;
+  const labelMap = {
+    manufacturer: "제조사", model: "정확한 모델", chip_manufacturer: "칩 제조사", market_segment: "제품 유형",
+    board_brand: "제품 브랜드", usage: "사용 유형", configuration: "구성", form_interface: "제품 형태·인터페이스", purpose: "용도", rated_wattage: "정격 출력",
+    family: "제품군 / 규격", generation: "세대", vram_gb: "VRAM", vram_options_gb: "VRAM", gpu_model: "GPU 모델", platform_vendor: "CPU 제조사", socket: "소켓",
+    suffix: "모델 suffix", memory_generation: "메모리 규격", module_capacity_gb: "모듈 용량", form_factor: "폼팩터",
+    ecc: "ECC", buffering: "모듈 종류", chipset: "칩셋", capacity_bucket: "용량", interface: "인터페이스",
+    protocol: "프로토콜", pcie_generation: "PCIe 세대", use_class: "사용군", recording_technology: "기록 방식",
+    watts: "정격 출력", watts_bucket: "정격 출력", atx_spec: "ATX 규격", modularity: "케이블 방식", efficiency: "효율 등급",
+    module_count: "모듈 수", total_capacity_gb: "총용량",
+    subtype: "종류", radiator_mm: "라디에이터", fan_mm: "팬 크기", chassis_class: "케이스 크기",
+    motherboard_support: "지원 보드", side_panel: "측면 패널", host_interface: "호스트 규격", bracket: "브래킷",
+    media_family: "미디어", capability: "읽기 / 쓰기", placement: "내장 / 외장",
+  };
+  const label = normalizeText(firstDefined(definition.label, definition.display_name, definition.name, labelMap[key], key));
+  const options = toArray(firstDefined(definition.options, definition.values, definition.items))
+    .map((option) => normalizeFacetOption(option, key))
+    .filter(Boolean);
+  return { key, label, options };
+}
+
+function normalizeAvailableFacets(value) {
+  if (!value || typeof value !== "object") return {};
+  return Object.fromEntries(Object.entries(value).map(([key, options]) => [
+    normalizeText(key).toLowerCase(),
+    toArray(firstDefined(options?.options, options?.items, options))
+      .map((option) => {
+        const normalized = normalizeFacetOption(option, key);
+        if (!normalized) return null;
+        const count = Number(firstDefined(option?.count, option?.model_count, option?.total));
+        return Number.isFinite(count) ? { ...normalized, count } : normalized;
+      })
+      .filter(Boolean),
+  ]).filter(([key, options]) => key && options.length));
+}
+
+function normalizeBrowseFlows(value) {
+  if (!value || typeof value !== "object") return {};
+  const entries = Array.isArray(value)
+    ? value.map((flow) => [normalizeText(firstDefined(flow?.category_code, flow?.category)), flow?.steps || flow?.flow || flow?.facets || []])
+    : Object.entries(value);
+  return Object.fromEntries(entries.map(([category, steps]) => {
+    const rawSteps = steps && !Array.isArray(steps) && typeof steps === "object"
+      ? firstDefined(steps.steps, steps.browse_flow, steps.flow, steps.facets, [])
+      : steps;
+    const normalizedSteps = toArray(rawSteps).map((step) => {
+      if (typeof step === "string") return { key: step, label: normalizeFacetDefinition({ key: step })?.label || step };
+      const key = normalizeText(firstDefined(step?.key, step?.query_param, step?.param)).toLowerCase();
+      if (!key || !PRODUCT_QUERY_KEYS.has(key)) return null;
+      return {
+        key,
+        label: normalizeText(firstDefined(step?.label, step?.display_name, normalizeFacetDefinition({ key })?.label, key)),
+        depends_on: toArray(firstDefined(step?.depends_on, step?.dependsOn)).map((item) => normalizeText(item).toLowerCase()).filter(Boolean),
+      };
+    }).filter(Boolean);
+    return [normalizeText(category).toUpperCase(), normalizedSteps];
+  }).filter(([category, steps]) => category && steps.length));
+}
+
+function browseFlowForCategory(category) {
+  if (DEFAULT_BROWSE_FLOWS[category]?.length) {
+    return DEFAULT_BROWSE_FLOWS[category];
+  }
+  return toArray(state.browseFlows?.[category]);
+}
+
+function productFacetValues(product, key) {
+  if (key === "manufacturer") {
+    const category = productCategory(product);
+    const manufacturer = category === "GPU"
+      ? firstDefined(product?.manufacturer, product?.key_specs?.chip_manufacturer, product?.browse_facets?.chip_manufacturer, product?.spec?.chip_manufacturer)
+      : productManufacturer(product);
+    return [normalizeText(manufacturer)].filter(Boolean);
+  }
+  if (key === "model") return [productName(product)].filter(Boolean);
+  if (key === "board_brand") return [productManufacturer(product)].filter(Boolean);
+  if (key === "family") return [productFamily(product)].filter(Boolean);
+  const specs = {
+    ...(product?.key_specs && typeof product.key_specs === "object" ? product.key_specs : {}),
+    ...(product?.browse_facets && typeof product.browse_facets === "object" ? product.browse_facets : {}),
+    ...(product?.spec_json && typeof product.spec_json === "object" ? product.spec_json : {}),
+    ...(product?.spec && typeof product.spec === "object" ? product.spec : {}),
+  };
+  if (key === "gpu_model") return [firstDefined(specs.gpu_model, specs.family, productName(product))].filter(Boolean).map(normalizeText);
+  if (key === "usage") {
+    const formFactor = normalizeText(firstDefined(specs.form_factor, specs.memory_form_factor)).toUpperCase();
+    return [formFactor === "SODIMM" || formFactor === "SO-DIMM" ? "LAPTOP" : firstDefined(specs.market_segment, "CONSUMER_DESKTOP")].filter(Boolean).map(normalizeText);
+  }
+  if (key === "configuration") {
+    const capacity = firstDefined(specs.module_capacity_gb, specs.capacity_per_module_gb);
+    const modules = firstDefined(specs.module_count, specs.modules_per_kit);
+    return [specs.configuration, capacity !== undefined ? `${capacity}GB × ${modules || 1}` : ""].filter(Boolean).map(normalizeText);
+  }
+  if (key === "form_interface") {
+    const form = firstDefined(specs.form_factor, specs.interface);
+    const protocol = firstDefined(specs.protocol);
+    return [form && protocol ? `${form} ${protocol}` : form].filter(Boolean).map(normalizeText);
+  }
+  if (key === "capacity") return [firstDefined(specs.marketed_capacity_gb, specs.capacity_gb, specs.capacity_bucket)].filter((value) => value !== undefined && value !== null).map(normalizeText);
+  if (key === "purpose") return [firstDefined(specs.purpose, specs.use_class)].filter(Boolean).map(normalizeText);
+  if (key === "rated_wattage") return [firstDefined(specs.rated_wattage, specs.watts, specs.watts_bucket)].filter(Boolean).map(normalizeText);
+  const value = firstDefined(specs[key], product?.[key]);
+  return toArray(value).map((item) => normalizeText(item)).filter(Boolean);
+}
+
+function productMatchesActiveFacets(product, ignoreKey = "") {
+  return Object.entries(state.facets).every(([key, expected]) => {
+    if (!expected || key === ignoreKey) return true;
+    return productFacetValues(product, key).some((value) => String(value).toUpperCase() === String(expected).toUpperCase());
+  });
+}
+
+function ramCapacityOptions() {
+  const capacities = new Map();
+  const addCapacity = (value, count = 0) => {
+    const match = normalizeText(value).match(/(\d+(?:\.\d+)?)\s*GB/i);
+    if (!match) return;
+    const capacity = match[1];
+    const current = capacities.get(capacity) || 0;
+    capacities.set(capacity, current + (Number.isFinite(Number(count)) ? Number(count) : 0));
+  };
+
+  toArray(state.availableFacets?.configuration).forEach((option) => {
+    addCapacity(firstDefined(option?.value, option?.label, option), option?.count);
+  });
+  if (!capacities.size) {
+    state.products.forEach((product) => productFacetValues(product, "module_capacity_gb").forEach((value) => addCapacity(`${value}GB`)));
+  }
+  return [...capacities.entries()]
+    .sort((left, right) => Number(left[0]) - Number(right[0]))
+    .map(([value, count]) => ({ value, label: facetOptionLabel("module_capacity_gb", value), ...(count ? { count } : {}) }));
+}
+
+function seriesOptionsForCategory(category) {
+  const options = new Map();
+  const products = state.products.length ? state.products : state.seedProducts;
+  products.filter((product) => productCategory(product) === category && productMatchesActiveFacets(product, "generation")).forEach((product) => {
+    const specs = product?.key_specs && typeof product.key_specs === "object" ? product.key_specs : {};
+    const value = normalizeText(firstDefined(specs.generation, product?.generation, product?.series));
+    if (value && !options.has(value)) options.set(value, { value, label: facetOptionLabel("generation", value) });
+  });
+  return [...options.values()].sort((left, right) => left.label.localeCompare(right.label, "ko"));
+}
+
+function facetOptionsForStep(category, step) {
+  const addRamUsageFallback = (options) => {
+    if (category !== "RAM" || step.key !== "usage" || options.some((option) => option.value === "LAPTOP")) return options;
+    return [{ value: "LAPTOP", label: "노트북", count: 0, disabled: true }, ...options];
+  };
+  if (category === "RAM" && step.key === "module_capacity_gb") {
+    const capacityOptions = ramCapacityOptions();
+    if (capacityOptions.length) return capacityOptions;
+  }
+  if (["CPU", "GPU"].includes(category) && step.key === "generation") {
+    const seriesOptions = seriesOptionsForCategory(category);
+    if (seriesOptions.length) return seriesOptions;
+  }
+  const availableKey = category === "RAM" && step.key === "memory_generation" ? "generation" : step.key;
+  const available = state.availableFacets?.[availableKey];
+  const availableOptions = toArray(firstDefined(available?.options, available?.items, available));
+  if (availableOptions.length) return addRamUsageFallback(availableOptions.map((option) => normalizeFacetOption(option, step.key)).filter(Boolean));
+
+  const schema = state.facetSchema?.[category] || state.facetSchema?.[category.toLowerCase()];
+  const schemaOptions = toArray(schema?.[step.key]).map((option) => normalizeFacetOption(option, step.key)).filter(Boolean);
+  if (schemaOptions.length && !step.depends_on?.length) return addRamUsageFallback(schemaOptions);
+
+  const derived = new Map();
+  state.products.filter((product) => productMatchesActiveFacets(product, step.key)).forEach((product) => {
+    productFacetValues(product, step.key).forEach((value) => {
+      if (!derived.has(value)) derived.set(value, { value, label: facetOptionLabel(step.key, value) });
+    });
+  });
+  return addRamUsageFallback([...derived.values()].sort((left, right) => left.label.localeCompare(right.label, "ko")));
+}
+
+function facetDefinitionsForCategory(category) {
+  return browseFlowForCategory(category).map((step) => {
+    const options = facetOptionsForStep(category, step);
+    return options.length ? { ...step, options } : null;
+  }).filter(Boolean);
+}
+
+function renderCategories() {
+  dom.categoryRail.replaceChildren();
+  state.categories.forEach((category) => {
+    const code = categoryCode(category);
+    const button = createElement("button", "category-button");
+    button.type = "button";
+    button.dataset.categoryCode = code;
+    button.setAttribute("aria-pressed", String(state.categoryCode === code));
+    button.append(
+      createElement("span", "category-marker", ""),
+      createElement("span", "category-label", categoryLabel(category)),
+      createElement("span", "category-count", `${categoryCount(category).toLocaleString("ko-KR")}개`),
+    );
+    button.addEventListener("click", () => selectCategory(code));
+    dom.categoryRail.append(button);
+  });
+}
+
+function makeFacetButton(label, value, active, onClick, disabled = false) {
+  const button = createElement("button", "facet-option", label);
+  button.type = "button";
+  button.disabled = disabled;
+  button.dataset.value = value;
+  button.setAttribute("aria-pressed", String(active));
+  button.addEventListener("click", onClick);
+  return button;
+}
+
+function makeFacetSelect(definition) {
+  const field = createElement("label", "facet-control");
+  field.dataset.facetKey = definition.key;
+  field.append(createElement("span", "facet-label", definition.label));
+
+  const select = createElement("select", "facet-select");
+  select.dataset.facetKey = definition.key;
+  select.setAttribute("aria-label", definition.label);
+  const current = state.facets[definition.key] || "";
+  const allOption = document.createElement("option");
+  allOption.value = "";
+  allOption.textContent = "전체";
+  allOption.selected = !current;
+  select.append(allOption);
+
+  definition.options.forEach((option) => {
+    const node = document.createElement("option");
+    node.value = option.value;
+    node.textContent = Number.isFinite(Number(option.count))
+      ? `${option.label} (${Number(option.count).toLocaleString("ko-KR")}개)`
+      : option.label;
+    node.selected = current === option.value;
+    node.disabled = option.disabled === true;
+    select.append(node);
+  });
+  select.addEventListener("change", () => updateFacet(definition.key, select.value));
+  field.append(select);
+  return field;
+}
+
+function renderFacets() {
+  dom.facetRows.replaceChildren();
+  const category = state.categories.find((item) => categoryCode(item) === state.categoryCode);
+  const selectedFacetCount = Object.values(state.facets).filter(Boolean).length;
+  const filterState = selectedFacetCount ? `${selectedFacetCount}개 조건 선택` : "전체 상품";
+  if (dom.filterContext) dom.filterContext.textContent = category ? `${categoryLabel(category)} · ${filterState}` : filterState;
+  const definitions = facetDefinitionsForCategory(state.categoryCode);
+  definitions.forEach((definition) => {
+    dom.facetRows.append(makeFacetSelect(definition));
+  });
+
+  if (!definitions.length && state.categoryCode) {
+    dom.facetRows.append(createElement("p", "facet-empty", "선택 가능한 필터가 없습니다."));
   }
 
-  const requestController = new AbortController();
-  state.requestController?.abort();
-  state.requestController = requestController;
-  const categoryIds = selectedCategoryIds();
-  const sites = state.collectionSites.length ? [...state.collectionSites] : getSelectedSites(categoryIds);
-  state.appendError = '';
-  setLoading(true, true);
-  try {
-    if ((state.data?.items || []).length < targetItemCount && state.data?.pagination?.next_cursor) {
-      const previousCount = state.data.items.length;
-      const requestedCursor = state.data.pagination.next_cursor;
-      const nextData = await requestSearchPage({
-        keyword: state.query,
-        categoryIds,
-        sites,
-        viewSites: activeViewSites(),
-        cursor: requestedCursor,
-        signal: requestController.signal,
-        refreshIndex: false
-      });
-      if (state.requestController !== requestController) return;
-      if (pageResponseMatchesCursor(state.data?.pagination?.next_cursor, requestedCursor)) {
-        state.data = mergeSearchData(state.data, nextData);
-        rememberViewData(state.data);
-        if (state.data.items.length <= previousCount) state.appendError = uiText('추가 결과가 없습니다.', 'No additional results were returned.');
+  renderSourceFilters();
+  dom.resetFilters.hidden = !Object.values(state.facets).some(Boolean) && state.selectedSites.size === 0 && !state.query;
+}
+
+function renderSourceFilters() {
+  dom.sourceFilters.replaceChildren();
+  dom.sourceFacetRow.hidden = state.sources.length === 0 && state.sourceCandidates.length === 0;
+  if (!state.sources.length && !state.sourceCandidates.length) return;
+  dom.sourceFilters.append(makeFacetButton("전체", "", state.selectedSites.size === 0, () => {
+    state.selectedSites.clear();
+    renderFacets();
+    if (state.selectedProduct) {
+      updateListingScopeNote();
+      loadProductDetail();
+    }
+  }));
+  state.sources.forEach((source) => {
+    dom.sourceFilters.append(makeFacetButton(source.label, source.id, state.selectedSites.has(source.id), () => {
+      if (state.selectedSites.has(source.id)) state.selectedSites.delete(source.id);
+      else state.selectedSites.add(source.id);
+      renderFacets();
+      if (state.selectedProduct) {
+        updateListingScopeNote();
+        loadProductDetail();
       }
+    }));
+  });
+  state.sourceCandidates.forEach((source) => {
+    const status = source.reason === "PARTNER_CONTRACT_REQUIRED"
+      ? "파트너 승인 필요"
+      : source.reason === "WRITTEN_PERMISSION_REQUIRED" ? "허가 필요" : "검토 중";
+    const note = createElement(source.activationUrl ? "a" : "span", "source-unavailable", `${source.label} · ${status}`);
+    note.setAttribute("aria-label", `${source.label} 수집 ${status}`);
+    if (source.activationUrl) {
+      note.href = source.activationUrl;
+      note.target = "_blank";
+      note.rel = "noopener noreferrer";
     }
-    const reachablePages = resultPageCount(Math.min(availableResultCount(), state.data.items.length));
-    state.currentPage = clampResultPage(targetPage, reachablePages);
-  } catch (error) {
-    if (error.name === 'AbortError') return;
-    state.appendError = formatSourceMessage(error.message);
-    $('#search-status').textContent = `페이지를 불러오지 못했습니다: ${state.appendError}`;
-    $('#search-status').classList.add('visible');
-  } finally {
-    if (state.requestController === requestController) {
-      state.requestController = null;
-      setLoading(false);
-      renderAll();
-      focusCurrentPage();
-    }
-  }
+    note.title = source.reason === "PARTNER_CONTRACT_REQUIRED"
+      ? "공식 파트너 계약과 카탈로그 접근 권한이 발급된 뒤 활성화합니다."
+      : source.reason === "WRITTEN_PERMISSION_REQUIRED"
+        ? "공식 허가 또는 제휴 피드가 확보되기 전에는 수집하지 않습니다."
+        : "정책 검토와 실사이트 검증이 끝난 뒤 활성화합니다.";
+    dom.sourceFilters.append(note);
+  });
 }
 
-function canExpandResultWindow(totalCount = availableResultCount()) {
-  return !state.showFavorites
-    && !state.expansionExhausted
-    && currentResultWindow() < SITE_RESULT_WINDOW_MAX
-    && totalCount < SEARCH_SESSION_MAX_ITEMS
-    && state.data != null;
-}
-
-async function expandResultWindow() {
-  if (!canExpandResultWindow() || state.loading || state.viewCollectionController) return;
-  const previousWindow = currentResultWindow();
-  const previousCount = availableResultCount();
-  const previousPage = state.currentPage;
-  const nextWindow = Math.min(previousWindow + SITE_RESULT_WINDOW_STEP, SITE_RESULT_WINDOW_MAX);
-  const requestController = new AbortController();
-  state.requestController?.abort();
-  state.requestController = requestController;
-  const categoryIds = selectedCategoryIds();
-  const sites = state.collectionSites.length ? [...state.collectionSites] : getSelectedSites(categoryIds, state.query);
-  const viewSites = activeViewSites();
-  const focusSites = viewSites.length ? viewSites : sites;
-  state.appendError = '';
-  $('#search-status').textContent = uiText('다음 매물을 더 찾는 중입니다.', 'Loading more listings.');
-  $('#search-status').classList.add('visible');
-  setLoading(true, true);
-  try {
-    let expanded = await requestSearchPage({
-      keyword: state.query,
-      categoryIds,
-      sites,
-      viewSites,
-      focusSites,
-      signal: requestController.signal,
-      refreshIndex: false,
-      siteWindow: nextWindow,
-      expandIndex: true,
-      acquisitionMode: 'recent'
+function updateFacet(key, value) {
+  const flow = browseFlowForCategory(state.categoryCode);
+  const descendants = new Set();
+  let changed = true;
+  while (changed) {
+    changed = false;
+    flow.forEach((step) => {
+      if (step.key === key || !step.depends_on?.some((dependency) => dependency === key || descendants.has(dependency))) return;
+      if (!descendants.has(step.key)) {
+        descendants.add(step.key);
+        changed = true;
+      }
     });
-    if (state.requestController !== requestController) return;
-    if (viewSites.length === 1) state.focusedSiteWindows[viewSites[0]] = nextWindow;
-    else state.siteWindow = nextWindow;
-    state.data = expanded;
-    rememberViewData(expanded);
-    const expandedCount = availableResultCount();
-    const targetPage = expandedCount > previousCount
-      ? Math.min(previousPage + 1, Math.max(0, resultPageCount(expandedCount) - 1))
-      : previousPage;
-    const targetItemCount = Math.min(expandedCount, (targetPage + 1) * RESULT_PAGE_SIZE);
-    while ((state.data?.items || []).length < targetItemCount && state.data?.pagination?.next_cursor) {
-      const nextData = await requestSearchPage({
-        keyword: state.query,
-        categoryIds,
-        sites,
-        viewSites,
-        cursor: state.data.pagination.next_cursor,
-        signal: requestController.signal,
-        refreshIndex: false,
-        siteWindow: nextWindow
-      });
-      if (state.requestController !== requestController) return;
-      const before = state.data.items.length;
-      state.data = mergeSearchData(state.data, nextData);
-      rememberViewData(state.data);
-      if (state.data.items.length <= before) break;
-    }
-    state.currentPage = clampResultPage(targetPage, resultPageCount(availableResultCount()));
-    const addedCount = Math.max(0, availableResultCount() - previousCount);
-    state.expansionExhausted = addedCount === 0 || nextWindow >= SITE_RESULT_WINDOW_MAX;
-    $('#search-status').textContent = addedCount > 0
-      ? `새 매물 ${addedCount}개를 더 찾았습니다.`
-      : uiText('추가로 확인된 매물이 없습니다.', 'No additional listings were found.');
-  } catch (error) {
-    if (error.name === 'AbortError') return;
-    if (viewSites.length === 1) state.focusedSiteWindows[viewSites[0]] = previousWindow;
-    else state.siteWindow = previousWindow;
-    state.appendError = formatSourceMessage(error.message);
-    $('#search-status').textContent = `다음 매물을 찾지 못했습니다: ${state.appendError}`;
-  } finally {
-    if (state.requestController === requestController) {
-      state.requestController = null;
-      setLoading(false);
-      renderAll();
-      focusCurrentPage();
-    }
   }
+  state.facets[key] = value;
+  descendants.forEach((descendant) => { delete state.facets[descendant]; });
+  state.openSeries.clear();
+  renderFacets();
+  loadProducts(false);
 }
 
-function search(keyword) {
-  // Keep the category selection when the user submits the top search form.
-  // Passing an empty array here silently cleared multi-category searches.
-  executeSearch({ keyword, categoryIds: selectedCategoryIds() });
-}
-
-function renderAll() {
-  if (!state.data) return;
-  $('.market-app').classList.add('has-results');
-  const visible = visibleItems();
+function selectCategory(code) {
+  if (!code || code === state.categoryCode) return;
+  state.categoryCode = code;
+  state.facets = {};
+  state.openSeries.clear();
+  state.availableFacets = {};
+  state.selectedProduct = null;
+  state.products = [];
+  resetDetail();
   renderCategories();
-  renderResults();
-  renderFreshnessStatus();
+  renderFacets();
+  updateWorkspaceHeading();
+  loadProducts(false);
 }
 
-function formatSourceMessage(message) {
-  const text = String(message || '');
-  if (text.startsWith('SEARCH_BUSY:')) {
-    const retryAfter = Number(text.slice('SEARCH_BUSY:'.length));
-    return Number.isFinite(retryAfter) && retryAfter > 0
-      ? `검색 요청이 많습니다. 약 ${retryAfter}초 후 다시 시도해 주세요.`
-      : '검색 요청이 많습니다. 잠시 후 다시 시도해 주세요.';
+function updateWorkspaceHeading() {
+  const category = state.categories.find((item) => categoryCode(item) === state.categoryCode);
+  const label = category ? categoryLabel(category) : "제품";
+  const categoryRoute = window.location.pathname.match(/^\/categories\/([a-z-]+)$/u);
+  const query = state.query.slice(0, 80);
+  const pageTitle = query
+    ? `${query} 중고 PC 부품 검색 | USED PICK`
+    : categoryRoute
+      ? `중고 ${label} 검색 | ${label} 중고시세 비교 | USED PICK`
+      : "중고 PC·컴퓨터 부품 검색 | 중고 시세 비교 | USED PICK";
+  const pageDescription = query
+    ? `중고 PC 부품 검색 결과입니다. ${query} 모델별 매물과 최근 30일 중고 시세를 비교하세요.`
+    : categoryRoute
+      ? `중고 ${label}를 모델별로 검색하고 현재 매물, 판매중 가격, 최근 30일 ${label} 중고시세를 비교하세요.`
+      : "중고 PC와 컴퓨터 부품을 모델별로 검색하세요. 중고 그래픽카드, CPU, RAM, SSD, 메인보드, 파워서플라이 매물과 최근 30일 중고 시세를 비교합니다.";
+  const heading = query
+    ? `“${query}” 중고 PC 검색 결과`
+    : categoryRoute
+      ? `중고 ${label} 검색`
+      : "중고 PC 부품 검색";
+  const intro = query
+    ? `${query} 관련 중고 PC 부품 모델과 현재 매물을 비교합니다.`
+    : categoryRoute
+      ? `중고 ${label} 모델을 검색하고 출처별 매물과 중고시세를 비교하세요.`
+      : "중고 컴퓨터 부품을 모델별로 검색하고 현재 매물과 최근 중고 시세를 비교하세요.";
+
+  dom.workspaceTitle.textContent = heading;
+  if (dom.workspaceIntro) dom.workspaceIntro.textContent = intro;
+  dom.modelListContext.textContent = query ? `“${query}” 검색 결과` : `${label} 중고 부품 모델`;
+  document.title = pageTitle;
+  const descriptionMeta = document.querySelector('meta[name="description"]');
+  const ogTitleMeta = document.querySelector('meta[property="og:title"]');
+  const ogDescriptionMeta = document.querySelector('meta[property="og:description"]');
+  const twitterTitleMeta = document.querySelector('meta[name="twitter:title"]');
+  const twitterDescriptionMeta = document.querySelector('meta[name="twitter:description"]');
+  if (descriptionMeta) descriptionMeta.setAttribute("content", pageDescription);
+  if (ogTitleMeta) ogTitleMeta.setAttribute("content", pageTitle);
+  if (ogDescriptionMeta) ogDescriptionMeta.setAttribute("content", pageDescription);
+  if (twitterTitleMeta) twitterTitleMeta.setAttribute("content", pageTitle);
+  if (twitterDescriptionMeta) twitterDescriptionMeta.setAttribute("content", pageDescription);
+}
+
+function productStatsBlock(product) {
+  return firstDefined(product?.price_stats, product?.stats, product?.statistics, {});
+}
+
+function productActiveBlock(product) {
+  const stats = productStatsBlock(product);
+  return firstDefined(stats.active, product?.active, {});
+}
+
+function productSoldBlock(product) {
+  const stats = productStatsBlock(product);
+  return firstDefined(stats.sold, stats.sold_last_ask, product?.sold, {});
+}
+
+function productSpecText(product) {
+  const explicit = normalizeText(firstDefined(product?.spec_summary, product?.spec_text, product?.capacity_label));
+  if (explicit) return explicit;
+  const specs = {
+    ...(product?.key_specs && typeof product.key_specs === "object" ? product.key_specs : {}),
+    ...(product?.spec_json && typeof product.spec_json === "object" ? product.spec_json : {}),
+    ...(product?.specs && typeof product.specs === "object" ? product.specs : {}),
+    ...(product?.spec && typeof product.spec === "object" ? product.spec : {}),
+    ...(product?.browse_facets && typeof product.browse_facets === "object" ? product.browse_facets : {}),
+  };
+  if (!specs || typeof specs !== "object") return "—";
+  if (productCategory(product) === "RAM") {
+    const generation = normalizeText(specs.memory_generation);
+    const moduleCapacity = Number(specs.module_capacity_gb);
+    const moduleCount = Number(specs.module_count);
+    const totalCapacity = Number.isFinite(Number(specs.total_capacity_gb))
+      ? Number(specs.total_capacity_gb)
+      : Number.isFinite(moduleCapacity) && Number.isFinite(moduleCount) ? moduleCapacity * moduleCount : null;
+    const capacity = Number.isFinite(moduleCapacity)
+      ? `${moduleCapacity}GB${Number.isFinite(moduleCount) ? ` × ${moduleCount}` : ""}${Number.isFinite(totalCapacity) ? ` · 총 ${totalCapacity}GB` : ""}`
+      : "";
+    const formFactor = normalizeText(specs.form_factor || specs.memory_form_factor);
+    return [generation, capacity, formFactor].filter(Boolean).join(" · ") || "—";
   }
-  if (text.startsWith('CURSOR_EXPIRED:')) return '검색 결과가 만료됐습니다. 새로 검색해 주세요.';
-  if (text.startsWith('CATEGORY_KEYWORD_FALLBACK:')) return '공식 세부분류가 없어 카테고리명으로 검색했습니다.';
-  if (text.startsWith('CATEGORY_PARENT_FALLBACK:')) return '공식 세부분류가 없어 확인된 상위 카테고리 기준으로 조회했습니다.';
-  if (text.startsWith('CATEGORY_KEYWORD_FILTER:') || text.startsWith('CATEGORY_TEXT_FILTER:')) return '다른 카테고리로 분류된 검색 결과를 제외했습니다.';
-  if (text.startsWith('CATEGORY_SOURCE_FILTER:')) return '공식 분류 결과 중 다른 카테고리로 판정된 매물을 제외했습니다.';
-  if (text.startsWith('BUNJANG_CATEGORY_API_ERROR:')) return '번개장터 공식 카테고리 응답을 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.';
-  if (text.startsWith('BUNJANG_SEARCH_API_ERROR:')) return '번개장터 검색 응답을 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.';
-  if (/Failed to fetch|NetworkError|Load failed/i.test(text)) return '검색 서버에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.';
-  if (text.startsWith('EBAY_CREDENTIALS_REQUIRED:') || /eBay Browse API token is not configured/i.test(text)) return 'eBay API 인증정보가 설정되지 않았습니다. EBAY_CLIENT_ID와 EBAY_CLIENT_SECRET을 설정한 뒤 다시 시도해 주세요.';
-  if (text.startsWith('EBAY_OAUTH_ERROR:')) return 'eBay API 인증에 실패했습니다. Client ID와 Client Secret을 확인해 주세요.';
-  if (text.startsWith('CATEGORY_COLLECTION_UNAVAILABLE:')) return '이 사이트는 해당 카테고리 조회를 아직 지원하지 않습니다.';
-  if (/public search aggregated across \d+ areas/i.test(text)) return '공개 검색 결과를 여러 지역에서 합산했습니다.';
-  if (text.startsWith('PAGINATION_UNAVAILABLE:')) return '이 사이트는 안정적인 다음 페이지 커서를 제공하지 않아 현재 페이지까지만 표시합니다.';
-  if (text.startsWith('EBAY_SALE_STATUS_UNAVAILABLE')) return '판매 상태는 원문에서 확인해 주세요.';
-  if (text.startsWith('Dropped item due to weak keyword relevance:')) return '검색어와 관련성이 낮은 매물을 제외했습니다.';
-  if (text.startsWith('Dropped item due to missing required fields')) return '필수 정보가 없는 매물을 제외했습니다.';
-  if (text.startsWith('Dropped duplicate URL:')) return '중복 매물을 하나로 합쳤습니다.';
-  if (text.startsWith('BLOCKED_PAGE:') || /blocked page detected|access challenge/i.test(text)) return '사이트가 자동 수집을 제한해 결과를 확인하지 못했습니다. 잠시 후 다시 시도하거나 원문 사이트에서 직접 확인해 주세요.';
-  if (text.startsWith('BROWSER_RUNTIME_UNAVAILABLE:')) return '브라우저 연결이 없어 이 사이트를 조회하지 못했습니다. 수집 환경을 확인해 주세요.';
-  if (text.startsWith('EMPTY_RESULTS:')) return '사이트 응답에서 매물 목록을 찾지 못했습니다. 검색 결과가 없거나 사이트 구조가 바뀌었을 수 있습니다.';
-  if (text.startsWith('UNSUPPORTED_EVIDENCE_SHAPE:')) return '사이트 응답 형식이 현재 수집 규칙과 달라 결과를 확인하지 못했습니다.';
-  if (text.startsWith('SELECTOR_DRIFT:')) return '사이트 화면 구조가 바뀌어 매물 필드를 읽지 못했습니다. 수집 규칙 점검이 필요합니다.';
-  if (text.startsWith('SEARCH_EXTRACTION_FAILED:')) return '사이트 매물 추출 중 문제가 발생했습니다. 잠시 후 다시 시도해 주세요.';
-  if (text.startsWith('EBAY_BROWSE_API_ERROR:')) return 'eBay 공식 API를 확인하지 못했습니다. API 인증과 연결 상태를 점검해 주세요.';
-  if (text.startsWith('EBAY_BROWSE_API_EMPTY:')) return 'eBay 공식 API에서 검색 결과가 없습니다.';
-  if (text.startsWith('LOGIN_STATE_UNCLEAR:')) return '사이트 로그인 상태를 확인하지 못했습니다.';
-  if (text.startsWith('No search rows matched selector:') || text.startsWith('Browser-first extraction unavailable') || text.startsWith('Unsupported evidence shape for')) return '사이트에서 검색 목록을 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.';
-  if (text.startsWith('Selectors prepared:') || text.startsWith('Adapter notes:')) return '사이트별 수집 규칙 점검이 필요합니다.';
-  if (text.startsWith('Keyword fallback was not used')) return '카테고리 매핑이 없어 검색을 실행하지 못했습니다.';
-  if (text === 'Internal error' || text.startsWith('Internal error')) return '검색 서버 내부 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.';
-  return text;
-}
-
-function filteredItems() {
-  const minPrice = state.minPrice;
-  const maxPrice = state.maxPrice;
-  const currentItems = state.data?.items || [];
-  const storedItems = Array.from(state.favoriteItems.values());
-  const itemsByKey = new Map([...storedItems, ...currentItems].map((item) => [favoriteKey(item), item]));
-  let items = Array.from(state.showFavorites ? itemsByKey.values() : currentItems)
-    .filter((item) => state.showFavorites || state.activeSite === 'all' || item.site === state.activeSite);
-  if (state.showFavorites) items = items.filter((item) => state.favorites.has(favoriteKey(item)));
-  const filterCurrency = resultCurrency(items);
-  state.priceFilterCurrency = filterCurrency;
-  const hasPriceRange = minPrice !== null || maxPrice !== null;
-  state.priceFilterIgnored = Boolean(state.data?.filter_meta?.reason === 'mixed_currency'
-    || (state.showFavorites && hasPriceRange && filterCurrency === 'MIXED'));
-  if (state.showFavorites && hasPriceRange && !state.priceFilterIgnored) {
-    items = items.filter((item) => typeof item.price === 'number'
-      && (minPrice === null || item.price >= minPrice)
-      && (maxPrice === null || item.price <= maxPrice));
+  const priority = {
+    GPU: ["gpu_model", "board_manufacturer", "vram_gb", "generation", "family"],
+    CPU: ["generation", "family", "suffix", "socket"],
+    RAM: ["memory_generation", "module_capacity_gb", "module_count", "total_capacity_gb", "form_factor"],
+    SSD: ["marketed_capacity_gb", "capacity_gb", "interface", "protocol", "form_factor"],
+    HDD: ["marketed_capacity_gb", "capacity_gb", "purpose", "form_factor"],
+    MOTHERBOARD: ["socket", "chipset", "form_factor", "memory_generation"],
+    PSU: ["rated_wattage", "watts", "atx_spec", "efficiency", "form_factor"],
+  }[productCategory(product)] || [];
+  const orderedKeys = [...new Set([...priority, ...Object.keys(specs)])];
+  if (productCategory(product) === "RAM" && specs.total_capacity_gb === undefined
+    && Number.isFinite(Number(specs.module_capacity_gb)) && Number.isFinite(Number(specs.module_count))) {
+    specs.total_capacity_gb = Number(specs.module_capacity_gb) * Number(specs.module_count);
   }
-  // 정렬 탭은 현재 세션의 결과 배열만 바꾼다. 원 사이트 재수집은 사이트 보강에서만 수행한다.
-  if (state.sort === 'price_asc') {
-    items.sort((a, b) => sortablePrice(a, Number.MAX_SAFE_INTEGER) - sortablePrice(b, Number.MAX_SAFE_INTEGER));
-  }
-  if (state.sort === 'price_desc') {
-    items.sort((a, b) => sortablePrice(b, Number.NEGATIVE_INFINITY) - sortablePrice(a, Number.NEGATIVE_INFINITY));
-  }
-  if (state.sort === 'recent') {
-    items.sort((a, b) => {
-      const left = Date.parse(String(a.posted_at || ''));
-      const right = Date.parse(String(b.posted_at || ''));
-      return (Number.isFinite(right) ? right : Number.NEGATIVE_INFINITY) - (Number.isFinite(left) ? left : Number.NEGATIVE_INFINITY);
-    });
-  }
-  if (state.showFavorites && state.sort === 'recommended') {
-    items.sort((a, b) => (Number(b.score) || 0) - (Number(a.score) || 0)
-      || (Date.parse(String(b.posted_at || '')) || 0) - (Date.parse(String(a.posted_at || '')) || 0));
-  }
-  return prioritizeImageResults(items);
+  return orderedKeys.map((key) => [key, specs[key]])
+    .filter(([key, value]) => !["directory_node_type", "market_segment", "board_manufacturer", "chip_manufacturer", "manufacturer_roles"].includes(key)
+      && (["string", "number"].includes(typeof value) || Array.isArray(value))
+      && (Array.isArray(value) ? value.length : normalizeText(value)))
+    .slice(0, 3)
+    .map(([key, value]) => facetOptionLabel(key, Array.isArray(value) ? value.join(" / ") : normalizeText(value)))
+    .join(" · ") || "—";
 }
 
-function sortablePrice(item, missingValue) {
-  const price = Number(item?.price);
-  return Number.isFinite(price) && price > 100 ? price : missingValue;
+function productSummaryPrice(product, type) {
+  const block = type === "active" ? productActiveBlock(product) : productSoldBlock(product);
+  const direct = type === "active"
+    ? firstDefined(product?.active_median, product?.median_price)
+    : firstDefined(product?.sold_last_ask_median, product?.sold_median);
+  return metricValue(block, ["median", "median_price", "sold_last_ask_median", "amount"]) || normalizePrice(direct, "KRW");
 }
 
-function availableResultCount(data = state.data) {
-  if (state.showFavorites && data === state.data) return filteredItems().length;
-  const availableCount = Number(data?.quality?.available_count);
-  return Number.isFinite(availableCount)
-    ? Math.min(Math.max(0, availableCount), SEARCH_SESSION_MAX_ITEMS)
-    : Math.min((data?.items || []).length, SEARCH_SESSION_MAX_ITEMS);
+function productStatsMarketLabel(product) {
+  const marketPool = normalizeText(product?.price_stats_market_pool);
+  if (marketPool === "KR_C2C_USED") return "국내 개인 중고";
+  if (marketPool === "KR_DEALER_USED") return "국내 업자 중고";
+  return "";
 }
 
-function visibleItems() {
-  const items = filteredItems();
-  const start = state.currentPage * RESULT_PAGE_SIZE;
-  return items.slice(start, start + RESULT_PAGE_SIZE);
+function productFacetValue(product, key) {
+  const values = productFacetValues(product, key);
+  if (values.length) return values[0];
+  const value = firstDefined(product?.key_specs?.[key], product?.browse_facets?.[key], product?.spec_json?.[key], product?.spec?.[key], product?.[key]);
+  return Array.isArray(value) ? value[0] : normalizeText(value);
 }
 
-function renderPaginationControls(root, markup) {
-  if (!root) return;
-  root.innerHTML = markup;
-  root.hidden = false;
+function productSeriesLabel(product) {
+  const category = productCategory(product);
+  if (!["GPU", "CPU"].includes(category)) return "";
+  const manufacturer = productFacetValue(product, "manufacturer");
+  const family = productFacetValue(product, "family") || productFamily(product) || "기타 제품군";
+  const generation = productFacetValue(product, "generation");
+  return [manufacturer, family, generation].filter(Boolean).join(" · ");
 }
 
-function renderPagination(totalCount = availableResultCount()) {
-  const root = $('#pagination-controls');
-  const summaryRoot = $('#result-summary-pagination');
-  if (!root && !summaryRoot) return;
-  const pageCount = resultPageCount(totalCount);
-  state.currentPage = clampResultPage(state.currentPage, pageCount);
-  const canExpand = canExpandResultWindow(totalCount);
-  if (pageCount <= 1 && !canExpand) {
-    hidePagination();
-    return;
-  }
-  const loadedCount = Array.isArray(state.data?.items) ? state.data.items.length : 0;
-  const maxNavigablePage = maxNavigableResultPage(loadedCount, totalCount, Boolean(state.data?.pagination?.next_cursor));
-  const pageButtons = paginationItems(state.currentPage, pageCount, maxNavigablePage).map((item, index) => {
-    if (item === 'ellipsis') return `<span class="pagination-ellipsis" aria-hidden="true" data-pagination-gap="${index}">…</span>`;
-    const label = `${item + 1}페이지`;
-    if (item > maxNavigablePage) return `<span class="pagination-page-preview" aria-label="${label} · ${uiText('아직 이동할 수 없음', 'Not available yet')}" aria-disabled="true">${item + 1}</span>`;
-    return `<button class="pagination-page" type="button" data-result-page="${item}" aria-label="${label}"${item === state.currentPage ? ' aria-current="page"' : ''}>${item + 1}</button>`;
-  }).join('');
-  const atLastPage = pageCount <= 1 || state.currentPage >= pageCount - 1;
-  const nextLoadsMore = atLastPage && canExpand;
-  const nextUnavailable = !nextLoadsMore && (atLastPage || state.currentPage + 1 > maxNavigablePage);
-  const controlsBusy = state.loading || Boolean(state.viewCollectionController);
-  const nextAction = nextLoadsMore ? 'data-expand-results' : `data-result-page="${state.currentPage + 1}"`;
-  const previousButton = `<button class="pagination-direction" type="button" data-result-page="${state.currentPage - 1}" aria-label="${uiText('이전 페이지', 'Previous page')}"${state.currentPage === 0 || controlsBusy ? ' disabled' : ''}>${uiText('이전', 'Previous')}</button>`;
-  const nextButton = `<button class="pagination-direction" type="button" ${nextAction} aria-label="${uiText('다음 페이지', 'Next page')}"${nextUnavailable || controlsBusy ? ' disabled' : ''}>${uiText('다음', 'Next')}</button>`;
-  renderPaginationControls(root, `${previousButton}${pageButtons}${nextButton}`);
-  renderPaginationControls(summaryRoot, `${previousButton}<span class="result-summary-pagination-separator" aria-hidden="true">·</span>${nextButton}`);
+function productSeriesKey(product) {
+  const category = productCategory(product);
+  if (!["GPU", "CPU"].includes(category)) return "";
+  return `${category}:${productSeriesLabel(product)}`;
 }
 
-function focusCurrentPage() {
-  requestAnimationFrame(() => {
-    $('#pagination-controls [aria-current="page"]')?.focus({ preventScroll: true });
-    $('.results-toolbar')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+function renderProducts() {
+  dom.productRows.replaceChildren();
+  const category = state.categories.find((item) => categoryCode(item) === state.categoryCode);
+  if (dom.modelBrandHeader) dom.modelBrandHeader.textContent = normalizeText(firstDefined(category?.brand_label, "브랜드"));
+  const grouped = new Map();
+  const useSeriesGroups = ["GPU", "CPU"].includes(state.categoryCode);
+  state.products.forEach((product) => {
+    const key = useSeriesGroups ? productSeriesKey(product) : "";
+    if (!grouped.has(key)) grouped.set(key, []);
+    grouped.get(key).push(product);
   });
-}
 
-function bindThumbnailFallbacks() {
-  document.querySelectorAll('#result-list .item-thumb').forEach((image) => {
-    image.addEventListener('error', () => {
-      image.hidden = true;
-      const fallback = image.nextElementSibling;
-      if (fallback) fallback.hidden = false;
-      if (state.showFavorites || state.sort !== 'recommended') return;
-      const row = image.closest('.item-row');
-      if (!row || row.dataset.imageFailed === 'true' || !row.parentElement) return;
-      row.dataset.imageFailed = 'true';
-      row.parentElement.append(row);
-    }, { once: true });
-  });
-}
-
-function thumbnailMarkup(item) {
-  const imageUrl = safeImageUrl(item.image_url);
-  const listingUrl = safeListingUrl(item);
-  const fallback = `<div class="item-thumb-fallback" hidden>${uiText('이미지 없음', 'Image unavailable')}</div>`;
-  const key = escapeHtml(favoriteKey(item));
-  const saved = state.favorites.has(favoriteKey(item));
-  const thumbnail = `<div class="item-thumb-wrap">${imageUrl ? `<img class="item-thumb" src="${escapeHtml(imageUrl)}" alt="${escapeHtml(item.title)}" loading="lazy" decoding="async" referrerpolicy="no-referrer" />` : ''}${imageUrl ? fallback : `<div class="item-thumb-fallback">${uiText('이미지 없음', 'Image unavailable')}</div>`}</div>`;
-  const media = listingUrl
-    ? `<a class="item-thumb-link" href="${escapeHtml(listingUrl)}" target="_blank" rel="noreferrer noopener" aria-label="${uiText('매물 원문 열기', 'Open original listing')}" data-item-key="${key}">${thumbnail}</a>`
-    : `<span class="item-thumb-link" aria-hidden="true">${thumbnail}</span>`;
-  return `<div class="item-media">${media}<button class="heart-button${saved ? ' saved' : ''}" type="button" data-favorite="${key}" aria-label="${saved ? uiText('찜 해제', 'Remove saved item') : uiText('찜', 'Save item')}" aria-pressed="${saved}">${saved ? '♥' : '♡'}</button></div>`;
-}
-
-function sourceCount(source) {
-  const count = Number(source?.total_count ?? source?.visible_count ?? source?.count ?? 0);
-  return Number.isFinite(count) && count > 0 ? count : 0;
-}
-
-function sourceHasFailure(source) {
-  return source?.status === 'failed'
-    || source?.status === 'error'
-    || Boolean(source?.error)
-    || (Array.isArray(source?.errors) && source.errors.length > 0);
-}
-
-function renderSourceSummary() {
-  const root = $('#source-summary');
-  if (!root) return;
-  const availableSources = Array.isArray(state.data?.sources) ? state.data.sources : [];
-  if (!state.data || !availableSources.length) {
-    root.innerHTML = '';
-    return;
-  }
-  const expectedSites = getSelectedSites(selectedCategoryIds());
-  const sourceByKey = new Map(availableSources.map((source) => [source.key, source]));
-  root.innerHTML = expectedSites.map((site) => {
-    const source = sourceByKey.get(site) || { key: site, status: 'empty', count: 0 };
-    const count = sourceCount(source);
-    const unavailable = !count && source.data_source === 'unavailable' && !(source.errors || []).length;
-    const filterWarning = (source.warnings || []).some((warningText) => /키워드 조건|카테고리 조건/.test(String(warningText)));
-    const suggested = (source.warnings || []).some((warningText) => /추천 검색어|UPSTREAM_SUGGESTED_KEYWORD/.test(String(warningText)));
-    const suggestedKeyword = (source.warnings || [])
-      .map((warningText) => String(warningText).match(/UPSTREAM_SUGGESTED_KEYWORD:(.+)$/)?.[1]?.trim() || '')
-      .find(Boolean) || '';
-    const suggestedLabel = suggestedKeyword ? `${uiText('추천어', 'Suggested')}: ${suggestedKeyword}` : uiText('추천어', 'Suggested');
-    const rateLimited = source.data_source === 'rate_limited';
-    const failure = (sourceHasFailure(source) || rateLimited) && !unavailable;
-    const partial = Boolean(count && (failure
-      || source.collection_state === 'partial'
-      || source.status === 'warning'
-      || Number(source.filtered_count) > 0));
-    const statusText = failure && !count
-      ? rateLimited ? uiText('원 사이트 접속 제한', 'Marketplace access limited') : uiText('원 사이트 확인 실패', 'Marketplace unavailable')
-      : partial ? `${count}개 · 일부 확인`
-      : filterWarning && count ? `${count}개 · 조건 적용`
-          : suggested ? (count ? `${count}개 · ${suggestedLabel}` : suggestedLabel)
-            : count ? `${count}개` : uiText('결과 없음', 'No results');
-    const statusClass = failure || partial ? 'is-warning' : count ? '' : 'is-empty';
-    const detail = failure || partial ? uiText('원 사이트 응답 중 확인 가능한 매물만 표시합니다.', 'Showing only listings that could be verified from this marketplace.') : '';
-    return `<span class="source-summary-item ${statusClass}" title="${escapeHtml(detail)}">${escapeHtml(labels[site] || site)} ${escapeHtml(statusText)}</span>`;
-  }).join('');
-}
-
-function renderResults() {
-  const items = visibleItems();
-  const availableCount = availableResultCount();
-  const pageCount = resultPageCount(availableCount);
-  const pageText = pageCount > 1 ? ` · ${state.currentPage + 1}/${pageCount}페이지` : '';
-  $('#result-count').textContent = `총 ${availableCount}개${pageText}`;
-  renderPagination(availableCount);
-  renderSourceSummary();
-  renderControlNotice();
-  updateResultControls();
-  if (!items.length) {
-    $('#result-list').innerHTML = `<div class="empty-state" role="status"><span>${uiText('결과 없음', 'No results')}</span></div>`;
-    return;
-  }
-  $('#result-list').innerHTML = items.map((item) => {
-    const warning = item.price_suspect || item.quality_suspect || (item.fraud_risk != null && item.fraud_risk > .45);
-    const comparison = formatMarketComparison(item);
-    const flag = warning ? `<span class="item-flag">${uiText('확인', 'Review')}</span>` : item.noise_filtered ? `<span class="item-flag">${escapeHtml(formatNoiseReason(item.noise_filter_reason))}</span>` : '';
-    const listingTag = ({ part: '부품', full_pc: '본체', bundle: '묶음' })[item.listing_type] || '';
-    const shipping = formatShipping(item.shipping);
-    const tag = shipping || listingTag;
-    const priceLabel = formatPriceLabel(item.price_label);
-    const priceHint = [priceLabel, comparison].filter(Boolean).join(' · ');
-    const itemKey = escapeHtml(favoriteKey(item));
-    const sourceLabel = labels[item.site] || uiText('출처 미상', 'Unknown source');
-    const location = String(item.location || '').trim();
-    const condition = formatCondition(item.condition);
-    const description = String(item.description || '').replace(/\s+/g, ' ').trim();
-    const detail = description.length > 110 ? `${description.slice(0, 110)}…` : description;
-    const titleLang = originalLanguageAttr(item.title);
-    const locationLang = originalLanguageAttr(location);
-    const conditionLang = originalLanguageAttr(condition);
-    const detailLang = originalLanguageAttr(detail);
-    const tagLang = originalLanguageAttr(tag);
-    const listingUrl = safeListingUrl(item);
-    const title = listingUrl
-      ? `<a class="item-title"${titleLang} href="${escapeHtml(listingUrl)}" target="_blank" rel="noreferrer noopener" data-item-key="${itemKey}">${escapeHtml(item.title)}</a>`
-      : `<span class="item-title"${titleLang}>${escapeHtml(item.title)}</span>`;
-    return `<article class="item-row">${thumbnailMarkup(item)}<div class="item-main">${title}<div class="item-price"><strong>${formatPrice(item.price, item.currency)}</strong>${priceHint ? `<small>${escapeHtml(priceHint)}</small>` : ''}</div><div class="item-meta"><span class="item-source-badge">${escapeHtml(sourceLabel)}</span>${location ? `<span${locationLang}>${escapeHtml(location)}</span>` : ''}${condition ? `<span${conditionLang}>${escapeHtml(condition)}</span>` : ''}<span>${escapeHtml(formatListingTime(item))}</span>${flag}</div>${detail ? `<p class="item-description"${detailLang}>${escapeHtml(detail)}</p>` : ''}${tag ? `<span class="item-tag"${tagLang}>${escapeHtml(tag)}</span>` : ''}</div></article>`;
-  }).join('');
-  bindThumbnailFallbacks();
-}
-
-function mergeSearchData(previous, next) {
-  if (!previous) return next;
-  const items = [];
-  const seen = new Set();
-  [...(previous.items || []), ...(next.items || [])].forEach((item) => {
-    const key = canonicalItemKey(item);
-    if (seen.has(key) || items.length >= SEARCH_SESSION_MAX_ITEMS) return;
-    seen.add(key);
-    items.push(item);
-  });
-  const nextCursor = next.pagination?.next_cursor || null;
-  const previousCursor = previous.pagination?.next_cursor || null;
-  const cursorAdvanced = Boolean(nextCursor && nextCursor !== previousCursor);
-  const sourceMap = new Map();
-  [...(previous.sources || []), ...(next.sources || [])].forEach((source) => {
-    const old = sourceMap.get(source.key);
-    if (!old) {
-      sourceMap.set(source.key, { ...source, warnings: [...(source.warnings || [])], errors: [...(source.errors || [])] });
+  let groupIndex = 0;
+  grouped.forEach((products, seriesKey) => {
+    let rows = [];
+    if (useSeriesGroups && seriesKey) {
+      const groupId = `series-group-${groupIndex}`;
+      const seriesLabel = productSeriesLabel(products[0]);
+      const header = createElement("tr", "series-group-row");
+      const cell = createElement("td");
+      cell.colSpan = 6;
+      const toggle = createElement("button", "series-toggle");
+      toggle.type = "button";
+      toggle.setAttribute("aria-controls", groupId);
+      const open = state.openSeries?.has(seriesKey);
+      toggle.setAttribute("aria-expanded", String(open));
+      toggle.append(
+        createElement("span", "series-toggle-icon", open ? "−" : "+"),
+        createElement("span", "series-toggle-label", seriesLabel),
+        createElement("span", "series-toggle-count", `${products.length}개 모델`),
+      );
+      cell.append(toggle);
+      header.append(cell);
+      dom.productRows.append(header);
+      toggle.addEventListener("click", () => {
+        const nextOpen = toggle.getAttribute("aria-expanded") !== "true";
+        toggle.setAttribute("aria-expanded", String(nextOpen));
+        toggle.querySelector(".series-toggle-icon").textContent = nextOpen ? "−" : "+";
+        rows.forEach((row) => { row.hidden = !nextOpen; });
+        if (nextOpen) state.openSeries?.add(seriesKey);
+        else state.openSeries?.delete(seriesKey);
+      });
+      groupIndex += 1;
+      rows = products.map((product) => renderProductRow(product));
+      rows.forEach((row) => {
+        row.id = `${groupId}-${row.dataset.productId.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+        row.hidden = !open;
+        dom.productRows.append(row);
+      });
       return;
     }
-    sourceMap.set(source.key, {
-      ...old,
-      count: (old.count || 0) + (source.count || 0),
-      normalized_count: (old.normalized_count || 0) + (source.normalized_count || 0),
-      visible_count: (old.visible_count || 0) + (source.visible_count || 0),
-      status: old.status === 'warning' || source.status === 'warning' ? 'warning' : 'ready',
-      warnings: Array.from(new Set([...(old.warnings || []), ...(source.warnings || [])])).slice(0, 3),
-      errors: Array.from(new Set([...(old.errors || []), ...(source.errors || [])])).slice(0, 3),
-      search_urls: Array.from(new Set([...(old.search_urls || []), ...(source.search_urls || (source.search_url ? [source.search_url] : []))])),
-      search_url: old.search_url || source.search_url
+
+    products.forEach((product) => dom.productRows.append(renderProductRow(product)));
+  });
+
+  function renderProductRow(product) {
+    const id = productId(product);
+    const row = createElement("tr", "product-row");
+    row.dataset.productId = id;
+    row.setAttribute("aria-selected", String(Boolean(state.selectedProduct && productId(state.selectedProduct) === id)));
+
+    const modelCell = createElement("td");
+    const selectButton = createElement("button", "product-select");
+    selectButton.type = "button";
+    selectButton.setAttribute("aria-label", `${productName(product)} 가격 상세 보기`);
+    selectButton.append(createElement("span", "product-name", productName(product)));
+    const family = productFamily(product);
+    const statsMarket = productStatsMarketLabel(product);
+    const summary = [family, statsMarket].filter(Boolean).join(" · ");
+    if (summary) selectButton.append(createElement("span", "product-family", summary));
+    modelCell.append(selectButton);
+
+    const specCell = createElement("td");
+    specCell.append(createElement("span", "product-spec", productSpecText(product)));
+    const makerCell = createElement("td");
+    makerCell.append(createElement("span", "product-maker", productManufacturer(product) || "—"));
+
+    const active = productActiveBlock(product);
+    const countCell = createElement("td", "count-cell", formatCount(firstDefined(sampleCount(active), product.active_count)));
+    const medianCell = createElement("td", "price-cell", formatMoney(productSummaryPrice(product, "active")));
+    const soldCell = createElement("td", "price-cell", formatMoney(productSummaryPrice(product, "sold")));
+    row.append(modelCell, specCell, makerCell, countCell, medianCell, soldCell);
+
+    const choose = () => selectProduct(product);
+    row.addEventListener("click", choose);
+    selectButton.addEventListener("click", (event) => {
+      event.stopPropagation();
+      choose();
     });
+    return row;
+  }
+
+  dom.productEmpty.hidden = state.products.length > 0;
+  const total = Number.isFinite(Number(state.productTotal)) && Number(state.productTotal) >= state.products.length
+    ? Number(state.productTotal)
+    : state.products.length;
+  dom.productCount.textContent = total ? `${total.toLocaleString("ko-KR")}개 모델` : "0개 모델";
+  dom.modelListContext.textContent = state.query
+    ? `“${state.query}” · ${total.toLocaleString("ko-KR")}개 모델`
+    : "";
+  dom.loadMoreProducts.hidden = !state.productCursor;
+}
+
+function firstProductWithActiveListings(products) {
+  return products.find((product) => Number(firstDefined(sampleCount(productActiveBlock(product)), product?.active_count, 0)) > 0) || null;
+}
+
+function buildProductQuery(cursor = "") {
+  const params = new URLSearchParams();
+  if (state.categoryCode) params.set("category_code", state.categoryCode);
+  Object.entries(state.facets).forEach(([key, value]) => {
+    if (PRODUCT_QUERY_KEYS.has(key) && value) params.set(key, value);
   });
-  const mergedSources = Array.from(sourceMap.values()).map((source) => {
-    const visibleCount = items.filter((item) => item.site === source.key).length;
-    return {
-      ...source,
-      count: visibleCount,
-      normalized_count: visibleCount,
-      visible_count: visibleCount
-    };
+  if (state.query) params.set("q", state.query);
+  if (cursor) params.set("cursor", cursor);
+  return params;
+}
+
+function filterSeedProducts() {
+  const query = state.query.toLocaleLowerCase("ko-KR");
+  return state.seedProducts.filter((product) => {
+    if (state.categoryCode && productCategory(product) !== state.categoryCode) return false;
+    if (query && !productName(product).toLocaleLowerCase("ko-KR").includes(query)) return false;
+    return productMatchesActiveFacets(product);
   });
-  const prices = items.map((item) => item.price).filter((price) => typeof price === 'number' && price > 0);
-  const trustedPrices = items.filter((item) => !item.price_suspect && !item.noise_filtered && (item.fraud_risk == null || item.fraud_risk <= .45)).map((item) => item.price).filter((price) => typeof price === 'number' && price > 0);
-  return {
-    ...next,
-    items,
-    sources: mergedSources,
-    pagination: items.length < SEARCH_SESSION_MAX_ITEMS && next.pagination?.has_more && cursorAdvanced
-      ? next.pagination
-      : { has_more: false, next_cursor: null },
-    summary: {
-      ...(next.summary || previous.summary || {}),
-      item_count: items.length,
-      source_count: mergedSources.filter((source) => source.visible_count > 0).length,
-      median_price: median(prices),
-      average_price: trustedPrices.length ? Math.round(trustedPrices.reduce((sum, price) => sum + price, 0) / trustedPrices.length) : null,
-      lowest_price: trustedPrices.length ? Math.min(...trustedPrices) : null,
-      highest_price: trustedPrices.length ? Math.max(...trustedPrices) : null
-    },
-    quality: {
-      ...(next.quality || previous.quality || {}),
-      raw_count: (previous.quality?.raw_count || 0) + (next.quality?.raw_count || 0),
-      normalized_count: (previous.quality?.normalized_count || 0) + (next.quality?.normalized_count || 0),
-      merged_count: items.length,
-      warnings: Array.from(new Set([...(previous.quality?.warnings || []), ...(next.quality?.warnings || [])])).slice(0, 8)
+}
+
+async function loadProducts(append) {
+  if (!state.categoryCode && !state.query) return;
+  state.productRequest?.abort();
+  const controller = new AbortController();
+  state.productRequest = controller;
+  const cursor = append ? state.productCursor : "";
+  if (!append) {
+    state.productCursor = "";
+    state.products = [];
+    state.productTotal = 0;
+    resetDetail();
+  }
+  showCatalogMessage("제품 목록을 불러오는 중입니다.");
+  setBusy(dom.loadMoreProducts, true, "불러오는 중");
+  try {
+    const payload = await fetchJson(`/api/catalog/models?${buildProductQuery(cursor)}`, { signal: controller.signal });
+    const nestedProducts = payload?.products && !Array.isArray(payload.products) && typeof payload.products === "object"
+      ? payload.products
+      : null;
+    const items = toArray(firstDefined(
+      nestedProducts?.items,
+      payload?.items,
+      payload?.models,
+      Array.isArray(payload?.products) ? payload.products : null,
+      payload?.results,
+    ));
+    state.products = append ? [...state.products, ...items] : items;
+    const responseTotal = Number(firstDefined(nestedProducts?.total, payload?.total));
+    state.productTotal = Number.isFinite(responseTotal)
+      ? responseTotal
+      : (append ? state.productTotal : items.length);
+    state.availableFacets = normalizeAvailableFacets(firstDefined(payload?.available_facets, nestedProducts?.available_facets));
+    state.productCursor = normalizeText(firstDefined(
+      nestedProducts?.next_cursor,
+      nestedProducts?.nextCursor,
+      payload?.next_cursor,
+      payload?.nextCursor,
+    ));
+    renderProducts();
+    renderFacets();
+    showCatalogMessage("");
+    if (!append) resetDetail();
+  } catch (error) {
+    if (error.name === "AbortError") return;
+    const fallback = !append ? filterSeedProducts() : [];
+    if (fallback.length) {
+      state.products = fallback;
+      state.productTotal = fallback.length;
+      state.productCursor = "";
+      state.availableFacets = {};
+      renderProducts();
+      renderFacets();
+      showCatalogMessage("제품 목록 API가 응답하지 않아 카탈로그에 포함된 제품을 표시합니다.");
+      resetDetail();
+    } else {
+      if (!append) state.products = [];
+      if (!append) state.productTotal = 0;
+      renderProducts();
+      showCatalogMessage(`제품 목록을 불러오지 못했습니다. ${error.message}`, true);
+      resetDetail();
     }
+  } finally {
+    if (state.productRequest === controller) state.productRequest = null;
+    setBusy(dom.loadMoreProducts, false, "");
+  }
+}
+
+function resetDetail() {
+  state.detailRequest?.abort();
+  state.detailRequest = null;
+  state.selectedProduct = null;
+  state.listings = [];
+  state.listingCursor = "";
+  state.detailStats = [];
+  state.visibleStatsCount = 0;
+  state.offerRequest?.abort();
+  state.offerRequest = null;
+  setPricePanelOpen(false);
+  document.body.classList.remove("has-selected-product");
+  dom.pricePanelTitle.textContent = "모델을 선택하세요";
+  dom.selectedProductMeta.textContent = "표준 모델과 출처별 가격 통계를 확인할 수 있습니다.";
+  showDetailMessage("왼쪽 모델 목록에서 제품을 선택하세요.");
+  dom.referencePrice.hidden = true;
+  dom.priceSummary.hidden = true;
+  dom.statsSection.hidden = true;
+  dom.listingSection.hidden = true;
+  dom.modelDirectory.hidden = false;
+  dom.statsGroups.replaceChildren();
+  dom.listingRows.replaceChildren();
+  dom.contextualOffer.hidden = true;
+  renderProducts();
+}
+
+function setPricePanelOpen(open) {
+  state.pricePanelOpen = Boolean(open && state.selectedProduct);
+  if (dom.pricePanelContent) dom.pricePanelContent.hidden = !state.pricePanelOpen;
+  if (!dom.pricePanelToggle) return;
+  dom.pricePanelToggle.disabled = !state.selectedProduct;
+  dom.pricePanelToggle.setAttribute("aria-expanded", String(state.pricePanelOpen));
+  dom.pricePanelToggle.setAttribute("aria-label", state.pricePanelOpen ? "30일 평균 가격 차트 접기" : "30일 평균 가격 차트 펼치기");
+  const icon = dom.pricePanelToggle.querySelector(".price-panel-toggle-icon");
+  const label = dom.pricePanelToggle.querySelector(".price-panel-toggle-text");
+  if (icon) icon.textContent = state.pricePanelOpen ? "−" : "+";
+  if (label) label.textContent = state.pricePanelOpen ? "닫기" : "차트 보기";
+}
+
+function selectedProductMeta(product) {
+  return [productManufacturer(product), productFamily(product), productSpecText(product)]
+    .filter((value, index, array) => value && value !== "—" && array.indexOf(value) === index)
+    .join(" · ") || "제품 마스터에 등록된 표준 모델";
+}
+
+function updateListingScopeNote() {
+  if (!dom.listingScopeNote) return;
+  dom.listingScopeNote.textContent = state.selectedSites.size
+    ? `${[...state.selectedSites].map(sourceLabel).join(" · ")} · 묶음·고장·박스만·수량 불명확 제외`
+    : "전체 사이트 · 묶음·고장·박스만·수량 불명확 제외";
+}
+
+function selectProduct(product) {
+  if (!productId(product)) {
+    showDetailMessage("이 제품은 표준 제품 ID가 없어 상세 통계를 조회할 수 없습니다.", true);
+    return;
+  }
+  state.selectedProduct = product;
+  setPricePanelOpen(false);
+  document.body.classList.add("has-selected-product");
+  state.listings = [];
+  state.listingCursor = "";
+  state.detailStats = [];
+  state.visibleStatsCount = 0;
+  dom.pricePanelTitle.textContent = productName(product);
+  dom.selectedProductMeta.textContent = selectedProductMeta(product);
+  dom.workspaceTitle.textContent = productName(product);
+  dom.listingTitle.textContent = `${productName(product)} 구매 가능한 매물`;
+  updateListingScopeNote();
+  dom.referencePrice.hidden = true;
+  dom.priceSummary.hidden = true;
+  dom.statsSection.hidden = true;
+  dom.listingSection.hidden = false;
+  dom.modelDirectory.hidden = true;
+  dom.listingRows.replaceChildren();
+  dom.listingEmpty.hidden = true;
+  showDetailMessage("가격 통계와 현재 매물을 불러오는 중입니다.");
+  renderProducts();
+  loadProductDetail();
+  void refreshContextualOffer(product);
+}
+
+function monetizationEventPayload(offer, eventType) {
+  return {
+    event_type: eventType,
+    offer_id: offer.offer_id,
+    slot: offer.slot,
+    context_type: offer.context_type,
+    context_key: offer.context_key,
+    event_token: offer.event_token,
   };
 }
 
-function canonicalItemKey(item) {
-  const rawUrl = String(item.url || '').trim();
+function recordMonetizationEvent(offer, eventType) {
+  void postJson("/api/monetization/event", monetizationEventPayload(offer, eventType), { keepalive: true }).catch(() => {});
+}
+
+async function refreshContextualOffer(product) {
+  state.offerRequest?.abort();
+  const controller = new AbortController();
+  state.offerRequest = controller;
+  dom.contextualOffer.hidden = true;
   try {
-    const url = new URL(rawUrl, window.location.origin);
-    if (/^(?:m\.)?bunjang\.co\.kr$/i.test(url.hostname) && /^\/products\/\d+$/i.test(url.pathname)) {
-      return `bunjang:${url.pathname}`;
-    }
-  } catch {
-    // Fall through to the stable item identifier.
+    const payload = await postJson("/api/monetization/contextual-offer", {
+      canonical_product_id: productId(product),
+      category_code: productCategory(product),
+      slot: "after-organic-results",
+    }, { signal: controller.signal });
+    if (controller.signal.aborted || state.selectedProduct !== product) return;
+    const offer = payload?.offer;
+    const destination = safeHttpsUrl(offer?.destination_url);
+    if (!offer || !destination || !offer.event_token) return;
+    dom.contextualOfferTitle.textContent = normalizeText(offer.title);
+    dom.contextualOfferProvider.textContent = normalizeText(offer.provider);
+    dom.contextualOfferLink.textContent = normalizeText(offer.cta_label) || "상품 보기";
+    dom.contextualOfferLink.href = destination;
+    dom.contextualOfferLink.onclick = () => recordMonetizationEvent(offer, "click");
+    dom.contextualOffer.hidden = false;
+    recordMonetizationEvent(offer, "impression");
+  } catch (error) {
+    if (error.name !== "AbortError") dom.contextualOffer.hidden = true;
+  } finally {
+    if (state.offerRequest === controller) state.offerRequest = null;
   }
-  return rawUrl || item.id || `${item.site}:${item.title}`;
 }
 
-function median(values) {
-  if (!values.length) return null;
-  const sorted = [...values].sort((left, right) => left - right);
-  const middle = Math.floor(sorted.length / 2);
-  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+function buildListingQuery(cursor = "") {
+  const params = new URLSearchParams();
+  params.set("canonical_product_id", productId(state.selectedProduct));
+  if (state.selectedSites.size) params.set("sites", [...state.selectedSites].join(","));
+  if (state.listingSort) params.set("sort", state.listingSort);
+  if (state.priceMin) params.set("price_min", state.priceMin);
+  if (state.priceMax) params.set("price_max", state.priceMax);
+  const sourceScope = state.selectedSites.size
+    ? state.sources.filter((source) => state.selectedSites.has(source.id))
+    : state.sources;
+  const currencies = [...new Set(sourceScope.map((source) => source.currency).filter(Boolean))];
+  const marketPools = [...new Set(sourceScope.map((source) => source.marketPool).filter(Boolean))];
+  if (currencies.length === 1) params.set("currency", currencies[0]);
+  if (marketPools.length === 1) params.set("market_pool", marketPools[0]);
+  if (cursor) params.set("cursor", cursor);
+  return params;
 }
 
-renderSiteTabs();
-$('#search-form').addEventListener('submit', (event) => { event.preventDefault(); search($('#keyword').value); });
-$('#site-tabs').addEventListener('click', (event) => {
-  const tab = event.target.closest('[data-site-tab]');
-  if (tab) setActiveSite(tab.dataset.siteTab || 'all');
-});
-$('#category-panel-toggle').addEventListener('click', () => {
-  if (!isMobileViewport()) return;
-  state.categoryPanelOpen = !state.categoryPanelOpen;
-  syncCategoryPanel();
-});
-$('#category-list').addEventListener('click', (event) => {
-  const toggle = event.target.closest('[data-category-toggle]');
-  if (toggle) {
-    const branch = document.getElementById(toggle.dataset.categoryBranch || '');
-    if (!branch) return;
-    const expanded = toggle.getAttribute('aria-expanded') === 'true';
-    branch.hidden = expanded;
-    toggle.setAttribute('aria-expanded', String(!expanded));
-    toggle.setAttribute('aria-label', expanded ? '하위 카테고리 펼치기' : '하위 카테고리 접기');
-    const icon = toggle.querySelector('.category-toggle');
-    if (icon) icon.textContent = expanded ? '+' : '−';
+function buildStatsUrl(product, cohort) {
+  const params = new URLSearchParams({
+    days: "30",
+    market_pool: cohort.marketPool,
+    condition: cohort.condition,
+    currency: cohort.currency,
+  });
+  return `/api/products/${encodeURIComponent(productId(product))}/price-stats?${params}`;
+}
+
+async function loadProductDetail() {
+  state.detailRequest?.abort();
+  const controller = new AbortController();
+  state.detailRequest = controller;
+  const product = state.selectedProduct;
+  const listingPromise = fetchJson(`/api/pc/listings?${buildListingQuery()}`, { signal: controller.signal });
+  const statsPromises = COHORTS.map(async (cohort) => {
+    try {
+      const data = await fetchJson(buildStatsUrl(product, cohort), { signal: controller.signal });
+      return { cohort, data, error: null };
+    } catch (error) {
+      if (error.name === "AbortError") throw error;
+      return { cohort, data: null, error };
+    }
+  });
+
+  try {
+    const [listingResult, ...statsResults] = await Promise.allSettled([listingPromise, ...statsPromises]);
+    if (controller.signal.aborted || state.selectedProduct !== product) return;
+
+    let listingError = null;
+    if (listingResult.status === "fulfilled") {
+      applyListingPayload(listingResult.value, false);
+    } else {
+      listingError = listingResult.reason;
+      state.listings = [];
+      state.listingCursor = "";
+      renderListings();
+    }
+
+    state.detailStats = statsResults
+      .filter((result) => result.status === "fulfilled")
+      .map((result) => result.value)
+      .filter((result) => result.data);
+    renderStats();
+
+    const statsFailures = statsResults.filter((result) => result.status === "fulfilled" && result.value.error).length;
+    if (listingError && !state.detailStats.length) {
+      showDetailMessage("가격 상세 API를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.", true);
+    } else if (listingError) {
+      showDetailMessage("가격 통계는 표시했지만 현재 매물 목록을 불러오지 못했습니다.", true);
+    } else if (!state.visibleStatsCount) {
+      showDetailMessage(state.selectedSites.size
+        ? "현재 매물은 표시했지만 선택한 사이트의 30일 가격 통계는 아직 없습니다."
+        : "현재 매물은 표시했지만 이 모델의 30일 가격 통계는 아직 없습니다.");
+    } else if (statsFailures) {
+      showDetailMessage("일부 시장군 통계가 없어 확인 가능한 자료만 표시합니다.");
+    } else {
+      showDetailMessage("");
+    }
+  } catch (error) {
+    if (error.name !== "AbortError") showDetailMessage(`상세 정보를 불러오지 못했습니다. ${error.message}`, true);
+  } finally {
+    if (state.detailRequest === controller) state.detailRequest = null;
+  }
+}
+
+function applyListingPayload(payload, append) {
+  const items = toArray(firstDefined(payload?.items, payload?.listings, payload?.results));
+  state.listings = append ? [...state.listings, ...items] : items;
+  state.listingCursor = normalizeText(firstDefined(payload?.next_cursor, payload?.nextCursor, payload?.pagination?.next_cursor, payload?.pagination?.nextCursor));
+  const freshness = payload?.freshness;
+  const lastCollectedAt = firstDefined(freshness?.last_collected_at, freshness?.as_of, payload?.as_of);
+  const freshnessState = normalizeText(freshness?.state).toUpperCase();
+  const freshnessPrefix = freshnessState === "STALE" ? "수집 지연" : freshnessState === "EMPTY" ? "수집 자료 없음" : "최근 수집";
+  dom.listingFreshness.textContent = `${freshnessPrefix}${lastCollectedAt ? ` · ${formatDateTime(lastCollectedAt)}` : ""}`;
+  dom.listingFreshness.classList.toggle("is-stale", freshnessState === "STALE");
+  renderListings();
+}
+
+function listingPrice(listing) {
+  const price = firstDefined(listing?.price, listing?.display_price, listing?.amount, listing?.unit_price);
+  const currency = normalizeText(firstDefined(listing?.currency, price?.currency, "KRW"));
+  return formatMoney(price, currency);
+}
+
+function listingIdentity(listing) {
+  const source = normalizeText(firstDefined(listing.source_id, listing.site, listing.source));
+  const explicit = normalizeText(firstDefined(listing.source_listing_id, listing.item_id, listing.id));
+  const url = normalizeText(firstDefined(listing.url, listing.listing_url, listing.canonical_url));
+  let urlIdentity = "";
+  try {
+    const parsed = new URL(url);
+    urlIdentity = parsed.searchParams.get("seq") || parsed.searchParams.get("item") || parsed.pathname;
+  } catch {
+    urlIdentity = url;
+  }
+  return `${source}\u0000${explicit.replace(new RegExp(`^${source}:`, "u"), "") || urlIdentity}`;
+}
+
+function listingIsDisplayable(listing) {
+  if (listing?.price_eligible === false) return false;
+  const condition = normalizeText(firstDefined(listing?.condition_code, listing?.condition)).toUpperCase();
+  if (condition && condition !== "USED_WORKING") return false;
+  const quantity = Number(firstDefined(listing?.quantity, 1));
+  if (!Number.isFinite(quantity) || quantity < 1) return false;
+  const scope = normalizeText(listing?.price_scope).toUpperCase();
+  return !["AMBIGUOUS", "UNKNOWN"].includes(scope);
+}
+
+function listingConditionLabel(value) {
+  const normalized = normalizeText(value).toUpperCase();
+  return ({ ACTIVE: "판매중", USED_WORKING: "정상 작동", RESERVED: "예약중" })[normalized] || normalized || "상태 미확인";
+}
+
+function listingScopeLabel(listing) {
+  const quantity = Math.max(1, Number(firstDefined(listing?.quantity, 1)) || 1);
+  const scope = normalizeText(listing?.price_scope).toUpperCase();
+  const scopeLabel = scope === "UNIT" ? "개당가격" : scope === "TOTAL" ? (quantity > 1 ? "일괄가격" : "단품가격") : "가격범위 확인중";
+  return `${quantity}개 · ${scopeLabel}`;
+}
+
+function renderListings() {
+  dom.listingRows.replaceChildren();
+  const unique = new Map();
+  state.listings.filter(listingIsDisplayable).forEach((listing) => {
+    const key = listingIdentity(listing);
+    const existing = unique.get(key);
+    if (!existing || (!existing.image_url && listing.image_url)) unique.set(key, listing);
+  });
+  const visibleListings = [...unique.values()];
+  visibleListings.forEach((listing) => {
+    const row = createElement("article", "listing-row");
+    const titleText = normalizeText(firstDefined(listing.title, listing.display_title, listing.name, "제목 미확인 매물"));
+    const url = safeHttpsUrl(firstDefined(listing.url, listing.listing_url, listing.canonical_url));
+    const imageUrl = safeHttpsUrl(firstDefined(listing.image_url, listing.thumbnail_url, listing.image));
+    const media = createElement(url ? "a" : "div", "listing-media");
+    if (url) {
+      media.href = url;
+      media.target = "_blank";
+      media.rel = "noopener noreferrer";
+      media.setAttribute("aria-label", `${titleText} 매물 보기`);
+    }
+    if (imageUrl) {
+      const image = document.createElement("img");
+      image.src = imageUrl;
+      image.alt = "";
+      image.loading = "lazy";
+      image.decoding = "async";
+      image.addEventListener("error", () => {
+        image.remove();
+        media.classList.add("is-empty");
+        media.textContent = "이미지 없음";
+      }, { once: true });
+      media.append(image);
+    } else {
+      media.classList.add("is-empty");
+      media.textContent = "이미지 없음";
+    }
+    const body = createElement("div", "listing-body");
+    const source = createElement("span", "listing-source", sourceLabel(firstDefined(listing.source_id, listing.site, listing.source)));
+    const title = createElement(url ? "a" : "span", "listing-title", titleText);
+    if (url) {
+      title.href = url;
+      title.target = "_blank";
+      title.rel = "noopener noreferrer";
+    }
+    body.append(source, title);
+    const meta = createElement("div", "listing-meta");
+    const maker = normalizeText(firstDefined(listing.board_manufacturer, listing.canonical_manufacturer, listing.manufacturer));
+    if (maker) meta.append(createElement("span", "listing-maker", maker));
+    meta.append(createElement("span", "listing-state", listingConditionLabel(firstDefined(listing.condition_code, listing.lifecycle_status, listing.status, listing.availability))));
+    meta.append(createElement("span", "listing-scope", listingScopeLabel(listing)));
+    body.append(meta);
+    const observed = createElement("div", "listing-observed");
+    const observedAt = formatDateTime(firstDefined(listing.observed_at, listing.posted_at, listing.created_at, listing.updated_at));
+    if (observedAt) observed.append(createElement("time", "", observedAt));
+    const commerce = createElement("div", "listing-commerce");
+    commerce.append(createElement("span", "listing-price", listingPrice(listing)));
+    if (url) {
+      const action = createElement("a", "listing-action", "매물 보기");
+      action.href = url;
+      action.target = "_blank";
+      action.rel = "noopener noreferrer";
+      commerce.append(action);
+    }
+    row.append(media, body, observed, commerce);
+    dom.listingRows.append(row);
+  });
+  dom.listingEmpty.hidden = visibleListings.length > 0;
+  dom.loadMoreListings.hidden = !state.listingCursor;
+}
+
+function sourceRows(data) {
+  const raw = firstDefined(data?.by_source, data?.sources, data?.source_stats);
+  if (Array.isArray(raw)) return raw;
+  if (raw && typeof raw === "object") {
+    return Object.entries(raw).map(([sourceId, value]) => ({
+      ...(value && typeof value === "object" ? value : {}),
+      source_id: firstDefined(value?.source_id, sourceId),
+    }));
+  }
+  return [];
+}
+
+function statsRow(label, data, currency, combined = false) {
+  const row = createElement("tr", combined ? "combined-row" : "");
+  const active = firstDefined(data?.active, data?.active_stats, {});
+  const sold = firstDefined(data?.sold, data?.sold_last_ask, data?.sold_stats, {});
+  const confirmed = firstDefined(data?.confirmed_transactions, data?.confirmed_transaction, data?.transactions, {});
+  const activeCount = firstDefined(sampleCount(active), data?.active_count, data?.n_active);
+  const mean = metricValue(active, ["mean", "average", "avg", "mean_price"]) || normalizePrice(firstDefined(data?.active_mean, data?.average), currency);
+  const median = metricValue(active, ["median", "median_price"]) || normalizePrice(data?.active_median, currency);
+  const soldMean = metricValue(sold, ["mean", "average", "avg", "mean_price", "sold_last_ask_mean"]) || normalizePrice(firstDefined(data?.sold_last_ask_mean, data?.sold_mean), currency);
+  const soldMedian = metricValue(sold, ["median", "median_price", "sold_last_ask_median"]) || normalizePrice(firstDefined(data?.sold_last_ask_median, data?.sold_median), currency);
+  const soldCount = firstDefined(sampleCount(sold), data?.sold_count, data?.n_sold);
+  const confirmedPrice = metricValue(confirmed, ["median", "median_price", "mean", "average", "amount", "transaction_price_median"])
+    || normalizePrice(firstDefined(data?.confirmed_transaction_median, data?.transaction_price_median), currency);
+  const confirmedCount = firstDefined(sampleCount(confirmed), data?.confirmed_transaction_count, data?.n_confirmed_transactions);
+
+  row.append(
+    createElement("td", "", label),
+    createElement("td", "", activeCount === undefined || activeCount === null ? "—" : String(activeCount)),
+    createElement("td", "", formatMoney(mean, currency)),
+    createElement("td", "", formatMoney(median, currency)),
+    createElement("td", "", formatMoney(soldMean, currency)),
+  );
+  const soldCell = createElement("td", "", formatMoney(soldMedian, currency));
+  if (soldCount !== undefined && soldCount !== null) soldCell.title = `판매완료 표본 ${soldCount}건`;
+  const confirmedCell = createElement("td", "", formatMoney(confirmedPrice, currency));
+  if (confirmedCount !== undefined && confirmedCount !== null) confirmedCell.title = `확인된 체결가 표본 ${confirmedCount}건`;
+  row.append(soldCell, confirmedCell);
+  return row;
+}
+
+function compactStatsRow(label, data, currency, combined = false) {
+  const row = createElement("tr", combined ? "combined-row" : "");
+  const active = firstDefined(data?.active, data?.active_stats, {});
+  const sold = firstDefined(data?.sold, data?.sold_last_ask, data?.sold_stats, {});
+  const activeMean = metricValue(active, ["mean", "average", "avg", "mean_price"]);
+  const activeMedian = metricValue(active, ["median", "median_price"]);
+  const soldMean = metricValue(sold, ["mean", "average", "avg", "mean_price", "sold_last_ask_mean"]);
+  const soldMedian = metricValue(sold, ["median", "median_price", "sold_last_ask_median"]);
+  const activeCell = createElement("td", "metric-pair");
+  activeCell.append(createElement("strong", "", formatMoney(activeMean, currency)), createElement("small", "", `중앙 ${formatMoney(activeMedian, currency)}`));
+  const soldCell = createElement("td", "metric-pair sold-metric");
+  soldCell.append(createElement("strong", "", formatMoney(soldMean, currency)), createElement("small", "", `중앙 ${formatMoney(soldMedian, currency)}`));
+  const counts = `${sampleCount(active) ?? 0} / ${sampleCount(sold) ?? 0}`;
+  row.append(createElement("td", "", label), activeCell, soldCell, createElement("td", "sample-pair", counts));
+  return row;
+}
+
+function combineSourceMetric(rows, key) {
+  const blocks = rows.map((row) => firstDefined(row?.[key], key === "sold" ? row?.sold_last_ask : null, {}));
+  const sampleCountTotal = blocks.reduce((sum, block) => sum + Number(sampleCount(block) || 0), 0);
+  const meanParts = blocks.map((block) => ({ count: Number(sampleCount(block) || 0), value: Number(firstDefined(block?.mean, block?.average, block?.avg)) }))
+    .filter((part) => part.count > 0 && Number.isFinite(part.value));
+  const representedCount = meanParts.reduce((sum, part) => sum + part.count, 0);
+  const mean = representedCount === sampleCountTotal && representedCount > 0
+    ? meanParts.reduce((sum, part) => sum + part.value * part.count, 0) / representedCount
+    : null;
+  return { sample_count: sampleCountTotal, mean, median: null };
+}
+
+function statsForSelectedSites(data) {
+  if (!state.selectedSites.size) return data;
+  const rows = sourceRows(data).filter((row) => state.selectedSites.has(normalizeText(firstDefined(row.source_id, row.site, row.source))));
+  if (rows.length === 1 && state.selectedSites.size === 1) {
+    return { ...rows[0], by_source: rows, by_manufacturer: [], as_of: data?.as_of, selected_site_scope: "single" };
+  }
+  if (!rows.length) return null;
+  return {
+    ...data,
+    active: combineSourceMetric(rows, "active"),
+    reserved: combineSourceMetric(rows, "reserved"),
+    sold: combineSourceMetric(rows, "sold"),
+    confirmed_transactions: combineSourceMetric(rows, "confirmed_transactions"),
+    daily: [],
+    by_source: rows,
+    by_manufacturer: [],
+    selected_site_scope: "multiple",
+  };
+}
+
+function statsHasEvidence(data) {
+  const blocks = [data?.active, data?.reserved, data?.sold, data?.confirmed_transactions];
+  if (blocks.some((block) => Number(sampleCount(block) || 0) > 0)) return true;
+  if (sourceRows(data).some((row) => [row?.active, row?.reserved, row?.sold, row?.confirmed_transactions]
+    .some((block) => Number(sampleCount(block) || 0) > 0))) return true;
+  return toArray(data?.daily).some((row) => [row?.active, row?.reserved, row?.sold, row?.confirmed_transactions]
+    .some((block) => Number(sampleCount(block) || 0) > 0));
+}
+
+function createSvgElement(tag, attributes = {}) {
+  const element = document.createElementNS("http://www.w3.org/2000/svg", tag);
+  Object.entries(attributes).forEach(([name, value]) => element.setAttribute(name, String(value)));
+  return element;
+}
+
+function dailyAveragePoint(row, key, index) {
+  const metric = row?.[key];
+  const average = Number(firstDefined(metric?.mean, metric?.average, metric?.avg, metric?.mean_price));
+  const count = Number(firstDefined(metric?.sample_count, metric?.count, 0));
+  if (!Number.isFinite(average) || average <= 0 || !Number.isFinite(count) || count <= 0) return null;
+  const date = normalizeText(firstDefined(row?.date, row?.stat_date));
+  return { index, date, average, count };
+}
+
+function dateKey(value) {
+  const text = normalizeText(value);
+  if (!/^\d{4}-\d{2}-\d{2}/u.test(text)) return "";
+  const date = new Date(`${text.slice(0, 10)}T00:00:00Z`);
+  return Number.isNaN(date.getTime()) ? "" : date.toISOString().slice(0, 10);
+}
+
+function dailyWindow(data, days = 30) {
+  const rows = toArray(data?.daily)
+    .map((row) => ({ ...row, date: dateKey(firstDefined(row?.date, row?.stat_date)) }))
+    .filter((row) => row.date);
+  if (!rows.length) return [];
+  const byDate = new Map(rows.map((row) => [row.date, row]));
+  const anchor = dateKey(data?.as_of) || rows.map((row) => row.date).sort().at(-1);
+  const end = new Date(`${anchor}T00:00:00Z`);
+  const window = [];
+  for (let offset = Math.max(1, Number(days) || 30) - 1; offset >= 0; offset -= 1) {
+    const date = new Date(end);
+    date.setUTCDate(end.getUTCDate() - offset);
+    const key = date.toISOString().slice(0, 10);
+    window.push(byDate.get(key) || { date: key });
+  }
+  return window;
+}
+
+function renderPriceChart(data, currency) {
+  const daily = dailyWindow(data, 30);
+  const series = [
+    { key: "active", label: "현재 매물 30일 평균", className: "active-series" },
+    { key: "reserved", label: "예약중 표시가격 30일 평균", className: "reserved-series" },
+    { key: "sold", label: "판매완료 표시가격 30일 평균", className: "sold-series" },
+    { key: "confirmed_transactions", label: "확인된 실제 거래 30일 평균", className: "confirmed-series" },
+  ].map((entry) => ({
+    ...entry,
+    points: daily.map((row, index) => dailyAveragePoint(row, entry.key, index)).filter(Boolean),
+  }));
+  const values = series.flatMap((entry) => entry.points.map((point) => point.average));
+  const figure = createElement("figure", "price-chart");
+  if (!values.length) {
+    const activeCount = Number(firstDefined(data?.active?.sample_count, data?.active?.count, 0));
+    const soldCount = Number(firstDefined(data?.sold?.sample_count, data?.sold?.count, 0));
+    const reservedCount = Number(firstDefined(data?.reserved?.sample_count, data?.reserved?.count, 0));
+    const confirmedCount = Number(firstDefined(data?.confirmed_transactions?.sample_count, data?.confirmed_transactions?.count, 0));
+    figure.append(createElement(
+      "div",
+      "price-chart-empty",
+      `일별 그래프 누적 중 · 판매중 ${activeCount}건 · 예약중 ${reservedCount}건 · 판매완료 ${soldCount}건 · 확인된 실제 거래 ${confirmedCount}건`,
+    ));
+    return figure;
+  }
+
+  const width = 720;
+  const height = 230;
+  const margin = { top: 18, right: 18, bottom: 34, left: 78 };
+  const plotWidth = width - margin.left - margin.right;
+  const plotHeight = height - margin.top - margin.bottom;
+  const minimum = Math.min(...values);
+  const maximum = Math.max(...values);
+  const padding = Math.max((maximum - minimum) * 0.12, maximum * 0.03, 1);
+  const yMin = Math.max(0, minimum - padding);
+  const yMax = maximum + padding;
+  const xAt = (index) => margin.left + (daily.length <= 1 ? plotWidth / 2 : (index / (daily.length - 1)) * plotWidth);
+  const yAt = (value) => margin.top + ((yMax - value) / Math.max(1, yMax - yMin)) * plotHeight;
+
+  const svg = createSvgElement("svg", {
+    viewBox: `0 0 ${width} ${height}`,
+    role: "img",
+    "aria-label": `최근 ${daily.length}일 현재 매물, 예약중 표시가격, 판매완료 표시가격, 확인된 실제 거래 평균 그래프`,
+  });
+  [0, 0.5, 1].forEach((ratio) => {
+    const y = margin.top + plotHeight * ratio;
+    svg.append(createSvgElement("line", { x1: margin.left, x2: width - margin.right, y1: y, y2: y, class: "chart-grid" }));
+    const label = createSvgElement("text", { x: margin.left - 10, y: y + 4, class: "chart-axis-label", "text-anchor": "end" });
+    label.textContent = formatMoney(yMax - (yMax - yMin) * ratio, currency);
+    svg.append(label);
+  });
+
+  const dateIndexes = [...new Set([0, Math.floor((daily.length - 1) / 2), daily.length - 1])].filter((index) => index >= 0);
+  dateIndexes.forEach((index) => {
+    const label = createSvgElement("text", {
+      x: xAt(index), y: height - 10, class: "chart-axis-label", "text-anchor": index === 0 ? "start" : index === daily.length - 1 ? "end" : "middle",
+    });
+    label.textContent = normalizeText(firstDefined(daily[index]?.date, daily[index]?.stat_date)).slice(5);
+    svg.append(label);
+  });
+
+  series.forEach((entry) => {
+    let segment = [];
+    const flushSegment = () => {
+      if (segment.length > 1) {
+        svg.append(createSvgElement("polyline", {
+          points: segment.map((point) => `${xAt(point.index)},${yAt(point.average)}`).join(" "),
+          class: `chart-line ${entry.className}`,
+        }));
+      }
+      segment = [];
+    };
+    entry.points.forEach((point, pointIndex) => {
+      const previous = entry.points[pointIndex - 1];
+      if (previous && point.index !== previous.index + 1) flushSegment();
+      segment.push(point);
+    });
+    flushSegment();
+    entry.points.forEach((point) => {
+      const circle = createSvgElement("circle", {
+        cx: xAt(point.index), cy: yAt(point.average), r: 3.2, class: `chart-point ${entry.className}`,
+        tabindex: 0,
+        role: "img",
+        "aria-label": `${point.date} ${entry.label} ${formatMoney(point.average, currency)} 표본 ${point.count}건`,
+      });
+      const title = createSvgElement("title");
+      title.textContent = `${point.date} · ${entry.label} ${formatMoney(point.average, currency)} · 표본 ${point.count}건`;
+      circle.append(title);
+      svg.append(circle);
+    });
+  });
+
+  const caption = createElement("figcaption", "price-chart-legend");
+  series.forEach((entry) => {
+    const item = createElement("span", entry.className, entry.label);
+    caption.append(item);
+  });
+  const reservedSeries = series.find((entry) => entry.key === "reserved");
+  if (!reservedSeries?.points.length) {
+    caption.append(createElement("span", "chart-sample-note", "예약중 표본 수집 중 (0건)"));
+  }
+  const soldSeries = series.find((entry) => entry.key === "sold");
+  if (!soldSeries?.points.length) {
+    caption.append(createElement("span", "chart-sample-note", "판매완료 표본 수집 중 (0건)"));
+  }
+  const confirmedSeries = series.find((entry) => entry.key === "confirmed_transactions");
+  if (!confirmedSeries?.points.length) {
+    caption.append(createElement("span", "chart-sample-note", "확인된 실제 거래 표본 없음 · 예약중 제외"));
+  }
+  caption.append(createElement("span", "chart-gap-note", "자료 없는 날짜는 연결하지 않음"));
+  figure.append(svg, caption);
+  return figure;
+}
+
+function renderStatsGroup(result) {
+  const { cohort, data } = result;
+  const group = createElement("section", "stats-group");
+  const title = createElement("div", "stats-group-title");
+  const selectedSiteLabel = state.selectedSites.size ? ` · ${[...state.selectedSites].map(sourceLabel).join(" + ")}` : "";
+  title.append(createElement("h4", "", `${cohort.label}${selectedSiteLabel}`), createElement("span", "", `${cohort.currency} · 최근 30일`));
+  const table = createElement("table", "stats-table");
+  const thead = createElement("thead");
+  const headerRow = createElement("tr");
+  ["사이트", "현재 평균", "완료 평균", "표본(현/완)"].forEach((heading) => headerRow.append(createElement("th", "", heading)));
+  thead.append(headerRow);
+  const tbody = createElement("tbody");
+  if (!state.selectedSites.size || data?.selected_site_scope === "single") {
+    tbody.append(compactStatsRow(state.selectedSites.size ? sourceLabel([...state.selectedSites][0]) : "전체", data, cohort.currency, true));
+  }
+  sourceRows(data).forEach((source) => {
+    const label = sourceLabel(firstDefined(source.source_id, source.site, source.source));
+    if (!state.selectedSites.size || data?.selected_site_scope === "multiple") tbody.append(compactStatsRow(label, source, cohort.currency));
+  });
+  table.append(thead, tbody);
+  group.append(title);
+  if (data?.selected_site_scope === "multiple") {
+    sourceRows(data).forEach((source) => {
+      group.append(createElement("h5", "source-chart-title", sourceLabel(firstDefined(source.source_id, source.site, source.source))));
+      group.append(renderPriceChart(source, cohort.currency));
+    });
+  } else {
+    group.append(renderPriceChart(data, cohort.currency));
+  }
+  group.append(table);
+  return group;
+}
+
+function soldReference(data, currency) {
+  const sold = firstDefined(data?.sold, data?.sold_last_ask, {});
+  return metricValue(sold, ["median", "median_price", "sold_last_ask_median"]) || normalizePrice(firstDefined(data?.sold_last_ask_median, data?.reference_price), currency);
+}
+
+function renderStats() {
+  dom.statsGroups.replaceChildren();
+  const scopedResults = state.detailStats
+    .map((result) => ({ ...result, data: statsForSelectedSites(result.data) }))
+    .filter((result) => result.data && statsHasEvidence(result.data));
+  state.visibleStatsCount = scopedResults.length;
+  const receivedStats = state.detailStats.length > 0;
+  dom.statsSection.hidden = !receivedStats;
+  dom.priceSummary.hidden = scopedResults.length === 0;
+  dom.referencePrice.hidden = true;
+  if (!scopedResults.length) {
+    if (receivedStats) {
+      const scope = state.selectedSites.size
+        ? `${[...state.selectedSites].map(sourceLabel).join(" · ")}의 `
+        : "이 모델의 ";
+      dom.statsGroups.append(createElement(
+        "div",
+        "price-chart-empty",
+        `${scope}최근 30일 가격 통계가 아직 없습니다. 확인된 실제 거래가 없으면 실제 거래 선도 표시하지 않습니다.`,
+      ));
+    }
     return;
   }
-  const button = event.target.closest('[data-category-id]');
-  if (!button || button.disabled) return;
-  setCategory(button.dataset.categoryId || 'all');
-});
-$('#keyword').addEventListener('input', () => {
-  $('#search-status').textContent = '';
-  $('#search-status').classList.remove('visible');
-  $('#keyword').removeAttribute('aria-invalid');
-});
-$('#recent-search-list').addEventListener('click', (event) => {
-  const button = event.target.closest('[data-recent-search]');
-  if (!button) return;
-  const keyword = button.dataset.recentSearch || '';
-  $('#keyword').value = keyword;
-  search(keyword);
-});
-$('#clear-recent-searches').addEventListener('click', () => {
-  state.recentSearches = [];
-  saveRecentSearches();
-  renderRecentSearches();
-});
-function applyPriceFilter() {
-  if (state.loading) return;
-  if (!syncPriceRangeFromInputs()) return;
-  $('#search-status').textContent = '';
-  $('#search-status').classList.remove('visible');
-  const shouldSearch = Boolean(state.data || state.loading);
-  if (shouldSearch) {
-    cancelPendingSearch();
-    executeSearch({ keyword: state.query, categoryId: state.categoryId, categoryIds: selectedCategoryIds(), reason: 'price_filter' });
-  }
-}
 
-$('#apply-price-filter').addEventListener('click', applyPriceFilter);
-['#min-price', '#max-price'].forEach((selector) => {
-  $(selector).addEventListener('input', () => {
-    $(selector).removeAttribute('aria-invalid');
-  });
-  $(selector).addEventListener('keydown', (event) => {
-    if (event.key === 'Enter') applyPriceFilter();
-  });
-});
-$$('[data-sort]').forEach((tab) => tab.addEventListener('click', async () => {
-  if (state.loading) return;
-  const nextSort = tab.dataset.sort || 'recommended';
-  if (nextSort === state.sort) return;
-  state.sort = nextSort;
-  state.currentPage = 0;
-  updateSortTabs();
-  const shouldSearch = Boolean(state.data || state.loading);
-  if (shouldSearch) {
-    renderAll();
-    cancelPendingSearch();
-    await executeSearch({ keyword: state.query, categoryId: state.categoryId, categoryIds: selectedCategoryIds(), reason: 'sort' });
-  }
-}));
-$('#result-list').addEventListener('click', (event) => {
-  const button = event.target.closest('[data-favorite]');
-  if (!button) return;
-  event.preventDefault();
-  event.stopPropagation();
-  toggleFavorite(button);
-});
-$('#result-list').addEventListener('click', (event) => {
-  const link = event.target.closest('[data-item-key]');
-  if (!link) return;
-  const item = (state.data?.items || []).find((candidate) => favoriteKey(candidate) === link.dataset.itemKey);
-  if (item) recordRecentItem(item);
-}, true);
-$('#reset-filters').addEventListener('click', () => {
-  if (state.loading) return;
-  const hadPriceRange = state.minPrice !== null || state.maxPrice !== null;
-  const shouldSearch = Boolean(state.data || state.loading);
-  $('#min-price').value = '';
-  $('#max-price').value = '';
-  state.minPrice = null;
-  state.maxPrice = null;
-  updateSortTabs();
-  if (shouldSearch && hadPriceRange) {
-    cancelPendingSearch();
-    executeSearch({ keyword: state.query, categoryId: state.categoryId, categoryIds: selectedCategoryIds(), reason: 'price_filter' });
-  }
-});
-$('#apply-refresh-results').addEventListener('click', () => {
-  if (!state.pendingRefreshData) return;
-  const applyingStale = state.pendingResultKind === 'stale';
-  state.data = state.pendingRefreshData;
-  state.pendingRefreshData = null;
-  state.pendingResultKind = '';
-  if (applyingStale) state.refreshMessage = `${formatCheckedAge(state.data?.freshness)} · ${uiText('오래된 결과 표시', 'Showing saved results')}`;
-  state.currentPage = 0;
-  renderAll();
-  $('.results-toolbar')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-});
-['#pagination-controls', '#result-summary-pagination'].forEach((selector) => {
-  $(selector)?.addEventListener('click', (event) => {
-    const expandButton = event.target.closest('[data-expand-results]');
-    if (expandButton && !expandButton.disabled) {
-      expandResultWindow();
-      return;
+  scopedResults.forEach((result) => dom.statsGroups.append(renderStatsGroup(result)));
+  const summaryResult = scopedResults.find((result) => (
+    Number(sampleCount(result.data?.active) || 0) > 0
+      || Number(sampleCount(result.data?.reserved) || 0) > 0
+      || Number(sampleCount(result.data?.sold) || 0) > 0
+      || Number(sampleCount(result.data?.confirmed_transactions) || 0) > 0
+  )) || scopedResults[0];
+  const summaryCurrency = summaryResult.cohort.currency;
+  const summaryActive = summaryResult.data?.active || {};
+  const summaryReserved = summaryResult.data?.reserved || {};
+  const summarySold = firstDefined(summaryResult.data?.sold, summaryResult.data?.sold_last_ask, {});
+  const summaryConfirmed = firstDefined(summaryResult.data?.confirmed_transactions, summaryResult.data?.confirmed_transaction, summaryResult.data?.transactions, {});
+  const multipleSites = summaryResult.data?.selected_site_scope === "multiple";
+  dom.activeMean.textContent = formatMoney(metricValue(summaryActive, ["mean", "average", "avg", "mean_price"]), summaryCurrency);
+  dom.activeMedian.textContent = multipleSites ? "사이트별 참고" : formatMoney(metricValue(summaryActive, ["median", "median_price"]), summaryCurrency);
+  dom.activeCount.textContent = formatCount(sampleCount(summaryActive) || 0);
+  dom.reservedMean.textContent = formatMoney(metricValue(summaryReserved, ["mean", "average", "avg", "mean_price"]), summaryCurrency);
+  dom.reservedMedian.textContent = multipleSites ? "사이트별 참고" : formatMoney(metricValue(summaryReserved, ["median", "median_price"]), summaryCurrency);
+  dom.reservedCount.textContent = formatCount(sampleCount(summaryReserved) || 0);
+  dom.soldMean.textContent = formatMoney(metricValue(summarySold, ["mean", "average", "avg", "mean_price", "sold_last_ask_mean"]), summaryCurrency);
+  dom.soldMedian.textContent = multipleSites ? "사이트별 참고" : formatMoney(metricValue(summarySold, ["median", "median_price", "sold_last_ask_median"]), summaryCurrency);
+  dom.soldCount.textContent = formatCount(sampleCount(summarySold) || 0);
+  dom.confirmedMean.textContent = formatMoney(metricValue(summaryConfirmed, ["mean", "average", "avg", "mean_price", "transaction_price_mean"]), summaryCurrency);
+  dom.confirmedMedian.textContent = multipleSites ? "사이트별 참고" : formatMoney(metricValue(summaryConfirmed, ["median", "median_price", "transaction_price_median"]), summaryCurrency);
+  dom.confirmedCount.textContent = formatCount(sampleCount(summaryConfirmed) || 0);
+
+  const domestic = scopedResults.find((result) => result.cohort.marketPool === "KR_C2C_USED");
+  if (domestic) {
+    const reference = soldReference(domestic.data, domestic.cohort.currency);
+    if (reference) {
+      dom.referencePrice.hidden = false;
+      dom.referenceValue.textContent = formatMoney(reference, domestic.cohort.currency);
+      const confidence = normalizeText(firstDefined(domestic.data?.confidence?.level, domestic.data?.confidence_level));
+      dom.referenceNote.textContent = confidence
+        ? `판매완료 직전 표시가격 중앙값 · 신뢰도 ${confidence}`
+        : "판매완료 직전 마지막 표시가격 중앙값";
     }
-    const button = event.target.closest('[data-result-page]');
-    if (!button || button.disabled) return;
-    loadResultPage(Number(button.dataset.resultPage));
-  });
+  }
+  const asOf = firstDefined(...scopedResults.map((result) => result.data?.as_of).filter(Boolean));
+  dom.statsAsOf.textContent = formatDateTime(asOf);
+  if (asOf) dom.statsAsOf.dateTime = normalizeText(asOf);
+}
+
+async function loadListings(append) {
+  if (!state.selectedProduct) return;
+  const product = state.selectedProduct;
+  const cursor = append ? state.listingCursor : "";
+  setBusy(dom.loadMoreListings, true, "불러오는 중");
+  if (!append) {
+    state.listings = [];
+    state.listingCursor = "";
+    renderListings();
+    showDetailMessage("현재 매물을 불러오는 중입니다.");
+  }
+  try {
+    const payload = await fetchJson(`/api/pc/listings?${buildListingQuery(cursor)}`);
+    if (state.selectedProduct !== product) return;
+    applyListingPayload(payload, append);
+    showDetailMessage("");
+  } catch (error) {
+    if (error.name !== "AbortError") showDetailMessage(`현재 매물을 불러오지 못했습니다. ${error.message}`, true);
+  } finally {
+    setBusy(dom.loadMoreListings, false, "");
+  }
+}
+
+function digitsOnly(value) {
+  return normalizeText(value).replace(/[^0-9]/g, "");
+}
+
+function syncSearchUrl() {
+  const url = new URL(window.location.href);
+  if (state.query) url.searchParams.set("q", state.query);
+  else url.searchParams.delete("q");
+  window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+}
+
+async function loadCatalog() {
+  showCatalogMessage("PC 부품 카탈로그를 불러오는 중입니다.");
+  try {
+    const catalog = await fetchJson("/api/pc/catalog");
+    state.catalog = catalog;
+    state.categories = toArray(catalog?.categories).filter((category) => categoryCode(category));
+    state.facetSchema = firstDefined(catalog?.facet_schema, catalog?.facetSchema);
+    state.browseFlows = normalizeBrowseFlows(firstDefined(catalog?.browse_flow, catalog?.browse_flows));
+    state.sources = normalizeSources(catalog?.sources);
+    state.sourceCandidates = normalizeSourceCandidates(catalog?.source_candidates);
+    state.seedProducts = toArray(firstDefined(catalog?.products, catalog?.public_catalog?.products));
+    if (!state.categories.length && state.seedProducts.length) {
+      const inferred = [...new Set(state.seedProducts.map(productCategory).filter(Boolean))];
+      state.categories = inferred.map((code) => ({ category_code: code, display_name: code }));
+    }
+    if (!state.categories.length) throw new Error("공개된 부품 카테고리가 없습니다.");
+
+    const initialQuery = normalizeText(new URLSearchParams(window.location.search).get("q") || "");
+    const routeCategory = window.location.pathname.match(/^\/categories\/([a-z-]+)$/u)?.[1]?.toUpperCase();
+    state.query = initialQuery;
+    dom.catalogQuery.value = initialQuery;
+    state.categoryCode = initialQuery
+      ? ""
+      : categoryCode(state.categories.find((category) => categoryCode(category) === routeCategory) || state.categories[0]);
+    state.availableFacets = {};
+    renderCategories();
+    renderFacets();
+    updateWorkspaceHeading();
+    const version = normalizeText(firstDefined(catalog?.version, catalog?.catalog_version));
+    dom.catalogMeta.textContent = version ? `카탈로그 ${version}` : `${state.categories.length}개 부품군`;
+    showCatalogMessage("");
+    await loadProducts(false);
+  } catch (error) {
+    state.categories = [];
+    state.products = [];
+    renderCategories();
+    renderProducts();
+    dom.catalogMeta.textContent = "카탈로그 연결 안 됨";
+    dom.workspaceTitle.textContent = "중고 PC 부품 검색";
+    dom.modelListContext.textContent = "카탈로그를 사용할 수 없습니다";
+    showCatalogMessage(`PC 부품 카탈로그를 불러오지 못했습니다. ${error.message}`, true);
+    resetDetail();
+  }
+}
+
+dom.catalogSearch.addEventListener("submit", (event) => {
+  event.preventDefault();
+  state.query = normalizeText(dom.catalogQuery.value);
+  syncSearchUrl();
+  if (state.query) {
+    state.categoryCode = "";
+    state.facets = {};
+    state.openSeries.clear();
+    renderCategories();
+  } else if (!state.categoryCode) {
+    state.categoryCode = categoryCode(state.categories[0]);
+    renderCategories();
+  }
+  updateWorkspaceHeading();
+  renderFacets();
+  loadProducts(false);
 });
 
-renderCategories();
-renderRecentViewed();
-renderRecentSearches();
-window.addEventListener('resize', syncCategoryPanel);
-window.addEventListener('pageshow', reloadRecentItems);
-window.addEventListener('storage', (event) => {
-  if (event.key === storageKey('used-market:recent-items')) reloadRecentItems();
-  if (event.key === storageKey('used-market:recent-searches')) {
-    state.recentSearches = loadRecentSearches();
-    renderRecentSearches();
+dom.catalogQuery.addEventListener("search", () => {
+  if (!dom.catalogQuery.value && state.query) {
+    state.query = "";
+    syncSearchUrl();
+    if (!state.categoryCode) state.categoryCode = categoryCode(state.categories[0]);
+    renderCategories();
+    updateWorkspaceHeading();
+    renderFacets();
+    loadProducts(false);
   }
 });
-loadCategories();
 
-const presetKeyword = new URLSearchParams(window.location.search).get('keyword')?.trim().slice(0, 80);
-if (presetKeyword) {
-  $('#keyword').value = presetKeyword;
-  search(presetKeyword);
-}
+dom.resetFilters.addEventListener("click", () => {
+  state.facets = {};
+  state.openSeries.clear();
+  state.selectedSites.clear();
+  state.query = "";
+  dom.catalogQuery.value = "";
+  syncSearchUrl();
+  if (!state.categoryCode) state.categoryCode = categoryCode(state.categories[0]);
+  renderCategories();
+  renderFacets();
+  updateWorkspaceHeading();
+  loadProducts(false);
+});
+
+dom.loadMoreProducts.addEventListener("click", () => loadProducts(true));
+dom.loadMoreListings.addEventListener("click", () => loadListings(true));
+dom.pricePanelToggle.addEventListener("click", () => setPricePanelOpen(!state.pricePanelOpen));
+dom.backToModels.addEventListener("click", () => {
+  resetDetail();
+  updateWorkspaceHeading();
+  dom.modelDirectory.scrollIntoView({ behavior: "smooth", block: "start" });
+});
+
+dom.listingControls.addEventListener("submit", (event) => {
+  event.preventDefault();
+  state.listingSort = dom.listingSort.value;
+  state.priceMin = digitsOnly(dom.priceMin.value);
+  state.priceMax = digitsOnly(dom.priceMax.value);
+  dom.priceMin.value = state.priceMin;
+  dom.priceMax.value = state.priceMax;
+  const sourceScope = state.selectedSites.size
+    ? state.sources.filter((source) => state.selectedSites.has(source.id))
+    : state.sources;
+  const currencies = new Set(sourceScope.map((source) => source.currency).filter(Boolean));
+  if ((state.listingSort !== "recent" || state.priceMin || state.priceMax) && currencies.size > 1) {
+    showDetailMessage("원화와 해외 통화를 함께 가격순으로 비교할 수 없습니다. 같은 통화의 사이트만 선택해 주세요.", true);
+    return;
+  }
+  loadListings(false);
+});
+
+loadCatalog();

@@ -347,9 +347,18 @@ export function isCategorySelectableForSite(siteKey: string, categoryId: string)
 }
 
 export function categoryCatalogForApi() {
+  const publicCategoryIds = new Set<CanonicalCategoryId>(["pc"]);
+  const publicPlans = Object.fromEntries(Object.entries(CATEGORY_HARNESS.categoryPlansForApi()).map(([site, plans]) => [
+    site,
+    Object.fromEntries(Object.entries(plans).filter(([categoryId]) => publicCategoryIds.has(categoryId as CanonicalCategoryId)))
+  ]));
+  const publicBindings = Object.fromEntries(Object.entries(CATEGORY_HARNESS.sourceBindingsForApi()).map(([site, bindings]) => [
+    site,
+    Object.fromEntries(Object.entries(bindings).filter(([categoryId]) => publicCategoryIds.has(categoryId as CanonicalCategoryId)))
+  ]));
   return {
-    categories: listCategoryNodes(),
-    site_plans: CATEGORY_HARNESS.categoryPlansForApi(),
-    source_bindings: CATEGORY_HARNESS.sourceBindingsForApi()
+    categories: listCategoryNodes().filter((category) => publicCategoryIds.has(category.id)),
+    site_plans: publicPlans,
+    source_bindings: publicBindings
   };
 }

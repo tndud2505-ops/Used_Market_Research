@@ -4,34 +4,42 @@
 
 국내 중고 PC·컴퓨터 부품 매물을 여러 플랫폼에서 수집하고, 기존 부품 정규화 로직으로 구성·가격·신뢰 신호·가격 이력을 비교하는 서비스다.
 
-## 현재 상태 (2026-08-24)
+## 현재 상태 (2026-08-30)
 
 - 웹 서버: `npm run web`, 기본 포트 `8787`
 - 스케줄러: `npm run scheduler`, 기본 시간대 `Asia/Seoul`
-- 하네스: `npm run harness`
-- 카테고리 하네스: `npm run category:harness`
+- 기본 결정론 하네스: `npm test`
+- PC 서비스 네 계약 축: `npm run test:pc`
 - Cloudflare Worker 계약 하네스: `npm run cloudflare:harness`
-- 운영 검색: 중고나라·번개장터·헬로마켓·리씽크몰·eBay
+- PC 원장·분류·통계 계약: `npm run pc:contract`
+- 운영 검색: 중고나라·헬로마켓·리씽크몰·eBay. 번개장터는 정책 검토 중이라 비활성이다.
 - 당근은 지역별 결과를 정확히 구분할 수 없는 공개 검색 경계 때문에 운영 대상에서 제외한다.
 - 검색 소유권: Cloudflare Worker가 정적 UI·공개 API·D1 장애 대체 경계를 담당하고, Named Tunnel 뒤 AWS Node 러너가 원 사이트 수집·품질 정책·SQLite 주 색인을 담당한다.
-- 결과 예산: 초기 사이트별 최대 160개·전체 최대 640개, 확장 스냅샷 최대 1,000개, PC·모바일 모두 30개씩 번호 페이지
+- legacy `/api/search` 결과 예산: 초기 사이트별 최대 160개·전체 최대 640개, 확장 스냅샷 최대 1,000개, PC·모바일 모두 30개씩 번호 페이지
 - 최신성: 기본 6시간. 저장 결과를 먼저 표시한 뒤 최근 결과를 확인하고 신규·변경만 병합한다.
-- 검색 세션: 검색어·카테고리·처음 선택한 사이트 묶음이 수집 키다. 사이트 탭·정렬·가격 범위는 같은 스냅샷의 보기 조건이며 페이지를 1페이지로 초기화한다.
-- 사이트 집중 수집: 전체 검색 뒤 사이트 탭을 누르면 저장 결과를 즉시 필터링한 다음 해당 사이트만 기본 160개에서 320개 후보까지 비동기 보강한다. 같은 세션의 최신 보강은 반복하지 않는다.
+- legacy `/api/search` 검색 세션: 검색어·카테고리·처음 선택한 사이트 묶음이 수집 키다.
+- legacy 사이트 집중 수집은 rollback 경로에만 남고 새 PC 디렉터리 화면에서는 호출하지 않는다.
 - 낮은 가격: 현재 결과를 즉시 숫자 가격순으로 재배열하고 같은 SQLite 스냅샷의 가격순 페이지를 읽는다. 정렬 변경만으로 원 사이트를 다시 수집하지 않는다.
 - 카테고리 검색 기준: 중고나라·번개장터의 공식 원본 카테고리 경로를 우선한다. 헬로마켓·리씽크몰·eBay는 명시 검색어가 있을 때만 키워드 결과를 로컬 카테고리 분류해 통합하고, 검색어 없는 카테고리 탐색에는 참여하지 않는다.
 - 정렬: 추천, 낮은 가격, 높은 가격, 최신. 가격 정렬은 같은 SQLite 스냅샷을 숫자 가격 기준으로 읽으며 원 사이트를 다시 수집하지 않는다.
 - 통화: eBay USD와 국내 KRW가 섞인 전체 보기에서는 환율 없는 오정렬을 막기 위해 가격순·가격 범위를 비활성화한다. 사이트 하나를 선택하면 해당 통화 안에서 정렬·필터링한다.
 - 페이지: 사이트 보강으로 90개를 받으면 `1 2 3 4 … 마지막`을 표시한다. 1~3은 즉시 이동하고 4는 cursor 한 번으로 이동한다. 먼 마지막 페이지는 비활성 총량 표시다.
-- 카테고리 분류 기록: `docs/decisions/ADR-joongna-canonical-category-policy.md`, 실행 증거: `merge/result/harness/category-mapping/`
+- PC 카테고리와 소스 정책: `docs/decisions/ADR-pc-parts-ledger-and-source-policy.md`
 - 그래프: 실제 관측값과 수동 seed 분리, 2개 이상 관측일 전에는 추세 보류
+- PC 전용 계층: `pc_parts_v1` 검색 projection과 AWS SQLite 원장에 원본·상태·제품 master·30일 통계를 분리 저장한다.
+- PC 기본 UX: 사전수집형 제품 디렉터리다. 공개 catalog·products·listings 조회는 원 사이트 수집을 실행하지 않으며, 부품군·규격/용량·제조사·정확 모델 순으로 내부 publication을 탐색한다.
+- PC 제품 master: Intel 6세대·Ryzen 1000·GTX 900 이후를 포함한 V2 760개 디렉터리 노드다. GPU 칩 제조사와 보드 제조사는 별도 역할로 저장하며 RAM·SSD·HDD 등은 제조사별 탐색 노드를 제공한다.
+- PC 수집 주기: 승인된 소스 스크립트를 AWS Runner에서 매시간 분할 실행하고, 일별 가격 통계는 03:00 KST에 확정한다. 사용자 화면 요청은 수집 target을 만들거나 실행하지 않는다.
+- 가격 의미: 판매완료는 명시적 SOLD만 인정하고, 통계에는 실제 체결가가 아닌 `sold_last_ask_price`를 사용한다. 기존 검색 `price_history`는 legacy read-only다.
+- 전문 소스: 다나와·쿨엔조이는 adapter/fixture만 준비하며 최신 정책 확인과 운영자 활성화 전에는 호출하지 않는다.
 
 ## 위험 경계
 
 - 사이트 수집 결과는 공개 페이지와 접근 제한의 영향을 받는다.
 - 판매완료·비활성·가격 이상 매물은 최종 비교에서 제외될 수 있다.
+- 검색 목록 소실은 판매완료가 아니다. 3회 재확인 후에도 `UNAVAILABLE_UNKNOWN`으로만 이동한다.
 - AWS 러너 장애 시 Worker는 D1의 제한된 저장 결과를 사용할 수 있지만 5개 사이트 원본 수집과 동일하지 않다.
-- 저장 색인이 있으면 6시간 초과 결과도 `stale`과 경과 시간을 표시해 먼저 제공하고 백그라운드 갱신을 예약한다. 캐시가 없는 첫 검색만 원 사이트를 기다린다.
+- legacy `/api/search`는 저장 색인이 있으면 stale 결과를 먼저 제공하고 백그라운드 갱신을 예약할 수 있다. 새 PC 디렉터리 API는 cache miss에서도 원 사이트를 기다리거나 수집하지 않는다.
 - 사이트 탭은 기존 전체 결과에서 즉시 필터링한 뒤 선택 사이트만 보강하고, 첫 3페이지(90개)를 미리 읽는다.
 - 원 사이트가 가격 범위 파라미터를 지원하지 않으면 제한된 후보 창에 로컬 범위를 적용한다. 무제한 수집은 하지 않는다.
 - `낮은 가격`은 확인한 후보 창 안의 품질 우선 가격순이다. 모든 원 사이트의 무한 목록에서 절대 최저가를 보장한다는 의미가 아니다.
@@ -41,8 +49,10 @@
 ## 다음에 읽을 문서
 
 - 사이트별 검색: `docs/wiki/02-search-verification.md`
-- 카테고리 연결: `docs/wiki/07-category-harness.md`
+- PC taxonomy·소스 정책: `docs/decisions/ADR-pc-parts-ledger-and-source-policy.md`
+- 사전수집형 제품 디렉터리: `docs/decisions/ADR-precollected-pc-parts-directory.md`
 - 가격 그래프: `docs/wiki/03-price-history.md`
 - Runner 배포: `docs/wiki/04-cloudflare-runner.md`
 - 검증 루프: `docs/wiki/05-harness-loop.md`
 - 캐시·검색 UX: `docs/wiki/08-cache-search-ux.md`
+- PC 원장·소스 정책: `docs/decisions/ADR-pc-parts-ledger-and-source-policy.md`

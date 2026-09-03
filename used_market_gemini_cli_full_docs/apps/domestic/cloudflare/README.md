@@ -4,14 +4,18 @@
 
 ## 역할 분리
 
-- Cloudflare Worker: 화면·검색 API·Cron Trigger·수동 실행 인증·AWS 러너 호출
-- AWS Node 러너: 번개장터·중고나라·헬로마켓·리씽크몰·eBay 검색·수집
+- Cloudflare Worker: 화면·사전수집 PC catalog/listing/stats 읽기 API·Cron watchdog·수동 실행 인증·AWS 러너 호출
+- AWS Node 러너: source registry에서 `APPROVED + ENABLED`이고 governance 검증을 통과한 사이트만 사전수집·분류·publication 생성
 - `POST /api/runner/run`: 허용된 스케줄러 작업 하나 또는 묶음을 실행하는 인증된 Node 엔드포인트
-- `POST /api/search`: AWS 러너의 5개 사이트 검색·색인 응답을 Worker가 인증 프록시
+- `POST /api/search`: rollback용 legacy 범용 검색 경로. PC 디렉터리는 호출하지 않음
+
+공개 PC 화면은 검증된 하나의 publication manifest에 속한 projection만 조회한다. 좌측 부품·용량·제조사·모델·사이트 필터, 사이트별 매물 결과, 현재 ACTIVE·RESERVED 평균·중앙값, SOLD 직전 마지막 표시가격 평균·중앙값, 최근 30일 그래프는 모두 같은 `publication_version`/`as_of` 범위를 사용한다. RESERVED·SOLD 표시가격은 실제 체결가가 아니며, 확인된 체결금액은 별도 통계로 표시한다.
+
+다나와 장터·중고나라·번개장터·헬로마켓·리씽크몰·eBay·쿨엔조이는 registry의 운영 승인과 공개 경로 제약을 통과한 사전수집 projection에서만 노출한다. 국내 개인 중고, 업자 중고, 리퍼비시, 해외 중고는 `market_pool`로 분리하며 HTTP 403·captcha가 발생한 소스는 우회하지 않고 backoff·quarantine을 적용한다.
 
 수동 실행도 작업 결과 저장 뒤 알림 dispatch와 reporter 후처리를 실행한다. 후처리 경고가 있으면 전체 응답은 `partial_success`가 되며 `postprocess.warnings`에서 원인을 확인할 수 있다.
 
-방문자 검색과 수집은 Cloudflare Browser Run이 아니라 AWS 러너에서 처리한다. Worker의 `RUNNER_URL`과 `SEARCH_RUNNER_URL`은 Cloudflare Tunnel 공개 URL이어야 하며, 로컬 `localhost`는 사용할 수 없다.
+사전수집은 Cloudflare Browser Run이 아니라 AWS 러너에서 처리한다. 공개 PC 읽기 API는 요청 중 원 사이트를 호출하지 않는다. Worker의 `RUNNER_URL`과 legacy `SEARCH_RUNNER_URL`은 Cloudflare Tunnel 공개 URL이어야 하며, 로컬 `localhost`는 사용할 수 없다.
 
 ## 로컬 검증
 
@@ -70,7 +74,8 @@ Invoke-RestMethod -Uri "https://<worker-subdomain>.workers.dev/run" -Method Post
 The active Worker/AWS profile:
 
 - Static assets are served by the Worker Assets binding.
-- `/api/search` proxies live search to AWS through Cloudflare Tunnel.
+- `/api/pc/catalog`, `/api/pc/products`, `/api/pc/listings`, and product price stats read only precollected projections.
+- `/api/search` remains a legacy rollback path through Cloudflare Tunnel; the PC directory does not call it.
 - Cron and manual jobs call the authenticated AWS `/api/runner/run` endpoint.
 - D1 remains available for optional imported snapshots and fallback data.
 - Browser Run and Queue are intentionally not deployed for this profile.
@@ -103,9 +108,21 @@ public health endpoint, homepage, and category API on both domains. Set
 
 The AWS profile intentionally keeps the collection boundary outside Cloudflare. Keep the Tunnel token, Worker `RUNNER_TOKEN`, and optional D1 import token out of Git.
 
-### Live search result budget
+If the runner reports a D1 import error for a missing projection column, apply
+the checked-in migrations as an explicit operator recovery step before waiting
+for the runner to produce a fresh publication:
 
-The search path starts with a bounded 160-candidate window per selected market.
+```powershell
+npm run cloudflare:migrate:remote
+```
+
+This command changes the remote D1 schema and is intentionally separate from
+the normal release command. After the runner completes fresh source
+collections and publication, run `npm run cloudflare:release`.
+
+### Legacy live-search result budget
+
+This section applies only to the rollback `/api/search` path, not the public PC directory. The search path starts with a bounded 160-candidate window per selected market.
 When a user reaches the stored boundary, the selected market can deepen in
 160-item steps up to 640 candidates; one combined SQLite snapshot keeps at most
 1,000 listings. The browser renders 30-item pages and prefetches the first three
@@ -123,9 +140,10 @@ instance is only a constrained minimum for a runner-only machine; if other
 applications share the machine, keep the 4 GB plan.
 
 Price bounds are sent to the upstream marketplace when a confirmed parameter
-exists (Joonggonara and Hello Market). Bunjang and RethinkMall are searched in
-a bounded price-ordered/page-limited window and filtered again locally because
-no verified upstream price-range contract is used. Every source is checked
+exists (Joonggonara and Hello Market). Approved legacy sources without a
+verified upstream price-range contract are searched in a bounded
+price-ordered/page-limited window and filtered again locally. `REVIEW_REQUIRED`
+sources such as Bunjang are not called. Every source is checked
 again before merge, so a listing outside the requested range is never exposed.
 
 The user-facing sort modes are `recommended`, `price_asc`, `price_desc`, and

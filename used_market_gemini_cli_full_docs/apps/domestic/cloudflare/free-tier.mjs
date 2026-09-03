@@ -1,6 +1,14 @@
 import { hasOfficialCategory } from "./category-source-map.mjs";
 import { selectQualifiedItems } from "./live-search.mjs";
-import { TARGET_SITES } from "./target-sites.mjs";
+import { pcCollectionTargetSetV2 } from "./pc-directory-http.mjs";
+import { PC_SOURCE_REGISTRY } from "../collector/logic/pc-source-registry.mjs";
+import { OPERATIONAL_PC_DIRECTORY_SITES, OPERATIONAL_TARGET_SITES } from "./target-sites.mjs";
+import {
+  decodePcListingsCursor,
+  encodePcListingsCursor,
+  parsePcListingsRequest,
+  pcListingsFreshness
+} from "./pc-listings-contract.mjs";
 
 export const FREE_TIER_POLICY = Object.freeze({
   browserMinutesPerDay: 10,
@@ -13,6 +21,8 @@ export const FREE_TIER_POLICY = Object.freeze({
 
 const CACHEABLE_GET_PATHS = new Set([
   "/api/categories",
+  "/api/pc/catalog",
+  "/api/pc/products",
   "/api/search-only/sources",
   "/api/market/history",
   "/api/merged/latest",
@@ -22,10 +32,337 @@ const CACHEABLE_GET_PATHS = new Set([
   "/api/collector/latest"
 ]);
 
+const PC_COLLECTION_TARGETS = Object.freeze(pcCollectionTargetSetV2().targets);
+const PC_HOURLY_COLLECTION_TARGETS = Object.freeze(PC_COLLECTION_TARGETS.filter((target) => (
+  target.enabled !== false && target.cadenceClass === "HOURLY_CATEGORY"
+)));
+const PC_HOURLY_CATEGORY_CODES = Object.freeze([...new Set(
+  PC_HOURLY_COLLECTION_TARGETS.map((target) => target.categoryCode).filter(Boolean)
+)]);
+const PC_CANONICAL_CATEGORY_BY_ID = new Map(PC_COLLECTION_TARGETS
+  .filter((target) => target.canonicalProductId && target.categoryCode)
+  .map((target) => [target.canonicalProductId, target.categoryCode]));
+const PC_DIRECTORY_SOURCE_BY_ID = new Map(PC_SOURCE_REGISTRY
+  .filter((source) => source.directory_source === true
+    && source.policy_status === "APPROVED" && source.runtime_status === "ENABLED")
+  .map((source) => [source.key, source]));
+const PC_FRESHNESS_RUNTIME_BINDING_LIMIT = 40;
+
+function requestedPcFreshnessScopes(query) {
+  const sourceIds = (query.sites.length > 0 ? query.sites : OPERATIONAL_PC_DIRECTORY_SITES)
+    .filter((sourceId) => {
+      const source = PC_DIRECTORY_SOURCE_BY_ID.get(sourceId);
+      if (!source) return false;
+      const marketPools = Array.isArray(source.market_pools) ? source.market_pools : [source.market_pool];
+      if (query.marketPool && !marketPools.includes(query.marketPool)) return false;
+      if (query.currency === "USD" && !marketPools.includes("OVERSEAS_USED")) return false;
+      if (query.currency === "KRW" && !marketPools.some((marketPool) => String(marketPool).startsWith("KR_"))) return false;
+      return true;
+    });
+  const categoryCodes = query.canonicalProductId
+    ? [PC_CANONICAL_CATEGORY_BY_ID.get(query.canonicalProductId) || ""]
+    : query.boardManufacturer
+      ? ["GPU"]
+      : PC_HOURLY_CATEGORY_CODES;
+  return sourceIds.flatMap((sourceId) => categoryCodes.map((categoryCode) => `${sourceId}:${categoryCode}`));
+}
+
+function requiredPcFreshnessTargets(cohortScopes) {
+  const pairs = new Map();
+  let unresolvedScopeCount = 0;
+  for (const scope of cohortScopes) {
+    const separator = scope.indexOf(":");
+    const sourceId = separator >= 0 ? scope.slice(0, separator) : "";
+    const categoryCode = separator >= 0 ? scope.slice(separator + 1) : "";
+    const targets = PC_HOURLY_COLLECTION_TARGETS.filter((target) => (
+      target.categoryCode === categoryCode
+      && Array.isArray(target.sourceKeys)
+      && target.sourceKeys.includes(sourceId)
+    ));
+    if (!sourceId || !categoryCode || targets.length === 0) {
+      unresolvedScopeCount += 1;
+      continue;
+    }
+    for (const target of targets) {
+      pairs.set(`${sourceId}\u0000${target.targetId}`, { sourceId, targetId: target.targetId });
+    }
+  }
+  return { pairs: [...pairs.values()], unresolvedScopeCount };
+}
+
+async function pcListingCollectionFreshness(db, cohortScopes, asOf) {
+  const required = requiredPcFreshnessTargets(cohortScopes);
+  const latestByTarget = new Map();
+  try {
+    for (let offset = 0; offset < required.pairs.length; offset += PC_FRESHNESS_RUNTIME_BINDING_LIMIT) {
+      const chunk = required.pairs.slice(offset, offset + PC_FRESHNESS_RUNTIME_BINDING_LIMIT);
+      const pairConditions = chunk.map(() => "(source_id = ? AND target_id = ?)").join(" OR ");
+      const bindings = [asOf, asOf, ...chunk.flatMap((pair) => [pair.sourceId, pair.targetId])];
+      const result = await db.prepare(`SELECT source_id, target_id, MAX(last_succeeded_at) AS last_succeeded_at
+        FROM pc_listing_collection_target_runtime
+        WHERE last_succeeded_at <= ? AND mirrored_at <= ? AND (${pairConditions})
+        GROUP BY source_id, target_id`).bind(...bindings).all();
+      for (const row of asArray(result.results)) {
+        if (typeof row.last_succeeded_at === "string" && Number.isFinite(Date.parse(row.last_succeeded_at))) {
+          latestByTarget.set(`${row.source_id}\u0000${row.target_id}`, row.last_succeeded_at);
+        }
+      }
+    }
+  } catch (error) {
+    if (!/pc_listing_collection_target_runtime|no such table/iu.test(error instanceof Error ? error.message : String(error))) throw error;
+  }
+  const coveredTimes = required.pairs.map((pair) => latestByTarget.get(`${pair.sourceId}\u0000${pair.targetId}`))
+    .filter((value) => typeof value === "string" && Number.isFinite(Date.parse(value)));
+  const complete = required.unresolvedScopeCount === 0
+    && required.pairs.length > 0
+    && coveredTimes.length === required.pairs.length;
+  const lastCollectedAt = complete
+    ? coveredTimes.sort((left, right) => Date.parse(left) - Date.parse(right))[0]
+    : null;
+  return {
+    lastCollectedAt,
+    requiredTargetCount: required.pairs.length + required.unresolvedScopeCount,
+    coveredTargetCount: coveredTimes.length,
+    complete
+  };
+}
+
+function pcListingItem(row) {
+  const chipManufacturer = String(row.canonical_product_id || "").match(/^gpu:(nvidia|amd|intel):/u)?.[1];
+  return {
+    id: row.item_id,
+    item_id: row.item_id,
+    site: row.site,
+    category_id: row.category_id,
+    title: row.title,
+    price: typeof row.price_value === "number" ? row.price_value : null,
+    currency: row.currency || "KRW",
+    url: row.url,
+    image_url: row.image_url || null,
+    posted_at: row.posted_at || null,
+    updated_at: row.updated_at,
+    canonical_product_id: row.canonical_product_id || null,
+    canonical_display_name: row.canonical_display_name || null,
+    canonical_manufacturer: row.canonical_manufacturer || null,
+    chip_manufacturer: chipManufacturer ? ({ nvidia: "NVIDIA", amd: "AMD", intel: "Intel" })[chipManufacturer] : null,
+    board_manufacturer: row.pc_category_code === "GPU" ? row.board_manufacturer || null : null,
+    listing_kind: row.listing_kind || "UNKNOWN",
+    category_code: row.pc_category_code || null,
+    market_segment: row.market_segment || "UNKNOWN",
+    listing_type: row.listing_type || "UNKNOWN",
+    condition_group: row.condition_group || "UNKNOWN",
+    spec_group_id: row.spec_group_id || null,
+    classification_confidence: Number(row.classification_confidence || 0),
+    model_confidence: Number(row.model_confidence || 0),
+    quantity_confidence: Number(row.quantity_confidence || 0),
+    price_scope_confidence: Number(row.price_scope_confidence || 0),
+    statistics_eligible: row.statistics_eligible === 1,
+    statistics_exclusion_reasons: parseJson(row.statistics_exclusion_reasons_json, []),
+    quantity: Number.isInteger(row.quantity) ? row.quantity : null,
+    price_scope: row.price_scope || "UNKNOWN",
+    condition_code: row.condition_code || "UNKNOWN",
+    lifecycle_status: row.lifecycle_status || "ACTIVE",
+    market_pool: row.market_pool || null,
+    confidence: parseJson(row.confidence_json, {}),
+    evidence: parseJson(row.evidence_json, {}),
+    price_eligible: row.price_eligible === 1,
+    exclusion_reasons: parseJson(row.exclusion_reasons_json, []),
+    good_listing_eligible: row.good_listing_eligible === 1,
+    reference_price: typeof row.reference_price === "number" ? row.reference_price : null
+  };
+}
+
+export async function browsePcListingsD1(request, env) {
+  if (!hasD1(env)) return new Response(JSON.stringify({ status: "error", error: "D1 is unavailable" }), {
+    status: 503,
+    headers: { "content-type": "application/json; charset=utf-8" }
+  });
+  let query;
+  let cursorState;
+  try {
+    query = parsePcListingsRequest(request, { allowedSites: OPERATIONAL_PC_DIRECTORY_SITES });
+    cursorState = decodePcListingsCursor(query, env.SEARCH_CURSOR_SECRET || env.RUNNER_TOKEN || "used-market-local-cursor-v2");
+  } catch (error) {
+    return new Response(JSON.stringify({ status: "error", error: error instanceof Error ? error.message : String(error) }), {
+      status: 400,
+      headers: { "content-type": "application/json; charset=utf-8" }
+    });
+  }
+  const asOf = cursorState?.asOf || new Date().toISOString();
+  const conditions = [
+    "active = 1",
+    "lifecycle_status = 'ACTIVE'",
+    "canonical_product_id IS NOT NULL",
+    "pc_category_code IN ('CPU', 'GPU', 'RAM', 'MOTHERBOARD', 'SSD', 'HDD', 'PSU')",
+    "price_value IS NOT NULL",
+    "price_value > 0",
+    "listing_kind IN ('SINGLE_COMPONENT', 'SAME_PRODUCT_LOT')",
+    "price_eligible = 1",
+    "condition_code = 'USED_WORKING'",
+    "quantity IS NOT NULL",
+    "quantity >= 1",
+    "price_scope IN ('TOTAL', 'UNIT')",
+    "((market_pool IN ('KR_C2C_USED', 'KR_DEALER_USED', 'KR_REFURB_RETAIL') AND currency = 'KRW') OR (market_pool = 'OVERSEAS_USED' AND currency = 'USD'))",
+    "updated_at <= ?"
+  ];
+  const bindings = [asOf];
+  if (query.canonicalProductId) {
+    conditions.push("canonical_product_id = ?");
+    bindings.push(query.canonicalProductId);
+  }
+  if (query.manufacturer) {
+    conditions.push("(canonical_manufacturer = ? OR board_manufacturer = ?)");
+    bindings.push(query.manufacturer, query.manufacturer);
+  }
+  if (query.boardManufacturer) {
+    conditions.push("pc_category_code = 'GPU'");
+    conditions.push("board_manufacturer = ?");
+    bindings.push(query.boardManufacturer);
+  }
+  if (query.sites.length > 0) {
+    conditions.push(`site IN (${query.sites.map(() => "?").join(", ")})`);
+    bindings.push(...query.sites);
+  }
+  if (query.minPrice !== null) {
+    conditions.push("price_value >= ?");
+    bindings.push(query.minPrice);
+  }
+  if (query.maxPrice !== null) {
+    conditions.push("price_value <= ?");
+    bindings.push(query.maxPrice);
+  }
+  if (query.marketPool) {
+    conditions.push("market_pool = ?");
+    bindings.push(query.marketPool);
+  }
+  if (query.currency) {
+    conditions.push("currency = ?");
+    bindings.push(query.currency);
+  }
+  const whereClause = conditions.join(" AND ");
+  const broadRecentBrowse = query.sort === "recent"
+    && !query.canonicalProductId && !query.manufacturer && !query.boardManufacturer
+    && query.minPrice === null && query.maxPrice === null && !query.marketPool && !query.currency;
+  const publicIndexHint = broadRecentBrowse
+    ? (query.sites.length > 0 ? " INDEXED BY idx_listings_pc_public_site_recent" : " INDEXED BY idx_listings_pc_public_recent")
+    : "";
+  const orderBy = query.sort === "price_asc"
+    ? "price_value ASC, updated_at DESC, item_id ASC"
+    : query.sort === "price_desc"
+      ? "price_value DESC, updated_at DESC, item_id ASC"
+      : "updated_at DESC, item_id ASC";
+  const selectListings = (boardManufacturerColumn, selectedWhere, selectedBindings, suffix = "", indexHint = "") => env.DB.prepare(`SELECT item_id, site, category_id, title, price_value, currency, url,
+      image_url, posted_at, updated_at, canonical_product_id, canonical_display_name, canonical_manufacturer,
+      ${boardManufacturerColumn}, listing_kind, pc_category_code, quantity, price_scope, condition_code, lifecycle_status, market_pool,
+      confidence_json, evidence_json, price_eligible, exclusion_reasons_json, good_listing_eligible, reference_price
+    FROM listings${indexHint} WHERE ${selectedWhere} ${suffix}`).bind(...selectedBindings).all();
+  const executeListingSelect = async (selectedWhere, selectedBindings, suffix = "", indexHint = "") => {
+    try {
+      return await selectListings("board_manufacturer", selectedWhere, selectedBindings, suffix, indexHint);
+    } catch (error) {
+      const missingBoardManufacturer = /board_manufacturer/iu.test(error instanceof Error ? error.message : String(error));
+      if (!missingBoardManufacturer || query.manufacturer || query.boardManufacturer) throw error;
+      return selectListings("NULL AS board_manufacturer", selectedWhere, selectedBindings, suffix, indexHint);
+    }
+  };
+  const cursorExpired = () => new Response(JSON.stringify({ status: "error", error: "CURSOR_EXPIRED: listing snapshot changed" }), {
+    status: 410,
+    headers: { "content-type": "application/json; charset=utf-8" }
+  });
+  let page;
+  let total;
+  let latestObservedAt;
+  let hasMoreCandidates;
+  // Authoritative reconciliation and incremental imports publish one eligible row per stable item_id,
+  // so normal and audit reads can share bounded raw keyset pagination without request-time deduplication.
+  let anchor = null;
+  if (cursorState?.after?.item_id) {
+    anchor = await env.DB.prepare(`SELECT item_id, price_value, updated_at
+      FROM listings WHERE item_id = ? AND ${whereClause} LIMIT 1`)
+      .bind(cursorState.after.item_id, ...bindings).first();
+    if (!anchor) return cursorExpired();
+  }
+  const pageConditions = [...conditions];
+  const pageBindings = [...bindings];
+  if (anchor && query.sort === "recent") {
+    pageConditions.push("(updated_at < ? OR (updated_at = ? AND item_id > ?))");
+    pageBindings.push(anchor.updated_at, anchor.updated_at, anchor.item_id);
+  } else if (anchor) {
+    const priceOperator = query.sort === "price_desc" ? "<" : ">";
+    pageConditions.push(`(price_value ${priceOperator} ? OR (price_value = ?
+      AND (updated_at < ? OR (updated_at = ? AND item_id > ?))))`);
+    pageBindings.push(anchor.price_value, anchor.price_value, anchor.updated_at, anchor.updated_at, anchor.item_id);
+  }
+  const candidateLimit = query.limit + 1;
+  const result = await executeListingSelect(pageConditions.join(" AND "), [...pageBindings, candidateLimit],
+    `ORDER BY ${orderBy} LIMIT ?`, publicIndexHint);
+  const rawRows = asArray(result.results);
+  page = rawRows.slice(0, query.limit);
+  const summary = await env.DB.prepare(`SELECT COUNT(*) AS total, MAX(updated_at) AS latest_observed_at
+    FROM listings${publicIndexHint} WHERE ${whereClause}`).bind(...bindings).first();
+  total = Number(summary?.total || 0);
+  latestObservedAt = summary?.latest_observed_at || null;
+  const runtimeFreshness = await pcListingCollectionFreshness(env.DB, requestedPcFreshnessScopes(query), asOf);
+  const runtimeCollectedAt = runtimeFreshness.lastCollectedAt;
+  const freshnessBasis = runtimeCollectedAt
+    ? "SOURCE_TARGET_COLLECTION_MANIFEST"
+    : runtimeFreshness.requiredTargetCount > 0
+      ? "SOURCE_TARGET_COLLECTION_MANIFEST_INCOMPLETE"
+      : "NO_MATCHING_LISTINGS";
+  hasMoreCandidates = rawRows.length > query.limit;
+  const nextAfter = hasMoreCandidates && page.length > 0 ? { item_id: page.at(-1).item_id } : null;
+  const nextCursor = nextAfter ? encodePcListingsCursor(query, { asOf, after: nextAfter },
+    env.SEARCH_CURSOR_SECRET || env.RUNNER_TOKEN || "used-market-local-cursor-v2") : null;
+  return new Response(JSON.stringify({
+    status: "success",
+    data: {
+      items: page.map(pcListingItem),
+      total,
+      pagination: { has_more: Boolean(nextCursor), next_cursor: nextCursor },
+      as_of: asOf,
+      freshness: {
+        ...pcListingsFreshness(asOf, runtimeCollectedAt),
+        basis: freshnessBasis,
+        last_listing_updated_at: latestObservedAt,
+        coverage_state: runtimeFreshness.complete ? "COMPLETE" : "INCOMPLETE",
+        required_target_count: runtimeFreshness.requiredTargetCount,
+        covered_target_count: runtimeFreshness.coveredTargetCount
+      },
+      filters: {
+        canonical_product_id: query.canonicalProductId || null,
+        manufacturer: query.manufacturer || null,
+        board_manufacturer: query.boardManufacturer || null,
+        sites: query.sites,
+        sort: query.sort,
+        price_min: query.minPrice,
+        price_max: query.maxPrice,
+        market_pool: query.marketPool || null,
+        currency: query.currency || null
+      }
+    }
+  }), {
+    status: 200,
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store",
+      "x-free-tier-data-source": "d1"
+    }
+  });
+}
+
 const CACHEABLE_POST_PATHS = new Set([
   "/api/search",
   "/api/search-only"
 ]);
+
+function parseJson(value, fallback) {
+  try {
+    const parsed = JSON.parse(String(value ?? ""));
+    return parsed ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
 
 function readPositiveInteger(value, fallback, maximum) {
   const parsed = Number(value);
@@ -192,9 +529,9 @@ export async function searchD1(request, env) {
     ...asArray(body?.category_ids).map(normalizeString),
     normalizeString(body?.category_id)
   ].filter((value) => value && value !== "all"))];
-  const allowedSites = new Set(TARGET_SITES);
+  const allowedSites = new Set(OPERATIONAL_TARGET_SITES);
   const hasExplicitSites = Array.isArray(body?.sites);
-  const sites = normalizeStringList(hasExplicitSites ? body.sites : TARGET_SITES, allowedSites);
+  const sites = normalizeStringList(hasExplicitSites ? body.sites : OPERATIONAL_TARGET_SITES, allowedSites);
   if (hasExplicitSites && sites.length === 0) {
     return new Response(JSON.stringify({ status: "error", error: "at least one target site is required" }), {
       status: 400,
@@ -276,6 +613,8 @@ export async function searchD1(request, env) {
 
   const conditions = ["active = 1"];
   const bindings = [];
+  const pcCategoryCode = normalizeString(body?.pc_category_code).toUpperCase();
+  const manufacturer = normalizeString(body?.manufacturer);
   if (keyword) {
     const compactKeyword = keyword.toLowerCase().replace(/[\s._\-/]+/g, "");
     const compactTitle = "REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(LOWER(title), ' ', ''), '-', ''), '_', ''), '.', ''), '/', '')";
@@ -286,6 +625,14 @@ export async function searchD1(request, env) {
   if (categoryIds.length > 0) {
     conditions.push(`category_id IN (${categoryIds.map(() => "?").join(", ")})`);
     bindings.push(...categoryIds);
+  }
+  if (pcCategoryCode) {
+    conditions.push("pc_category_code = ?");
+    bindings.push(pcCategoryCode);
+  }
+  if (manufacturer) {
+    conditions.push("canonical_manufacturer = ?");
+    bindings.push(manufacturer);
   }
   conditions.push(`site IN (${effectiveSites.map(() => "?").join(", ")})`);
   bindings.push(...effectiveSites);
@@ -308,7 +655,10 @@ export async function searchD1(request, env) {
   const candidateLimit = Math.min(Math.max(limit * 4, limit), 240);
   const result = await env.DB.prepare(`
     SELECT item_id, site, category_id, title, price_value, currency, url, image_url,
-           seller_name, posted_at, updated_at
+           seller_name, posted_at, updated_at, canonical_product_id, canonical_display_name, canonical_manufacturer,
+           listing_kind, pc_category_code, quantity, price_scope, condition_code, lifecycle_status,
+           market_pool, confidence_json, evidence_json, price_eligible, exclusion_reasons_json,
+           good_listing_eligible, reference_price
       FROM listings
      WHERE ${conditions.join(" AND ")}
      ORDER BY ${orderBy}
@@ -327,7 +677,23 @@ export async function searchD1(request, env) {
     image_url: row.image_url ?? null,
     seller_name: row.seller_name ?? null,
     posted_at: row.posted_at ?? null,
-    updated_at: row.updated_at
+    updated_at: row.updated_at,
+    canonical_product_id: row.canonical_product_id ?? null,
+    canonical_display_name: row.canonical_display_name ?? null,
+    canonical_manufacturer: row.canonical_manufacturer ?? null,
+    listing_kind: row.listing_kind || "UNKNOWN",
+    category_code: row.pc_category_code ?? null,
+    quantity: Number.isInteger(row.quantity) ? row.quantity : null,
+    price_scope: row.price_scope || "UNKNOWN",
+    condition_code: row.condition_code || "UNKNOWN",
+    lifecycle_status: row.lifecycle_status || "ACTIVE",
+    market_pool: row.market_pool ?? null,
+    confidence: parseJson(row.confidence_json, {}),
+    evidence: parseJson(row.evidence_json, {}),
+    price_eligible: row.price_eligible === 1,
+    exclusion_reasons: parseJson(row.exclusion_reasons_json, []),
+    good_listing_eligible: row.good_listing_eligible === 1,
+    reference_price: typeof row.reference_price === "number" ? row.reference_price : null
   }));
   const selection = selectQualifiedItems(candidateItems, limit, body);
   const items = selection.items;

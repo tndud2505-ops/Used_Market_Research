@@ -12,12 +12,7 @@ const ALLOWED_HOSTS = new Set([
   "web.rethinkmall.com"
 ]);
 
-export const FREE_COLLECTION_SITES = Object.freeze([
-  "bunjang",
-  "joonggonara",
-  "hellomarket",
-  "rethinkmall"
-]);
+export const FREE_COLLECTION_SITES = Object.freeze(OPERATIONAL_TARGET_SITES.filter((site) => site !== "ebay"));
 
 export const FREE_COLLECTION_EXCLUDED_SITES = Object.freeze(["ebay"]);
 
@@ -27,21 +22,18 @@ const JOB_PLANS = Object.freeze({
   "ram-scan": { category_id: "pc", keyword: "RAM 16GB" },
   "ssd-scan": { category_id: "pc", keyword: "SSD 1TB" },
   "psu-scan": { category_id: "pc", keyword: "PSU 600W" },
-  "full-pc-scan": { category_id: "pc", keyword: "gaming PC" },
-  "iphone-scan": { category_id: "all", keyword: "아이폰 15" },
-  "airpods-scan": { category_id: "all", keyword: "에어팟 프로" },
-  "switch-scan": { category_id: "all", keyword: "닌텐도 스위치" },
-  "fashion-bottoms-scan": { category_id: "all", keyword: "여성 바지" }
+  "full-pc-scan": { category_id: "pc", keyword: "gaming PC" }
 });
 
 function buildTargets(keyword) {
   const encoded = encodeURIComponent(keyword);
-  return [
+  const candidates = [
     { site: "bunjang", url: `https://api.bunjang.co.kr/api/1/find_v2.json?q=${encoded}&n=20&page=0&order=date&stat_device=w&version=4` },
     { site: "joonggonara", url: `https://web.joongna.com/search/${encoded}` },
     { site: "hellomarket", url: `https://www.hellomarket.com/search?q=${encoded}` },
     { site: "rethinkmall", url: `https://web.rethinkmall.com/search?utm_source=bu&keyword=${encoded}` }
   ];
+  return candidates.filter((target) => FREE_COLLECTION_SITES.includes(target.site));
 }
 
 function dateKey() {
@@ -328,3 +320,4 @@ export async function handleFreeCollectionQueue(batch, env) {
     }
   }
 }
+import { OPERATIONAL_TARGET_SITES } from "./target-sites.mjs";

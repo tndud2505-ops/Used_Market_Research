@@ -1,6 +1,7 @@
 import { TARGET_SITES, normalizeTargetSites } from "./target-sites.mjs";
 import { categoryIdsFromBody, filterCategoryItems, isCategoryExcluded, isKeywordCategoryNoise } from "./category-filter.mjs";
 import { hasOfficialCategory, sourceCategoryIds } from "./category-source-map.mjs";
+import { ebayTargetForCategory, pcCategoryTitleMatches } from "../collector/logic/pc-specialist-targets.mjs";
 
 const LIVE_CACHE_TTL_SECONDS = 300;
 const LIVE_REQUEST_TIMEOUT_MS = 8_000;
@@ -19,6 +20,10 @@ const SOURCE_COOLDOWN_MS = Object.freeze({ rethinkmall: 450 });
 const SOURCE_PARSE_MAX_ITEMS = 1_280;
 const SOURCE_CANDIDATE_MAX_ITEMS = SITE_RESULT_WINDOW_MAX;
 const SOURCE_CANDIDATE_MIN_ITEMS = SITE_RESULT_WINDOW_INITIAL;
+// A broad eBay category can report many thousands of rows while only a small
+// subset passes our exact PC-part title check. Bound the upstream pagination so
+// one sparse category cannot monopolize a scheduled collection run.
+const EBAY_MAX_SEARCH_PAGES = 4;
 const PRICE_MAX_WON = 100_000_000_000;
 
 // Each upstream market has a different failure mode. C2C markets need a
@@ -333,7 +338,7 @@ function sourceFetchLimit(limit, categoryId, queryKeyword) {
   return Math.min(Math.max(limit, 40), SOURCE_CANDIDATE_MAX_ITEMS);
 }
 
-function sourceItem({ site, categoryId, title, price, currency = "KRW", url, imageUrl, seller, postedAt, searchText, description, location }) {
+function sourceItem({ site, categoryId, sourceListingId, title, price, currency = "KRW", url, imageUrl, seller, postedAt, searchText, description, location }) {
   const cleanTitle = clean(title, 500);
   const baseBySite = {
     joonggonara: "https://web.joongna.com",
@@ -344,9 +349,12 @@ function sourceItem({ site, categoryId, title, price, currency = "KRW", url, ima
   };
   const cleanUrl = absoluteUrl(url, baseBySite[site]);
   if (!cleanTitle || !cleanUrl) return null;
+  const stableSourceListingId = clean(sourceListingId, 500);
+  const stableItemId = stableSourceListingId ? `${site}:${stableSourceListingId}` : `${site}:${cleanUrl}`;
   return {
-    id: `${site}:${cleanUrl}`,
-    item_id: `${site}:${cleanUrl}`,
+    id: stableItemId,
+    item_id: stableItemId,
+    ...(stableSourceListingId ? { source_listing_id: stableSourceListingId } : {}),
     site,
     category_id: categoryId,
     title: cleanTitle,
@@ -1208,6 +1216,7 @@ async function collectRethinkLivewire(html, pageResponse, pageUrl, categoryId, l
 }
 
 let ebayAccessTokenCache = null;
+let ebayAccessTokenInflight = null;
 
 function ebaySearchKeyword(value) {
   return clean(value, 300)
@@ -1219,6 +1228,7 @@ function ebaySearchKeyword(value) {
 
 export function resetEbayAccessTokenCacheForTests() {
   ebayAccessTokenCache = null;
+  ebayAccessTokenInflight = null;
 }
 
 function runtimeEnvironmentValue(name) {
@@ -1229,49 +1239,62 @@ async function getEbayAccessToken() {
   const configuredToken = runtimeEnvironmentValue("EBAY_BROWSE_API_TOKEN");
   if (configuredToken) return configuredToken;
   if (ebayAccessTokenCache && ebayAccessTokenCache.expiresAt > Date.now() + 60_000) return ebayAccessTokenCache.token;
-
-  const clientId = runtimeEnvironmentValue("EBAY_CLIENT_ID");
-  const clientSecret = runtimeEnvironmentValue("EBAY_CLIENT_SECRET");
-  if (!clientId || !clientSecret) throw new Error("EBAY_CREDENTIALS_REQUIRED: eBay Client ID and Client Secret are not configured");
-  const rawCredentials = `${clientId}:${clientSecret}`;
-  const credentials = typeof Buffer !== "undefined"
-    ? Buffer.from(rawCredentials, "utf8").toString("base64")
-    : btoa(rawCredentials);
-  const response = await fetch("https://api.ebay.com/identity/v1/oauth2/token", {
-    method: "POST",
-    headers: {
-      accept: "application/json",
-      authorization: `Basic ${credentials}`,
-      "content-type": "application/x-www-form-urlencoded"
-    },
-    body: new URLSearchParams({
-      grant_type: "client_credentials",
-      scope: "https://api.ebay.com/oauth/api_scope"
-    })
-  });
-  if (!response.ok) throw new Error(`EBAY_OAUTH_ERROR: HTTP ${response.status}`);
-  const payload = await response.json();
-  const token = clean(payload?.access_token, 8_000);
-  if (!token) throw new Error("EBAY_OAUTH_ERROR: token response did not include access_token");
-  const expiresIn = Number.isFinite(Number(payload?.expires_in)) ? Math.max(120, Number(payload.expires_in)) : 7_200;
-  ebayAccessTokenCache = { token, expiresAt: Date.now() + expiresIn * 1_000 };
-  return token;
+  if (ebayAccessTokenInflight) return ebayAccessTokenInflight;
+  ebayAccessTokenInflight = (async () => {
+    const clientId = runtimeEnvironmentValue("EBAY_CLIENT_ID");
+    const clientSecret = runtimeEnvironmentValue("EBAY_CLIENT_SECRET");
+    if (!clientId || !clientSecret) throw new Error("EBAY_CREDENTIALS_REQUIRED: eBay Client ID and Client Secret are not configured");
+    const rawCredentials = `${clientId}:${clientSecret}`;
+    const credentials = typeof Buffer !== "undefined"
+      ? Buffer.from(rawCredentials, "utf8").toString("base64")
+      : btoa(rawCredentials);
+    const response = await fetchWithRetry("https://api.ebay.com/identity/v1/oauth2/token", {
+      method: "POST",
+      headers: {
+        accept: "application/json",
+        authorization: `Basic ${credentials}`,
+        "content-type": "application/x-www-form-urlencoded"
+      },
+      body: new URLSearchParams({
+        grant_type: "client_credentials",
+        scope: "https://api.ebay.com/oauth/api_scope"
+      })
+    });
+    if (!response.ok) throw new Error(`EBAY_OAUTH_ERROR: HTTP ${response.status}`);
+    const payload = await response.json();
+    const token = clean(payload?.access_token, 8_000);
+    if (!token) throw new Error("EBAY_OAUTH_ERROR: token response did not include access_token");
+    const expiresIn = Number.isFinite(Number(payload?.expires_in)) ? Math.max(120, Number(payload.expires_in)) : 7_200;
+    ebayAccessTokenCache = { token, expiresAt: Date.now() + expiresIn * 1_000 };
+    return token;
+  })();
+  try {
+    return await ebayAccessTokenInflight;
+  } finally {
+    ebayAccessTokenInflight = null;
+  }
 }
 
 async function collectEbay(keyword, categoryId, limit) {
   const token = await getEbayAccessToken();
-  const searchKeyword = ebaySearchKeyword(keyword);
+  const pcTarget = ebayTargetForCategory(categoryId);
+  const searchKeyword = ebaySearchKeyword(pcTarget?.query || keyword);
   const targetCount = Math.min(Math.max(Number(limit) || 1, 1), SOURCE_CANDIDATE_MAX_ITEMS);
   const items = [];
   let offset = 0;
   let total = targetCount;
-  while (items.length < targetCount && offset < total) {
-    const pageLimit = Math.min(200, targetCount - items.length);
+  let pageCount = 0;
+  while (items.length < targetCount && offset < total && pageCount < EBAY_MAX_SEARCH_PAGES) {
+    const pageLimit = Math.min(200, Math.max(50, targetCount - items.length));
     const url = new URL("https://api.ebay.com/buy/browse/v1/item_summary/search");
     url.searchParams.set("q", searchKeyword);
+    if (pcTarget) {
+      url.searchParams.set("category_ids", pcTarget.category_ids.join(","));
+      url.searchParams.set("filter", "conditions:{USED}");
+    }
     url.searchParams.set("limit", String(pageLimit));
     if (offset > 0) url.searchParams.set("offset", String(offset));
-    const response = await fetch(url, {
+    const response = await fetchWithRetry(url, {
       headers: {
         accept: "application/json",
         authorization: `Bearer ${token}`,
@@ -1280,9 +1303,21 @@ async function collectEbay(keyword, categoryId, limit) {
     });
     if (!response.ok) throw new Error(`EBAY_BROWSE_API_ERROR: HTTP ${response.status}`);
     const payload = await response.json();
+    pageCount += 1;
     const summaries = Array.isArray(payload?.itemSummaries) ? payload.itemSummaries : [];
     total = Number.isFinite(Number(payload?.total)) ? Number(payload.total) : offset + summaries.length;
     for (const summary of summaries) {
+      const numericPrice = Number(summary?.price?.value);
+      // Browse search already scopes descendants of category_ids. ItemSummary
+      // normally reports leafCategoryIds rather than echoing the requested
+      // parent category, so an exact categoryId equality check drops valid rows.
+      if (pcTarget && (!pcCategoryTitleMatches(categoryId, summary?.title)
+        || !Number.isFinite(numericPrice) || numericPrice <= 0)) continue;
+      const leafCategoryIds = [
+        ...(Array.isArray(summary?.leafCategoryIds) ? summary.leafCategoryIds : []),
+        ...(Array.isArray(summary?.categories) ? summary.categories.map((entry) => entry?.categoryId) : []),
+        summary?.categoryId
+      ].map((value) => clean(String(value || ""), 40)).filter(Boolean);
       const location = [summary?.itemLocation?.city, summary?.itemLocation?.stateOrProvince, summary?.itemLocation?.country]
         .map((value) => clean(value, 80))
         .filter(Boolean)
@@ -1290,6 +1325,7 @@ async function collectEbay(keyword, categoryId, limit) {
       const item = sourceItem({
         site: "ebay",
         categoryId,
+        sourceListingId: summary?.itemId,
         title: summary?.title,
         price: summary?.price?.value,
         currency: clean(summary?.price?.currency, 12) || "USD",
@@ -1301,7 +1337,14 @@ async function collectEbay(keyword, categoryId, limit) {
         description: clean(summary?.condition, 120),
         location
       });
-      if (item) items.push(item);
+      if (item) items.push({
+        ...item,
+        ...(pcTarget ? {
+          requested_category_code: String(categoryId).toUpperCase(),
+          source_category_code: pcTarget.category_ids[0],
+          source_leaf_category_ids: [...new Set(leafCategoryIds)]
+        } : {})
+      });
       if (items.length >= targetCount) break;
     }
     if (!summaries.length) break;
