@@ -23,20 +23,20 @@ const DEFAULT_BROWSE_FLOWS = Object.freeze({
   MOTHERBOARD: Object.freeze([
     Object.freeze({ key: "socket", label: "CPU 소켓" }),
     Object.freeze({ key: "chipset", label: "칩셋", depends_on: Object.freeze(["socket"]) }),
-    Object.freeze({ key: "form_factor", label: "폼팩터", depends_on: Object.freeze(["socket", "chipset"]) }),
-    Object.freeze({ key: "manufacturer", label: "제조사", depends_on: Object.freeze(["socket", "chipset", "form_factor"]) }),
+    Object.freeze({ key: "form_factor", label: "폼팩터", depends_on: Object.freeze(["socket"]) }),
+    Object.freeze({ key: "manufacturer", label: "제조사" }),
   ]),
   SSD: Object.freeze([
     Object.freeze({ key: "capacity", label: "용량" }),
-    Object.freeze({ key: "manufacturer", label: "제조사", depends_on: Object.freeze(["capacity"]) }),
+    Object.freeze({ key: "manufacturer", label: "제조사" }),
   ]),
   HDD: Object.freeze([
     Object.freeze({ key: "capacity", label: "용량" }),
-    Object.freeze({ key: "manufacturer", label: "제조사", depends_on: Object.freeze(["capacity"]) }),
+    Object.freeze({ key: "manufacturer", label: "제조사" }),
   ]),
   PSU: Object.freeze([
     Object.freeze({ key: "rated_wattage", label: "정격 출력" }),
-    Object.freeze({ key: "manufacturer", label: "제조사", depends_on: Object.freeze(["rated_wattage"]) }),
+    Object.freeze({ key: "manufacturer", label: "제조사" }),
   ]),
 });
 const COHORTS = [
@@ -403,6 +403,11 @@ function facetOptionLabel(key, value) {
     LE_1_TB: "1TB 이하", "2_TB": "2TB", "3_4_TB": "3~4TB", "5_6_TB": "5~6TB", "8_TB": "8TB",
     "10_12_TB": "10~12TB", "14_16_TB": "14~16TB", "18_20_TB": "18~20TB", "22_24_TB": "22~24TB", GE_26_TB: "26TB 이상",
   };
+  const rangeLabels = {
+    GE_500GB: "500GB 이상", GE_1TB: "1TB 이상", GE_2TB: "2TB 이상", GE_4TB: "4TB 이상", GE_8TB: "8TB 이상", GE_10TB: "10TB 이상", GE_16TB: "16TB 이상",
+    LE_500GB: "500GB 이하", LE_1TB: "1TB 이하", LE_2TB: "2TB 이하", LE_4TB: "4TB 이하",
+  };
+  if (rangeLabels[value]) return rangeLabels[value];
   const wattsLabels = { LE_500: "500W 이하", "550_650": "550~650W", "700_750": "700~750W", "800_850": "800~850W", "900_1000": "900~1000W", "1100_1200": "1100~1200W", GT_1200: "1200W 초과" };
   const usageLabels = { LAPTOP: "노트북", CONSUMER_DESKTOP: "데스크탑", DESKTOP: "데스크탑" };
   if (key === "usage") return usageLabels[value] || value;
@@ -410,7 +415,9 @@ function facetOptionLabel(key, value) {
   if (["radiator_mm", "fan_mm"].includes(key)) return `${value}mm`;
   if (key === "pcie_generation") return `PCIe ${value}.0`;
   if (key === "capacity_bucket") return capacityLabels[value] || value;
+  if (key === "capacity" && capacityLabels[value]) return capacityLabels[value];
   if (key === "watts_bucket") return wattsLabels[value] || value;
+  if (key === "rated_wattage" && /^\d+$/u.test(value)) return `${value}W`;
   return value;
 }
 
@@ -533,9 +540,48 @@ function productFacetValues(product, key) {
   return toArray(value).map((item) => normalizeText(item)).filter(Boolean);
 }
 
+function productCapacityNumbers(product) {
+  const specs = {
+    ...(product?.key_specs && typeof product.key_specs === "object" ? product.key_specs : {}),
+    ...(product?.browse_facets && typeof product.browse_facets === "object" ? product.browse_facets : {}),
+    ...(product?.spec_json && typeof product.spec_json === "object" ? product.spec_json : {}),
+    ...(product?.spec && typeof product.spec === "object" ? product.spec : {}),
+  };
+  const numbers = [];
+  if (specs.marketed_capacity_gb) numbers.push(Number(specs.marketed_capacity_gb));
+  if (specs.capacity_gb) numbers.push(Number(specs.capacity_gb));
+  if (Array.isArray(specs.capacity_examples_gb)) {
+    for (const ex of specs.capacity_examples_gb) numbers.push(Number(ex));
+  }
+  const bucketValues = {
+    LE_256_GB: [256], "480_512_GB": [500], "960_GB_1_TB": [1000],
+    "1_92_2_TB": [2000], "3_84_4_TB": [4000], "7_68_8_TB": [8000], GT_8_TB: [16000],
+    LE_1_TB: [1000], "2_TB": [2000], "3_4_TB": [4000], "5_6_TB": [6000], "8_TB": [8000],
+    "10_12_TB": [12000], "14_16_TB": [16000], "18_20_TB": [20000], "22_24_TB": [24000], GE_26_TB: [26000],
+  };
+  if (specs.capacity_bucket && bucketValues[specs.capacity_bucket]) {
+    numbers.push(...bucketValues[specs.capacity_bucket]);
+  }
+  return numbers.filter((n) => Number.isFinite(n) && n > 0);
+}
+
 function productMatchesActiveFacets(product, ignoreKey = "") {
   return Object.entries(state.facets).every(([key, expected]) => {
     if (!expected || key === ignoreKey) return true;
+    if (key === "capacity") {
+      const matchGe = String(expected).match(/^GE_(\d+)(GB|TB)?$/i);
+      if (matchGe) {
+        const threshold = Number(matchGe[1]) * (matchGe[2]?.toUpperCase() === "TB" ? 1000 : 1);
+        const numbers = productCapacityNumbers(product);
+        if (numbers.length && numbers.some((n) => n >= threshold * 0.95)) return true;
+      }
+      const matchLe = String(expected).match(/^LE_(\d+)(GB|TB)?$/i);
+      if (matchLe) {
+        const threshold = Number(matchLe[1]) * (matchLe[2]?.toUpperCase() === "TB" ? 1000 : 1);
+        const numbers = productCapacityNumbers(product);
+        if (numbers.length && numbers.some((n) => n <= threshold * 1.05)) return true;
+      }
+    }
     return productFacetValues(product, key).some((value) => String(value).toUpperCase() === String(expected).toUpperCase());
   });
 }
@@ -563,8 +609,16 @@ function ramCapacityOptions() {
 
 function seriesOptionsForCategory(category) {
   const options = new Map();
-  const products = state.products.length ? state.products : state.seedProducts;
-  products.filter((product) => productCategory(product) === category && productMatchesActiveFacets(product, "generation")).forEach((product) => {
+  const pool = state.seedProducts.length ? catalogCategoryProducts(category) : (state.products.length ? state.products : []);
+  const activeMaker = state.facets.manufacturer;
+  pool.filter((product) => {
+    if (productCategory(product) !== category) return false;
+    if (activeMaker) {
+      const makers = productFacetValues(product, "manufacturer");
+      if (!makers.some((m) => String(m).toUpperCase() === String(activeMaker).toUpperCase())) return false;
+    }
+    return true;
+  }).forEach((product) => {
     const specs = product?.key_specs && typeof product.key_specs === "object" ? product.key_specs : {};
     const value = normalizeText(firstDefined(specs.generation, product?.generation, product?.series));
     if (value && !options.has(value)) options.set(value, { value, label: facetOptionLabel("generation", value) });
@@ -585,6 +639,36 @@ function facetOptionsForStep(category, step) {
     const seriesOptions = seriesOptionsForCategory(category);
     if (seriesOptions.length) return seriesOptions;
   }
+  if (category === "SSD" && step.key === "capacity") {
+    return [
+      { value: "GE_500GB", label: "500GB 이상" },
+      { value: "GE_1TB", label: "1TB 이상" },
+      { value: "GE_2TB", label: "2TB 이상" },
+      { value: "GE_4TB", label: "4TB 이상" },
+      { value: "LE_500GB", label: "500GB 이하" },
+      { value: "LE_1TB", label: "1TB 이하" },
+      { value: "480_512_GB", label: "480~512GB" },
+      { value: "960_GB_1_TB", label: "960GB~1TB" },
+      { value: "1_92_2_TB", label: "1.92~2TB" },
+      { value: "3_84_4_TB", label: "3.84~4TB" },
+    ];
+  }
+  if (category === "HDD" && step.key === "capacity") {
+    return [
+      { value: "GE_2TB", label: "2TB 이상" },
+      { value: "GE_4TB", label: "4TB 이상" },
+      { value: "GE_8TB", label: "8TB 이상" },
+      { value: "GE_10TB", label: "10TB 이상" },
+      { value: "GE_16TB", label: "16TB 이상" },
+      { value: "LE_1TB", label: "1TB 이하" },
+      { value: "LE_2TB", label: "2TB 이하" },
+      { value: "2_TB", label: "2TB" },
+      { value: "3_4_TB", label: "3~4TB" },
+      { value: "8_TB", label: "8TB" },
+      { value: "10_12_TB", label: "10~12TB" },
+      { value: "14_16_TB", label: "14~16TB" },
+    ];
+  }
   const availableKey = category === "RAM" && step.key === "memory_generation" ? "generation" : step.key;
   const available = state.availableFacets?.[availableKey];
   const availableOptions = toArray(firstDefined(available?.options, available?.items, available));
@@ -594,8 +678,17 @@ function facetOptionsForStep(category, step) {
   const schemaOptions = toArray(schema?.[step.key]).map((option) => normalizeFacetOption(option, step.key)).filter(Boolean);
   if (schemaOptions.length && !step.depends_on?.length) return addRamUsageFallback(schemaOptions);
 
+  const pool = state.seedProducts.length ? catalogCategoryProducts(category) : (state.products.length ? state.products : []);
+  const dependencies = toArray(step.depends_on);
   const derived = new Map();
-  state.products.filter((product) => productMatchesActiveFacets(product, step.key)).forEach((product) => {
+  pool.filter((product) => {
+    if (productCategory(product) !== category) return false;
+    return dependencies.every((depKey) => {
+      const expected = state.facets[depKey];
+      if (!expected) return true;
+      return productFacetValues(product, depKey).some((val) => String(val).toUpperCase() === String(expected).toUpperCase());
+    });
+  }).forEach((product) => {
     productFacetValues(product, step.key).forEach((value) => {
       if (!derived.has(value)) derived.set(value, { value, label: facetOptionLabel(step.key, value) });
     });
@@ -606,8 +699,11 @@ function facetOptionsForStep(category, step) {
 function facetDefinitionsForCategory(category) {
   return browseFlowForCategory(category).map((step) => {
     const options = facetOptionsForStep(category, step);
-    return options.length ? { ...step, options } : null;
-  }).filter(Boolean);
+    if (!options.length) {
+      return { ...step, options: [{ value: "", label: "선택 불가", disabled: true }] };
+    }
+    return { ...step, options };
+  });
 }
 
 function renderCategories() {

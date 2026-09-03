@@ -48,7 +48,15 @@ const SUPPLEMENTAL_PRODUCTS = Object.freeze([
   { id: "ssd:samsung:990-pro-2tb", name: "Samsung 990 PRO 2TB", category: "SSD", manufacturer: "Samsung", brand: "Samsung", group: "ssd:samsung:990-pro", aliases: ["990 PRO 2TB"], spec: { exact_model: "990 PRO", marketed_capacity_gb: 2000, form_factor: "M.2 2280", interface: "PCIe", protocol: "NVMe" } },
   { id: "ssd:samsung:m2-sata-1tb", name: "Samsung M.2 SATA 1TB", category: "SSD", manufacturer: "Samsung", brand: "Samsung", group: "ssd:samsung:m2-sata", aliases: ["M.2 SATA 1TB"], spec: { exact_model: "M.2 SATA", marketed_capacity_gb: 1000, form_factor: "M.2 2280", interface: "SATA", protocol: "AHCI" } },
   { id: "hdd:seagate:st16000dm001", name: "Seagate ST16000DM001 16TB", category: "HDD", manufacturer: "Seagate", brand: "Seagate", group: "hdd:seagate:st16000dm001", aliases: ["ST16000DM001 16TB"], spec: { exact_model: "ST16000DM001", marketed_capacity_gb: 16000, purpose: "DESKTOP_PC", form_factor: "3.5-inch", interface: "SATA" } },
-  { id: "psu:seasonic:vertex-gx-850", name: "Seasonic VERTEX GX-850 850W", category: "PSU", manufacturer: "Seasonic", brand: "Seasonic", group: "psu:seasonic:gx-850", aliases: ["VERTEX GX-850 850W"], spec: { exact_model: "VERTEX GX-850", rated_wattage: 850, form_factor: "ATX", atx_or_sfx_version: "ATX 3.0" } }
+  { id: "psu:micronics:classic-ii-500", name: "Micronics Classic II 500W", category: "PSU", manufacturer: "Micronics", brand: "Classic II", group: "psu:micronics:classic-ii-500", aliases: ["Classic II 500W", "클래식2 500W"], spec: { exact_model: "Classic II 500W", rated_wattage: 500, watts: 500, watts_bucket: "LE_500", form_factor: "ATX" } },
+  { id: "psu:micronics:classic-ii-600", name: "Micronics Classic II 600W", category: "PSU", manufacturer: "Micronics", brand: "Classic II", group: "psu:micronics:classic-ii-600", aliases: ["Classic II 600W", "클래식2 600W"], spec: { exact_model: "Classic II 600W", rated_wattage: 600, watts: 600, watts_bucket: "550_650", form_factor: "ATX" } },
+  { id: "psu:fsp:hydro-pro-600", name: "FSP HYDRO PRO 600W", category: "PSU", manufacturer: "FSP", brand: "HYDRO PRO", group: "psu:fsp:hydro-pro-600", aliases: ["HYDRO PRO 600W", "하이드로 프로 600W"], spec: { exact_model: "HYDRO PRO 600W", rated_wattage: 600, watts: 600, watts_bucket: "550_650", form_factor: "ATX" } },
+  { id: "psu:micronics:classic-ii-700", name: "Micronics Classic II 700W", category: "PSU", manufacturer: "Micronics", brand: "Classic II", group: "psu:micronics:classic-ii-700", aliases: ["Classic II 700W", "클래식2 700W"], spec: { exact_model: "Classic II 700W", rated_wattage: 700, watts: 700, watts_bucket: "700_750", form_factor: "ATX" } },
+  { id: "psu:seasonic:focus-gold-gx-750", name: "Seasonic FOCUS GOLD GX-750", category: "PSU", manufacturer: "Seasonic", brand: "FOCUS GOLD", group: "psu:seasonic:focus-gold-750", aliases: ["FOCUS GOLD GX-750", "포커스 골드 750W"], spec: { exact_model: "FOCUS GOLD GX-750", rated_wattage: 750, watts: 750, watts_bucket: "700_750", form_factor: "ATX" } },
+  { id: "psu:seasonic:vertex-gx-850", name: "Seasonic VERTEX GX-850 850W", category: "PSU", manufacturer: "Seasonic", brand: "Seasonic", group: "psu:seasonic:gx-850", aliases: ["VERTEX GX-850 850W"], spec: { exact_model: "VERTEX GX-850", rated_wattage: 850, form_factor: "ATX", atx_or_sfx_version: "ATX 3.0" } },
+  { id: "psu:super-flower:leadex-iii-850", name: "SuperFlower LEADEX III GOLD 850W", category: "PSU", manufacturer: "Super Flower", brand: "LEADEX III", group: "psu:super-flower:leadex-iii-850", aliases: ["LEADEX III GOLD 850W", "리덱스 3 850W"], spec: { exact_model: "LEADEX III GOLD 850W", rated_wattage: 850, watts: 850, watts_bucket: "800_850", form_factor: "ATX" } },
+  { id: "psu:seasonic:focus-gold-gx-1000", name: "Seasonic FOCUS GOLD GX-1000", category: "PSU", manufacturer: "Seasonic", brand: "FOCUS GOLD", group: "psu:seasonic:focus-gold-1000", aliases: ["FOCUS GOLD GX-1000", "포커스 골드 1000W"], spec: { exact_model: "FOCUS GOLD GX-1000", rated_wattage: 1000, watts: 1000, watts_bucket: "900_1000", form_factor: "ATX" } },
+  { id: "psu:corsair:rm1000x", name: "Corsair RM1000x 80PLUS Gold", category: "PSU", manufacturer: "Corsair", brand: "RMx", group: "psu:corsair:rm1000x", aliases: ["Corsair RM1000x", "커세어 RM1000x"], spec: { exact_model: "RM1000x", rated_wattage: 1000, watts: 1000, watts_bucket: "900_1000", form_factor: "ATX" } }
 ]);
 
 const PUBLIC_PRODUCTS = Object.freeze([
@@ -99,6 +107,26 @@ function capacityValues(product) {
   return values(spec.capacity_examples_gb || spec.capacity_bucket);
 }
 
+function productCapacityNumbers(product) {
+  const spec = productSpec(product);
+  const numbers = [];
+  if (spec.marketed_capacity_gb) numbers.push(Number(spec.marketed_capacity_gb));
+  if (spec.capacity_gb) numbers.push(Number(spec.capacity_gb));
+  if (Array.isArray(spec.capacity_examples_gb)) {
+    for (const ex of spec.capacity_examples_gb) numbers.push(Number(ex));
+  }
+  const bucketValues = {
+    LE_256_GB: [256], '480_512_GB': [500], '960_GB_1_TB': [1000],
+    '1_92_2_TB': [2000], '3_84_4_TB': [4000], '7_68_8_TB': [8000], GT_8_TB: [16000],
+    LE_1_TB: [1000], '2_TB': [2000], '3_4_TB': [4000], '5_6_TB': [6000], '8_TB': [8000],
+    '10_12_TB': [12000], '14_16_TB': [16000], '18_20_TB': [20000], '22_24_TB': [24000], GE_26_TB: [26000]
+  };
+  if (spec.capacity_bucket && bucketValues[spec.capacity_bucket]) {
+    numbers.push(...bucketValues[spec.capacity_bucket]);
+  }
+  return numbers.filter((n) => Number.isFinite(n) && n > 0);
+}
+
 function publicFacetValues(product, key) {
   const spec = productSpec(product);
   switch (key) {
@@ -128,6 +156,23 @@ function publicFacetValues(product, key) {
 
 function filterMatches(product, key, requested) {
   if (!requested.length) return true;
+  if (key === "capacity") {
+    const numbers = productCapacityNumbers(product);
+    const hasRangeMatch = requested.some((expected) => {
+      const matchGe = String(expected).match(/^GE_(\d+)(GB|TB)?$/i);
+      if (matchGe) {
+        const threshold = Number(matchGe[1]) * (matchGe[2]?.toUpperCase() === "TB" ? 1000 : 1);
+        return numbers.some((n) => n >= (threshold * 0.95));
+      }
+      const matchLe = String(expected).match(/^LE_(\d+)(GB|TB)?$/i);
+      if (matchLe) {
+        const threshold = Number(matchLe[1]) * (matchLe[2]?.toUpperCase() === "TB" ? 1000 : 1);
+        return numbers.some((n) => n <= (threshold * 1.05));
+      }
+      return false;
+    });
+    if (hasRangeMatch) return true;
+  }
   const actual = publicFacetValues(product, key);
   return requested.some((expected) => actual.some((candidate) => compact(candidate) === compact(expected)));
 }
@@ -156,9 +201,19 @@ function matchingProducts(category, filters, exceptKey = null) {
 }
 
 function optionLabel(key, value) {
-  if (key === "capacity" && /^\d+(?:\.\d+)?$/u.test(value)) {
-    const gb = Number(value);
-    return gb >= 1000 ? `${gb / 1000}TB` : `${gb}GB`;
+  if (key === "capacity") {
+    const rangeLabels = {
+      GE_500GB: "500GB 이상", GE_1TB: "1TB 이상", GE_2TB: "2TB 이상", GE_4TB: "4TB 이상", GE_8TB: "8TB 이상", GE_10TB: "10TB 이상", GE_16TB: "16TB 이상",
+      LE_500GB: "500GB 이하", LE_1TB: "1TB 이하", LE_2TB: "2TB 이하", LE_4TB: "4TB 이하",
+    };
+    if (rangeLabels[value]) return rangeLabels[value];
+    if (/^\d+(?:\.\d+)?$/u.test(value)) {
+      const gb = Number(value);
+      return gb >= 1000 ? `${gb / 1000}TB` : `${gb}GB`;
+    }
+  }
+  if (key === "rated_wattage" && /^\d+$/u.test(value)) {
+    return `${value}W`;
   }
   return value;
 }
