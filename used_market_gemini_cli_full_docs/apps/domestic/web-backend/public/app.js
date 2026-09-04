@@ -6,37 +6,51 @@ const PRODUCT_QUERY_KEYS = new Set([
   "watts_bucket", "atx_spec", "modularity", "efficiency", "subtype", "radiator_mm", "fan_mm", "chassis_class",
   "motherboard_support", "side_panel", "host_interface", "bracket", "media_family", "capability", "placement",
 ]);
-const DEFAULT_BROWSE_FLOWS = Object.freeze({
+const FALLBACK_BROWSE_FLOWS = Object.freeze({
   CPU: Object.freeze([
     Object.freeze({ key: "manufacturer", label: "제조사" }),
-    Object.freeze({ key: "generation", label: "CPU 시리즈", depends_on: Object.freeze(["manufacturer"]) }),
+    Object.freeze({ key: "family", label: "제품군" }),
+    Object.freeze({ key: "generation", label: "세대" }),
+    Object.freeze({ key: "socket", label: "소켓" }),
+    Object.freeze({ key: "suffix", label: "모델 구분" }),
   ]),
   GPU: Object.freeze([
-    Object.freeze({ key: "manufacturer", label: "제조사" }),
-    Object.freeze({ key: "generation", label: "GPU 시리즈", depends_on: Object.freeze(["manufacturer"]) }),
+    Object.freeze({ key: "manufacturer", label: "칩 제조사" }),
+    Object.freeze({ key: "family", label: "제품군" }),
+    Object.freeze({ key: "generation", label: "세대" }),
+    Object.freeze({ key: "vram_gb", label: "VRAM" }),
   ]),
   RAM: Object.freeze([
-    Object.freeze({ key: "usage", label: "사용 유형" }),
-    Object.freeze({ key: "module_capacity_gb", label: "용량(GB)", depends_on: Object.freeze(["usage"]) }),
-    Object.freeze({ key: "memory_generation", label: "DDR 세대", depends_on: Object.freeze(["usage", "module_capacity_gb"]) }),
+    Object.freeze({ key: "generation", label: "DDR 세대" }),
+    Object.freeze({ key: "module_capacity_gb", label: "모듈 용량" }),
+    Object.freeze({ key: "manufacturer", label: "제조사" }),
   ]),
   MOTHERBOARD: Object.freeze([
+    Object.freeze({ key: "platform_vendor", label: "CPU 플랫폼" }),
     Object.freeze({ key: "socket", label: "CPU 소켓" }),
-    Object.freeze({ key: "chipset", label: "칩셋", depends_on: Object.freeze(["socket"]) }),
-    Object.freeze({ key: "form_factor", label: "폼팩터", depends_on: Object.freeze(["socket"]) }),
+    Object.freeze({ key: "chipset", label: "칩셋" }),
     Object.freeze({ key: "manufacturer", label: "제조사" }),
+    Object.freeze({ key: "form_factor", label: "폼팩터" }),
   ]),
   SSD: Object.freeze([
-    Object.freeze({ key: "capacity", label: "용량" }),
+    Object.freeze({ key: "form_interface", label: "형태·인터페이스" }),
+    Object.freeze({ key: "capacity_bucket", label: "용량" }),
     Object.freeze({ key: "manufacturer", label: "제조사" }),
+    Object.freeze({ key: "protocol", label: "프로토콜" }),
   ]),
   HDD: Object.freeze([
-    Object.freeze({ key: "capacity", label: "용량" }),
+    Object.freeze({ key: "capacity_bucket", label: "용량" }),
     Object.freeze({ key: "manufacturer", label: "제조사" }),
+    Object.freeze({ key: "purpose", label: "용도" }),
+    Object.freeze({ key: "interface", label: "인터페이스" }),
   ]),
   PSU: Object.freeze([
-    Object.freeze({ key: "rated_wattage", label: "정격 출력" }),
+    Object.freeze({ key: "watts_bucket", label: "정격 출력" }),
+    Object.freeze({ key: "form_factor", label: "폼팩터" }),
     Object.freeze({ key: "manufacturer", label: "제조사" }),
+    Object.freeze({ key: "atx_spec", label: "ATX 규격" }),
+    Object.freeze({ key: "efficiency", label: "효율 등급" }),
+    Object.freeze({ key: "modularity", label: "케이블 방식" }),
   ]),
 });
 const COHORTS = [
@@ -45,19 +59,24 @@ const COHORTS = [
   { marketPool: "KR_REFURB_RETAIL", condition: "REFURBISHED", currency: "KRW", label: "국내 리퍼비시" },
   { marketPool: "OVERSEAS_USED", condition: "USED_WORKING", currency: "USD", label: "해외 중고" },
 ];
+const mobileFacetMedia = window.matchMedia("(max-width: 640px)");
+const stackedLayoutMedia = window.matchMedia("(max-width: 1120px)");
+const compactFilterMedia = window.matchMedia("(max-width: 1120px)");
 
 const state = {
   catalog: null,
   categories: [],
   facetSchema: null,
   browseFlows: {},
-  availableFacets: {},
+  facetUniverse: {},
   sources: [],
   sourceCandidates: [],
   seedProducts: [],
   categoryCode: "",
   facets: {},
   openSeries: new Set(),
+  openFacetRows: new Set(),
+  expandedFacetOptions: new Set(),
   selectedSites: new Set(),
   query: "",
   products: [],
@@ -66,6 +85,7 @@ const state = {
   selectedProduct: null,
   listings: [],
   listingCursor: "",
+  listingScopeKey: "",
   listingSort: "recent",
   priceMin: "",
   priceMax: "",
@@ -73,8 +93,8 @@ const state = {
   visibleStatsCount: 0,
   productRequest: null,
   detailRequest: null,
-  offerRequest: null,
   pricePanelOpen: false,
+  modelFiltersCollapsed: false,
 };
 
 const dom = {
@@ -87,11 +107,17 @@ const dom = {
   productCount: document.querySelector("#product-count"),
   modelBrandHeader: document.querySelector("#model-brand-header"),
   modelFilters: document.querySelector("#model-filters"),
+  modelFilterBody: document.querySelector("#model-filter-body"),
+  modelFilterToggle: document.querySelector("#model-filter-toggle"),
+  filterCategoryLabel: document.querySelector("#filter-category-label"),
   filterContext: document.querySelector("#filter-context"),
   facetRows: document.querySelector("#facet-rows"),
+  activeFilterSummary: document.querySelector("#active-filter-summary"),
+  activeFilterChips: document.querySelector("#active-filter-chips"),
   sourceFacetRow: document.querySelector("#source-facet-row"),
   sourceFilters: document.querySelector("#source-filters"),
   resetFilters: document.querySelector("#reset-filters"),
+  showMatchedModels: document.querySelector("#show-matched-models"),
   catalogMessage: document.querySelector("#catalog-message"),
   modelDirectory: document.querySelector("#model-directory"),
   modelListContext: document.querySelector("#model-list-context"),
@@ -125,6 +151,7 @@ const dom = {
   listingSection: document.querySelector("#listing-section"),
   listingTitle: document.querySelector("#listing-title"),
   listingScopeNote: document.querySelector("#listing-scope-note"),
+  listingMessage: document.querySelector("#listing-message"),
   backToModels: document.querySelector("#back-to-models"),
   listingControls: document.querySelector("#listing-controls"),
   listingSort: document.querySelector("#listing-sort"),
@@ -134,10 +161,6 @@ const dom = {
   listingRows: document.querySelector("#listing-rows"),
   listingEmpty: document.querySelector("#listing-empty"),
   loadMoreListings: document.querySelector("#load-more-listings"),
-  contextualOffer: document.querySelector("#contextual-offer"),
-  contextualOfferTitle: document.querySelector("#contextual-offer-title"),
-  contextualOfferProvider: document.querySelector("#contextual-offer-provider"),
-  contextualOfferLink: document.querySelector("#contextual-offer-link"),
 };
 
 function createElement(tag, className, text) {
@@ -190,24 +213,6 @@ async function fetchJson(url, options = {}) {
   if (!response.ok) {
     throw new Error(firstDefined(payload?.error?.message, payload?.message, `요청에 실패했습니다. (${response.status})`));
   }
-  return unwrapPayload(payload);
-}
-
-async function postJson(url, body, options = {}) {
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { Accept: "application/json", "Content-Type": "application/json" },
-    credentials: "same-origin",
-    body: JSON.stringify(body),
-    keepalive: options.keepalive === true,
-    signal: options.signal,
-  });
-  if (response.status === 204) return null;
-  let payload = null;
-  try {
-    payload = await response.json();
-  } catch {}
-  if (!response.ok) throw new Error(firstDefined(payload?.error?.message, payload?.message, `요청에 실패했습니다. (${response.status})`));
   return unwrapPayload(payload);
 }
 
@@ -380,6 +385,12 @@ function showDetailMessage(message, isError = false) {
   dom.detailMessage.hidden = !message;
 }
 
+function showListingMessage(message, isError = false) {
+  dom.listingMessage.textContent = message;
+  dom.listingMessage.classList.toggle("is-error", isError);
+  dom.listingMessage.hidden = !message;
+}
+
 function setBusy(button, isBusy, busyText) {
   if (!button) return;
   if (isBusy) {
@@ -397,6 +408,7 @@ function catalogCategoryProducts(category) {
 }
 
 function facetOptionLabel(key, value) {
+  if (key === "suffix" && value === "NONE") return "일반";
   const capacityLabels = {
     LE_256_GB: "256GB 이하", "480_512_GB": "480~512GB", "960_GB_1_TB": "960GB~1TB",
     "1_92_2_TB": "1.92~2TB", "3_84_4_TB": "3.84~4TB", "7_68_8_TB": "7.68~8TB", GT_8_TB: "8TB 초과",
@@ -426,7 +438,13 @@ function normalizeFacetOption(option, key = "") {
     const value = normalizeText(firstDefined(option.value, option.code, option.id, option.key, option.name));
     const providedLabel = normalizeText(firstDefined(option.label, option.display_name, option.name));
     const label = providedLabel && providedLabel !== value ? providedLabel : facetOptionLabel(key, value);
-    return value ? { value, label, ...(option.disabled === true ? { disabled: true } : {}) } : null;
+    const count = Number(firstDefined(option.count, option.model_count, option.total));
+    return value ? {
+      value,
+      label,
+      ...(Number.isFinite(count) ? { count } : {}),
+      ...(option.disabled === true ? { disabled: true } : {})
+    } : null;
   }
   const value = normalizeText(option);
   return value ? { value, label: facetOptionLabel(key, value) } : null;
@@ -456,21 +474,6 @@ function normalizeFacetDefinition(definition, fallbackKey = "") {
   return { key, label, options };
 }
 
-function normalizeAvailableFacets(value) {
-  if (!value || typeof value !== "object") return {};
-  return Object.fromEntries(Object.entries(value).map(([key, options]) => [
-    normalizeText(key).toLowerCase(),
-    toArray(firstDefined(options?.options, options?.items, options))
-      .map((option) => {
-        const normalized = normalizeFacetOption(option, key);
-        if (!normalized) return null;
-        const count = Number(firstDefined(option?.count, option?.model_count, option?.total));
-        return Number.isFinite(count) ? { ...normalized, count } : normalized;
-      })
-      .filter(Boolean),
-  ]).filter(([key, options]) => key && options.length));
-}
-
 function normalizeBrowseFlows(value) {
   if (!value || typeof value !== "object") return {};
   const entries = Array.isArray(value)
@@ -495,10 +498,22 @@ function normalizeBrowseFlows(value) {
 }
 
 function browseFlowForCategory(category) {
-  if (DEFAULT_BROWSE_FLOWS[category]?.length) {
-    return DEFAULT_BROWSE_FLOWS[category];
-  }
-  return toArray(state.browseFlows?.[category]);
+  const catalogFlow = toArray(state.browseFlows?.[category]);
+  return catalogFlow.length ? catalogFlow : toArray(FALLBACK_BROWSE_FLOWS[category]);
+}
+
+function selectedFacetValues(key) {
+  const current = state.facets[key];
+  if (Array.isArray(current)) return current.map(normalizeText).filter(Boolean);
+  return normalizeText(current) ? [normalizeText(current)] : [];
+}
+
+function selectedFacetCount() {
+  return Object.keys(state.facets).reduce((total, key) => total + selectedFacetValues(key).length, 0);
+}
+
+function hasSelectedFacets() {
+  return selectedFacetCount() > 0;
 }
 
 function productFacetValues(product, key) {
@@ -519,6 +534,9 @@ function productFacetValues(product, key) {
     ...(product?.spec && typeof product.spec === "object" ? product.spec : {}),
   };
   if (key === "gpu_model") return [firstDefined(specs.gpu_model, specs.family, productName(product))].filter(Boolean).map(normalizeText);
+  if (key === "generation") return [firstDefined(specs.generation, specs.memory_generation)].filter(Boolean).map(normalizeText);
+  if (key === "vram_gb") return toArray(firstDefined(specs.vram_gb, specs.vram_options_gb)).map(normalizeText).filter(Boolean);
+  if (key === "atx_spec") return [firstDefined(specs.atx_spec, specs.atx_or_sfx_version)].filter(Boolean).map(normalizeText);
   if (key === "usage") {
     const formFactor = normalizeText(firstDefined(specs.form_factor, specs.memory_form_factor)).toUpperCase();
     return [formFactor === "SODIMM" || formFactor === "SO-DIMM" ? "LAPTOP" : firstDefined(specs.market_segment, "CONSUMER_DESKTOP")].filter(Boolean).map(normalizeText);
@@ -530,14 +548,66 @@ function productFacetValues(product, key) {
   }
   if (key === "form_interface") {
     const form = firstDefined(specs.form_factor, specs.interface);
-    const protocol = firstDefined(specs.protocol);
-    return [form && protocol ? `${form} ${protocol}` : form].filter(Boolean).map(normalizeText);
+    const productInterface = firstDefined(specs.interface);
+    return [form && productInterface && form !== productInterface ? `${form} ${productInterface}` : form].filter(Boolean).map(normalizeText);
   }
   if (key === "capacity") return [firstDefined(specs.marketed_capacity_gb, specs.capacity_gb, specs.capacity_bucket)].filter((value) => value !== undefined && value !== null).map(normalizeText);
   if (key === "purpose") return [firstDefined(specs.purpose, specs.use_class)].filter(Boolean).map(normalizeText);
   if (key === "rated_wattage") return [firstDefined(specs.rated_wattage, specs.watts, specs.watts_bucket)].filter(Boolean).map(normalizeText);
   const value = firstDefined(specs[key], product?.[key]);
-  return toArray(value).map((item) => normalizeText(item)).filter(Boolean);
+  return (Array.isArray(value) ? value : [value]).map((item) => normalizeText(item)).filter(Boolean);
+}
+
+function compareFacetOptions(left, right) {
+  return left.label.localeCompare(right.label, "ko-KR", { numeric: true, sensitivity: "base" });
+}
+
+function sortFacetOptions(category, key, options) {
+  const makerOrder = {
+    CPU: ["Intel", "AMD"],
+    GPU: ["NVIDIA", "AMD", "Intel"],
+  };
+  const makers = makerOrder[category];
+  return [...options].sort((left, right) => {
+    if (key === "manufacturer" && makers) {
+      const leftIndex = makers.indexOf(left.value);
+      const rightIndex = makers.indexOf(right.value);
+      if (leftIndex >= 0 || rightIndex >= 0) return (leftIndex < 0 ? makers.length : leftIndex) - (rightIndex < 0 ? makers.length : rightIndex);
+    }
+    if (category === "CPU" && key === "generation") {
+      const rank = (value) => {
+        if (/^Core Ultra/iu.test(value)) return 30000;
+        const intel = value.match(/^(\d+)th$/iu);
+        if (intel) return 20000 + Number(intel[1]);
+        const ryzen = value.match(/^Ryzen\s+(\d+)/iu);
+        if (ryzen) return 10000 + Number(ryzen[1]);
+        return 0;
+      };
+      const ranked = rank(right.value) - rank(left.value);
+      if (ranked) return ranked;
+    }
+    return compareFacetOptions(left, right);
+  });
+}
+
+function buildFacetUniverse() {
+  const universe = {};
+  state.categories.forEach((category) => {
+    const code = categoryCode(category);
+    const products = catalogCategoryProducts(code);
+    universe[code] = {};
+    browseFlowForCategory(code).forEach((step) => {
+      const counts = new Map();
+      products.forEach((product) => {
+        productFacetValues(product, step.key).forEach((value) => {
+          counts.set(value, (counts.get(value) || 0) + 1);
+        });
+      });
+      universe[code][step.key] = sortFacetOptions(code, step.key, [...counts.entries()]
+        .map(([value, count]) => ({ value, label: facetOptionLabel(step.key, value), count })));
+    });
+  });
+  state.facetUniverse = universe;
 }
 
 function productCapacityNumbers(product) {
@@ -566,79 +636,34 @@ function productCapacityNumbers(product) {
 }
 
 function productMatchesActiveFacets(product, ignoreKey = "") {
-  return Object.entries(state.facets).every(([key, expected]) => {
-    if (!expected || key === ignoreKey) return true;
+  return Object.keys(state.facets).every((key) => {
+    const requested = selectedFacetValues(key);
+    if (!requested.length || key === ignoreKey) return true;
     if (key === "capacity") {
-      const matchGe = String(expected).match(/^GE_(\d+)(GB|TB)?$/i);
-      if (matchGe) {
-        const threshold = Number(matchGe[1]) * (matchGe[2]?.toUpperCase() === "TB" ? 1000 : 1);
-        const numbers = productCapacityNumbers(product);
-        if (numbers.length && numbers.some((n) => n >= threshold * 0.95)) return true;
-      }
-      const matchLe = String(expected).match(/^LE_(\d+)(GB|TB)?$/i);
-      if (matchLe) {
-        const threshold = Number(matchLe[1]) * (matchLe[2]?.toUpperCase() === "TB" ? 1000 : 1);
-        const numbers = productCapacityNumbers(product);
-        if (numbers.length && numbers.some((n) => n <= threshold * 1.05)) return true;
-      }
+      const numbers = productCapacityNumbers(product);
+      if (requested.some((expected) => {
+        const matchGe = String(expected).match(/^GE_(\d+)(GB|TB)?$/i);
+        if (matchGe) {
+          const threshold = Number(matchGe[1]) * (matchGe[2]?.toUpperCase() === "TB" ? 1000 : 1);
+          return numbers.some((n) => n >= threshold * 0.95);
+        }
+        const matchLe = String(expected).match(/^LE_(\d+)(GB|TB)?$/i);
+        if (matchLe) {
+          const threshold = Number(matchLe[1]) * (matchLe[2]?.toUpperCase() === "TB" ? 1000 : 1);
+          return numbers.some((n) => n <= threshold * 1.05);
+        }
+        return false;
+      })) return true;
     }
-    return productFacetValues(product, key).some((value) => String(value).toUpperCase() === String(expected).toUpperCase());
+    const actual = productFacetValues(product, key);
+    return requested.some((expected) => actual.some((value) => String(value).toUpperCase() === String(expected).toUpperCase()));
   });
-}
-
-function ramCapacityOptions() {
-  const capacities = new Map();
-  const addCapacity = (value, count = 0) => {
-    const match = normalizeText(value).match(/(\d+(?:\.\d+)?)\s*GB/i);
-    if (!match) return;
-    const capacity = match[1];
-    const current = capacities.get(capacity) || 0;
-    capacities.set(capacity, current + (Number.isFinite(Number(count)) ? Number(count) : 0));
-  };
-
-  toArray(state.availableFacets?.configuration).forEach((option) => {
-    addCapacity(firstDefined(option?.value, option?.label, option), option?.count);
-  });
-  if (!capacities.size) {
-    state.products.forEach((product) => productFacetValues(product, "module_capacity_gb").forEach((value) => addCapacity(`${value}GB`)));
-  }
-  return [...capacities.entries()]
-    .sort((left, right) => Number(left[0]) - Number(right[0]))
-    .map(([value, count]) => ({ value, label: facetOptionLabel("module_capacity_gb", value), ...(count ? { count } : {}) }));
-}
-
-function seriesOptionsForCategory(category) {
-  const options = new Map();
-  const pool = state.seedProducts.length ? catalogCategoryProducts(category) : (state.products.length ? state.products : []);
-  const activeMaker = state.facets.manufacturer;
-  pool.filter((product) => {
-    if (productCategory(product) !== category) return false;
-    if (activeMaker) {
-      const makers = productFacetValues(product, "manufacturer");
-      if (!makers.some((m) => String(m).toUpperCase() === String(activeMaker).toUpperCase())) return false;
-    }
-    return true;
-  }).forEach((product) => {
-    const specs = product?.key_specs && typeof product.key_specs === "object" ? product.key_specs : {};
-    const value = normalizeText(firstDefined(specs.generation, product?.generation, product?.series));
-    if (value && !options.has(value)) options.set(value, { value, label: facetOptionLabel("generation", value) });
-  });
-  return [...options.values()].sort((left, right) => left.label.localeCompare(right.label, "ko"));
 }
 
 function facetOptionsForStep(category, step) {
-  const addRamUsageFallback = (options) => {
-    if (category !== "RAM" || step.key !== "usage" || options.some((option) => option.value === "LAPTOP")) return options;
-    return [{ value: "LAPTOP", label: "노트북", count: 0, disabled: true }, ...options];
-  };
-  if (category === "RAM" && step.key === "module_capacity_gb") {
-    const capacityOptions = ramCapacityOptions();
-    if (capacityOptions.length) return capacityOptions;
-  }
-  if (["CPU", "GPU"].includes(category) && step.key === "generation") {
-    const seriesOptions = seriesOptionsForCategory(category);
-    if (seriesOptions.length) return seriesOptions;
-  }
+  const fixedOptions = toArray(state.facetUniverse?.[category]?.[step.key]);
+  if (fixedOptions.length) return fixedOptions;
+
   if (category === "SSD" && step.key === "capacity") {
     return [
       { value: "GE_500GB", label: "500GB 이상" },
@@ -669,40 +694,36 @@ function facetOptionsForStep(category, step) {
       { value: "14_16_TB", label: "14~16TB" },
     ];
   }
-  const availableKey = category === "RAM" && step.key === "memory_generation" ? "generation" : step.key;
-  const available = state.availableFacets?.[availableKey];
-  const availableOptions = toArray(firstDefined(available?.options, available?.items, available));
-  if (availableOptions.length) return addRamUsageFallback(availableOptions.map((option) => normalizeFacetOption(option, step.key)).filter(Boolean));
-
   const schema = state.facetSchema?.[category] || state.facetSchema?.[category.toLowerCase()];
   const schemaOptions = toArray(schema?.[step.key]).map((option) => normalizeFacetOption(option, step.key)).filter(Boolean);
-  if (schemaOptions.length && !step.depends_on?.length) return addRamUsageFallback(schemaOptions);
+  if (schemaOptions.length && !step.depends_on?.length) return schemaOptions;
 
   const pool = state.seedProducts.length ? catalogCategoryProducts(category) : (state.products.length ? state.products : []);
-  const dependencies = toArray(step.depends_on);
   const derived = new Map();
-  pool.filter((product) => {
-    if (productCategory(product) !== category) return false;
-    return dependencies.every((depKey) => {
-      const expected = state.facets[depKey];
-      if (!expected) return true;
-      return productFacetValues(product, depKey).some((val) => String(val).toUpperCase() === String(expected).toUpperCase());
-    });
-  }).forEach((product) => {
+  pool.filter((product) => productCategory(product) === category).forEach((product) => {
     productFacetValues(product, step.key).forEach((value) => {
-      if (!derived.has(value)) derived.set(value, { value, label: facetOptionLabel(step.key, value) });
+      const current = derived.get(value) || { value, label: facetOptionLabel(step.key, value), count: 0 };
+      current.count += 1;
+      derived.set(value, current);
     });
   });
-  return addRamUsageFallback([...derived.values()].sort((left, right) => left.label.localeCompare(right.label, "ko")));
+  return sortFacetOptions(category, step.key, [...derived.values()]);
 }
 
 function facetDefinitionsForCategory(category) {
-  return browseFlowForCategory(category).map((step) => {
+  const definitions = browseFlowForCategory(category).filter((step) => step.key !== "model" && step.key !== "gpu_model").map((step) => {
     const options = facetOptionsForStep(category, step);
-    if (!options.length) {
-      return { ...step, options: [{ value: "", label: "선택 불가", disabled: true }] };
-    }
-    return { ...step, options };
+    return { ...step, rowKey: step.key, options };
+  }).filter((definition) => definition.options.length > 0);
+  if (category !== "CPU") return definitions;
+  return definitions.flatMap((definition) => {
+    if (definition.key !== "generation") return [definition];
+    const intelOptions = definition.options.filter((option) => !/^Ryzen\s/iu.test(option.value));
+    const amdOptions = definition.options.filter((option) => /^Ryzen\s/iu.test(option.value));
+    return [
+      { ...definition, rowKey: "generation-intel", label: "인텔 CPU 종류", options: intelOptions },
+      { ...definition, rowKey: "generation-amd", label: "AMD CPU 종류", options: amdOptions },
+    ].filter((row) => row.options.length > 0);
   });
 }
 
@@ -713,9 +734,8 @@ function renderCategories() {
     const button = createElement("button", "category-button");
     button.type = "button";
     button.dataset.categoryCode = code;
-    button.setAttribute("aria-pressed", String(state.categoryCode === code));
+    if (state.categoryCode === code) button.setAttribute("aria-current", "page");
     button.append(
-      createElement("span", "category-marker", ""),
       createElement("span", "category-label", categoryLabel(category)),
       createElement("span", "category-count", `${categoryCount(category).toLocaleString("ko-KR")}개`),
     );
@@ -734,53 +754,160 @@ function makeFacetButton(label, value, active, onClick, disabled = false) {
   return button;
 }
 
-function makeFacetSelect(definition) {
-  const field = createElement("label", "facet-control");
-  field.dataset.facetKey = definition.key;
-  field.append(createElement("span", "facet-label", definition.label));
+function makeFacetCheckboxRow(definition) {
+  const row = createElement("section", "model-facet-row");
+  row.dataset.facetKey = definition.key;
+  row.dataset.facetRow = definition.rowKey;
+  const rowId = `facet-values-${definition.rowKey.replace(/[^a-z0-9_-]/giu, "-")}`;
+  const selected = selectedFacetValues(definition.key);
+  const selectedSet = new Set(selected);
+  const rowOptionValues = new Set(definition.options.map((option) => option.value));
+  const selectedLabels = selected.filter((value) => rowOptionValues.has(value))
+    .map((value) => definition.options.find((option) => option.value === value)?.label || value);
+  const isMobileDisclosure = mobileFacetMedia.matches;
+  const open = !isMobileDisclosure || state.openFacetRows.has(definition.rowKey) || selectedLabels.length > 0;
 
-  const select = createElement("select", "facet-select");
-  select.dataset.facetKey = definition.key;
-  select.setAttribute("aria-label", definition.label);
-  const current = state.facets[definition.key] || "";
-  const allOption = document.createElement("option");
-  allOption.value = "";
-  allOption.textContent = "전체";
-  allOption.selected = !current;
-  select.append(allOption);
+  const disclosure = createElement(isMobileDisclosure ? "button" : "div", "facet-disclosure");
+  if (isMobileDisclosure) {
+    disclosure.type = "button";
+    disclosure.setAttribute("aria-controls", rowId);
+    disclosure.setAttribute("aria-expanded", String(open));
+  }
+  disclosure.append(
+    createElement("strong", "facet-row-label", definition.label),
+    createElement("span", "facet-selected-summary", selectedLabels.length
+      ? `${selectedLabels.slice(0, 2).join(", ")}${selectedLabels.length > 2 ? ` 외 ${selectedLabels.length - 2}개` : ""}`
+      : "전체"),
+    createElement("span", "facet-disclosure-icon", open ? "−" : "+"),
+  );
+  if (isMobileDisclosure) {
+    disclosure.addEventListener("click", () => {
+      if (state.openFacetRows.has(definition.rowKey)) state.openFacetRows.delete(definition.rowKey);
+      else state.openFacetRows.add(definition.rowKey);
+      renderFacets();
+    });
+  }
 
-  definition.options.forEach((option) => {
-    const node = document.createElement("option");
-    node.value = option.value;
-    node.textContent = Number.isFinite(Number(option.count))
-      ? `${option.label} (${Number(option.count).toLocaleString("ko-KR")}개)`
-      : option.label;
-    node.selected = current === option.value;
-    node.disabled = option.disabled === true;
-    select.append(node);
+  const body = createElement("div", "facet-matrix-body");
+  body.id = rowId;
+  const values = createElement("div", "model-facet-values");
+  const expanded = state.expandedFacetOptions.has(definition.rowKey);
+  const initialOptions = definition.options.slice(0, 5);
+  const visibleOptions = expanded ? definition.options : initialOptions;
+
+  visibleOptions.forEach((option) => {
+    const choice = createElement("label", "model-facet-choice");
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.name = definition.key;
+    checkbox.value = option.value;
+    checkbox.checked = selectedSet.has(option.value);
+    checkbox.addEventListener("change", () => updateFacet(definition.key, option.value, definition.rowKey));
+    choice.append(checkbox, createElement("span", "model-facet-option-label", option.label));
+    if (Number.isFinite(Number(option.count))) {
+      choice.append(createElement("span", "model-facet-count", `${Number(option.count).toLocaleString("ko-KR")}개`));
+    }
+    values.append(choice);
   });
-  select.addEventListener("change", () => updateFacet(definition.key, select.value));
-  field.append(select);
-  return field;
+  body.append(values);
+
+  if (definition.options.length > 5) {
+    const more = createElement("button", "facet-more", expanded ? "접기" : `${definition.options.length}개`);
+    more.type = "button";
+    more.setAttribute("aria-expanded", String(expanded));
+    more.setAttribute("aria-controls", rowId);
+    more.addEventListener("click", () => {
+      if (expanded) state.expandedFacetOptions.delete(definition.rowKey);
+      else state.expandedFacetOptions.add(definition.rowKey);
+      renderFacets();
+    });
+    body.append(more);
+  }
+  row.append(disclosure, body);
+  return row;
+}
+
+function renderActiveFilterSummary(definitions) {
+  if (!dom.activeFilterSummary || !dom.activeFilterChips) return;
+  dom.activeFilterChips.replaceChildren();
+  Object.entries(state.facets).forEach(([key]) => {
+    selectedFacetValues(key).forEach((value) => {
+      const rows = definitions.filter((definition) => definition.key === key);
+      const row = rows.find((definition) => definition.options.some((option) => option.value === value)) || rows[0];
+      const option = row?.options.find((candidate) => candidate.value === value);
+      const button = createElement("button", "active-filter-chip");
+      button.type = "button";
+      button.setAttribute("aria-label", `${row?.label || key} ${option?.label || value} 조건 해제`);
+      button.append(
+        createElement("span", "active-filter-chip-label", option?.label || facetOptionLabel(key, value)),
+        createElement("span", "active-filter-chip-remove", "×"),
+      );
+      button.querySelector(".active-filter-chip-remove")?.setAttribute("aria-hidden", "true");
+      button.addEventListener("click", () => updateFacet(key, value, row?.rowKey || key));
+      dom.activeFilterChips.append(button);
+    });
+  });
+  if (!hasSelectedFacets()) {
+    dom.activeFilterChips.append(createElement("span", "active-filter-empty", "전체"));
+  }
+  dom.activeFilterSummary.hidden = false;
+}
+
+function updateMatchedModelButton() {
+  if (!dom.showMatchedModels) return;
+  dom.showMatchedModels.textContent = `조건에 맞는 모델 ${Number(state.productTotal || state.products.length).toLocaleString("ko-KR")}개 보기`;
+}
+
+function updateFacetSelectionUi(definitions = facetDefinitionsForCategory(state.categoryCode)) {
+  const selectionCount = selectedFacetCount();
+  if (dom.filterContext) dom.filterContext.textContent = selectionCount ? `${selectionCount}개 조건 선택` : "전체 상품";
+
+  dom.facetRows.querySelectorAll('.model-facet-row').forEach((row) => {
+    const definition = definitions.find((candidate) => candidate.rowKey === row.dataset.facetRow);
+    if (!definition) return;
+    const selected = new Set(selectedFacetValues(definition.key));
+    const labels = definition.options
+      .filter((option) => selected.has(option.value))
+      .map((option) => option.label);
+    const summary = row.querySelector(".facet-selected-summary");
+    if (summary) {
+      summary.textContent = labels.length
+        ? `${labels.slice(0, 2).join(", ")}${labels.length > 2 ? ` 외 ${labels.length - 2}개` : ""}`
+        : "전체";
+    }
+    row.querySelectorAll('input[type="checkbox"]').forEach((checkbox) => {
+      checkbox.checked = selected.has(checkbox.value);
+    });
+  });
+
+  renderActiveFilterSummary(definitions);
+  dom.resetFilters.hidden = !hasSelectedFacets() && !state.query;
+  updateMatchedModelButton();
 }
 
 function renderFacets() {
   dom.facetRows.replaceChildren();
   const category = state.categories.find((item) => categoryCode(item) === state.categoryCode);
-  const selectedFacetCount = Object.values(state.facets).filter(Boolean).length;
-  const filterState = selectedFacetCount ? `${selectedFacetCount}개 조건 선택` : "전체 상품";
-  if (dom.filterContext) dom.filterContext.textContent = category ? `${categoryLabel(category)} · ${filterState}` : filterState;
+  if (dom.filterCategoryLabel) dom.filterCategoryLabel.textContent = category ? categoryLabel(category) : "PC 부품";
   const definitions = facetDefinitionsForCategory(state.categoryCode);
   definitions.forEach((definition) => {
-    dom.facetRows.append(makeFacetSelect(definition));
+    dom.facetRows.append(makeFacetCheckboxRow(definition));
   });
 
   if (!definitions.length && state.categoryCode) {
     dom.facetRows.append(createElement("p", "facet-empty", "선택 가능한 필터가 없습니다."));
   }
+  dom.modelFilters.hidden = !state.categoryCode && definitions.length === 0;
 
+  updateFacetSelectionUi(definitions);
   renderSourceFilters();
-  dom.resetFilters.hidden = !Object.values(state.facets).some(Boolean) && state.selectedSites.size === 0 && !state.query;
+}
+
+function setModelFiltersCollapsed(collapsed) {
+  state.modelFiltersCollapsed = Boolean(collapsed);
+  dom.modelFilterBody.hidden = state.modelFiltersCollapsed;
+  dom.modelFilterToggle.setAttribute("aria-expanded", String(!state.modelFiltersCollapsed));
+  dom.modelFilterToggle.textContent = state.modelFiltersCollapsed ? "옵션 전체보기" : "옵션 접기";
 }
 
 function renderSourceFilters() {
@@ -789,21 +916,19 @@ function renderSourceFilters() {
   if (!state.sources.length && !state.sourceCandidates.length) return;
   dom.sourceFilters.append(makeFacetButton("전체", "", state.selectedSites.size === 0, () => {
     state.selectedSites.clear();
-    renderFacets();
-    if (state.selectedProduct) {
-      updateListingScopeNote();
-      loadProductDetail();
-    }
+    renderSourceFilters();
+    updateListingScopeNote();
+    if (state.selectedProduct) loadProductDetail();
+    else loadListings(false);
   }));
   state.sources.forEach((source) => {
     dom.sourceFilters.append(makeFacetButton(source.label, source.id, state.selectedSites.has(source.id), () => {
       if (state.selectedSites.has(source.id)) state.selectedSites.delete(source.id);
       else state.selectedSites.add(source.id);
-      renderFacets();
-      if (state.selectedProduct) {
-        updateListingScopeNote();
-        loadProductDetail();
-      }
+      renderSourceFilters();
+      updateListingScopeNote();
+      if (state.selectedProduct) loadProductDetail();
+      else loadListings(false);
     }));
   });
   state.sourceCandidates.forEach((source) => {
@@ -826,39 +951,37 @@ function renderSourceFilters() {
   });
 }
 
-function updateFacet(key, value) {
-  const flow = browseFlowForCategory(state.categoryCode);
-  const descendants = new Set();
-  let changed = true;
-  while (changed) {
-    changed = false;
-    flow.forEach((step) => {
-      if (step.key === key || !step.depends_on?.some((dependency) => dependency === key || descendants.has(dependency))) return;
-      if (!descendants.has(step.key)) {
-        descendants.add(step.key);
-        changed = true;
-      }
-    });
-  }
-  state.facets[key] = value;
-  descendants.forEach((descendant) => { delete state.facets[descendant]; });
+function updateFacet(key, value, rowKey = key) {
+  const next = new Set(selectedFacetValues(key));
+  if (next.has(value)) next.delete(value);
+  else next.add(value);
+  if (next.size) state.facets[key] = [...next];
+  else delete state.facets[key];
+  state.openFacetRows.add(rowKey);
   state.openSeries.clear();
-  renderFacets();
+  syncCatalogUrl();
+  updateFacetSelectionUi();
   loadProducts(false);
 }
 
 function selectCategory(code) {
   if (!code || code === state.categoryCode) return;
   state.categoryCode = code;
+  state.query = "";
+  dom.catalogQuery.value = "";
   state.facets = {};
   state.openSeries.clear();
-  state.availableFacets = {};
+  state.openFacetRows.clear();
+  state.expandedFacetOptions.clear();
+  const firstFacet = browseFlowForCategory(code)[0]?.key;
+  if (firstFacet) state.openFacetRows.add(firstFacet);
   state.selectedProduct = null;
   state.products = [];
   resetDetail();
   renderCategories();
   renderFacets();
   updateWorkspaceHeading();
+  syncCatalogUrl();
   loadProducts(false);
 }
 
@@ -1026,7 +1149,9 @@ function renderProducts() {
       const toggle = createElement("button", "series-toggle");
       toggle.type = "button";
       toggle.setAttribute("aria-controls", groupId);
-      const open = state.openSeries?.has(seriesKey);
+      const open = state.openSeries?.has(seriesKey)
+        || (groupIndex === 0 && state.openSeries?.size === 0 && !state.selectedProduct);
+      if (open) state.openSeries?.add(seriesKey);
       toggle.setAttribute("aria-expanded", String(open));
       toggle.append(
         createElement("span", "series-toggle-icon", open ? "−" : "+"),
@@ -1103,6 +1228,7 @@ function renderProducts() {
     ? `“${state.query}” · ${total.toLocaleString("ko-KR")}개 모델`
     : "";
   dom.loadMoreProducts.hidden = !state.productCursor;
+  updateMatchedModelButton();
 }
 
 function firstProductWithActiveListings(products) {
@@ -1112,8 +1238,9 @@ function firstProductWithActiveListings(products) {
 function buildProductQuery(cursor = "") {
   const params = new URLSearchParams();
   if (state.categoryCode) params.set("category_code", state.categoryCode);
-  Object.entries(state.facets).forEach(([key, value]) => {
-    if (PRODUCT_QUERY_KEYS.has(key) && value) params.set(key, value);
+  Object.keys(state.facets).forEach((key) => {
+    if (!PRODUCT_QUERY_KEYS.has(key)) return;
+    selectedFacetValues(key).forEach((value) => params.append(key, value));
   });
   if (state.query) params.set("q", state.query);
   if (cursor) params.set("cursor", cursor);
@@ -1127,6 +1254,12 @@ function filterSeedProducts() {
     if (query && !productName(product).toLocaleLowerCase("ko-KR").includes(query)) return false;
     return productMatchesActiveFacets(product);
   });
+}
+
+function openSingleSearchResult(append) {
+  if (append || state.productTotal !== 1 || state.products.length !== 1) return false;
+  selectProduct(state.products[0]);
+  return true;
 }
 
 async function loadProducts(append) {
@@ -1160,7 +1293,6 @@ async function loadProducts(append) {
     state.productTotal = Number.isFinite(responseTotal)
       ? responseTotal
       : (append ? state.productTotal : items.length);
-    state.availableFacets = normalizeAvailableFacets(firstDefined(payload?.available_facets, nestedProducts?.available_facets));
     state.productCursor = normalizeText(firstDefined(
       nestedProducts?.next_cursor,
       nestedProducts?.nextCursor,
@@ -1168,9 +1300,8 @@ async function loadProducts(append) {
       payload?.nextCursor,
     ));
     renderProducts();
-    renderFacets();
     showCatalogMessage("");
-    if (!append) resetDetail();
+    if (!openSingleSearchResult(append) && !append) showScopedListings();
   } catch (error) {
     if (error.name === "AbortError") return;
     const fallback = !append ? filterSeedProducts() : [];
@@ -1178,11 +1309,9 @@ async function loadProducts(append) {
       state.products = fallback;
       state.productTotal = fallback.length;
       state.productCursor = "";
-      state.availableFacets = {};
       renderProducts();
-      renderFacets();
       showCatalogMessage("제품 목록 API가 응답하지 않아 카탈로그에 포함된 제품을 표시합니다.");
-      resetDetail();
+      if (!openSingleSearchResult(append)) showScopedListings();
     } else {
       if (!append) state.products = [];
       if (!append) state.productTotal = 0;
@@ -1191,7 +1320,9 @@ async function loadProducts(append) {
       resetDetail();
     }
   } finally {
-    if (state.productRequest === controller) state.productRequest = null;
+    if (state.productRequest === controller) {
+      state.productRequest = null;
+    }
     setBusy(dom.loadMoreProducts, false, "");
   }
 }
@@ -1202,24 +1333,64 @@ function resetDetail() {
   state.selectedProduct = null;
   state.listings = [];
   state.listingCursor = "";
+  state.listingScopeKey = "";
   state.detailStats = [];
   state.visibleStatsCount = 0;
-  state.offerRequest?.abort();
-  state.offerRequest = null;
   setPricePanelOpen(false);
   document.body.classList.remove("has-selected-product");
   dom.pricePanelTitle.textContent = "모델을 선택하세요";
   dom.selectedProductMeta.textContent = "표준 모델과 출처별 가격 통계를 확인할 수 있습니다.";
-  showDetailMessage("왼쪽 모델 목록에서 제품을 선택하세요.");
+  showDetailMessage("모델을 선택하면 30일 가격 인사이트를 볼 수 있습니다.");
   dom.referencePrice.hidden = true;
   dom.priceSummary.hidden = true;
   dom.statsSection.hidden = true;
   dom.listingSection.hidden = true;
+  dom.backToModels.hidden = true;
   dom.modelDirectory.hidden = false;
   dom.statsGroups.replaceChildren();
   dom.listingRows.replaceChildren();
-  dom.contextualOffer.hidden = true;
+  showListingMessage("");
   renderProducts();
+}
+
+function currentListingScopeTitle() {
+  if (state.query) return `“${state.query}” 검색 매물`;
+  const category = state.categories.find((item) => categoryCode(item) === state.categoryCode);
+  const selected = Object.entries(state.facets)
+    .flatMap(([key]) => selectedFacetValues(key).map((value) => facetOptionLabel(key, value)))
+    .slice(0, 3);
+  const scope = [category ? categoryLabel(category) : "PC 부품", ...selected].join(" · ");
+  return `${scope} 현재 매물`;
+}
+
+function showScopedListings() {
+  state.detailRequest?.abort();
+  state.detailRequest = null;
+  state.selectedProduct = null;
+  state.listings = [];
+  state.listingCursor = "";
+  state.listingScopeKey = "";
+  state.detailStats = [];
+  state.visibleStatsCount = 0;
+  setPricePanelOpen(false);
+  document.body.classList.remove("has-selected-product");
+  dom.pricePanelTitle.textContent = "모델을 선택하세요";
+  dom.selectedProductMeta.textContent = "현재 조건의 매물은 바로 표시합니다. 모델을 하나 고르면 30일 가격 차트를 볼 수 있습니다.";
+  showDetailMessage("모델별 가격 인사이트는 모델을 하나 선택했을 때만 표시합니다.");
+  dom.referencePrice.hidden = true;
+  dom.priceSummary.hidden = true;
+  dom.statsSection.hidden = true;
+  dom.statsGroups.replaceChildren();
+  dom.listingSection.hidden = false;
+  dom.backToModels.hidden = true;
+  dom.listingTitle.textContent = currentListingScopeTitle();
+  dom.listingEmpty.textContent = state.productTotal
+    ? "선택한 조건에 맞는 현재 매물이 없습니다."
+    : "선택한 조건에 맞는 모델이 없습니다.";
+  dom.listingRows.replaceChildren();
+  updateListingScopeNote();
+  renderProducts();
+  loadListings(false);
 }
 
 function setPricePanelOpen(open) {
@@ -1243,9 +1414,11 @@ function selectedProductMeta(product) {
 
 function updateListingScopeNote() {
   if (!dom.listingScopeNote) return;
-  dom.listingScopeNote.textContent = state.selectedSites.size
-    ? `${[...state.selectedSites].map(sourceLabel).join(" · ")} · 묶음·고장·박스만·수량 불명확 제외`
-    : "전체 사이트 · 묶음·고장·박스만·수량 불명확 제외";
+  const modelScope = state.selectedProduct ? "단일 모델" : `${Number(state.productTotal || 0).toLocaleString("ko-KR")}개 모델 범위`;
+  const siteScope = state.selectedSites.size
+    ? [...state.selectedSites].map(sourceLabel).join(" · ")
+    : "전체 사이트";
+  dom.listingScopeNote.textContent = `${modelScope} · ${siteScope} · 비교 가능한 정상 중고만 표시`;
 }
 
 function selectProduct(product) {
@@ -1254,77 +1427,47 @@ function selectProduct(product) {
     return;
   }
   state.selectedProduct = product;
-  setPricePanelOpen(false);
+  setPricePanelOpen(!stackedLayoutMedia.matches);
   document.body.classList.add("has-selected-product");
   state.listings = [];
   state.listingCursor = "";
+  state.listingScopeKey = "";
   state.detailStats = [];
   state.visibleStatsCount = 0;
   dom.pricePanelTitle.textContent = productName(product);
   dom.selectedProductMeta.textContent = selectedProductMeta(product);
   dom.workspaceTitle.textContent = productName(product);
-  dom.listingTitle.textContent = `${productName(product)} 구매 가능한 매물`;
+  dom.listingTitle.textContent = `${productName(product)} 현재 매물`;
   updateListingScopeNote();
   dom.referencePrice.hidden = true;
   dom.priceSummary.hidden = true;
   dom.statsSection.hidden = true;
   dom.listingSection.hidden = false;
-  dom.modelDirectory.hidden = true;
+  dom.backToModels.hidden = false;
+  dom.backToModels.textContent = "← 전체 조건 매물";
+  dom.modelDirectory.hidden = false;
   dom.listingRows.replaceChildren();
   dom.listingEmpty.hidden = true;
+  dom.listingEmpty.textContent = "이 모델의 현재 매물이 없습니다.";
+  showListingMessage("현재 매물을 불러오는 중입니다.");
   showDetailMessage("가격 통계와 현재 매물을 불러오는 중입니다.");
   renderProducts();
   loadProductDetail();
-  void refreshContextualOffer(product);
-}
-
-function monetizationEventPayload(offer, eventType) {
-  return {
-    event_type: eventType,
-    offer_id: offer.offer_id,
-    slot: offer.slot,
-    context_type: offer.context_type,
-    context_key: offer.context_key,
-    event_token: offer.event_token,
-  };
-}
-
-function recordMonetizationEvent(offer, eventType) {
-  void postJson("/api/monetization/event", monetizationEventPayload(offer, eventType), { keepalive: true }).catch(() => {});
-}
-
-async function refreshContextualOffer(product) {
-  state.offerRequest?.abort();
-  const controller = new AbortController();
-  state.offerRequest = controller;
-  dom.contextualOffer.hidden = true;
-  try {
-    const payload = await postJson("/api/monetization/contextual-offer", {
-      canonical_product_id: productId(product),
-      category_code: productCategory(product),
-      slot: "after-organic-results",
-    }, { signal: controller.signal });
-    if (controller.signal.aborted || state.selectedProduct !== product) return;
-    const offer = payload?.offer;
-    const destination = safeHttpsUrl(offer?.destination_url);
-    if (!offer || !destination || !offer.event_token) return;
-    dom.contextualOfferTitle.textContent = normalizeText(offer.title);
-    dom.contextualOfferProvider.textContent = normalizeText(offer.provider);
-    dom.contextualOfferLink.textContent = normalizeText(offer.cta_label) || "상품 보기";
-    dom.contextualOfferLink.href = destination;
-    dom.contextualOfferLink.onclick = () => recordMonetizationEvent(offer, "click");
-    dom.contextualOffer.hidden = false;
-    recordMonetizationEvent(offer, "impression");
-  } catch (error) {
-    if (error.name !== "AbortError") dom.contextualOffer.hidden = true;
-  } finally {
-    if (state.offerRequest === controller) state.offerRequest = null;
-  }
+  window.requestAnimationFrame(() => dom.listingSection.scrollIntoView({ behavior: "smooth", block: "start" }));
 }
 
 function buildListingQuery(cursor = "") {
   const params = new URLSearchParams();
-  params.set("canonical_product_id", productId(state.selectedProduct));
+  if (state.selectedProduct) {
+    params.set("canonical_product_id", productId(state.selectedProduct));
+  } else {
+    if (state.categoryCode) params.set("category_code", state.categoryCode);
+    Object.keys(state.facets).sort().forEach((key) => {
+      if (!PRODUCT_QUERY_KEYS.has(key)) return;
+      selectedFacetValues(key).sort().forEach((value) => params.append(key, value));
+    });
+    if (state.query) params.set("q", state.query);
+  }
   if (state.selectedSites.size) params.set("sites", [...state.selectedSites].join(","));
   if (state.listingSort) params.set("sort", state.listingSort);
   if (state.priceMin) params.set("price_min", state.priceMin);
@@ -1373,11 +1516,13 @@ async function loadProductDetail() {
     let listingError = null;
     if (listingResult.status === "fulfilled") {
       applyListingPayload(listingResult.value, false);
+      showListingMessage("");
     } else {
       listingError = listingResult.reason;
       state.listings = [];
       state.listingCursor = "";
       renderListings();
+      showListingMessage("현재 매물 목록을 불러오지 못했습니다.", true);
     }
 
     state.detailStats = statsResults
@@ -1421,7 +1566,7 @@ function applyListingPayload(payload, append) {
 }
 
 function listingPrice(listing) {
-  const price = firstDefined(listing?.price, listing?.display_price, listing?.amount, listing?.unit_price);
+  const price = firstDefined(listing?.price_value, listing?.price, listing?.display_price, listing?.amount, listing?.unit_price);
   const currency = normalizeText(firstDefined(listing?.currency, price?.currency, "KRW"));
   return formatMoney(price, currency);
 }
@@ -1509,6 +1654,8 @@ function renderListings() {
     }
     body.append(source, title);
     const meta = createElement("div", "listing-meta");
+    const canonicalModel = normalizeText(listing.canonical_display_name);
+    if (!state.selectedProduct && canonicalModel) meta.append(createElement("span", "listing-model", canonicalModel));
     const maker = normalizeText(firstDefined(listing.board_manufacturer, listing.canonical_manufacturer, listing.manufacturer));
     if (maker) meta.append(createElement("span", "listing-maker", maker));
     meta.append(createElement("span", "listing-state", listingConditionLabel(firstDefined(listing.condition_code, listing.lifecycle_status, listing.status, listing.availability))));
@@ -1893,24 +2040,29 @@ function renderStats() {
 }
 
 async function loadListings(append) {
-  if (!state.selectedProduct) return;
-  const product = state.selectedProduct;
+  if (!state.selectedProduct && !state.categoryCode && !state.query) return;
   const cursor = append ? state.listingCursor : "";
+  const scopeKey = buildListingQuery(cursor).toString();
+  state.listingScopeKey = scopeKey;
+  state.detailRequest?.abort();
+  const controller = new AbortController();
+  state.detailRequest = controller;
   setBusy(dom.loadMoreListings, true, "불러오는 중");
   if (!append) {
     state.listings = [];
     state.listingCursor = "";
     renderListings();
-    showDetailMessage("현재 매물을 불러오는 중입니다.");
+    showListingMessage("현재 매물을 불러오는 중입니다.");
   }
   try {
-    const payload = await fetchJson(`/api/pc/listings?${buildListingQuery(cursor)}`);
-    if (state.selectedProduct !== product) return;
+    const payload = await fetchJson(`/api/pc/listings?${scopeKey}`, { signal: controller.signal });
+    if (state.listingScopeKey !== scopeKey) return;
     applyListingPayload(payload, append);
-    showDetailMessage("");
+    showListingMessage("");
   } catch (error) {
-    if (error.name !== "AbortError") showDetailMessage(`현재 매물을 불러오지 못했습니다. ${error.message}`, true);
+    if (error.name !== "AbortError") showListingMessage(`현재 매물을 불러오지 못했습니다. ${error.message}`, true);
   } finally {
+    if (state.detailRequest === controller) state.detailRequest = null;
     setBusy(dom.loadMoreListings, false, "");
   }
 }
@@ -1919,8 +2071,17 @@ function digitsOnly(value) {
   return normalizeText(value).replace(/[^0-9]/g, "");
 }
 
-function syncSearchUrl() {
+function syncCatalogUrl() {
   const url = new URL(window.location.href);
+  for (const key of PRODUCT_QUERY_KEYS) url.searchParams.delete(key);
+  url.searchParams.delete("category");
+  url.searchParams.delete("category_code");
+  url.searchParams.delete("query");
+  if (state.categoryCode) url.searchParams.set("category_code", state.categoryCode);
+  Object.keys(state.facets).forEach((key) => {
+    if (!PRODUCT_QUERY_KEYS.has(key)) return;
+    selectedFacetValues(key).forEach((value) => url.searchParams.append(key, value));
+  });
   if (state.query) url.searchParams.set("q", state.query);
   else url.searchParams.delete("q");
   window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
@@ -1942,15 +2103,33 @@ async function loadCatalog() {
       state.categories = inferred.map((code) => ({ category_code: code, display_name: code }));
     }
     if (!state.categories.length) throw new Error("공개된 부품 카테고리가 없습니다.");
+    buildFacetUniverse();
 
-    const initialQuery = normalizeText(new URLSearchParams(window.location.search).get("q") || "");
+    const initialParams = new URLSearchParams(window.location.search);
+    const initialQuery = normalizeText(initialParams.get("q") || "");
     const routeCategory = window.location.pathname.match(/^\/categories\/([a-z-]+)$/u)?.[1]?.toUpperCase();
+    const queryCategory = normalizeText(initialParams.get("category_code") || initialParams.get("category")).toUpperCase();
+    const initialCategory = state.categories.find((category) => categoryCode(category) === queryCategory)
+      || state.categories.find((category) => categoryCode(category) === routeCategory)
+      || state.categories[0];
     state.query = initialQuery;
     dom.catalogQuery.value = initialQuery;
     state.categoryCode = initialQuery
       ? ""
-      : categoryCode(state.categories.find((category) => categoryCode(category) === routeCategory) || state.categories[0]);
-    state.availableFacets = {};
+      : categoryCode(initialCategory);
+    state.facets = {};
+    if (state.categoryCode) {
+      const categoryFlow = browseFlowForCategory(state.categoryCode);
+      categoryFlow.forEach(({ key }) => {
+        const requested = initialParams.getAll(key)
+          .flatMap((value) => value.split(","))
+          .map(normalizeText)
+          .filter(Boolean);
+        if (requested.length) state.facets[key] = [...new Set(requested)];
+      });
+      const firstFacet = categoryFlow[0]?.key;
+      if (firstFacet) state.openFacetRows.add(firstFacet);
+    }
     renderCategories();
     renderFacets();
     updateWorkspaceHeading();
@@ -1974,16 +2153,20 @@ async function loadCatalog() {
 dom.catalogSearch.addEventListener("submit", (event) => {
   event.preventDefault();
   state.query = normalizeText(dom.catalogQuery.value);
-  syncSearchUrl();
   if (state.query) {
     state.categoryCode = "";
     state.facets = {};
     state.openSeries.clear();
+    state.openFacetRows.clear();
+    state.expandedFacetOptions.clear();
     renderCategories();
   } else if (!state.categoryCode) {
     state.categoryCode = categoryCode(state.categories[0]);
+    const firstFacet = browseFlowForCategory(state.categoryCode)[0]?.key;
+    if (firstFacet) state.openFacetRows.add(firstFacet);
     renderCategories();
   }
+  syncCatalogUrl();
   updateWorkspaceHeading();
   renderFacets();
   loadProducts(false);
@@ -1992,8 +2175,10 @@ dom.catalogSearch.addEventListener("submit", (event) => {
 dom.catalogQuery.addEventListener("search", () => {
   if (!dom.catalogQuery.value && state.query) {
     state.query = "";
-    syncSearchUrl();
     if (!state.categoryCode) state.categoryCode = categoryCode(state.categories[0]);
+    const firstFacet = browseFlowForCategory(state.categoryCode)[0]?.key;
+    if (firstFacet) state.openFacetRows.add(firstFacet);
+    syncCatalogUrl();
     renderCategories();
     updateWorkspaceHeading();
     renderFacets();
@@ -2004,11 +2189,15 @@ dom.catalogQuery.addEventListener("search", () => {
 dom.resetFilters.addEventListener("click", () => {
   state.facets = {};
   state.openSeries.clear();
+  state.openFacetRows.clear();
+  state.expandedFacetOptions.clear();
   state.selectedSites.clear();
   state.query = "";
   dom.catalogQuery.value = "";
-  syncSearchUrl();
   if (!state.categoryCode) state.categoryCode = categoryCode(state.categories[0]);
+  const firstFacet = browseFlowForCategory(state.categoryCode)[0]?.key;
+  if (firstFacet) state.openFacetRows.add(firstFacet);
+  syncCatalogUrl();
   renderCategories();
   renderFacets();
   updateWorkspaceHeading();
@@ -2016,12 +2205,19 @@ dom.resetFilters.addEventListener("click", () => {
 });
 
 dom.loadMoreProducts.addEventListener("click", () => loadProducts(true));
+dom.showMatchedModels?.addEventListener("click", () => dom.modelDirectory.scrollIntoView({ behavior: "smooth", block: "start" }));
+mobileFacetMedia.addEventListener("change", () => renderFacets());
+stackedLayoutMedia.addEventListener("change", (event) => {
+  if (state.selectedProduct) setPricePanelOpen(!event.matches);
+});
+compactFilterMedia.addEventListener("change", (event) => setModelFiltersCollapsed(event.matches));
+dom.modelFilterToggle.addEventListener("click", () => setModelFiltersCollapsed(!state.modelFiltersCollapsed));
 dom.loadMoreListings.addEventListener("click", () => loadListings(true));
 dom.pricePanelToggle.addEventListener("click", () => setPricePanelOpen(!state.pricePanelOpen));
 dom.backToModels.addEventListener("click", () => {
-  resetDetail();
   updateWorkspaceHeading();
-  dom.modelDirectory.scrollIntoView({ behavior: "smooth", block: "start" });
+  showScopedListings();
+  dom.listingSection.scrollIntoView({ behavior: "smooth", block: "start" });
 });
 
 dom.listingControls.addEventListener("submit", (event) => {
@@ -2042,4 +2238,5 @@ dom.listingControls.addEventListener("submit", (event) => {
   loadListings(false);
 });
 
+setModelFiltersCollapsed(compactFilterMedia.matches);
 loadCatalog();

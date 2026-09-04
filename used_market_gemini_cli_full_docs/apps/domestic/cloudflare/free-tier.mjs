@@ -3,6 +3,7 @@ import { selectQualifiedItems } from "./live-search.mjs";
 import { pcCollectionTargetSetV2 } from "./pc-directory-http.mjs";
 import { PC_SOURCE_REGISTRY } from "../collector/logic/pc-source-registry.mjs";
 import { OPERATIONAL_PC_DIRECTORY_SITES, OPERATIONAL_TARGET_SITES } from "./target-sites.mjs";
+import { publicPcModelsForApi } from "../market/logic/pc-public-catalog.mjs";
 import {
   decodePcListingsCursor,
   encodePcListingsCursor,
@@ -50,7 +51,7 @@ const PC_DIRECTORY_SOURCE_BY_ID = new Map(PC_SOURCE_REGISTRY
   .map((source) => [source.key, source]));
 const PC_FRESHNESS_RUNTIME_BINDING_LIMIT = 40;
 
-function requestedPcFreshnessScopes(query) {
+function requestedPcFreshnessScopes(query, catalogScope = null) {
   const sourceIds = (query.sites.length > 0 ? query.sites : OPERATIONAL_PC_DIRECTORY_SITES)
     .filter((sourceId) => {
       const source = PC_DIRECTORY_SOURCE_BY_ID.get(sourceId);
@@ -61,12 +62,29 @@ function requestedPcFreshnessScopes(query) {
       if (query.currency === "KRW" && !marketPools.some((marketPool) => String(marketPool).startsWith("KR_"))) return false;
       return true;
     });
-  const categoryCodes = query.canonicalProductId
+  const categoryCodes = catalogScope
+    ? catalogScope.categoryCodes
+    : query.canonicalProductId
     ? [PC_CANONICAL_CATEGORY_BY_ID.get(query.canonicalProductId) || ""]
     : query.boardManufacturer
       ? ["GPU"]
       : PC_HOURLY_CATEGORY_CODES;
   return sourceIds.flatMap((sourceId) => categoryCodes.map((categoryCode) => `${sourceId}:${categoryCode}`));
+}
+
+function resolvePcCatalogListingScope(query) {
+  if (!query.catalogScope) return null;
+  const options = {
+    category: query.catalogScope.categoryCode,
+    q: query.catalogScope.query,
+    ...query.catalogScope.facets
+  };
+  const models = publicPcModelsForApi(options).models;
+  return {
+    modelIds: models.map((model) => model.canonical_product_id),
+    categoryCodes: [...new Set(models.map((model) => model.category_code).filter(Boolean))],
+    modelCount: models.length
+  };
 }
 
 function requiredPcFreshnessTargets(cohortScopes) {
@@ -181,8 +199,10 @@ export async function browsePcListingsD1(request, env) {
   });
   let query;
   let cursorState;
+  let catalogScope;
   try {
     query = parsePcListingsRequest(request, { allowedSites: OPERATIONAL_PC_DIRECTORY_SITES });
+    catalogScope = resolvePcCatalogListingScope(query);
     cursorState = decodePcListingsCursor(query, env.SEARCH_CURSOR_SECRET || env.RUNNER_TOKEN || "used-market-local-cursor-v2");
   } catch (error) {
     return new Response(JSON.stringify({ status: "error", error: error instanceof Error ? error.message : String(error) }), {
@@ -191,6 +211,49 @@ export async function browsePcListingsD1(request, env) {
     });
   }
   const asOf = cursorState?.asOf || new Date().toISOString();
+  if (catalogScope && catalogScope.modelIds.length === 0) {
+    return new Response(JSON.stringify({
+      status: "success",
+      data: {
+        items: [],
+        total: 0,
+        pagination: { has_more: false, next_cursor: null },
+        as_of: asOf,
+        freshness: {
+          ...pcListingsFreshness(asOf, null),
+          basis: "NO_MATCHING_CATALOG_MODELS",
+          last_listing_updated_at: null,
+          coverage_state: "INCOMPLETE",
+          required_target_count: 0,
+          covered_target_count: 0
+        },
+        filters: {
+          canonical_product_id: null,
+          catalog_scope: query.catalogScope,
+          matched_model_count: 0,
+          manufacturer: null,
+          board_manufacturer: query.boardManufacturer || null,
+          sites: query.sites,
+          sort: query.sort,
+          price_min: query.minPrice,
+          price_max: query.maxPrice,
+          market_pool: query.marketPool || null,
+          currency: query.currency || null
+        }
+      }
+    }), {
+      status: 200,
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+        "cache-control": `public, max-age=${readPositiveInteger(
+          env.D1_LISTING_CACHE_TTL_SECONDS,
+          D1_LISTING_CACHE_TTL_SECONDS,
+          300
+        )}`,
+        "x-free-tier-data-source": "d1"
+      }
+    });
+  }
   const conditions = [
     "active = 1",
     "lifecycle_status = 'ACTIVE'",
@@ -211,6 +274,12 @@ export async function browsePcListingsD1(request, env) {
   if (query.canonicalProductId) {
     conditions.push("canonical_product_id = ?");
     bindings.push(query.canonicalProductId);
+  } else if (catalogScope?.modelIds.length === 1) {
+    conditions.push("canonical_product_id = ?");
+    bindings.push(catalogScope.modelIds[0]);
+  } else if (catalogScope) {
+    conditions.push("canonical_product_id IN (SELECT value FROM json_each(?))");
+    bindings.push(JSON.stringify(catalogScope.modelIds));
   }
   if (query.manufacturer) {
     conditions.push("(canonical_manufacturer = ? OR board_manufacturer = ?)");
@@ -243,7 +312,7 @@ export async function browsePcListingsD1(request, env) {
   }
   const whereClause = conditions.join(" AND ");
   const broadRecentBrowse = query.sort === "recent"
-    && !query.canonicalProductId && !query.manufacturer && !query.boardManufacturer
+    && !query.canonicalProductId && !catalogScope && !query.manufacturer && !query.boardManufacturer
     && query.minPrice === null && query.maxPrice === null && !query.marketPool && !query.currency;
   const publicIndexHint = broadRecentBrowse
     ? (query.sites.length > 0 ? " INDEXED BY idx_listings_pc_public_site_recent" : " INDEXED BY idx_listings_pc_public_recent")
@@ -311,6 +380,16 @@ export async function browsePcListingsD1(request, env) {
       complete: cursorState.summary.requiredTargetCount > 0
         && cursorState.summary.requiredTargetCount === cursorState.summary.coveredTargetCount
     };
+  } else if (catalogScope) {
+    total = null;
+    latestObservedAt = page.reduce((latest, row) => (
+      String(row.updated_at || "") > String(latest || "") ? row.updated_at : latest
+    ), null);
+    runtimeFreshness = await pcListingCollectionFreshness(
+      env.DB,
+      requestedPcFreshnessScopes(query, catalogScope),
+      asOf
+    );
   } else {
     const summary = await env.DB.prepare(`SELECT COUNT(*) AS total, MAX(updated_at) AS latest_observed_at
       FROM listings${publicIndexHint} WHERE ${whereClause}`).bind(...bindings).first();
@@ -355,6 +434,8 @@ export async function browsePcListingsD1(request, env) {
       },
       filters: {
         canonical_product_id: query.canonicalProductId || null,
+        catalog_scope: query.catalogScope || null,
+        matched_model_count: catalogScope?.modelCount ?? null,
         manufacturer: query.manufacturer || null,
         board_manufacturer: query.boardManufacturer || null,
         sites: query.sites,
@@ -499,7 +580,14 @@ export async function fetchThroughD1ListingCache(request, env, originFetch) {
     || url.searchParams.has("reconciliation_audit") || !globalThis.caches?.default) {
     return originFetch(request);
   }
-  const cacheKey = await buildCacheKey(request, url);
+  const normalizedUrl = new URL(url);
+  const normalizedEntries = [...url.searchParams.entries()]
+    .sort(([leftKey, leftValue], [rightKey, rightValue]) => (
+      leftKey.localeCompare(rightKey) || leftValue.localeCompare(rightValue)
+    ));
+  normalizedUrl.search = "";
+  normalizedEntries.forEach(([key, value]) => normalizedUrl.searchParams.append(key, value));
+  const cacheKey = await buildCacheKey(request, normalizedUrl);
   if (!cacheKey) return originFetch(request);
   const cached = await globalThis.caches.default.match(cacheKey);
   if (cached) return responseWithHeader(cached, "x-d1-listing-cache", "HIT");

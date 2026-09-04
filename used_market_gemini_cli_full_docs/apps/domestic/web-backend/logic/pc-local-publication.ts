@@ -6,6 +6,7 @@ type JsonRecord = Record<string, any>;
 
 export interface LocalPcListingQuery {
   canonicalProductId: string | null;
+  canonicalProductIds: string[] | null;
   manufacturer: string | null;
   boardManufacturer: string | null;
   sites: string[];
@@ -169,8 +170,12 @@ export function createLocalPcPublicationReader() {
     const publication = readPublication(files.listingsPath);
     const allItems = Array.isArray(publication?.items) ? publication.items : [];
     const sites = new Set(query.sites.map(normalize).filter(Boolean));
+    const canonicalProductIds = Array.isArray(query.canonicalProductIds)
+      ? new Set(query.canonicalProductIds.map(normalize).filter(Boolean))
+      : null;
     let items = allItems.filter((item: JsonRecord) => {
       if (query.canonicalProductId && !same(item.canonical_product_id, query.canonicalProductId)) return false;
+      if (canonicalProductIds && !canonicalProductIds.has(normalize(item.canonical_product_id))) return false;
       if (sites.size && !sites.has(normalize(item.site))) return false;
       if (query.manufacturer && !same(item.canonical_manufacturer || item.manufacturer, query.manufacturer)) return false;
       if (query.boardManufacturer && !same(item.board_manufacturer, query.boardManufacturer)) return false;

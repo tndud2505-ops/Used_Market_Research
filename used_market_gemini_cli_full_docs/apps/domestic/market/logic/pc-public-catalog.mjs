@@ -19,25 +19,25 @@ export const PUBLIC_PC_CATEGORY_DEFINITIONS = Object.freeze([
 
 const FACETS = Object.freeze({
   CPU: [
-    ["manufacturer", "제조사"], ["generation", "세대·제품군"], ["model", "정확한 CPU 모델"]
+    ["manufacturer", "제조사"], ["family", "제품군"], ["generation", "세대"], ["socket", "소켓"], ["suffix", "모델 구분"]
   ],
   GPU: [
-    ["gpu_model", "GPU 모델"], ["board_brand", "제품 브랜드"], ["model", "정확한 그래픽카드 모델"]
+    ["manufacturer", "칩 제조사"], ["family", "제품군"], ["generation", "세대"], ["vram_gb", "VRAM"]
   ],
   RAM: [
-    ["usage", "사용 유형"], ["generation", "DDR 세대"], ["configuration", "구성"], ["model", "정확한 제품·품번"]
+    ["generation", "DDR 세대"], ["module_capacity_gb", "모듈 용량"], ["manufacturer", "제조사"]
   ],
   MOTHERBOARD: [
-    ["socket", "CPU 소켓"], ["chipset", "칩셋"], ["form_factor", "폼팩터"], ["model", "정확한 보드 모델"]
+    ["platform_vendor", "CPU 플랫폼"], ["socket", "CPU 소켓"], ["chipset", "칩셋"], ["manufacturer", "제조사"], ["form_factor", "폼팩터"]
   ],
   SSD: [
-    ["form_interface", "제품 형태·인터페이스"], ["capacity", "용량"], ["model", "정확한 SSD 모델"]
+    ["form_interface", "제품 형태·인터페이스"], ["capacity_bucket", "용량"], ["manufacturer", "제조사"], ["protocol", "프로토콜"]
   ],
   HDD: [
-    ["capacity", "용량"], ["purpose", "용도"], ["model", "정확한 HDD 모델"]
+    ["capacity_bucket", "용량"], ["manufacturer", "제조사"], ["purpose", "용도"], ["interface", "인터페이스"]
   ],
   PSU: [
-    ["rated_wattage", "정격 출력"], ["form_factor", "폼팩터"], ["model", "정확한 PSU 모델"]
+    ["watts_bucket", "정격 출력"], ["form_factor", "폼팩터"], ["manufacturer", "제조사"], ["atx_spec", "ATX 규격"], ["efficiency", "효율 등급"], ["modularity", "케이블 방식"]
   ]
 });
 
@@ -131,7 +131,10 @@ function publicFacetValues(product, key) {
   const spec = productSpec(product);
   switch (key) {
     case "manufacturer": return values(product.manufacturer || spec.chip_manufacturer || spec.platform_vendor);
+    case "platform_vendor": return values(spec.platform_vendor);
+    case "family": return values(spec.family);
     case "generation": return values(spec.generation || spec.memory_generation || spec.family);
+    case "suffix": return values(spec.suffix);
     case "model": return values(modelValue(product));
     case "gpu_model": return values(spec.gpu_model || (product.category === "GPU" ? modelValue(product) : ""));
     case "board_brand": return values(spec.board_manufacturer || product.board_brand || product.brand);
@@ -142,14 +145,21 @@ function publicFacetValues(product, key) {
     }
     case "configuration": return product.category === "RAM" ? [`${first(spec.module_capacity_gb || spec.capacity_per_module_gb)}GB × ${first(spec.module_count || spec.modules_per_kit || 1)}`] : [];
     case "module_capacity_gb": return product.category === "RAM" ? values(spec.module_capacity_gb || spec.capacity_per_module_gb) : [];
+    case "vram_gb": return values(spec.vram_gb || spec.vram_options_gb);
     case "socket": return values(spec.socket);
     case "chipset": return values(spec.chipset || first(modelValue(product).match(/\b([ABHXZ]\d{3})M?/iu)?.[1]));
     case "form_factor": return values(spec.form_factor);
-    case "form_interface": return values(spec.form_factor && spec.protocol ? `${spec.form_factor} ${spec.protocol}` : spec.form_factor || spec.interface);
+    case "form_interface": return values(spec.form_factor && spec.interface ? `${spec.form_factor} ${spec.interface}` : spec.form_factor || spec.interface);
     case "interface": return values(spec.interface);
+    case "protocol": return values(spec.protocol);
     case "capacity": return capacityValues(product);
+    case "capacity_bucket": return values(spec.capacity_bucket);
     case "purpose": return values(spec.purpose || spec.use_class);
     case "rated_wattage": return values(spec.rated_wattage || spec.watts || first(modelValue(product).match(/\b\d{3,4}\s*W\b/iu)?.[0]?.replace(/\s+/gu, "")));
+    case "watts_bucket": return values(spec.watts_bucket);
+    case "atx_spec": return values(spec.atx_spec || spec.atx_or_sfx_version);
+    case "efficiency": return values(spec.efficiency);
+    case "modularity": return values(spec.modularity);
     default: return [];
   }
 }
@@ -178,18 +188,23 @@ function filterMatches(product, key, requested) {
 }
 
 function normalizeFilters(options = {}) {
-  const input = options instanceof URLSearchParams ? Object.fromEntries(options.entries()) : options;
-  const category = categoryCode(input.category || input.category_code, { allowEmpty: true });
+  const input = options;
+  const requestedValues = (name) => options instanceof URLSearchParams
+    ? options.getAll(name).flatMap((value) => values(value.split(",")))
+    : values(input[name]);
+  const category = categoryCode(first(requestedValues("category")) || first(requestedValues("category_code")), { allowEmpty: true });
   const filters = {};
   const aliases = {
     manufacturer: ["manufacturer", "brand"], generation: ["generation", "memory_generation"], model: ["model", "exact_model"],
     gpu_model: ["gpu_model"], board_brand: ["board_brand", "board_manufacturer"], usage: ["usage", "market_segment"],
-    configuration: ["configuration", "config"], module_capacity_gb: ["module_capacity_gb", "capacity_per_module_gb"], socket: ["socket"], chipset: ["chipset"], form_factor: ["form_factor"],
-    form_interface: ["form_interface"], capacity: ["capacity", "marketed_capacity_gb", "capacity_bucket"], purpose: ["purpose", "use_class"],
-    rated_wattage: ["rated_wattage", "watts", "watts_bucket"]
+    platform_vendor: ["platform_vendor"], family: ["family"], suffix: ["suffix"],
+    configuration: ["configuration", "config"], module_capacity_gb: ["module_capacity_gb", "capacity_per_module_gb"], vram_gb: ["vram_gb", "vram_options_gb"], socket: ["socket"], chipset: ["chipset"], form_factor: ["form_factor"],
+    form_interface: ["form_interface"], capacity: ["capacity", "marketed_capacity_gb"], purpose: ["purpose", "use_class"],
+    capacity_bucket: ["capacity_bucket"], interface: ["interface"], protocol: ["protocol"],
+    rated_wattage: ["rated_wattage", "watts"], watts_bucket: ["watts_bucket"], atx_spec: ["atx_spec", "atx_or_sfx_version"], efficiency: ["efficiency"], modularity: ["modularity"]
   };
   for (const [key, names] of Object.entries(aliases)) {
-    const requested = names.flatMap((name) => values(input[name]));
+    const requested = names.flatMap(requestedValues);
     if (requested.length) filters[key] = [...new Set(requested)];
   }
   return { category, filters };
@@ -201,6 +216,7 @@ function matchingProducts(category, filters, exceptKey = null) {
 }
 
 function optionLabel(key, value) {
+  if (key === "suffix" && value === "NONE") return "일반";
   if (key === "capacity") {
     const rangeLabels = {
       GE_500GB: "500GB 이상", GE_1TB: "1TB 이상", GE_2TB: "2TB 이상", GE_4TB: "4TB 이상", GE_8TB: "8TB 이상", GE_10TB: "10TB 이상", GE_16TB: "16TB 이상",
@@ -215,6 +231,13 @@ function optionLabel(key, value) {
   if (key === "rated_wattage" && /^\d+$/u.test(value)) {
     return `${value}W`;
   }
+  if (key === "module_capacity_gb" || key === "vram_gb") return `${value}GB`;
+  if (key === "watts_bucket") {
+    return ({ LE_500: "500W 이하", "550_650": "550~650W", "700_750": "700~750W", "800_850": "800~850W", "900_1000": "900~1000W", "1100_1200": "1100~1200W", GT_1200: "1200W 초과" })[value] || value;
+  }
+  if (key === "capacity_bucket") {
+    return ({ LE_256_GB: "256GB 이하", "480_512_GB": "480~512GB", "960_GB_1_TB": "960GB~1TB", "1_92_2_TB": "1.92~2TB", "3_84_4_TB": "3.84~4TB", "7_68_8_TB": "7.68~8TB", GT_8_TB: "8TB 초과", LE_1_TB: "1TB 이하", "2_TB": "2TB", "3_4_TB": "3~4TB", "5_6_TB": "5~6TB", "8_TB": "8TB", "10_12_TB": "10~12TB", "14_16_TB": "14~16TB", "18_20_TB": "18~20TB", "22_24_TB": "22~24TB", GE_26_TB: "26TB 이상" })[value] || value;
+  }
   return value;
 }
 
@@ -223,7 +246,11 @@ export function publicPcProducts() {
 }
 
 export function publicPcFacetDefinitions(category) {
-  return FACETS[categoryCode(category)].map(([key, label], order) => ({ key, label, order }));
+  const code = categoryCode(category);
+  const products = PUBLIC_PRODUCTS.filter((product) => product.category === code);
+  return FACETS[code]
+    .map(([key, label], order) => ({ key, label, order }))
+    .filter(({ key }) => new Set(products.flatMap((product) => publicFacetValues(product, key))).size > 1);
 }
 
 export function publicPcCatalogForApi() {
@@ -284,9 +311,10 @@ function publicProductForApi(product, stats = {}) {
 }
 
 export function publicPcModelsForApi(options = {}) {
-  const input = options instanceof URLSearchParams ? Object.fromEntries(options.entries()) : options;
+  const input = options;
   const { category, filters } = normalizeFilters(input);
-  const query = normalize(input.q || input.query).toLocaleUpperCase("ko-KR");
+  const queryValue = options instanceof URLSearchParams ? (options.get("q") || options.get("query")) : (input.q || input.query);
+  const query = normalize(queryValue).toLocaleUpperCase("ko-KR");
   const products = matchingProducts(category, filters).filter((product) => {
     if (!query) return true;
     return [product.id, product.name, ...(product.aliases || [])].some((value) => normalize(value).toLocaleUpperCase("ko-KR").includes(query));

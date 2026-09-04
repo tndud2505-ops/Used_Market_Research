@@ -932,6 +932,9 @@ export class SearchIndex {
 
   browsePcListings(options = {}) {
     const canonicalProductId = cleanText(options.canonicalProductId, 300);
+    const canonicalProductIds = Array.isArray(options.canonicalProductIds)
+      ? [...new Set(options.canonicalProductIds.map((value) => cleanText(value, 300)).filter(Boolean))]
+      : null;
     const manufacturer = cleanText(options.manufacturer, 120);
     const boardManufacturer = cleanText(options.boardManufacturer, 120);
     const marketPool = cleanText(options.marketPool, 80);
@@ -963,6 +966,12 @@ export class SearchIndex {
     if (canonicalProductId) {
       where.push("json_extract(pc_metadata_json, '$.canonical_product_id') = ?");
       params.push(canonicalProductId);
+    } else if (canonicalProductIds?.length === 1) {
+      where.push("json_extract(pc_metadata_json, '$.canonical_product_id') = ?");
+      params.push(canonicalProductIds[0]);
+    } else if (canonicalProductIds) {
+      where.push("json_extract(pc_metadata_json, '$.canonical_product_id') IN (SELECT value FROM json_each(?))");
+      params.push(JSON.stringify(canonicalProductIds));
     }
     if (manufacturer) {
       where.push("(json_extract(pc_metadata_json, '$.canonical_manufacturer') = ? OR json_extract(pc_metadata_json, '$.board_manufacturer') = ?)");

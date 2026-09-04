@@ -57,6 +57,25 @@ const scopedPcListingsRequest = parsePcListingsRequest(
 assert.equal(scopedPcListingsRequest.marketPool, "KR_C2C_USED");
 assert.equal(scopedPcListingsRequest.currency, "KRW");
 assert.equal(scopedPcListingsRequest.boardManufacturer, "ASUS");
+const catalogScopedPcListingsRequest = parsePcListingsRequest(
+  "https://used-pick.test/api/pc/listings?category_code=RAM&module_capacity_gb=16&manufacturer=Samsung&manufacturer=SK%20hynix",
+  { allowedSites: [] }
+);
+assert.equal(catalogScopedPcListingsRequest.catalogScope.categoryCode, "RAM");
+assert.deepEqual(catalogScopedPcListingsRequest.catalogScope.facets.module_capacity_gb, ["16"]);
+assert.deepEqual(catalogScopedPcListingsRequest.catalogScope.facets.manufacturer, ["SK hynix", "Samsung"]);
+assert.equal(catalogScopedPcListingsRequest.manufacturer, "",
+  "manufacturer is a catalog facet whenever category_code defines a multi-model scope");
+const reversedCatalogScopedRequest = parsePcListingsRequest(
+  "https://used-pick.test/api/pc/listings?manufacturer=SK%20hynix&manufacturer=Samsung&module_capacity_gb=16&category_code=RAM",
+  { allowedSites: [] }
+);
+assert.equal(pcListingsIdentity(catalogScopedPcListingsRequest), pcListingsIdentity(reversedCatalogScopedRequest),
+  "equivalent catalog scopes retain one signed cursor identity regardless of parameter order");
+assert.throws(
+  () => parsePcListingsRequest("https://used-pick.test/api/pc/listings?canonical_product_id=ram%3Asamsung%3Addr5%3A16gb&category_code=RAM", { allowedSites: [] }),
+  /cannot be combined with catalog scope/u
+);
 assert.equal(Object.hasOwn(JSON.parse(pcListingsIdentity(scopedPcListingsRequest)), "reconciliation_audit"), false,
   "ordinary signed cursors retain their pre-audit query identity");
 const auditPcListingsRequest = parsePcListingsRequest(
@@ -1288,11 +1307,70 @@ const normalPageSelects = bindingObservations.filter((observation) => (
 assert.equal(normalPageSelects.length, 2);
 assert.equal(normalPageSelects.every((observation) => /\bORDER BY\b[\s\S]*\bLIMIT \?/iu.test(observation.sql)), true,
   "normal D1 listing reads must be bounded limit+1 keyset statements");
-assert.equal(bindingObservations.filter((observation) => /SELECT COUNT\(\*\) AS total, MAX\(updated_at\)/iu.test(observation.sql)).length, 1,
+
+const insertCatalogScopeFixture = paginationD1.prepare(`INSERT INTO listings(
+  item_id, site, category_id, title, search_text, price_value, currency, url, updated_at, active,
+  canonical_product_id, canonical_display_name, canonical_manufacturer, listing_kind, pc_category_code,
+  quantity, price_scope, condition_code, lifecycle_status, market_pool, price_eligible, exclusion_reasons_json
+) VALUES (?, 'danawa', 'pc', ?, ?, ?, 'KRW', ?, '2026-08-31T02:00:00.000Z', 1,
+  ?, ?, ?, 'SINGLE_COMPONENT', 'RAM', 1, 'TOTAL', 'USED_WORKING', 'ACTIVE', 'KR_C2C_USED', 1, '[]')`);
+insertCatalogScopeFixture.run("danawa:ram-samsung-16", "Samsung DDR5 16GB", "Samsung DDR5 16GB", 42_000,
+  "https://dmall.danawa.com/v3/?controller=sale&methods=blog&seq=ram-samsung-16",
+  "ram:samsung:ddr5:16gb", "Samsung DDR5 16GB", "Samsung");
+insertCatalogScopeFixture.run("danawa:ram-hynix-16", "SK hynix DDR5 16GB", "SK hynix DDR5 16GB", 39_000,
+  "https://dmall.danawa.com/v3/?controller=sale&methods=blog&seq=ram-hynix-16",
+  "ram:sk-hynix:ddr5:16gb", "SK hynix DDR5 16GB", "SK hynix");
+insertCatalogScopeFixture.run("danawa:ram-samsung-8", "Samsung DDR5 8GB", "Samsung DDR5 8GB", 22_000,
+  "https://dmall.danawa.com/v3/?controller=sale&methods=blog&seq=ram-samsung-8",
+  "ram:samsung:ddr5:8gb", "Samsung DDR5 8GB", "Samsung");
+const catalogScopeObservationStart = bindingObservations.length;
+const catalogScopeBase = "https://used-pick.test/api/pc/listings?category_code=RAM&generation=DDR5&module_capacity_gb=16&sites=danawa&currency=KRW&limit=1";
+const catalogScopeResponse = await worker.fetch(new Request(
+  catalogScopeBase
+), bindingBudgetEnv);
+assert.equal(catalogScopeResponse.status, 200);
+const catalogScopePayload = await catalogScopeResponse.json();
+assert.equal(catalogScopePayload.data.pagination.has_more, true);
+const catalogScopeContinuation = await worker.fetch(new Request(
+  `${catalogScopeBase}&cursor=${encodeURIComponent(catalogScopePayload.data.pagination.next_cursor)}`
+), bindingBudgetEnv);
+assert.equal(catalogScopeContinuation.status, 200);
+const catalogScopeContinuationPayload = await catalogScopeContinuation.json();
+assert.deepEqual(new Set([
+  ...catalogScopePayload.data.items,
+  ...catalogScopeContinuationPayload.data.items
+].map((item) => item.canonical_product_id)), new Set([
+  "ram:samsung:ddr5:16gb", "ram:sk-hynix:ddr5:16gb"
+]));
+assert.equal(catalogScopePayload.data.total, null,
+  "multi-model listing browse avoids a separate exact COUNT query");
+assert.equal(catalogScopeContinuationPayload.data.total, null,
+  "multi-model continuation reuses the nullable first-page summary");
+assert.equal(catalogScopePayload.data.filters.matched_model_count, 8);
+const catalogScopeObservations = bindingObservations.slice(catalogScopeObservationStart);
+assert.equal(catalogScopeObservations.some((observation) => /SELECT COUNT\(\*\) AS total/iu.test(observation.sql)), false,
+  "multi-model listing browse must not spend D1 reads on an exact total");
+assert.equal(catalogScopeObservations.some((observation) => /json_each\(\?\)/iu.test(observation.sql)), true,
+  "multi-model listing browse uses one JSON-bound catalog ID set");
+assert.equal(catalogScopeObservations.every((observation) => observation.count <= 90), true,
+  "catalog listing scopes stay within the D1 binding budget");
+
+let emptyCatalogScopeDbCalls = 0;
+const emptyCatalogScopeResponse = await worker.fetch(new Request(
+  "https://used-pick.test/api/pc/listings?category_code=RAM&q=no-such-public-model"
+), {
+  DB: { prepare() { emptyCatalogScopeDbCalls += 1; throw new Error("D1 must not be queried for an empty catalog scope"); } },
+  SEARCH_CURSOR_SECRET: "fixture-pagination-secret-that-is-long-enough"
+});
+assert.equal(emptyCatalogScopeResponse.status, 200);
+assert.equal((await emptyCatalogScopeResponse.json()).data.items.length, 0);
+assert.equal(emptyCatalogScopeDbCalls, 0, "an empty catalog model scope returns without a D1 read");
+const bindingBudgetObservations = bindingObservations.slice(0, catalogScopeObservationStart);
+assert.equal(bindingBudgetObservations.filter((observation) => /SELECT COUNT\(\*\) AS total, MAX\(updated_at\)/iu.test(observation.sql)).length, 1,
   "a signed continuation cursor must reuse the first-page summary instead of rescanning D1");
-assert.equal(bindingObservations.filter((observation) => /FROM pc_listing_collection_target_runtime/iu.test(observation.sql)).length, 1,
+assert.equal(bindingBudgetObservations.filter((observation) => /FROM pc_listing_collection_target_runtime/iu.test(observation.sql)).length, 1,
   "a signed continuation cursor must reuse the first-page collection freshness");
-assert.equal(bindingObservations.some((observation) => (
+assert.equal(bindingBudgetObservations.some((observation) => (
   /\bSELECT item_id, site, url, price_value, updated_at\b/iu.test(observation.sql)
   && !/\bLIMIT\b/iu.test(observation.sql)
 )), false, "normal pagination must not scan the complete identity projection in Worker memory");

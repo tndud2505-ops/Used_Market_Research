@@ -4,6 +4,16 @@ const SORTS = new Set(["recent", "price_asc", "price_desc"]);
 const CURRENCIES = new Set(["KRW", "USD"]);
 const MARKET_POOLS = new Set(["KR_C2C_USED", "KR_DEALER_USED", "KR_REFURB_RETAIL", "OVERSEAS_USED"]);
 const DOMESTIC_MARKET_POOLS = new Set(["KR_C2C_USED", "KR_DEALER_USED", "KR_REFURB_RETAIL"]);
+const PUBLIC_PC_CATEGORY_CODES = new Set(["CPU", "GPU", "RAM", "MOTHERBOARD", "SSD", "HDD", "PSU"]);
+const PUBLIC_PC_FACET_KEYS = new Set([
+  "manufacturer", "brand", "model", "exact_model", "gpu_model", "board_brand", "usage", "market_segment",
+  "configuration", "config", "platform_vendor", "family", "generation", "memory_generation", "suffix",
+  "module_capacity_gb", "capacity_per_module_gb", "vram_gb", "vram_options_gb", "socket", "chipset",
+  "form_factor", "form_interface", "capacity", "marketed_capacity_gb", "capacity_bucket", "purpose", "use_class",
+  "interface", "protocol", "rated_wattage", "watts", "watts_bucket", "atx_spec", "atx_or_sfx_version",
+  "efficiency", "modularity"
+]);
+const MAX_CATALOG_SCOPE_VALUES = 60;
 
 const SOURCE_URL_ID_PATTERNS = Object.freeze({
   ebay: [/\/itm\/(?:[^/?#]+\/)?(\d{8,14})(?:[/?#]|$)/iu],
@@ -27,12 +37,36 @@ function price(value, label) {
   return parsed;
 }
 
+function catalogScopeFrom(url) {
+  const categoryCode = text(url.searchParams.get("category_code"), 40).toUpperCase();
+  if (categoryCode && !PUBLIC_PC_CATEGORY_CODES.has(categoryCode)) {
+    throw new TypeError("unsupported category_code filter");
+  }
+  const query = text(url.searchParams.get("q") ?? url.searchParams.get("query"), 160);
+  if (!categoryCode && !query) return null;
+  const facets = {};
+  let valueCount = 0;
+  for (const key of PUBLIC_PC_FACET_KEYS) {
+    const selected = [...new Set(url.searchParams.getAll(key)
+      .flatMap((value) => value.split(","))
+      .map((value) => text(value, 120))
+      .filter(Boolean))].sort();
+    if (!selected.length) continue;
+    valueCount += selected.length;
+    if (valueCount > MAX_CATALOG_SCOPE_VALUES) throw new TypeError("too many catalog facet values");
+    facets[key] = selected;
+  }
+  return { categoryCode, query, facets };
+}
+
 export function parsePcListingsRequest(urlOrRequest, { allowedSites = [] } = {}) {
   const url = urlOrRequest instanceof URL
     ? urlOrRequest
     : new URL(typeof urlOrRequest === "string" ? urlOrRequest : urlOrRequest.url);
   const canonicalProductId = text(url.searchParams.get("canonical_product_id"), 300);
-  const manufacturer = text(url.searchParams.get("manufacturer"), 120);
+  const catalogScope = catalogScopeFrom(url);
+  if (canonicalProductId && catalogScope) throw new TypeError("canonical_product_id cannot be combined with catalog scope filters");
+  const manufacturer = catalogScope ? "" : text(url.searchParams.get("manufacturer"), 120);
   const boardManufacturer = text(url.searchParams.get("board_manufacturer"), 120);
   const requestedSites = [...new Set([...url.searchParams.getAll("sites"), ...url.searchParams.getAll("site")]
     .flatMap((value) => value.split(","))
@@ -65,6 +99,7 @@ export function parsePcListingsRequest(urlOrRequest, { allowedSites = [] } = {})
   const reconciliationAudit = text(url.searchParams.get("reconciliation_audit"), 160) || null;
   return {
     canonicalProductId,
+    catalogScope,
     manufacturer,
     boardManufacturer,
     sites: requestedSites,
@@ -83,6 +118,13 @@ export function pcListingsIdentity(query) {
   const identity = {
     namespace: "pc_parts_directory_v2",
     canonical_product_id: query.canonicalProductId || "",
+    catalog_scope: query.catalogScope ? {
+      category_code: query.catalogScope.categoryCode || "",
+      query: query.catalogScope.query || "",
+      facets: Object.fromEntries(Object.entries(query.catalogScope.facets || {})
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, values]) => [key, [...values].sort()]))
+    } : null,
     manufacturer: query.manufacturer || "",
     board_manufacturer: query.boardManufacturer || "",
     sites: [...(query.sites || [])].sort(),
@@ -198,12 +240,13 @@ export function decodePcListingsCursor(query, secret) {
   const asOf = text(state.after?.as_of, 80);
   const itemId = text(state.after?.item_id, 700);
   if (!asOf || !Number.isFinite(Date.parse(asOf)) || !itemId) throw new Error("CURSOR_INVALID: listing continuation is invalid");
-  const total = Number(state.after?.total);
+  const rawTotal = state.after?.total;
+  const total = rawTotal === null ? null : Number(rawTotal);
   const latestObservedAt = text(state.after?.latest_observed_at, 80);
   const lastCollectedAt = text(state.after?.last_collected_at, 80);
   const requiredTargetCount = Number(state.after?.required_target_count);
   const coveredTargetCount = Number(state.after?.covered_target_count);
-  const hasSummary = Number.isSafeInteger(total) && total >= 0
+  const hasSummary = (total === null || (Number.isSafeInteger(total) && total >= 0))
     && (!latestObservedAt || Number.isFinite(Date.parse(latestObservedAt)))
     && (!lastCollectedAt || Number.isFinite(Date.parse(lastCollectedAt)))
     && Number.isSafeInteger(requiredTargetCount) && requiredTargetCount >= 0

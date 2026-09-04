@@ -25,17 +25,10 @@ assert.match(privacy, /원문 검색어·상품명·전체 URL·영구 사용자
 assert.doesNotMatch(privacy, /카카오 애드핏/u);
 assert.match(terms, /제휴 여부는 검색 결과의 추천순이나 가격 통계에 영향을 주지 않습니다/u);
 
-assert.equal((html.match(/id="contextual-offer"/gu) || []).length, 1);
-assert.ok(html.indexOf('id="contextual-offer"') > html.indexOf('id="pagination-controls"'));
-assert.match(html, /contextual-offer-label">광고</u);
-assert.match(html, /수수료를 받을 수 있습니다/u);
-assert.match(html, /시세와 추천순에는 영향을 주지 않습니다/u);
-assert.match(html, /rel="sponsored noopener noreferrer"/u);
-assert.match(app, /\/api\/monetization\/contextual-offer/u);
-assert.match(app, /\/api\/monetization\/event/u);
-assert.match(app, /event_token: offer\.event_token/u);
-assert.match(app, /void refreshContextualOffer\(product\)/u);
-assert.ok(app.indexOf("void refreshContextualOffer(product)") > app.indexOf("state.selectedProduct = product"));
+assert.doesNotMatch(html, /contextual-offer|관련 광고|rel="sponsored/u,
+  "the PC search UI must not render advertising slots");
+assert.doesNotMatch(app, /\/api\/monetization\/|refreshContextualOffer/u,
+  "the PC search UI must not request internal monetization APIs");
 assert.doesNotMatch(migration, /query|title|url|ip|user|session/iu);
 
 const now = new Date("2026-08-29T00:00:00.000Z");

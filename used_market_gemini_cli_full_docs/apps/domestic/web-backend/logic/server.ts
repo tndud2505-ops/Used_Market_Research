@@ -247,6 +247,7 @@ export function createServer(
     runSearchOnly?: typeof runSearchOnly;
     listPcListings?: (query: {
       canonicalProductId: string | null;
+      canonicalProductIds: string[] | null;
       manufacturer: string | null;
       boardManufacturer: string | null;
       sites: string[];
@@ -532,9 +533,17 @@ export function createServer(
         if (minPrice !== null && maxPrice !== null && minPrice > maxPrice) throw new ApiError(400, 'price_min must be <= price_max');
         const requestedLimit = Number(urlObj.searchParams.get('limit') || 30);
         if (!Number.isInteger(requestedLimit) || requestedLimit < 1) throw new ApiError(400, 'limit must be a positive integer');
+        const canonicalProductId = urlObj.searchParams.get('canonical_product_id');
+        const hasCatalogScope = urlObj.searchParams.has('category_code')
+          || urlObj.searchParams.has('q') || urlObj.searchParams.has('query');
+        if (canonicalProductId && hasCatalogScope) {
+          throw new ApiError(400, 'canonical_product_id cannot be combined with catalog scope filters');
+        }
+        const catalogModels = hasCatalogScope ? publicPcModelsForApi(urlObj.searchParams).models : null;
         const data = await resolvedOptions.listPcListings({
-          canonicalProductId: urlObj.searchParams.get('canonical_product_id'),
-          manufacturer: urlObj.searchParams.get('manufacturer'),
+          canonicalProductId,
+          canonicalProductIds: catalogModels?.map((model: Record<string, unknown>) => String(model.canonical_product_id)) ?? null,
+          manufacturer: hasCatalogScope ? null : urlObj.searchParams.get('manufacturer'),
           boardManufacturer: urlObj.searchParams.get('board_manufacturer'),
           sites,
           sort,

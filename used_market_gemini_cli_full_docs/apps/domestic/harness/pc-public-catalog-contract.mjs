@@ -25,6 +25,15 @@ assert.deepEqual(catalog.categories.map((category) => category.label), [
 assert.equal(categoryCodes.some((code) => ["CASE", "COOLING", "ODD", "EXPANSION_CARD"].includes(code)), false);
 assert.deepEqual(catalog.categories.map((category) => Object.keys(category).filter((key) => ["model_count", "active_count", "sold_30d_count"].includes(key))),
   categoryCodes.map(() => ["model_count", "active_count", "sold_30d_count"]));
+for (const code of categoryCodes) {
+  const available = publicPcFacetsForApi({ category: code }).available_facets;
+  for (const facet of catalog.facet_schema[code]) {
+    assert.ok(available[facet.key]?.length > 1, `${code}.${facet.key} must have enough real values to be publicly declared`);
+    assert.equal(["model", "gpu_model"].includes(facet.key), false, "exact models belong in search and the model table");
+  }
+}
+assert.deepEqual(publicPcFacetsForApi({ category: "SSD" }).available_facets.protocol.map(({ value }) => value), ["AHCI", "NVMe"]);
+assert.deepEqual(publicPcFacetsForApi({ category: "SSD" }).available_facets.form_interface.map(({ value }) => value), ["M.2 2280 PCIe", "M.2 2280 SATA"]);
 
 const requiredModelFields = [
   "canonical_product_id", "canonical_display_name", "category_code", "brand_label", "key_specs",
@@ -44,9 +53,48 @@ assert.deepEqual(publicPcFacetsForApi({ q: "RX 460" }).available_facets, {},
 const ramFacets = publicPcFacetsForApi({ category: "RAM", usage: "CONSUMER_DESKTOP", generation: "DDR5" });
 assert.deepEqual(ramFacets.category, "RAM");
 assert.deepEqual(ramFacets.filters, { usage: ["CONSUMER_DESKTOP"], generation: ["DDR5"] });
-assert.ok(ramFacets.facets.configuration.values.length > 0);
-for (const option of ramFacets.facets.configuration.values) {
-  assert.ok(publicPcModelsForApi({ category: "RAM", usage: "CONSUMER_DESKTOP", generation: "DDR5", configuration: option.value }).models.length > 0);
+assert.ok(ramFacets.facets.module_capacity_gb.values.length > 0);
+for (const option of ramFacets.facets.module_capacity_gb.values) {
+  assert.ok(publicPcModelsForApi({ category: "RAM", usage: "CONSUMER_DESKTOP", generation: "DDR5", module_capacity_gb: option.value }).models.length > 0);
+}
+
+const repeatedCpuParams = new URLSearchParams([
+  ["category_code", "CPU"],
+  ["manufacturer", "AMD"],
+  ["manufacturer", "Intel"],
+  ["generation", "Ryzen 9000"],
+  ["generation", "14th"]
+]);
+const repeatedCpuModels = publicPcModelsForApi(repeatedCpuParams);
+const expectedCpuIds = new Set(["AMD", "Intel"].flatMap((manufacturer) => (
+  ["Ryzen 9000", "14th"].flatMap((generation) => (
+    publicPcModelsForApi({ category: "CPU", manufacturer, generation }).models
+  ))
+)).map((model) => model.canonical_product_id));
+assert.deepEqual(repeatedCpuModels.filters, {
+  manufacturer: ["AMD", "Intel"],
+  generation: ["Ryzen 9000", "14th"]
+});
+assert.deepEqual(new Set(repeatedCpuModels.models.map((model) => model.canonical_product_id)), expectedCpuIds,
+  "values in one facet row must use OR while different rows use AND");
+const repeatedCpuFacets = publicPcFacetsForApi(repeatedCpuParams);
+for (const manufacturer of ["AMD", "Intel"]) {
+  const option = repeatedCpuFacets.available_facets.manufacturer.find(({ value }) => value === manufacturer);
+  const expected = publicPcModelsForApi({
+    category: "CPU",
+    manufacturer,
+    generation: ["Ryzen 9000", "14th"]
+  }).models.length;
+  assert.equal(option?.count, expected, `self-excluding manufacturer count is wrong: ${manufacturer}`);
+}
+for (const generation of ["Ryzen 9000", "14th"]) {
+  const option = repeatedCpuFacets.available_facets.generation.find(({ value }) => value === generation);
+  const expected = publicPcModelsForApi({
+    category: "CPU",
+    manufacturer: ["AMD", "Intel"],
+    generation
+  }).models.length;
+  assert.equal(option?.count, expected, `self-excluding generation count is wrong: ${generation}`);
 }
 
 const classifications = [
@@ -81,6 +129,11 @@ assert.ok(incompletePsu.statistics_exclusion_reasons.includes("INCOMPLETE_CABLE_
 const html = await readFile(path.join(appRoot, "web-backend/public/index.html"), "utf8");
 for (const route of ["/categories/cpu", "/categories/gpu", "/categories/ram", "/categories/motherboard", "/categories/ssd", "/categories/hdd", "/categories/psu"]) assert.ok(html.includes(route), `SSR fallback route missing: ${route}`);
 for (const label of catalog.categories.map((category) => category.label)) assert.ok(html.includes(label), `SSR fallback label missing: ${label}`);
+for (const category of catalog.categories) {
+  const route = `/categories/${category.code.toLowerCase()}`;
+  const fallback = html.match(new RegExp(`href="${route}"[\\s\\S]*?category-count">(\\d+)개`, "u"));
+  assert.equal(Number(fallback?.[1]), category.model_count, `SSR fallback count mismatch: ${category.code}`);
+}
 const categoryLanding = await readFile(path.join(appRoot, "web-backend/public/used-market-categories.html"), "utf8");
 assert.match(categoryLanding, /<meta name="robots" content="index, follow/u, "category landing must be indexable");
 assert.match(categoryLanding, /<link rel="canonical" href="https:\/\/used-pick\.com\/categories"/u, "category landing canonical missing");
@@ -108,6 +161,11 @@ try {
   const globalModelsResponse = await fetch(`${baseUrl}/api/catalog/models?q=RX%20460`);
   assert.equal(globalModelsResponse.status, 200);
   assert.ok((await globalModelsResponse.json()).data.models.some((model) => model.canonical_product_id === "gpu:amd:rx-460"));
+  const repeatedModelsResponse = await fetch(`${baseUrl}/api/catalog/models?${repeatedCpuParams}`);
+  assert.equal(repeatedModelsResponse.status, 200);
+  const repeatedModelsPayload = (await repeatedModelsResponse.json()).data;
+  assert.deepEqual(repeatedModelsPayload.filters, repeatedCpuModels.filters);
+  assert.deepEqual(new Set(repeatedModelsPayload.models.map((model) => model.canonical_product_id)), expectedCpuIds);
   const categoryPage = await fetch(`${baseUrl}/categories/gpu`);
   assert.equal(categoryPage.status, 200);
   assert.match(await categoryPage.text(), /category-rail/u);

@@ -11,6 +11,8 @@ import {
   pcPartsDirectoryForApiV2,
   queryPcPartsDirectoryV2
 } from "../market/logic/pc-parts-directory.mjs";
+import { pcProductsResponse } from "../cloudflare/pc-directory-http.mjs";
+import { publicPcModelsForApi } from "../market/logic/pc-public-catalog.mjs";
 
 assert.equal(PC_PRODUCT_MASTER_V2_VERSION, 2);
 assert.equal(PC_PART_CATEGORY_SEEDS_V2.length, 11);
@@ -124,5 +126,22 @@ const api = pcPartsDirectoryForApiV2({ category: "RAM", facets: { memory_generat
 assert.equal(api.master_version, 2);
 assert.deepEqual([...new Set(api.products.items.map((product) => product.spec.module_capacity_gb))], [48, 64]);
 assert.ok(api.categories.length === 11 && api.facet_schema.memory_generation.includes("DDR5"));
+
+const repeatedPublicUrl = new URL("https://used-pick.test/api/pc/products");
+for (const [key, value] of [
+  ["category_code", "CPU"],
+  ["manufacturer", "AMD"], ["manufacturer", "Intel"],
+  ["generation", "Ryzen 9000"], ["generation", "14th"]
+]) repeatedPublicUrl.searchParams.append(key, value);
+const repeatedPublic = pcProductsResponse(repeatedPublicUrl);
+const repeatedExpected = publicPcModelsForApi(repeatedPublicUrl.searchParams);
+assert.deepEqual(repeatedPublic.products.items.map((product) => product.id),
+  repeatedExpected.models.map((product) => product.canonical_product_id),
+  "/api/pc/products must preserve repeated public facet values");
+assert.equal(repeatedPublic.products.total, repeatedExpected.models.length);
+
+const legacyModelFilter = pcProductsResponse("https://used-pick.test/api/pc/products?category_code=SSD&model=990%20PRO");
+assert.ok(legacyModelFilter.products.items.some((product) => product.id === "ssd:samsung:990-pro-1tb"),
+  "legacy public model filters must stay routed through the public catalog");
 
 console.log(`pc-directory-contract: ok (${PC_PRODUCT_MASTER_V2.length} V2 directory nodes)`);

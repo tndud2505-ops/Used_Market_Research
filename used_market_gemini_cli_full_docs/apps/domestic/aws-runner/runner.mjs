@@ -27,6 +27,7 @@ import { evaluatePipelineQualityReports, loadPipelineQualityReports } from "./pc
 import { explicitSoldText, structuredSoldEvidenceFromHtml } from "../market/logic/listing-lifecycle.mjs";
 import { compactStatsForPublication, statsChecksum, statsPublicationKey } from "../cloudflare/public-product-stats.mjs";
 import { pcCatalogResponse, pcCollectionTargetSetV2, pcProductsResponse } from "../cloudflare/pc-directory-http.mjs";
+import { publicPcModelsForApi } from "../market/logic/pc-public-catalog.mjs";
 import {
   decodePcListingsCursor,
   encodePcListingsCursor,
@@ -2114,10 +2115,18 @@ const server = http.createServer(async (req, res) => {
     if (!searchIndex) return json(res, 503, { status: "error", error: "PC listing projection is unavailable" });
     try {
       const query = parsePcListingsRequest(url, { allowedSites: PC_DIRECTORY_SITES });
+      const catalogModels = query.catalogScope
+        ? publicPcModelsForApi({
+          category: query.catalogScope.categoryCode,
+          q: query.catalogScope.query,
+          ...query.catalogScope.facets
+        }).models
+        : null;
       const cursorState = decodePcListingsCursor(query, SEARCH_CURSOR_SECRET);
       const asOf = cursorState?.asOf || new Date().toISOString();
       const result = searchIndex.browsePcListings({
         ...query,
+        canonicalProductIds: catalogModels?.map((model) => model.canonical_product_id) ?? null,
         asOf,
         after: cursorState?.after || null
       });
@@ -2135,6 +2144,8 @@ const server = http.createServer(async (req, res) => {
           freshness: pcListingsFreshness(asOf, result.latestObservedAt),
           filters: {
             canonical_product_id: query.canonicalProductId || null,
+            catalog_scope: query.catalogScope || null,
+            matched_model_count: catalogModels?.length ?? null,
             manufacturer: query.manufacturer || null,
             board_manufacturer: query.boardManufacturer || null,
             sites: query.sites,

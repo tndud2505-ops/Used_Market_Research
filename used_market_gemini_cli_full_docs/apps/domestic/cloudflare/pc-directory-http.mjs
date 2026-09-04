@@ -8,7 +8,8 @@ import {
   PUBLIC_PC_CATEGORY_CODES,
   publicPcCatalogForApi,
   publicPcFacetsForApi,
-  publicPcModelsForApi
+  publicPcModelsForApi,
+  publicPcProducts
 } from "../market/logic/pc-public-catalog.mjs";
 import { PC_SOURCE_REGISTRY } from "../collector/logic/pc-source-registry.mjs";
 import { pcBrowseFlowForApiV1 } from "../market/data/browse-flows/index.mjs";
@@ -97,16 +98,52 @@ export function pcCatalogResponse() {
 
 export function pcProductsResponse(urlOrRequest) {
   const options = pcDirectoryOptions(urlOrRequest);
-  const publicFacetKeys = new Set(PUBLIC_PC_CATEGORY_CODES.flatMap((category) => publicPcCatalogForApi().facet_schema[category].map((facet) => facet.key)));
+  const publicFacetKeys = new Set([
+    ...PUBLIC_PC_CATEGORY_CODES.flatMap((category) => publicPcCatalogForApi().facet_schema[category].map((facet) => facet.key)),
+    "model", "exact_model", "gpu_model", "board_brand", "board_manufacturer", "usage", "market_segment",
+    "configuration", "config", "capacity", "marketed_capacity_gb", "rated_wattage", "watts"
+  ]);
   const category = options.category[0] || "";
-  if (category && Object.keys(options.facets).some((key) => publicFacetKeys.has(key))) {
-    const publicOptions = { category, ...Object.fromEntries(Object.entries(options.facets).map(([key, values]) => [key, values[0]])) };
+  const hasPublicFilter = options.query || options.manufacturer.length || options.brand.length
+    || Object.keys(options.facets).some((key) => publicFacetKeys.has(key));
+  if (category && hasPublicFilter) {
+    const publicOptions = {
+      category,
+      q: options.query,
+      manufacturer: options.manufacturer,
+      brand: options.brand,
+      ...Object.fromEntries(Object.entries(options.facets).map(([key, facetValues]) => [key, facetValues]))
+    };
     const models = publicPcModelsForApi(publicOptions);
     const facets = publicPcFacetsForApi(publicOptions);
+    const matchingIds = new Set(models.models.map((product) => product.canonical_product_id));
+    const matchingProducts = publicPcProducts().filter((product) => matchingIds.has(product.id));
+    const limit = Math.max(1, Math.min(100, Number.parseInt(options.limit || "50", 10) || 50));
+    const cursorPrefix = "public:";
+    const fingerprint = JSON.stringify(publicOptions);
+    let offset = 0;
+    if (options.cursor) {
+      if (!options.cursor.startsWith(cursorPrefix)) throw new RangeError("Public PC product cursor is invalid");
+      const decoded = JSON.parse(decodeURIComponent(options.cursor.slice(cursorPrefix.length)));
+      if (decoded.fingerprint !== fingerprint || !Number.isSafeInteger(decoded.offset) || decoded.offset < 0) {
+        throw new RangeError("Public PC product cursor does not match the request");
+      }
+      offset = decoded.offset;
+    }
+    if (offset > matchingProducts.length) throw new RangeError("Public PC product cursor offset is outside the result set");
+    const items = matchingProducts.slice(offset, offset + limit);
+    const nextOffset = offset + items.length;
     return {
       master_version: publicPcCatalogForApi().master_version,
-      products: models.models,
-      total: models.models.length,
+      products: {
+        items,
+        total: matchingProducts.length,
+        limit,
+        sort: options.sort || "DEFAULT",
+        next_cursor: nextOffset < matchingProducts.length
+          ? `${cursorPrefix}${encodeURIComponent(JSON.stringify({ offset: nextOffset, fingerprint }))}`
+          : null
+      },
       query: options.query,
       available_facets: facets.available_facets
     };

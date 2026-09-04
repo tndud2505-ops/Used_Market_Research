@@ -35,7 +35,7 @@
       }
     </script>
     <link rel="icon" href="/assets/mark.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css?v=pc-directory-v25" />
+    <link rel="stylesheet" href="/styles.css?v=pc-directory-v42" />
   </head>
   <body>
     <a class="skip-link" href="#main">본문으로 건너뛰기</a>
@@ -47,7 +47,7 @@
       <form class="catalog-search" id="catalog-search" role="search">
         <label class="sr-only" for="catalog-query">중고 PC 부품 모델 검색</label>
         <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"></circle><path d="m15.5 15.5 5 5"></path></svg>
-        <input id="catalog-query" name="q" type="search" autocomplete="off" placeholder="중고 PC 부품 검색: RTX 4070 SUPER, 7800X3D, DDR5 32GB" />
+        <input id="catalog-query" name="q" type="search" autocomplete="off" placeholder="예: RTX 4070 SUPER, 7800X3D" />
         <button type="submit">검색</button>
       </form>
       <div class="catalog-meta" id="catalog-meta" aria-live="polite" hidden>제품 목록을 불러오는 중</div>
@@ -57,16 +57,16 @@
       <aside class="filter-rail" aria-label="카테고리 탐색">
         <div class="filter-rail-sticky">
           <div class="rail-title">
-            <strong>중고 PC 부품</strong>
+            <strong>부품 선택</strong>
           </div>
           <nav id="category-rail" class="category-rail" aria-label="부품 카테고리">
-            <a class="category-button" href="/categories/cpu" aria-pressed="true"><span class="category-marker" aria-hidden="true"></span><span class="category-label">CPU</span><span class="category-count">186개</span></a>
-            <a class="category-button" href="/categories/gpu" aria-pressed="false"><span class="category-marker" aria-hidden="true"></span><span class="category-label">그래픽카드</span><span class="category-count">94개</span></a>
-            <a class="category-button" href="/categories/ram" aria-pressed="false"><span class="category-marker" aria-hidden="true"></span><span class="category-label">RAM</span><span class="category-count">216개</span></a>
-            <a class="category-button" href="/categories/motherboard" aria-pressed="false"><span class="category-marker" aria-hidden="true"></span><span class="category-label">메인보드</span><span class="category-count">12개</span></a>
-            <a class="category-button" href="/categories/ssd" aria-pressed="false"><span class="category-marker" aria-hidden="true"></span><span class="category-label">SSD</span><span class="category-count">66개</span></a>
-            <a class="category-button" href="/categories/hdd" aria-pressed="false"><span class="category-marker" aria-hidden="true"></span><span class="category-label">HDD</span><span class="category-count">31개</span></a>
-            <a class="category-button" href="/categories/psu" aria-pressed="false"><span class="category-marker" aria-hidden="true"></span><span class="category-label">파워서플라이</span><span class="category-count">34개</span></a>
+            <a class="category-button" href="/categories/cpu" aria-current="page"><span class="category-label">CPU</span><span class="category-count">186개</span></a>
+            <a class="category-button" href="/categories/gpu"><span class="category-label">그래픽카드</span><span class="category-count">94개</span></a>
+            <a class="category-button" href="/categories/ram"><span class="category-label">RAM</span><span class="category-count">216개</span></a>
+            <a class="category-button" href="/categories/motherboard"><span class="category-label">메인보드</span><span class="category-count">12개</span></a>
+            <a class="category-button" href="/categories/ssd"><span class="category-label">SSD</span><span class="category-count">66개</span></a>
+            <a class="category-button" href="/categories/hdd"><span class="category-label">HDD</span><span class="category-count">31개</span></a>
+            <a class="category-button" href="/categories/psu"><span class="category-label">파워서플라이</span><span class="category-count">42개</span></a>
           </nav>
         </div>
       </aside>
@@ -82,52 +82,40 @@
 
         <section class="model-filters" id="model-filters" aria-label="상품 필터">
           <div class="model-filters-heading">
-            <h2>필터</h2>
+            <h2><span id="filter-category-label">CPU</span> 옵션 검색</h2>
             <div class="filter-heading-actions">
               <span class="filter-context" id="filter-context" aria-live="polite"></span>
-              <button class="reset-filters" id="reset-filters" type="button" hidden>초기화</button>
+              <button class="filter-visibility-toggle" id="model-filter-toggle" type="button" aria-expanded="true" aria-controls="model-filter-body">옵션 접기</button>
             </div>
           </div>
-          <div id="facet-rows"></div>
+          <div class="active-filter-summary" id="active-filter-summary">
+            <span class="active-filter-label">현재 조건</span>
+            <div class="active-filter-chips" id="active-filter-chips" aria-live="polite"></div>
+            <button class="reset-filters" id="reset-filters" type="button" hidden>초기화</button>
+          </div>
+          <div id="model-filter-body">
+            <div id="facet-rows"></div>
+            <button class="show-matched-models" id="show-matched-models" type="button">조건에 맞는 모델 보기</button>
+          </div>
         </section>
 
         <div class="catalog-message" id="catalog-message" role="status" aria-live="polite" hidden></div>
 
-        <section class="model-directory" id="model-directory" aria-labelledby="model-list-title">
-          <div class="section-bar">
-            <h2 id="model-list-title">중고 PC 부품 모델 목록</h2>
-            <span id="model-list-context">카테고리를 선택하세요</span>
-          </div>
-          <div class="model-table-wrap">
-            <table class="model-table">
-              <thead>
-                <tr>
-                  <th scope="col">모델</th>
-                  <th scope="col">주요 사양</th>
-                  <th id="model-brand-header" scope="col">브랜드</th>
-                  <th scope="col" class="numeric">판매중</th>
-                  <th scope="col" class="numeric">중앙값</th>
-                  <th scope="col" class="numeric">판매완료 표시가</th>
-                </tr>
-              </thead>
-              <tbody id="product-rows"></tbody>
-            </table>
-            <div class="directory-empty" id="product-empty" hidden>
-              <strong>표시할 중고 PC 부품이 없습니다</strong>
-              <p>다른 부품 카테고리나 모델을 검색해 보세요.</p>
-            </div>
-          </div>
-          <button class="load-more" id="load-more-products" type="button" hidden>모델 더 보기</button>
-        </section>
-
         <section class="listing-section" id="listing-section" hidden aria-labelledby="listing-title">
           <div class="listing-heading">
             <div>
-              <button class="back-to-models" id="back-to-models" type="button">← 다른 모델 선택</button>
-              <h2 id="listing-title">중고 PC 부품 현재 매물</h2>
+              <button class="back-to-models" id="back-to-models" type="button" hidden>← 전체 조건 매물</button>
+              <h2 id="listing-title">현재 매물</h2>
               <p class="listing-scope-note" id="listing-scope-note">묶음·고장·박스만·수량 불명확 매물은 가격 통계에서 제외합니다.</p>
             </div>
             <span id="listing-freshness"></span>
+          </div>
+          <div class="listing-message" id="listing-message" role="status" aria-live="polite" hidden></div>
+          <div class="listing-filter-strip">
+            <div class="facet-row source-facet" id="source-facet-row" hidden>
+              <h2>사이트 범위</h2>
+              <div class="facet-values" id="source-filters"></div>
+            </div>
           </div>
           <form class="listing-controls" id="listing-controls">
             <label>
@@ -156,13 +144,33 @@
           <div id="pagination-controls">
             <button class="load-more" id="load-more-listings" type="button" hidden>매물 더 보기</button>
           </div>
-          <aside class="contextual-offer" id="contextual-offer" hidden aria-label="관련 광고">
-            <span class="contextual-offer-label">광고</span>
-            <strong id="contextual-offer-title"></strong>
-            <span id="contextual-offer-provider"></span>
-            <a id="contextual-offer-link" target="_blank" rel="sponsored noopener noreferrer"></a>
-            <p>이 링크를 통해 구매하면 USED PICK이 수수료를 받을 수 있습니다. 시세와 추천순에는 영향을 주지 않습니다.</p>
-          </aside>
+        </section>
+
+        <section class="model-directory" id="model-directory" aria-labelledby="model-list-title">
+          <div class="section-bar">
+            <h2 id="model-list-title">조건에 맞는 모델</h2>
+            <span id="model-list-context">카테고리를 선택하세요</span>
+          </div>
+          <div class="model-table-wrap">
+            <table class="model-table">
+              <thead>
+                <tr>
+                  <th scope="col">모델</th>
+                  <th scope="col">주요 사양</th>
+                  <th id="model-brand-header" scope="col">브랜드</th>
+                  <th scope="col" class="numeric">판매중</th>
+                  <th scope="col" class="numeric">중앙값</th>
+                  <th scope="col" class="numeric">판매완료 표시가</th>
+                </tr>
+              </thead>
+              <tbody id="product-rows"></tbody>
+            </table>
+            <div class="directory-empty" id="product-empty" hidden>
+              <strong>표시할 중고 PC 부품이 없습니다</strong>
+              <p>다른 부품 카테고리나 모델을 검색해 보세요.</p>
+            </div>
+          </div>
+          <button class="load-more" id="load-more-products" type="button" hidden>모델 더 보기</button>
         </section>
       </section>
 
@@ -180,13 +188,6 @@
             <div class="selection-head">
               <h2 id="price-panel-title">모델을 선택하세요</h2>
               <p id="selected-product-meta">표준 모델과 출처별 가격 통계를 확인할 수 있습니다.</p>
-            </div>
-
-            <div class="price-source-scope">
-              <div class="facet-row source-facet" id="source-facet-row" hidden>
-                <h2>사이트 범위</h2>
-                <div class="facet-values" id="source-filters"></div>
-              </div>
             </div>
 
             <div class="detail-message" id="detail-message" role="status" aria-live="polite"></div>
@@ -260,6 +261,6 @@
       </nav>
     </footer>
 
-    <script type="module" src="/app.js?v=pc-directory-v25"></script>
+    <script type="module" src="/app.js?v=pc-directory-v42"></script>
   </body>
 </html>
