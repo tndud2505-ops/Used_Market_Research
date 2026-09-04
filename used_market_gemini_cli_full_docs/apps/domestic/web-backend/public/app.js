@@ -62,6 +62,9 @@ const COHORTS = [
 const mobileFacetMedia = window.matchMedia("(max-width: 640px)");
 const stackedLayoutMedia = window.matchMedia("(max-width: 1120px)");
 const compactFilterMedia = window.matchMedia("(max-width: 1120px)");
+let browseListingTimer = null;
+let catalogSearchTimer = null;
+let catalogSearchComposing = false;
 
 const state = {
   catalog: null,
@@ -92,9 +95,11 @@ const state = {
   detailStats: [],
   visibleStatsCount: 0,
   productRequest: null,
+  listingRequest: null,
   detailRequest: null,
   pricePanelOpen: false,
   modelFiltersCollapsed: false,
+  listingOptionsCollapsed: false,
 };
 
 const dom = {
@@ -152,6 +157,8 @@ const dom = {
   listingTitle: document.querySelector("#listing-title"),
   listingScopeNote: document.querySelector("#listing-scope-note"),
   listingMessage: document.querySelector("#listing-message"),
+  listingOptions: document.querySelector("#listing-options"),
+  listingOptionsToggle: document.querySelector("#listing-options-toggle"),
   backToModels: document.querySelector("#back-to-models"),
   listingControls: document.querySelector("#listing-controls"),
   listingSort: document.querySelector("#listing-sort"),
@@ -394,13 +401,23 @@ function showListingMessage(message, isError = false) {
 function setBusy(button, isBusy, busyText) {
   if (!button) return;
   if (isBusy) {
-    button.dataset.originalText = button.textContent;
+    if (!button.dataset.originalText) button.dataset.originalText = button.textContent;
     button.textContent = busyText;
     button.disabled = true;
   } else {
     button.textContent = button.dataset.originalText || button.textContent;
+    delete button.dataset.originalText;
     button.disabled = false;
   }
+}
+
+function cancelListingRequest({ hideLoadMore = true } = {}) {
+  clearTimeout(browseListingTimer);
+  browseListingTimer = null;
+  state.listingRequest?.abort();
+  state.listingRequest = null;
+  setBusy(dom.loadMoreListings, false, "");
+  if (hideLoadMore) dom.loadMoreListings.hidden = true;
 }
 
 function catalogCategoryProducts(category) {
@@ -855,7 +872,7 @@ function renderActiveFilterSummary(definitions) {
 
 function updateMatchedModelButton() {
   if (!dom.showMatchedModels) return;
-  dom.showMatchedModels.textContent = `조건에 맞는 모델 ${Number(state.productTotal || state.products.length).toLocaleString("ko-KR")}개 보기`;
+  dom.showMatchedModels.textContent = "현재 매물로 이동";
 }
 
 function updateFacetSelectionUi(definitions = facetDefinitionsForCategory(state.categoryCode)) {
@@ -910,6 +927,13 @@ function setModelFiltersCollapsed(collapsed) {
   dom.modelFilterToggle.textContent = state.modelFiltersCollapsed ? "옵션 전체보기" : "옵션 접기";
 }
 
+function setListingOptionsCollapsed(collapsed) {
+  state.listingOptionsCollapsed = Boolean(mobileFacetMedia.matches && collapsed);
+  dom.listingOptions.hidden = state.listingOptionsCollapsed;
+  dom.listingOptionsToggle.setAttribute("aria-expanded", String(!state.listingOptionsCollapsed));
+  dom.listingOptionsToggle.textContent = state.listingOptionsCollapsed ? "필터·정렬 열기" : "필터·정렬 닫기";
+}
+
 function renderSourceFilters() {
   dom.sourceFilters.replaceChildren();
   dom.sourceFacetRow.hidden = state.sources.length === 0 && state.sourceCandidates.length === 0;
@@ -961,7 +985,7 @@ function updateFacet(key, value, rowKey = key) {
   state.openSeries.clear();
   syncCatalogUrl();
   updateFacetSelectionUi();
-  loadProducts(false);
+  refreshBrowseScope(180);
 }
 
 function selectCategory(code) {
@@ -975,14 +999,12 @@ function selectCategory(code) {
   state.expandedFacetOptions.clear();
   const firstFacet = browseFlowForCategory(code)[0]?.key;
   if (firstFacet) state.openFacetRows.add(firstFacet);
-  state.selectedProduct = null;
-  state.products = [];
-  resetDetail();
+  clearTimeout(catalogSearchTimer);
   renderCategories();
   renderFacets();
   updateWorkspaceHeading();
   syncCatalogUrl();
-  loadProducts(false);
+  refreshBrowseScope();
 }
 
 function updateWorkspaceHeading() {
@@ -1272,7 +1294,6 @@ async function loadProducts(append) {
     state.productCursor = "";
     state.products = [];
     state.productTotal = 0;
-    resetDetail();
   }
   showCatalogMessage("제품 목록을 불러오는 중입니다.");
   setBusy(dom.loadMoreProducts, true, "불러오는 중");
@@ -1301,7 +1322,7 @@ async function loadProducts(append) {
     ));
     renderProducts();
     showCatalogMessage("");
-    if (!openSingleSearchResult(append) && !append) showScopedListings();
+    if (!openSingleSearchResult(append)) updateListingScopeNote();
   } catch (error) {
     if (error.name === "AbortError") return;
     const fallback = !append ? filterSeedProducts() : [];
@@ -1311,23 +1332,24 @@ async function loadProducts(append) {
       state.productCursor = "";
       renderProducts();
       showCatalogMessage("제품 목록 API가 응답하지 않아 카탈로그에 포함된 제품을 표시합니다.");
-      if (!openSingleSearchResult(append)) showScopedListings();
+      if (!openSingleSearchResult(append)) updateListingScopeNote();
     } else {
       if (!append) state.products = [];
       if (!append) state.productTotal = 0;
       renderProducts();
       showCatalogMessage(`제품 목록을 불러오지 못했습니다. ${error.message}`, true);
-      resetDetail();
+      updateListingScopeNote();
     }
   } finally {
     if (state.productRequest === controller) {
       state.productRequest = null;
+      setBusy(dom.loadMoreProducts, false, "");
     }
-    setBusy(dom.loadMoreProducts, false, "");
   }
 }
 
 function resetDetail() {
+  cancelListingRequest();
   state.detailRequest?.abort();
   state.detailRequest = null;
   state.selectedProduct = null;
@@ -1363,7 +1385,8 @@ function currentListingScopeTitle() {
   return `${scope} 현재 매물`;
 }
 
-function showScopedListings() {
+function showScopedListings(listingDelayMs = 0) {
+  cancelListingRequest();
   state.detailRequest?.abort();
   state.detailRequest = null;
   state.selectedProduct = null;
@@ -1390,7 +1413,24 @@ function showScopedListings() {
   dom.listingRows.replaceChildren();
   updateListingScopeNote();
   renderProducts();
-  loadListings(false);
+  if (listingDelayMs > 0) {
+    showListingMessage("현재 매물을 불러오는 중입니다.");
+    browseListingTimer = window.setTimeout(() => {
+      browseListingTimer = null;
+      loadListings(false);
+    }, listingDelayMs);
+  } else {
+    loadListings(false);
+  }
+}
+
+function refreshBrowseScope(listingDelayMs = 0) {
+  resetDetail();
+  const productsPromise = loadProducts(false);
+  showScopedListings(listingDelayMs);
+  dom.productCount.textContent = "모델 계산 중";
+  dom.productEmpty.hidden = true;
+  return productsPromise;
 }
 
 function setPricePanelOpen(open) {
@@ -1414,7 +1454,14 @@ function selectedProductMeta(product) {
 
 function updateListingScopeNote() {
   if (!dom.listingScopeNote) return;
-  const modelScope = state.selectedProduct ? "단일 모델" : `${Number(state.productTotal || 0).toLocaleString("ko-KR")}개 모델 범위`;
+  const modelTotal = Number(state.productTotal || 0);
+  const modelScope = state.selectedProduct
+    ? "단일 모델"
+    : modelTotal > 0
+      ? `${modelTotal.toLocaleString("ko-KR")}개 모델 범위`
+      : state.productRequest
+        ? "모델 범위 계산 중"
+        : "선택 조건 범위";
   const siteScope = state.selectedSites.size
     ? [...state.selectedSites].map(sourceLabel).join(" · ")
     : "전체 사이트";
@@ -1426,6 +1473,7 @@ function selectProduct(product) {
     showDetailMessage("이 제품은 표준 제품 ID가 없어 상세 통계를 조회할 수 없습니다.", true);
     return;
   }
+  cancelListingRequest();
   state.selectedProduct = product;
   setPricePanelOpen(!stackedLayoutMedia.matches);
   document.body.classList.add("has-selected-product");
@@ -1494,6 +1542,7 @@ function buildStatsUrl(product, cohort) {
 }
 
 async function loadProductDetail() {
+  cancelListingRequest();
   state.detailRequest?.abort();
   const controller = new AbortController();
   state.detailRequest = controller;
@@ -2041,12 +2090,14 @@ function renderStats() {
 
 async function loadListings(append) {
   if (!state.selectedProduct && !state.categoryCode && !state.query) return;
+  clearTimeout(browseListingTimer);
+  browseListingTimer = null;
   const cursor = append ? state.listingCursor : "";
   const scopeKey = buildListingQuery(cursor).toString();
   state.listingScopeKey = scopeKey;
-  state.detailRequest?.abort();
+  state.listingRequest?.abort();
   const controller = new AbortController();
-  state.detailRequest = controller;
+  state.listingRequest = controller;
   setBusy(dom.loadMoreListings, true, "불러오는 중");
   if (!append) {
     state.listings = [];
@@ -2062,8 +2113,10 @@ async function loadListings(append) {
   } catch (error) {
     if (error.name !== "AbortError") showListingMessage(`현재 매물을 불러오지 못했습니다. ${error.message}`, true);
   } finally {
-    if (state.detailRequest === controller) state.detailRequest = null;
-    setBusy(dom.loadMoreListings, false, "");
+    if (state.listingRequest === controller) {
+      state.listingRequest = null;
+      setBusy(dom.loadMoreListings, false, "");
+    }
   }
 }
 
@@ -2136,7 +2189,7 @@ async function loadCatalog() {
     const version = normalizeText(firstDefined(catalog?.version, catalog?.catalog_version));
     dom.catalogMeta.textContent = version ? `카탈로그 ${version}` : `${state.categories.length}개 부품군`;
     showCatalogMessage("");
-    await loadProducts(false);
+    await refreshBrowseScope();
   } catch (error) {
     state.categories = [];
     state.products = [];
@@ -2150,9 +2203,12 @@ async function loadCatalog() {
   }
 }
 
-dom.catalogSearch.addEventListener("submit", (event) => {
-  event.preventDefault();
-  state.query = normalizeText(dom.catalogQuery.value);
+function applyCatalogSearch(rawQuery, force = false) {
+  clearTimeout(catalogSearchTimer);
+  catalogSearchTimer = null;
+  const nextQuery = normalizeText(rawQuery);
+  if (!force && nextQuery === state.query) return;
+  state.query = nextQuery;
   if (state.query) {
     state.categoryCode = "";
     state.facets = {};
@@ -2169,24 +2225,41 @@ dom.catalogSearch.addEventListener("submit", (event) => {
   syncCatalogUrl();
   updateWorkspaceHeading();
   renderFacets();
-  loadProducts(false);
+  refreshBrowseScope();
+}
+
+function scheduleCatalogSearch() {
+  clearTimeout(catalogSearchTimer);
+  catalogSearchTimer = null;
+  if (catalogSearchComposing || !state.categories.length) return;
+  const nextQuery = normalizeText(dom.catalogQuery.value);
+  if (nextQuery === state.query || (nextQuery && nextQuery.length < 2)) return;
+  catalogSearchTimer = window.setTimeout(() => applyCatalogSearch(nextQuery), 350);
+}
+
+dom.catalogSearch.addEventListener("submit", (event) => {
+  event.preventDefault();
+  applyCatalogSearch(dom.catalogQuery.value, true);
 });
 
 dom.catalogQuery.addEventListener("search", () => {
   if (!dom.catalogQuery.value && state.query) {
-    state.query = "";
-    if (!state.categoryCode) state.categoryCode = categoryCode(state.categories[0]);
-    const firstFacet = browseFlowForCategory(state.categoryCode)[0]?.key;
-    if (firstFacet) state.openFacetRows.add(firstFacet);
-    syncCatalogUrl();
-    renderCategories();
-    updateWorkspaceHeading();
-    renderFacets();
-    loadProducts(false);
+    applyCatalogSearch("");
   }
 });
 
+dom.catalogQuery.addEventListener("input", scheduleCatalogSearch);
+dom.catalogQuery.addEventListener("compositionstart", () => {
+  catalogSearchComposing = true;
+  clearTimeout(catalogSearchTimer);
+});
+dom.catalogQuery.addEventListener("compositionend", () => {
+  catalogSearchComposing = false;
+  scheduleCatalogSearch();
+});
+
 dom.resetFilters.addEventListener("click", () => {
+  clearTimeout(catalogSearchTimer);
   state.facets = {};
   state.openSeries.clear();
   state.openFacetRows.clear();
@@ -2201,17 +2274,21 @@ dom.resetFilters.addEventListener("click", () => {
   renderCategories();
   renderFacets();
   updateWorkspaceHeading();
-  loadProducts(false);
+  refreshBrowseScope();
 });
 
 dom.loadMoreProducts.addEventListener("click", () => loadProducts(true));
-dom.showMatchedModels?.addEventListener("click", () => dom.modelDirectory.scrollIntoView({ behavior: "smooth", block: "start" }));
-mobileFacetMedia.addEventListener("change", () => renderFacets());
+dom.showMatchedModels?.addEventListener("click", () => dom.listingSection.scrollIntoView({ behavior: "smooth", block: "start" }));
+mobileFacetMedia.addEventListener("change", (event) => {
+  renderFacets();
+  setListingOptionsCollapsed(event.matches);
+});
 stackedLayoutMedia.addEventListener("change", (event) => {
   if (state.selectedProduct) setPricePanelOpen(!event.matches);
 });
 compactFilterMedia.addEventListener("change", (event) => setModelFiltersCollapsed(event.matches));
 dom.modelFilterToggle.addEventListener("click", () => setModelFiltersCollapsed(!state.modelFiltersCollapsed));
+dom.listingOptionsToggle.addEventListener("click", () => setListingOptionsCollapsed(!state.listingOptionsCollapsed));
 dom.loadMoreListings.addEventListener("click", () => loadListings(true));
 dom.pricePanelToggle.addEventListener("click", () => setPricePanelOpen(!state.pricePanelOpen));
 dom.backToModels.addEventListener("click", () => {
@@ -2232,11 +2309,13 @@ dom.listingControls.addEventListener("submit", (event) => {
     : state.sources;
   const currencies = new Set(sourceScope.map((source) => source.currency).filter(Boolean));
   if ((state.listingSort !== "recent" || state.priceMin || state.priceMax) && currencies.size > 1) {
-    showDetailMessage("원화와 해외 통화를 함께 가격순으로 비교할 수 없습니다. 같은 통화의 사이트만 선택해 주세요.", true);
+    showListingMessage("원화와 해외 통화를 함께 가격순으로 비교할 수 없습니다. 같은 통화의 사이트만 선택해 주세요.", true);
     return;
   }
-  loadListings(false);
+  if (state.selectedProduct) loadProductDetail();
+  else loadListings(false);
 });
 
 setModelFiltersCollapsed(compactFilterMedia.matches);
+setListingOptionsCollapsed(mobileFacetMedia.matches);
 loadCatalog();

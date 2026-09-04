@@ -24,7 +24,7 @@ assert.ok(html.indexOf('id="source-facet-row"') > listingsIndex
 for (const id of [
   "category-rail", "facet-rows", "filter-context", "source-filters", "model-directory", "listing-section", "listing-rows",
   "model-filters", "model-filter-body", "model-filter-toggle", "filter-category-label", "active-filter-summary", "active-filter-chips", "show-matched-models",
-  "price-panel-toggle", "price-panel-content",
+  "price-panel-toggle", "price-panel-content", "listing-options", "listing-options-toggle",
   "price-summary", "active-mean", "active-median", "active-count", "sold-mean", "sold-median", "sold-count",
   "reserved-mean", "reserved-median", "reserved-count",
   "confirmed-mean", "confirmed-median", "confirmed-count",
@@ -86,6 +86,7 @@ assert.equal(loadProductsBlock.includes("renderFacets()"), false,
 requireText(script, "params.append(key, value)", "facet URL requests must preserve repeated values");
 requireText(script, "syncCatalogUrl", "facet selections must persist in the shareable URL");
 requireText(script, "mobileFacetMedia", "facet disclosure semantics must follow the responsive layout");
+requireText(script, "setListingOptionsCollapsed", "mobile results must keep source and price controls in an accessible disclosure");
 requireText(styles, ".model-facet-values", "the model filter matrix needs a dedicated option grid");
 requireText(styles, "grid-template-columns: repeat(5, minmax(0, 1fr))", "desktop filter rows must use five aligned option slots");
 requireText(styles, ".active-filter-chip-remove", "selected facet chips need a visible removal control");
@@ -98,6 +99,14 @@ requireText(script, "category-button", "categories must expose selectable shoppi
 requireText(script, "openSingleSearchResult", "a unique model search result must open its listings and price insight directly");
 requireText(script, "state.productTotal !== 1", "a single filtered model may open its price insight directly");
 requireText(script, "showScopedListings", "category and facet results must expose listings before a model is selected");
+const refreshBrowseBlock = script.slice(script.indexOf("function refreshBrowseScope("), script.indexOf("function setPricePanelOpen("));
+assert.ok(refreshBrowseBlock.indexOf("loadProducts(false)") >= 0
+  && refreshBrowseBlock.indexOf("showScopedListings") > refreshBrowseBlock.indexOf("loadProducts(false)"),
+"model and listing requests must start together instead of hiding listings behind the model response");
+requireText(script, "state.listingRequest", "broad listing requests must not share the price-stat request controller");
+requireText(script, "function cancelListingRequest", "scope changes must cancel delayed or in-flight broad listing requests");
+const selectProductBlock = script.slice(script.indexOf("function selectProduct("), script.indexOf("function buildListingQuery("));
+requireText(selectProductBlock, "cancelListingRequest()", "single-model selection must cancel the pending broad listing timer");
 const listingQueryBlock = script.slice(script.indexOf("function buildListingQuery("), script.indexOf("function buildStatsUrl("));
 requireText(listingQueryBlock, 'params.set("category_code", state.categoryCode)', "multi-model listing browse must preserve the selected category");
 requireText(listingQueryBlock, "params.append(key, value)", "multi-model listing browse must preserve repeated facet values");
@@ -105,6 +114,10 @@ requireText(listingQueryBlock, 'params.set("canonical_product_id", productId(sta
 requireText(script, 'if (!state.selectedProduct && canonicalModel)', "combined listing rows must identify their canonical model");
 requireText(styles, ".listing-section { order: 4; }", "current listings must appear before the optional model directory");
 requireText(styles, ".model-directory { order: 5; }", "matching models must remain available as an optional narrowing step");
+assert.match(styles, /@media \(min-width: 1121px\)[\s\S]*?grid-template-areas:\s*"\. heading"\s*"filters message"\s*"filters listings"\s*"filters directory";/u,
+  "desktop results must place current listings before optional model narrowing");
+assert.match(styles, /@media \(max-width: 1120px\) and \(min-width: 641px\)[\s\S]*?\.model-directory\s*\{\s*order:\s*5;[\s\S]*?\.listing-section\s*\{\s*order:\s*4;/u,
+  "tablet and zoomed layouts must not move current listings below the model table");
 assert.ok(html.indexOf('id="listing-section"') < html.indexOf('id="model-directory"'),
   "DOM reading order must place immediate listing results before optional model narrowing");
 assert.match(styles, /@media \(max-width: 1120px\)[\s\S]*?body\.has-selected-product \.model-directory\s*\{[\s\S]*?display:\s*none;/u,

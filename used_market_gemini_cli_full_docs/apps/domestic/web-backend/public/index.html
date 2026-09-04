@@ -35,7 +35,7 @@
       }
     </script>
     <link rel="icon" href="/assets/mark.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css?v=pc-directory-v42" />
+    <link rel="stylesheet" href="/styles.css?v=pc-directory-v46" />
   </head>
   <body>
     <a class="skip-link" href="#main">본문으로 건너뛰기</a>
@@ -47,7 +47,7 @@
       <form class="catalog-search" id="catalog-search" role="search">
         <label class="sr-only" for="catalog-query">중고 PC 부품 모델 검색</label>
         <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"></circle><path d="m15.5 15.5 5 5"></path></svg>
-        <input id="catalog-query" name="q" type="search" autocomplete="off" placeholder="예: RTX 4070 SUPER, 7800X3D" />
+        <input id="catalog-query" name="q" type="search" autocomplete="off" placeholder="모델명 검색 (예: RTX 4070, 7800X3D)" />
         <button type="submit">검색</button>
       </form>
       <div class="catalog-meta" id="catalog-meta" aria-live="polite" hidden>제품 목록을 불러오는 중</div>
@@ -75,7 +75,7 @@
         <div class="workspace-heading">
           <div>
             <h1 id="workspace-title">중고 PC 부품 검색</h1>
-            <p class="workspace-intro" id="workspace-intro">중고 컴퓨터 부품을 모델별로 검색하고 현재 매물과 최근 중고 시세를 비교하세요.</p>
+            <p class="workspace-intro" id="workspace-intro" hidden></p>
           </div>
           <p class="workspace-count" id="product-count">—</p>
         </div>
@@ -95,7 +95,7 @@
           </div>
           <div id="model-filter-body">
             <div id="facet-rows"></div>
-            <button class="show-matched-models" id="show-matched-models" type="button">조건에 맞는 모델 보기</button>
+            <button class="show-matched-models" id="show-matched-models" type="button">현재 매물로 이동</button>
           </div>
         </section>
 
@@ -111,31 +111,34 @@
             <span id="listing-freshness"></span>
           </div>
           <div class="listing-message" id="listing-message" role="status" aria-live="polite" hidden></div>
-          <div class="listing-filter-strip">
-            <div class="facet-row source-facet" id="source-facet-row" hidden>
-              <h2>사이트 범위</h2>
-              <div class="facet-values" id="source-filters"></div>
+          <button class="listing-options-toggle" id="listing-options-toggle" type="button" aria-expanded="true" aria-controls="listing-options">필터·정렬</button>
+          <div class="listing-options" id="listing-options">
+            <div class="listing-filter-strip">
+              <div class="facet-row source-facet" id="source-facet-row" hidden>
+                <h2>사이트 범위</h2>
+                <div class="facet-values" id="source-filters"></div>
+              </div>
             </div>
+            <form class="listing-controls" id="listing-controls">
+              <label>
+                <span>정렬</span>
+                <select id="listing-sort" name="sort">
+                  <option value="recent">최근 수집순</option>
+                  <option value="price_asc">낮은 가격순</option>
+                  <option value="price_desc">높은 가격순</option>
+                </select>
+              </label>
+              <label>
+                <span>최저가</span>
+                <input id="price-min" name="price_min" inputmode="numeric" placeholder="0" />
+              </label>
+              <label>
+                <span>최고가</span>
+                <input id="price-max" name="price_max" inputmode="numeric" placeholder="제한 없음" />
+              </label>
+              <button type="submit">적용</button>
+            </form>
           </div>
-          <form class="listing-controls" id="listing-controls">
-            <label>
-              <span>정렬</span>
-              <select id="listing-sort" name="sort">
-                <option value="recent">최근 수집순</option>
-                <option value="price_asc">낮은 가격순</option>
-                <option value="price_desc">높은 가격순</option>
-              </select>
-            </label>
-            <label>
-              <span>최저가</span>
-              <input id="price-min" name="price_min" inputmode="numeric" placeholder="0" />
-            </label>
-            <label>
-              <span>최고가</span>
-              <input id="price-max" name="price_max" inputmode="numeric" placeholder="제한 없음" />
-            </label>
-            <button type="submit">적용</button>
-          </form>
           <div class="listing-table-head" aria-hidden="true">
             <span>사이트·매물</span><span>브랜드·상태</span><span>관측 시각</span><span>가격</span>
           </div>
@@ -261,6 +264,6 @@
       </nav>
     </footer>
 
-    <script type="module" src="/app.js?v=pc-directory-v42"></script>
+    <script type="module" src="/app.js?v=pc-directory-v46"></script>
   </body>
 </html>
