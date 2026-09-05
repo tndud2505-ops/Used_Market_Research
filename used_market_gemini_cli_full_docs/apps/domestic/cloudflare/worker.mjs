@@ -909,6 +909,16 @@ function normalizePcListingCollectionManifest(value) {
   };
 }
 
+function statementChanges(result) {
+  const changes = Number(result?.meta?.changes ?? result?.changes ?? 0);
+  return Number.isInteger(changes) && changes > 0 ? changes : 0;
+}
+
+function statementRowsWritten(result) {
+  const rowsWritten = Number(result?.meta?.rows_written);
+  return Number.isInteger(rowsWritten) && rowsWritten >= 0 ? rowsWritten : statementChanges(result);
+}
+
 async function importListings(env, values, collectionManifestValue = null) {
   if (!hasD1(env)) return { inserted: 0, rejected: values.length, error: "D1 is unavailable" };
   const collectionManifest = normalizePcListingCollectionManifest(collectionManifestValue);
@@ -922,7 +932,7 @@ async function importListings(env, values, collectionManifestValue = null) {
   }
   rejected += Math.max(0, values.length - MAX_IMPORTED_LISTINGS);
   if (normalized.length === 0 && !collectionManifest) {
-    return { inserted: 0, rejected, retired_purged: retiredPurged };
+    return { inserted: 0, changed: 0, unchanged: 0, rejected, retired_purged: retiredPurged };
   }
 
   const manifestTargetIdsJson = collectionManifest
@@ -942,7 +952,7 @@ async function importListings(env, values, collectionManifestValue = null) {
     throw new CollectionManifestConflictError("COLLECTION_MANIFEST_CONFLICT: source_id/as_of is immutable");
   }
 
-  const statements = normalized.map((item) => env.DB.prepare(
+  const listingStatements = normalized.map((item) => env.DB.prepare(
     `INSERT INTO listings
       (item_id, site, category_id, title, search_text, price_value, currency, url, image_url, seller_name, posted_at, updated_at, active,
        canonical_product_id, canonical_display_name, canonical_manufacturer, board_manufacturer, listing_kind, pc_category_code,
@@ -1051,13 +1061,7 @@ async function importListings(env, values, collectionManifestValue = null) {
     item.confidence_json, item.evidence_json, item.price_eligible, item.exclusion_reasons_json,
     item.good_listing_eligible, item.reference_price
   ));
-  if (normalized.length > 0) {
-    statements.push(env.DB.prepare(
-      `INSERT INTO free_tier_usage (date_key, browser_seconds, queue_operations, d1_rows_written, collection_runs, updated_at)
-       VALUES (?, 0, 0, ?, 0, ?)
-       ON CONFLICT(date_key) DO UPDATE SET d1_rows_written = d1_rows_written + excluded.d1_rows_written, updated_at = excluded.updated_at`
-    ).bind(new Date().toISOString().slice(0, 10), normalized.length, new Date().toISOString()));
-  }
+  const statements = [...listingStatements];
   const nonManifestStatements = [...statements];
   if (collectionManifest && !existingManifest) {
     const mirroredAt = new Date().toISOString();
@@ -1084,9 +1088,10 @@ async function importListings(env, values, collectionManifestValue = null) {
       ));
     }
   }
+  let statementResults = [];
   if (statements.length > 0) {
     try {
-      await env.DB.batch(statements);
+      statementResults = await env.DB.batch(statements);
     } catch (error) {
       if (!collectionManifest || existingManifest) throw error;
       const racedManifest = await env.DB.prepare(`SELECT source_id, as_of, manifest_version,
@@ -1101,7 +1106,24 @@ async function importListings(env, values, collectionManifestValue = null) {
       }
       // D1 batch is transactional. Retry only the unrelated listing writes after an
       // identical concurrent manifest won the immutable parent-row insert race.
-      if (nonManifestStatements.length > 0) await env.DB.batch(nonManifestStatements);
+      if (nonManifestStatements.length > 0) statementResults = await env.DB.batch(nonManifestStatements);
+    }
+  }
+  const changed = statementResults.slice(0, normalized.length)
+    .reduce((total, result) => total + (statementChanges(result) > 0 ? 1 : 0), 0);
+  const rowsWritten = statementResults.reduce((total, result) => total + statementRowsWritten(result), 0);
+  if (rowsWritten > 0) {
+    const accountedAt = new Date().toISOString();
+    try {
+      await env.DB.prepare(
+        `INSERT INTO free_tier_usage (date_key, browser_seconds, queue_operations, d1_rows_written, collection_runs, updated_at)
+         VALUES (?, 0, 0, ?, 0, ?)
+         ON CONFLICT(date_key) DO UPDATE SET d1_rows_written = d1_rows_written + excluded.d1_rows_written, updated_at = excluded.updated_at`
+      ).bind(accountedAt.slice(0, 10), rowsWritten, accountedAt).run();
+    } catch (error) {
+      // Listing and manifest writes are authoritative. Usage accounting is diagnostic
+      // and must not turn a committed import into a retry loop near the D1 limit.
+      console.warn("D1 import usage accounting failed", error);
     }
   }
   const mirroredManifest = collectionManifest
@@ -1114,6 +1136,8 @@ async function importListings(env, values, collectionManifestValue = null) {
   // over-cap rows remain recovery/audit data and must not be deleted here.
   return {
     inserted: normalized.length,
+    changed,
+    unchanged: normalized.length - changed,
     rejected,
     retired_purged: retiredPurged,
     retention_policy: "NON_DESTRUCTIVE",

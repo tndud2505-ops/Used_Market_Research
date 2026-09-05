@@ -1777,6 +1777,12 @@ const firstUnchangedImport = await worker.fetch(new Request("https://used-pick.t
   body: JSON.stringify({ items: [unchangedProjection] })
 }), importEnv);
 assert.equal(firstUnchangedImport.status, 200);
+const firstUnchangedPayload = await firstUnchangedImport.json();
+assert.equal(firstUnchangedPayload.changed, 1);
+assert.equal(firstUnchangedPayload.unchanged, 0);
+const usageBeforeUnchangedReplay = d1.prepare(
+  "SELECT d1_rows_written FROM free_tier_usage ORDER BY date_key DESC LIMIT 1"
+).get().d1_rows_written;
 const changesBeforeUnchangedReplay = d1.prepare("SELECT total_changes() AS value").get().value;
 const unchangedReplay = await worker.fetch(new Request("https://used-pick.test/admin/import-listings", {
   method: "POST",
@@ -1784,12 +1790,35 @@ const unchangedReplay = await worker.fetch(new Request("https://used-pick.test/a
   body: JSON.stringify({ items: [{ ...unchangedProjection, updated_at: "2026-09-01T01:00:00.000Z" }] })
 }), importEnv);
 assert.equal(unchangedReplay.status, 200);
-assert.equal((await unchangedReplay.json()).inserted, 1,
+const unchangedReplayPayload = await unchangedReplay.json();
+assert.equal(unchangedReplayPayload.inserted, 1,
   "a replayed projection remains an accepted import for runner compatibility");
-assert.equal(d1.prepare("SELECT total_changes() AS value").get().value - changesBeforeUnchangedReplay, 1,
-  "replaying unchanged listing content may update usage accounting but must not rewrite the listing and its indexes");
+assert.equal(unchangedReplayPayload.changed, 0);
+assert.equal(unchangedReplayPayload.unchanged, 1);
+assert.equal(d1.prepare("SELECT total_changes() AS value").get().value - changesBeforeUnchangedReplay, 0,
+  "replaying unchanged listing content must not write either the listing or usage accounting");
+assert.equal(d1.prepare("SELECT d1_rows_written FROM free_tier_usage ORDER BY date_key DESC LIMIT 1")
+  .get().d1_rows_written, usageBeforeUnchangedReplay,
+  "usage accounting must not count an accepted but unchanged listing replay as a D1 row write");
 assert.equal(d1.prepare("SELECT updated_at FROM listings WHERE item_id = ?").get(unchangedProjection.item_id).updated_at,
   unchangedProjection.updated_at, "an observation-only timestamp change must not impersonate a material listing update");
+const changedReplay = await worker.fetch(new Request("https://used-pick.test/admin/import-listings", {
+  method: "POST",
+  headers: { authorization: "Bearer import-fixture-token", "content-type": "application/json" },
+  body: JSON.stringify({ items: [{
+    ...unchangedProjection,
+    title: "RTX 3080 materially changed projection",
+    updated_at: "2026-09-01T02:00:00.000Z"
+  }] })
+}), importEnv);
+assert.equal(changedReplay.status, 200);
+const changedReplayPayload = await changedReplay.json();
+assert.equal(changedReplayPayload.inserted, 1);
+assert.equal(changedReplayPayload.changed, 1);
+assert.equal(changedReplayPayload.unchanged, 0);
+assert.equal(d1.prepare("SELECT d1_rows_written FROM free_tier_usage ORDER BY date_key DESC LIMIT 1")
+  .get().d1_rows_written, usageBeforeUnchangedReplay + 1,
+  "usage accounting must count the material listing change exactly once");
 const d1TombstoneResponse = await worker.fetch(new Request("https://used-pick.test/admin/import-listings", {
   method: "POST",
   headers: { authorization: "Bearer import-fixture-token", "content-type": "application/json" },
