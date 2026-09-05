@@ -35,7 +35,7 @@
       }
     </script>
     <link rel="icon" href="/assets/mark.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css?v=pc-directory-v65" />
+    <link rel="stylesheet" href="/styles.css?v=pc-directory-v67" />
   </head>
   <body>
     <a class="skip-link" href="#main">본문으로 건너뛰기</a>
@@ -56,7 +56,7 @@
     <main id="main" class="directory-shell">
       <section class="catalog-workspace" aria-labelledby="workspace-title">
         <div class="workspace-heading">
-          <h1 id="workspace-title">중고 PC 부품 검색</h1>
+          <h1 id="workspace-title" class="sr-only">중고 PC 부품 검색</h1>
           <div id="category-rail" class="category-selector">
             <label class="sr-only" for="category-select">검색할 PC 부품</label>
             <select id="category-select" name="category">
@@ -80,12 +80,20 @@
               </nav>
             </noscript>
           </div>
-          <details class="workspace-source-facet source-selector" id="source-facet-row" hidden>
-            <summary><span id="source-filter-summary">사이트 전체</span></summary>
+          <div class="model-selector">
+            <label class="sr-only" for="model-select">검색된 모델</label>
+            <select id="model-select" name="model" disabled>
+              <option value="">검색된 모델</option>
+            </select>
+          </div>
+          <div class="workspace-source-facet source-selector" id="source-facet-row" hidden>
+            <span class="source-selector-label">사이트</span>
+            <span class="sr-only" id="source-filter-summary">사이트 전체</span>
             <div class="source-selector-panel">
               <div class="facet-values" id="source-filters" role="group" aria-label="검색 사이트"></div>
+              <button class="source-more-toggle" id="source-more-toggle" type="button" aria-expanded="false">더보기</button>
             </div>
-          </details>
+          </div>
           <p class="workspace-intro" id="workspace-intro" hidden></p>
         </div>
 
@@ -112,50 +120,19 @@
         <div class="results-flow">
         <div class="catalog-message" id="catalog-message" role="status" aria-live="polite" hidden></div>
 
-        <div class="overview-panels">
-        <section class="model-directory" id="model-directory" aria-labelledby="model-list-title">
-          <div class="section-bar model-directory-bar">
-            <div>
-              <h2 id="model-list-title">검색된 모델</h2>
-              <span id="model-list-context">카테고리를 선택하세요</span>
-            </div>
-            <button class="section-visibility-toggle" id="model-directory-toggle" type="button" aria-expanded="true" aria-controls="model-directory-content">
-              <span class="section-toggle-text">접기</span><span class="section-toggle-icon" aria-hidden="true">−</span>
-            </button>
-          </div>
-          <div id="model-directory-content">
-            <div class="model-table-wrap">
-              <table class="model-table">
-                <thead>
-                  <tr>
-                    <th scope="col">모델</th>
-                    <th scope="col">주요 사양</th>
-                  </tr>
-                </thead>
-                <tbody id="product-rows"></tbody>
-              </table>
-              <div class="directory-empty" id="product-empty" hidden>조건에 맞는 모델이 없습니다.</div>
-            </div>
-            <nav class="model-pagination" id="model-pagination" aria-label="검색된 모델 페이지" hidden>
-              <button class="model-page-direction" id="model-page-prev" type="button" aria-label="이전 모델 페이지">이전</button>
-              <div class="model-page-numbers" id="model-page-numbers"></div>
-              <button class="model-page-direction" id="model-page-next" type="button" aria-label="다음 모델 페이지">다음</button>
-            </nav>
-          </div>
-        </section>
+        <dialog class="model-detail-dialog" id="model-detail-dialog" aria-labelledby="price-panel-title">
+          <div class="model-detail-window">
+            <header class="model-detail-header">
+              <div>
+                <span class="model-detail-kicker">모델 가격 정보</span>
+                <h2 id="price-panel-title" tabindex="-1">모델을 선택하세요</h2>
+              </div>
+              <button class="model-detail-close" id="model-detail-close" type="button" aria-label="모델 가격 정보 닫기">닫기</button>
+            </header>
 
-        <aside class="price-panel" aria-labelledby="price-panel-title">
-          <div class="price-panel-toolbar">
-            <span class="price-panel-label">선택 모델 가격</span>
-            <button class="price-panel-toggle" id="price-panel-toggle" type="button" aria-expanded="false" aria-controls="price-panel-content" aria-label="선택 모델 가격 펼치기">
-              <span class="price-panel-toggle-text">펼치기</span>
-              <span class="price-panel-toggle-icon" aria-hidden="true">+</span>
-            </button>
-          </div>
-
-          <div class="price-panel-content" id="price-panel-content" hidden>
+          <div class="price-panel-content" id="price-panel-content">
             <div class="selection-head">
-              <h2 id="price-panel-title" tabindex="-1">모델을 선택하세요</h2>
+              <p>현재 등록 매물의 평균과 확인된 거래가를 사이트별로 비교합니다.</p>
             </div>
 
             <div class="detail-message" id="detail-message" role="status" aria-live="polite">검색된 모델을 누르면 최근 30일 가격을 표시합니다.</div>
@@ -174,7 +151,7 @@
                   </thead>
                   <tbody>
                     <tr>
-                      <th scope="row">올라온 가격</th>
+                      <th scope="row">등록 매물 가격</th>
                       <td id="active-latest" data-label="최근 일평균">—</td>
                       <td id="active-mean" data-label="30일 평균">—</td>
                       <td id="active-change" data-label="차이">—</td>
@@ -206,8 +183,7 @@
               </div>
             </section>
 
-            <details class="price-chart-disclosure" id="price-chart-disclosure" hidden>
-              <summary>30일 추이 보기</summary>
+            <div class="price-chart-disclosure" id="price-chart-disclosure" hidden>
               <section class="stats-section" id="stats-section" hidden aria-labelledby="stats-title">
                 <div class="section-bar compact">
                   <h3 id="stats-title">최근 30일 평균 가격 차트</h3>
@@ -216,10 +192,10 @@
                 <div id="stats-groups" class="stats-groups"></div>
                 <p class="method-note">판매완료 표시는 실제 체결가와 다를 수 있습니다. 확인된 거래가는 출처가 거래 근거를 제공한 경우에만 표시합니다.</p>
               </section>
-            </details>
+            </div>
           </div>
-        </aside>
-        </div>
+          </div>
+        </dialog>
 
         <section class="listing-section" id="listing-section" hidden aria-labelledby="listing-title">
           <div class="listing-heading">
@@ -276,6 +252,6 @@
       </nav>
     </footer>
 
-    <script type="module" src="/app.js?v=pc-directory-v65"></script>
+    <script type="module" src="/app.js?v=pc-directory-v67"></script>
   </body>
 </html>
