@@ -943,7 +943,7 @@ async function importListings(env, values, collectionManifestValue = null) {
   }
 
   const statements = normalized.map((item) => env.DB.prepare(
-    `INSERT OR REPLACE INTO listings
+    `INSERT INTO listings
       (item_id, site, category_id, title, search_text, price_value, currency, url, image_url, seller_name, posted_at, updated_at, active,
        canonical_product_id, canonical_display_name, canonical_manufacturer, board_manufacturer, listing_kind, pc_category_code,
        market_segment, listing_type, condition_group, spec_group_id, classification_confidence, model_confidence, quantity_confidence, price_scope_confidence,
@@ -952,7 +952,85 @@ async function importListings(env, values, collectionManifestValue = null) {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
               ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
               ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-              ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+              ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(item_id) DO UPDATE SET
+        site = excluded.site,
+        category_id = excluded.category_id,
+        title = excluded.title,
+        search_text = excluded.search_text,
+        price_value = excluded.price_value,
+        currency = excluded.currency,
+        url = excluded.url,
+        image_url = excluded.image_url,
+        seller_name = excluded.seller_name,
+        posted_at = excluded.posted_at,
+        updated_at = excluded.updated_at,
+        active = excluded.active,
+        canonical_product_id = excluded.canonical_product_id,
+        canonical_display_name = excluded.canonical_display_name,
+        canonical_manufacturer = excluded.canonical_manufacturer,
+        board_manufacturer = excluded.board_manufacturer,
+        listing_kind = excluded.listing_kind,
+        pc_category_code = excluded.pc_category_code,
+        market_segment = excluded.market_segment,
+        listing_type = excluded.listing_type,
+        condition_group = excluded.condition_group,
+        spec_group_id = excluded.spec_group_id,
+        classification_confidence = excluded.classification_confidence,
+        model_confidence = excluded.model_confidence,
+        quantity_confidence = excluded.quantity_confidence,
+        price_scope_confidence = excluded.price_scope_confidence,
+        statistics_eligible = excluded.statistics_eligible,
+        statistics_exclusion_reasons_json = excluded.statistics_exclusion_reasons_json,
+        quantity = excluded.quantity,
+        price_scope = excluded.price_scope,
+        condition_code = excluded.condition_code,
+        lifecycle_status = excluded.lifecycle_status,
+        market_pool = excluded.market_pool,
+        confidence_json = excluded.confidence_json,
+        evidence_json = excluded.evidence_json,
+        price_eligible = excluded.price_eligible,
+        exclusion_reasons_json = excluded.exclusion_reasons_json,
+        good_listing_eligible = excluded.good_listing_eligible,
+        reference_price = excluded.reference_price
+      WHERE listings.site IS NOT excluded.site
+         OR listings.category_id IS NOT excluded.category_id
+         OR listings.title IS NOT excluded.title
+         OR listings.search_text IS NOT excluded.search_text
+         OR listings.price_value IS NOT excluded.price_value
+         OR listings.currency IS NOT excluded.currency
+         OR listings.url IS NOT excluded.url
+         OR listings.image_url IS NOT excluded.image_url
+         OR listings.seller_name IS NOT excluded.seller_name
+         OR listings.posted_at IS NOT excluded.posted_at
+         OR listings.active IS NOT excluded.active
+         OR listings.canonical_product_id IS NOT excluded.canonical_product_id
+         OR listings.canonical_display_name IS NOT excluded.canonical_display_name
+         OR listings.canonical_manufacturer IS NOT excluded.canonical_manufacturer
+         OR listings.board_manufacturer IS NOT excluded.board_manufacturer
+         OR listings.listing_kind IS NOT excluded.listing_kind
+         OR listings.pc_category_code IS NOT excluded.pc_category_code
+         OR listings.market_segment IS NOT excluded.market_segment
+         OR listings.listing_type IS NOT excluded.listing_type
+         OR listings.condition_group IS NOT excluded.condition_group
+         OR listings.spec_group_id IS NOT excluded.spec_group_id
+         OR listings.classification_confidence IS NOT excluded.classification_confidence
+         OR listings.model_confidence IS NOT excluded.model_confidence
+         OR listings.quantity_confidence IS NOT excluded.quantity_confidence
+         OR listings.price_scope_confidence IS NOT excluded.price_scope_confidence
+         OR listings.statistics_eligible IS NOT excluded.statistics_eligible
+         OR listings.statistics_exclusion_reasons_json IS NOT excluded.statistics_exclusion_reasons_json
+         OR listings.quantity IS NOT excluded.quantity
+         OR listings.price_scope IS NOT excluded.price_scope
+         OR listings.condition_code IS NOT excluded.condition_code
+         OR listings.lifecycle_status IS NOT excluded.lifecycle_status
+         OR listings.market_pool IS NOT excluded.market_pool
+         OR listings.confidence_json IS NOT excluded.confidence_json
+         OR listings.evidence_json IS NOT excluded.evidence_json
+         OR listings.price_eligible IS NOT excluded.price_eligible
+         OR listings.exclusion_reasons_json IS NOT excluded.exclusion_reasons_json
+         OR listings.good_listing_eligible IS NOT excluded.good_listing_eligible
+         OR listings.reference_price IS NOT excluded.reference_price`
   ).bind(
     item.item_id,
     item.site,
@@ -1350,11 +1428,11 @@ export default {
         if (!["cpu", "gpu", "ram", "motherboard", "ssd", "hdd", "psu"].includes(categoryRoute[1])) {
           return json(410, { status: "error", error: "Unsupported category route" });
         }
-        const assetResponse = await serveAssets(new Request(new URL("/index.html", request.url), request), env);
+        const assetResponse = await serveAssets(new Request(new URL("/", request.url), request), env);
         if (assetResponse) return assetResponse;
       }
       if (url.pathname === "/categories") {
-        const assetResponse = await serveAssets(new Request(new URL("/index.html", request.url), request), env);
+        const assetResponse = await serveAssets(new Request(new URL("/used-market-categories", request.url), request), env);
         if (assetResponse) return assetResponse;
       }
     }

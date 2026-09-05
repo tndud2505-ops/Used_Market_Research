@@ -757,6 +757,16 @@ const ryzen1200Projection = pipeline.recordItem({
   currency: "KRW", url: "https://web.joongna.com/product/ryzen-1200", status: "ACTIVE"
 }, new Date(now).toISOString());
 assert.equal(ryzen1200Projection.canonical_product_id, "cpu:amd:ryzen-3-1200");
+const unknown7500x3dProjection = pipeline.recordItem({
+  item_id: "hellomarket:unknown-7500x3d", site: "hellomarket",
+  title: "7500x3d cpu 팝니다", price: 300_000,
+  currency: "KRW", url: "https://www.hellomarket.com/item/unknown-7500x3d", status: "ACTIVE"
+}, new Date(now).toISOString());
+assert.equal(unknown7500x3dProjection.canonical_product_id, null,
+  "an unknown CPU model must not partially match an Intel numeric alias");
+assert.equal(unknown7500x3dProjection.price_eligible, false);
+assert.equal(unknown7500x3dProjection.statistics_eligible, false);
+assert.ok(unknown7500x3dProjection.exclusion_reasons.includes("MODEL_NOT_IN_MASTER"));
 for (let index = 0; index < 5; index += 1) {
   pipeline.recordItem({
     item_id: `joonggonara:rtx5090-sold-${index}`, site: "joonggonara",

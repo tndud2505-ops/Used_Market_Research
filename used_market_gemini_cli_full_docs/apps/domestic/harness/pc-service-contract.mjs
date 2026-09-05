@@ -1762,6 +1762,34 @@ assert.equal(ambiguousPrice.price_eligible, 0);
 assert.ok(JSON.parse(ambiguousPrice.exclusion_reasons_json).includes("PRICE_SCOPE_AMBIGUOUS"));
 assert.equal(d1.prepare("SELECT price_eligible FROM listings WHERE item_id = ?")
   .get(staleD1Fixture.item_id).price_eligible, 1, "the fixture starts as a stale v8-eligible D1 row");
+const unchangedProjection = {
+  item_id: "bunjang:unchanged-import", site: "bunjang", category_id: "pc",
+  title: "RTX 3080 unchanged projection", price: 483_000, currency: "KRW",
+  url: "https://m.bunjang.co.kr/products/unchanged-import", lifecycle_status: "SOLD", market_pool: "KR_C2C_USED",
+  canonical_product_id: "gpu:nvidia:rtx-3080", canonical_display_name: "NVIDIA GeForce RTX 3080",
+  canonical_manufacturer: "NVIDIA", board_manufacturer: "EVGA", listing_kind: "SINGLE_COMPONENT", category_code: "GPU",
+  quantity: 1, price_scope: "TOTAL", condition_code: "USED_WORKING", price_eligible: true, exclusion_reasons: [],
+  updated_at: "2026-09-01T00:00:00.000Z"
+};
+const firstUnchangedImport = await worker.fetch(new Request("https://used-pick.test/admin/import-listings", {
+  method: "POST",
+  headers: { authorization: "Bearer import-fixture-token", "content-type": "application/json" },
+  body: JSON.stringify({ items: [unchangedProjection] })
+}), importEnv);
+assert.equal(firstUnchangedImport.status, 200);
+const changesBeforeUnchangedReplay = d1.prepare("SELECT total_changes() AS value").get().value;
+const unchangedReplay = await worker.fetch(new Request("https://used-pick.test/admin/import-listings", {
+  method: "POST",
+  headers: { authorization: "Bearer import-fixture-token", "content-type": "application/json" },
+  body: JSON.stringify({ items: [{ ...unchangedProjection, updated_at: "2026-09-01T01:00:00.000Z" }] })
+}), importEnv);
+assert.equal(unchangedReplay.status, 200);
+assert.equal((await unchangedReplay.json()).inserted, 1,
+  "a replayed projection remains an accepted import for runner compatibility");
+assert.equal(d1.prepare("SELECT total_changes() AS value").get().value - changesBeforeUnchangedReplay, 1,
+  "replaying unchanged listing content may update usage accounting but must not rewrite the listing and its indexes");
+assert.equal(d1.prepare("SELECT updated_at FROM listings WHERE item_id = ?").get(unchangedProjection.item_id).updated_at,
+  unchangedProjection.updated_at, "an observation-only timestamp change must not impersonate a material listing update");
 const d1TombstoneResponse = await worker.fetch(new Request("https://used-pick.test/admin/import-listings", {
   method: "POST",
   headers: { authorization: "Bearer import-fixture-token", "content-type": "application/json" },
@@ -1855,6 +1883,23 @@ try {
 }
 
 const { createServer } = await import("../dist/web-backend/logic/server.js");
+const assetPaths = [];
+const routeAssets = {
+  ASSETS: {
+    fetch: async (request) => {
+      const pathname = new URL(request.url).pathname;
+      assetPaths.push(pathname);
+      return new Response(`asset:${pathname}`, { status: 200, headers: { "content-type": "text/html; charset=utf-8" } });
+    }
+  }
+};
+const categoryLanding = await worker.fetch(new Request("https://used-pick.test/categories"), routeAssets);
+assert.equal(categoryLanding.status, 200);
+assert.equal(assetPaths.at(-1), "/used-market-categories", "category landing must serve its own document without redirecting home");
+const categoryApp = await worker.fetch(new Request("https://used-pick.test/categories/ram"), routeAssets);
+assert.equal(categoryApp.status, 200);
+assert.equal(assetPaths.at(-1), "/", "category routes must serve the app shell without redirecting away from the category URL");
+
 const internalSecret = "database-password=must-not-leak";
 let localSearchCalls = 0;
 const server = createServer(0, {

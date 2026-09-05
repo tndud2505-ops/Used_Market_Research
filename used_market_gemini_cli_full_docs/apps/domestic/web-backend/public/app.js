@@ -100,6 +100,7 @@ const state = {
   pricePanelOpen: false,
   modelFiltersCollapsed: false,
   listingOptionsCollapsed: false,
+  returnFocusProductId: "",
 };
 
 const dom = {
@@ -272,12 +273,19 @@ function normalizeSources(sources) {
   return toArray(sources)
     .filter((source) => source && source.public_enabled !== false && source.enabled !== false)
     .filter((source) => !["DISABLED", "DENIED"].includes(normalizeText(firstDefined(source.operating_status, source.runtime_status, source.status)).toUpperCase()))
-    .map((source) => ({
-      id: normalizeText(firstDefined(source.source_id, source.key, source.code, source.id)),
-      label: normalizeText(firstDefined(source.display_name, source.label, source.name, source.source_id, source.id)),
-      marketPool: normalizeText(firstDefined(source.market_pool, toArray(source.market_pools)[0])),
-      currency: normalizeText(firstDefined(source.currency, normalizeText(source.market_pool).startsWith("OVERSEAS") ? "USD" : "KRW")).toUpperCase(),
-    }))
+    .map((source) => {
+      const marketPools = [...new Set(toArray(source.market_pools)
+        .map(normalizeText)
+        .filter(Boolean))];
+      const primaryMarketPool = normalizeText(source.market_pool);
+      if (!marketPools.length && primaryMarketPool) marketPools.push(primaryMarketPool);
+      return {
+        id: normalizeText(firstDefined(source.source_id, source.key, source.code, source.id)),
+        label: normalizeText(firstDefined(source.display_name, source.label, source.name, source.source_id, source.id)),
+        marketPools,
+        currency: normalizeText(firstDefined(source.currency, primaryMarketPool.startsWith("OVERSEAS") ? "USD" : "KRW")).toUpperCase(),
+      };
+    })
     .filter((source) => source.id && source.label);
 }
 
@@ -352,6 +360,7 @@ function formatMoney(value, fallbackCurrency = "KRW") {
 }
 
 function formatCount(value) {
+  if (value === null || value === undefined || value === "") return "—";
   const count = Number(value);
   return Number.isFinite(count) ? `${count.toLocaleString("ko-KR")}건` : "—";
 }
@@ -833,6 +842,7 @@ function makeFacetCheckboxRow(definition) {
     more.type = "button";
     more.setAttribute("aria-expanded", String(expanded));
     more.setAttribute("aria-controls", rowId);
+    more.setAttribute("aria-label", expanded ? `${definition.label} 옵션 접기` : `${definition.label} 옵션 ${definition.options.length}개 모두 보기`);
     more.addEventListener("click", () => {
       if (expanded) state.expandedFacetOptions.delete(definition.rowKey);
       else state.expandedFacetOptions.add(definition.rowKey);
@@ -872,7 +882,7 @@ function renderActiveFilterSummary(definitions) {
 
 function updateMatchedModelButton() {
   if (!dom.showMatchedModels) return;
-  dom.showMatchedModels.textContent = "현재 매물로 이동";
+  dom.showMatchedModels.textContent = "검색 결과로 이동";
 }
 
 function updateFacetSelectionUi(definitions = facetDefinitionsForCategory(state.categoryCode)) {
@@ -938,7 +948,8 @@ function renderSourceFilters() {
   dom.sourceFilters.replaceChildren();
   dom.sourceFacetRow.hidden = state.sources.length === 0 && state.sourceCandidates.length === 0;
   if (!state.sources.length && !state.sourceCandidates.length) return;
-  dom.sourceFilters.append(makeFacetButton("전체", "", state.selectedSites.size === 0, () => {
+  const allSourcesLabel = listingPriceControlsActive() && listingCurrencyScope() === "KRW" ? "원화 전체" : "전체";
+  dom.sourceFilters.append(makeFacetButton(allSourcesLabel, "", state.selectedSites.size === 0, () => {
     state.selectedSites.clear();
     renderSourceFilters();
     updateListingScopeNote();
@@ -997,6 +1008,12 @@ function selectCategory(code) {
   state.openSeries.clear();
   state.openFacetRows.clear();
   state.expandedFacetOptions.clear();
+  state.listingSort = "recent";
+  state.priceMin = "";
+  state.priceMax = "";
+  dom.listingSort.value = "recent";
+  dom.priceMin.value = "";
+  dom.priceMax.value = "";
   const firstFacet = browseFlowForCategory(code)[0]?.key;
   if (firstFacet) state.openFacetRows.add(firstFacet);
   clearTimeout(catalogSearchTimer);
@@ -1118,6 +1135,20 @@ function productSummaryPrice(product, type) {
   return metricValue(block, ["median", "median_price", "sold_last_ask_median", "amount"]) || normalizePrice(direct, "KRW");
 }
 
+function productActiveCount(product) {
+  const sampled = sampleCount(productActiveBlock(product));
+  if (sampled !== null) return sampled > 0 ? sampled : null;
+  const direct = Number(product?.active_count);
+  const hasPublishedSummary = Boolean(firstDefined(
+    product?.last_updated_at,
+    product?.price_stats_as_of,
+    product?.price_stats_updated_at,
+    product?.active_median,
+    product?.active_trimmed_mean,
+  ));
+  return hasPublishedSummary && Number.isFinite(direct) && direct > 0 ? direct : null;
+}
+
 function productStatsMarketLabel(product) {
   const marketPool = normalizeText(product?.price_stats_market_pool);
   if (marketPool === "KR_C2C_USED") return "국내 개인 중고";
@@ -1226,8 +1257,7 @@ function renderProducts() {
     const makerCell = createElement("td");
     makerCell.append(createElement("span", "product-maker", productManufacturer(product) || "—"));
 
-    const active = productActiveBlock(product);
-    const countCell = createElement("td", "count-cell", formatCount(firstDefined(sampleCount(active), product.active_count)));
+    const countCell = createElement("td", "count-cell", formatCount(productActiveCount(product)));
     const medianCell = createElement("td", "price-cell", formatMoney(productSummaryPrice(product, "active")));
     const soldCell = createElement("td", "price-cell", formatMoney(productSummaryPrice(product, "sold")));
     row.append(modelCell, specCell, makerCell, countCell, medianCell, soldCell);
@@ -1245,6 +1275,7 @@ function renderProducts() {
   const total = Number.isFinite(Number(state.productTotal)) && Number(state.productTotal) >= state.products.length
     ? Number(state.productTotal)
     : state.products.length;
+  if (!state.selectedProduct) dom.listingSection.hidden = total === 0;
   dom.productCount.textContent = total ? `${total.toLocaleString("ko-KR")}개 모델` : "0개 모델";
   dom.modelListContext.textContent = state.query
     ? `“${state.query}” · ${total.toLocaleString("ko-KR")}개 모델`
@@ -1254,7 +1285,7 @@ function renderProducts() {
 }
 
 function firstProductWithActiveListings(products) {
-  return products.find((product) => Number(firstDefined(sampleCount(productActiveBlock(product)), product?.active_count, 0)) > 0) || null;
+  return products.find((product) => Number(productActiveCount(product) || 0) > 0) || null;
 }
 
 function buildProductQuery(cursor = "") {
@@ -1462,10 +1493,29 @@ function updateListingScopeNote() {
       : state.productRequest
         ? "모델 범위 계산 중"
         : "선택 조건 범위";
+  const currencyScope = listingCurrencyScope();
   const siteScope = state.selectedSites.size
     ? [...state.selectedSites].map(sourceLabel).join(" · ")
-    : "전체 사이트";
+    : currencyScope === "KRW" && listingPriceControlsActive()
+      ? "원화 사이트"
+      : "전체 사이트";
   dom.listingScopeNote.textContent = `${modelScope} · ${siteScope} · 비교 가능한 정상 중고만 표시`;
+}
+
+function listingPriceControlsActive() {
+  return state.listingSort !== "recent" || Boolean(state.priceMin || state.priceMax);
+}
+
+function listingSourceScope() {
+  return state.selectedSites.size
+    ? state.sources.filter((source) => state.selectedSites.has(source.id))
+    : state.sources;
+}
+
+function listingCurrencyScope() {
+  const currencies = [...new Set(listingSourceScope().map((source) => source.currency).filter(Boolean))];
+  if (currencies.length === 1) return currencies[0];
+  return listingPriceControlsActive() && currencies.includes("KRW") ? "KRW" : "";
 }
 
 function selectProduct(product) {
@@ -1474,6 +1524,7 @@ function selectProduct(product) {
     return;
   }
   cancelListingRequest();
+  state.returnFocusProductId = productId(product);
   state.selectedProduct = product;
   setPricePanelOpen(!stackedLayoutMedia.matches);
   document.body.classList.add("has-selected-product");
@@ -1501,7 +1552,11 @@ function selectProduct(product) {
   showDetailMessage("가격 통계와 현재 매물을 불러오는 중입니다.");
   renderProducts();
   loadProductDetail();
-  window.requestAnimationFrame(() => dom.listingSection.scrollIntoView({ behavior: "smooth", block: "start" }));
+  window.requestAnimationFrame(() => {
+    dom.listingSection.scrollIntoView({ behavior: "smooth", block: "start" });
+    dom.listingTitle.tabIndex = -1;
+    dom.listingTitle.focus({ preventScroll: true });
+  });
 }
 
 function buildListingQuery(cursor = "") {
@@ -1520,12 +1575,10 @@ function buildListingQuery(cursor = "") {
   if (state.listingSort) params.set("sort", state.listingSort);
   if (state.priceMin) params.set("price_min", state.priceMin);
   if (state.priceMax) params.set("price_max", state.priceMax);
-  const sourceScope = state.selectedSites.size
-    ? state.sources.filter((source) => state.selectedSites.has(source.id))
-    : state.sources;
-  const currencies = [...new Set(sourceScope.map((source) => source.currency).filter(Boolean))];
-  const marketPools = [...new Set(sourceScope.map((source) => source.marketPool).filter(Boolean))];
-  if (currencies.length === 1) params.set("currency", currencies[0]);
+  const sourceScope = listingSourceScope();
+  const marketPools = [...new Set(sourceScope.flatMap((source) => source.marketPools).filter(Boolean))];
+  const currencyScope = listingCurrencyScope();
+  if (currencyScope) params.set("currency", currencyScope);
   if (marketPools.length === 1) params.set("market_pool", marketPools[0]);
   if (cursor) params.set("cursor", cursor);
   return params;
@@ -1704,7 +1757,26 @@ function renderListings() {
     body.append(source, title);
     const meta = createElement("div", "listing-meta");
     const canonicalModel = normalizeText(listing.canonical_display_name);
-    if (!state.selectedProduct && canonicalModel) meta.append(createElement("span", "listing-model", canonicalModel));
+    const canonicalProductId = normalizeText(listing.canonical_product_id);
+    if (!state.selectedProduct && canonicalModel) {
+      if (canonicalProductId) {
+        const modelAction = createElement("button", "listing-model listing-model-action", `${canonicalModel} 시세`);
+        modelAction.type = "button";
+        modelAction.setAttribute("aria-label", `${canonicalModel} 가격 인사이트 보기`);
+        modelAction.addEventListener("click", () => {
+          const product = state.products.find((item) => productId(item) === canonicalProductId) || {
+            canonical_product_id: canonicalProductId,
+            canonical_display_name: canonicalModel,
+            category_code: state.categoryCode,
+            manufacturer: firstDefined(listing.canonical_manufacturer, listing.manufacturer),
+          };
+          selectProduct(product);
+        });
+        meta.append(modelAction);
+      } else {
+        meta.append(createElement("span", "listing-model", canonicalModel));
+      }
+    }
     const maker = normalizeText(firstDefined(listing.board_manufacturer, listing.canonical_manufacturer, listing.manufacturer));
     if (maker) meta.append(createElement("span", "listing-maker", maker));
     meta.append(createElement("span", "listing-state", listingConditionLabel(firstDefined(listing.condition_code, listing.lifecycle_status, listing.status, listing.availability))));
@@ -2292,9 +2364,16 @@ dom.listingOptionsToggle.addEventListener("click", () => setListingOptionsCollap
 dom.loadMoreListings.addEventListener("click", () => loadListings(true));
 dom.pricePanelToggle.addEventListener("click", () => setPricePanelOpen(!state.pricePanelOpen));
 dom.backToModels.addEventListener("click", () => {
+  const returnFocusProductId = state.returnFocusProductId;
   updateWorkspaceHeading();
   showScopedListings();
   dom.listingSection.scrollIntoView({ behavior: "smooth", block: "start" });
+  window.requestAnimationFrame(() => {
+    const button = [...dom.productRows.querySelectorAll(".product-row")]
+      .find((row) => row.dataset.productId === returnFocusProductId)
+      ?.querySelector(".product-select");
+    button?.focus({ preventScroll: true });
+  });
 });
 
 dom.listingControls.addEventListener("submit", (event) => {
@@ -2304,14 +2383,8 @@ dom.listingControls.addEventListener("submit", (event) => {
   state.priceMax = digitsOnly(dom.priceMax.value);
   dom.priceMin.value = state.priceMin;
   dom.priceMax.value = state.priceMax;
-  const sourceScope = state.selectedSites.size
-    ? state.sources.filter((source) => state.selectedSites.has(source.id))
-    : state.sources;
-  const currencies = new Set(sourceScope.map((source) => source.currency).filter(Boolean));
-  if ((state.listingSort !== "recent" || state.priceMin || state.priceMax) && currencies.size > 1) {
-    showListingMessage("원화와 해외 통화를 함께 가격순으로 비교할 수 없습니다. 같은 통화의 사이트만 선택해 주세요.", true);
-    return;
-  }
+  renderSourceFilters();
+  updateListingScopeNote();
   if (state.selectedProduct) loadProductDetail();
   else loadListings(false);
 });

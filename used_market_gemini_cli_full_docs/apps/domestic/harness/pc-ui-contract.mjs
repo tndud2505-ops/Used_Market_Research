@@ -39,6 +39,8 @@ requireText(script, 'quantity > 1 ? "일괄가격"', "RAM lot pricing must stay 
 requireText(html, "실제 체결가와 다를 수 있습니다", "sold last-ask disclosure is required");
 requireText(script, "state.selectedSites.add(source.id)", "site filters must support selecting multiple sites");
 requireText(script, "state.selectedSites.delete(source.id)", "site filters must support independently disabling a site");
+requireText(script, "marketPools", "a source with multiple market pools must preserve every supported pool");
+requireText(script, "listingCurrencyScope", "mixed-currency price controls must use an explicit comparable currency scope");
 requireText(script, "state.sourceCandidates", "blocked or review-required PC sources must remain visibly explained");
 requireText(script, '"허가 필요"', "terms-blocked sources must show an honest permission-required state");
 requireText(script, '"파트너 승인 필요"', "contract-feed sources must show their distinct activation state");
@@ -99,6 +101,7 @@ requireText(script, "category-button", "categories must expose selectable shoppi
 requireText(script, "openSingleSearchResult", "a unique model search result must open its listings and price insight directly");
 requireText(script, "state.productTotal !== 1", "a single filtered model may open its price insight directly");
 requireText(script, "showScopedListings", "category and facet results must expose listings before a model is selected");
+requireText(script, "listing-model-action", "broad listing rows must provide a direct path to the model price insight");
 const refreshBrowseBlock = script.slice(script.indexOf("function refreshBrowseScope("), script.indexOf("function setPricePanelOpen("));
 assert.ok(refreshBrowseBlock.indexOf("loadProducts(false)") >= 0
   && refreshBrowseBlock.indexOf("showScopedListings") > refreshBrowseBlock.indexOf("loadProducts(false)"),
@@ -131,6 +134,8 @@ assert.equal(html.includes("제품 유형"), false, "DESKTOP must stay hidden as
 assert.equal(html.includes("contextual-offer"), false, "the public model and listing flow must not include ads");
 assert.equal(script.includes("/api/monetization/"), false, "the public UI must not request monetization APIs");
 assert.equal(/['"`]\/api\/search(?:-only)?(?:[?'"`])/u.test(script), false, "the public UI must not call generic used-market search APIs");
+assert.equal(script.includes("원화와 해외 통화를 함께 가격순으로 비교할 수 없습니다"), false,
+  "price controls must submit a comparable currency scope instead of refusing the request");
 
 requireText(script, "listing.image_url", "listing thumbnails must use collected source images");
 requireText(script, '"이미지 없음"', "missing source images must have an honest empty state");

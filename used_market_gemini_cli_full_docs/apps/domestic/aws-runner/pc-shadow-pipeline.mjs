@@ -55,6 +55,20 @@ function comparablePrices(price, quantity, priceScope) {
   return { unitPrice: count > 1 ? Number((price / count).toFixed(2)) : price, totalPrice: price };
 }
 
+function cpuModelToken(value) {
+  const matches = [...String(value || "").normalize("NFKC").toUpperCase()
+    .matchAll(/(\d{3,5}(?:X3D|KF|KS|XT|K|F|G|X)?)/gu)]
+    .map((match) => match[1]);
+  return matches.at(-1) || "";
+}
+
+function cpuProductMatchesClassification(classified, product) {
+  if (classified?.category_code !== "CPU" || !classified?.canonical_model || !product?.spec?.cpu_model) return true;
+  const classifiedModel = cpuModelToken(classified.canonical_model);
+  const productModel = cpuModelToken(product.spec.cpu_model);
+  return !classifiedModel || !productModel || classifiedModel === productModel;
+}
+
 function componentItemsWithExplicitPrices(value, components) {
   const text = String(value || "").normalize("NFKC").toLowerCase().replace(/[^0-9a-z가-힣]+/gu, "");
   const positioned = components.map((component) => ({ component, position: text.indexOf(component.alias_text) }))
@@ -293,9 +307,10 @@ export class PcShadowPipeline {
           : textAlias;
     const aliasMatched = Boolean(alias?.matched && !alias?.forbidden);
     const facetProduct = aliasMatched ? null : directoryFacetProduct(classified, `${item.title || ""} ${item.description || ""}`);
-    const product = aliasMatched
+    let product = aliasMatched
       ? this.ledger.getCanonicalProduct(alias.canonical_product_id, alias.master_version)
       : facetProduct ? this.ledger.getCanonicalProduct(facetProduct.id, PC_PRODUCT_MASTER_V2_VERSION) : null;
+    if (!cpuProductMatchesClassification(classified, product)) product = null;
     const matched = Boolean(product);
     const exclusionReasons = [...classified.exclusion_reasons];
     if (!matched) exclusionReasons.push("MODEL_NOT_IN_MASTER");
