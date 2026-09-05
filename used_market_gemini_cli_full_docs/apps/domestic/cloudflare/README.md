@@ -15,7 +15,7 @@
 
 수동 실행도 작업 결과 저장 뒤 알림 dispatch와 reporter 후처리를 실행한다. 후처리 경고가 있으면 전체 응답은 `partial_success`가 되며 `postprocess.warnings`에서 원인을 확인할 수 있다.
 
-사전수집은 Cloudflare Browser Run이 아니라 AWS 러너에서 처리한다. 공개 PC 읽기 API는 요청 중 원 사이트를 호출하지 않는다. Worker의 `RUNNER_URL`과 legacy `SEARCH_RUNNER_URL`은 Cloudflare Tunnel 공개 URL이어야 하며, 로컬 `localhost`는 사용할 수 없다.
+사전수집은 Cloudflare Browser Run이 아니라 AWS 러너에서 처리한다. 공개 PC 읽기 API는 요청 중 원 사이트를 호출하지 않는다. 매물과 가격 통계는 AWS SQLite를 먼저 읽고 Worker Cache API에 5분간 응답을 저장한다. D1 매물 fallback은 기본 비활성이며, 작은 일일 가격 통계만 AWS 읽기 실패 때 D1 fallback을 사용할 수 있다. Worker의 `RUNNER_URL`과 legacy `SEARCH_RUNNER_URL`은 Cloudflare Tunnel 공개 URL이어야 하며, 로컬 `localhost`는 사용할 수 없다.
 
 ## 로컬 검증
 
@@ -57,7 +57,7 @@ npm run cloudflare:deploy
 
 이 프로필은 `https://runner.used-pick.com`을 러너·검색·원본 주소로 사용한다. DNS가 아직 없으면 배포하지 말고 먼저 아래 CNAME을 추가한다.
 
-Cron 표현식은 Cloudflare 기준 UTC다. 수집은 AWS 러너에서 처리되며, 필요할 때만 D1 import를 사용한다. `FREE_TIER_MODE=false`이고 Worker에는 Browser/Queue 바인딩을 배포하지 않는다.
+Cron 표현식은 Cloudflare 기준 UTC다. 수집은 AWS 러너에서 처리되며, 연속 D1 매물 mirror와 D1 매물 fallback은 기본적으로 끈다. D1 매물 fallback을 운영자가 명시적으로 켜도 완전한 collection manifest가 있고 2시간 이내일 때만 허용한다. 작은 일일 가격 통계 publication은 fallback용으로 계속 사용할 수 있다. `FREE_TIER_MODE=false`이고 Worker에는 Browser/Queue 바인딩을 배포하지 않는다.
 
 ## 수동 실행
 
@@ -74,10 +74,11 @@ Invoke-RestMethod -Uri "https://<worker-subdomain>.workers.dev/run" -Method Post
 The active Worker/AWS profile:
 
 - Static assets are served by the Worker Assets binding.
-- `/api/pc/catalog`, `/api/pc/products`, `/api/pc/listings`, and product price stats read only precollected projections.
+- `/api/pc/listings` and product price stats read precollected AWS SQLite projections first and use the Worker Cache API for repeated reads.
+- `/api/pc/catalog` and `/api/pc/products` remain precollected/static directory reads.
 - `/api/search` remains a legacy rollback path through Cloudflare Tunnel; the PC directory does not call it.
 - Cron and manual jobs call the authenticated AWS `/api/runner/run` endpoint.
-- D1 remains available for optional imported snapshots and fallback data.
+- D1 listing mirror and listing fallback are disabled by default. An explicit listing fallback accepts only a fresh complete snapshot; compact daily price stats remain available for AWS failure fallback.
 - Browser Run and Queue are intentionally not deployed for this profile.
 - Public GET responses and search POST bodies are cached to avoid duplicate origin/browser work.
 - The legacy Node/CDP bridge is used only when the free-tier bindings are not present.

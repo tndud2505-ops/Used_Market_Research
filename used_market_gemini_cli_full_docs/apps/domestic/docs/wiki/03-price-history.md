@@ -42,11 +42,15 @@
 AWS raw_listings / listing_snapshots
   -> normalized_listings / listing_items / product_master
   -> daily_price_stats + daily_price_stat_members
-  -> 검증된 D1 catalog / listing / public_product_stats publication
+  -> AWS SQLite 공개 listing / price stats 읽기
+  -> Cloudflare Worker 응답 cache
+  -> AWS 장애 때 compact D1 public_product_stats fallback
   -> GET /api/pc/catalog + /api/pc/listings
   -> GET /api/products/:canonicalProductId/price-stats
   -> 좌측 필터 → 사이트별 매물 결과 + 가격 요약·30일 그래프
 ```
+
+D1 매물 mirror와 매물 fallback은 기본 비활성이다. 운영자가 별도로 허용해도 완전한 collection manifest가 있고 2시간 이내인 snapshot만 사용할 수 있다.
 
 - 활성 매물은 하루의 마지막 유효 관측을 한 번 센다.
 - SOLD는 최초 SOLD 날짜에 `sold_last_ask_price`를 한 번 센다.

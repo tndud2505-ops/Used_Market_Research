@@ -52,10 +52,14 @@ import {
 
 const PORT = Number.parseInt(process.env.RUNNER_PORT || "8787", 10);
 const RUNNER_TOKEN = process.env.CLOUDFLARE_RUNNER_TOKEN || process.env.RUNNER_TOKEN || "";
-const SEARCH_CURSOR_SECRET = process.env.RUNNER_CURSOR_SECRET || RUNNER_TOKEN || "used-market-local-cursor-v2";
+const SEARCH_CURSOR_SECRET = process.env.SEARCH_CURSOR_SECRET
+  || process.env.RUNNER_CURSOR_SECRET
+  || RUNNER_TOKEN
+  || "used-market-local-cursor-v2";
 const IMPORT_URL = (process.env.D1_IMPORT_URL || "").trim();
 const IMPORT_TOKEN = process.env.CLOUDFLARE_MANUAL_RUN_TOKEN || process.env.IMPORT_TOKEN || "";
 const STATS_IMPORT_URL = (process.env.D1_STATS_IMPORT_URL || "").trim();
+const D1_BACKGROUND_MIRROR_ENABLED = String(process.env.D1_BACKGROUND_MIRROR_ENABLED ?? "false").toLowerCase() === "true";
 const PC_LISTING_COLLECTION_MANIFEST_VERSION = "pc-listing-collection-v1";
 const PC_COLLECTION_TARGET_SET = pcCollectionTargetSetV2();
 const PC_HOURLY_COLLECTION_TARGET_IDS = new Set(PC_COLLECTION_TARGET_SET.targets
@@ -492,6 +496,9 @@ function toImportItem(item) {
 
 async function importToD1(items, parentSignal) {
   if (!items.length) return { inserted: 0, skipped: true };
+  if (!D1_BACKGROUND_MIRROR_ENABLED) {
+    return { inserted: 0, skipped: true, warning: "D1 background mirror is disabled" };
+  }
   if (!IMPORT_URL || !IMPORT_TOKEN) {
     return { inserted: 0, skipped: true, warning: "D1_IMPORT_URL or import token is not configured" };
   }
@@ -541,6 +548,9 @@ async function importToD1BestEffort(items, parentSignal) {
 }
 
 async function mirrorPcListingCollectionManifest({ sourceId, asOf, successfulTargetIds }, parentSignal) {
+  if (!D1_BACKGROUND_MIRROR_ENABLED) {
+    return { mirrored: false, skipped: true, warning: "D1 background mirror is disabled" };
+  }
   if (!IMPORT_URL || !IMPORT_TOKEN) {
     return { mirrored: false, skipped: true, warning: "D1_IMPORT_URL or import token is not configured" };
   }
@@ -986,6 +996,8 @@ function runnerStatus() {
       ledger_ready: Boolean(pcLedger),
       scheduler_enabled: PC_PARTS_SCHEDULER_ENABLED,
       scheduler_active: pcSchedulerActive,
+      d1_background_mirror_enabled: D1_BACKGROUND_MIRROR_ENABLED,
+      d1_background_mirror_configured: Boolean(IMPORT_URL && IMPORT_TOKEN),
       publication_configured: Boolean(STATS_IMPORT_URL && IMPORT_TOKEN),
       publication_last_succeeded_at: pcPublicationLastSucceededAt,
       ...readiness,
@@ -2083,6 +2095,8 @@ const server = http.createServer(async (req, res) => {
         ledger_ready: Boolean(pcLedger),
         scheduler_enabled: PC_PARTS_SCHEDULER_ENABLED,
         scheduler_active: pcSchedulerActive,
+        d1_background_mirror_enabled: D1_BACKGROUND_MIRROR_ENABLED,
+        d1_background_mirror_configured: Boolean(IMPORT_URL && IMPORT_TOKEN),
         publication_configured: Boolean(STATS_IMPORT_URL && IMPORT_TOKEN),
         publication_last_succeeded_at: pcPublicationLastSucceededAt,
         ...pcOperationalReadiness(),

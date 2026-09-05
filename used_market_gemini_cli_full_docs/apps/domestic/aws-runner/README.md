@@ -81,7 +81,8 @@ sudo bash /opt/used-market-runner/aws-runner/configure-ubuntu24.sh
 - `CLOUDFLARE_RUNNER_TOKEN`: Cloudflare Worker가 `/api/runner/run` 호출 때 쓰는 긴 랜덤 토큰
 - `EBAY_CLIENT_ID`: eBay Developer 애플리케이션 Client ID
 - `EBAY_CLIENT_SECRET`: eBay Developer 애플리케이션 Client Secret
-- `D1_IMPORT_URL`: 선택. `{ "items": [...] }`를 받는 HTTPS import API
+- `D1_IMPORT_URL`: 선택. 운영자 seed/recovery 또는 명시적으로 켠 background mirror가 `{ "items": [...] }`를 보내는 HTTPS import API
+- `D1_BACKGROUND_MIRROR_ENABLED`: 기본 `false`. `true`일 때만 수집·상태 확인 결과를 D1에 연속 복제
 - `D1_STATS_IMPORT_URL`: PC 전환 시 필수. checksum·row count가 포함된 완성 통계 publication을 받는 `/admin/import-product-stats`
 - `CLOUDFLARE_MANUAL_RUN_TOKEN`: 선택한 import API의 Bearer 토큰
 - `Cloudflare Tunnel token`: Dashboard에서 복사한 Tunnel 토큰
@@ -103,6 +104,8 @@ systemctl status used-market-tunnel.service --no-pager
 ## 3.1 반복 배포
 
 기존 서버에 새 release를 올릴 때도 설치 스크립트를 사용한다. Tunnel 토큰이 이미 있으면 스크립트가 `runner → tunnel` 순서로 재시작하고 로컬·외부 health를 필수 검증한다.
+
+D1-first 운영에서 AWS-first로 처음 전환할 때는 Worker를 먼저 배포해 `/api/pc/listings`와 가격 통계가 `x-search-data-source: aws-runner`로 응답하는지 확인한 뒤 AWS 러너를 배포한다. 반대 순서로 진행하면 기존 Worker가 자동 mirror가 멈춘 D1 매물을 계속 읽을 수 있다.
 
 ```bash
 sudo env RUNNER_PUBLIC_URL=https://runner.example.com \
@@ -126,6 +129,8 @@ RUNNER_TOKEN=<CLOUDFLARE_RUNNER_TOKEN과 동일한 값>
 새 환경의 첫 배포는 `RUNNER_INDEX_MODE=shadow`로 live·색인 비교 수치를 모을 수 있다. 현재 운영은 2026-08-20 검색 대기시간 개선 결정에 따라 `RUNNER_INDEX_MODE=cache_first`다. 저장 결과를 먼저 응답하고 stale이면 백그라운드 갱신하며, 캐시가 없는 검색만 동기 수집한다.
 
 PC 원장 shadow dual-write는 `PC_PARTS_SHADOW_WRITE_ENABLED=true`로 켠다. 고주기 cadence는 운영자가 병행 수집 시작을 승인한 뒤 `PC_PARTS_SCHEDULER_ENABLED=true`로 켠다. 동시에 Worker의 `AWS_PC_SCHEDULER_AUTHORITY=true`를 적용해야 Cloudflare cron이 중복 수집을 멈추고 watchdog만 수행한다. 단, 하루 한 번의 `daily-price-refresh`는 완성된 통계 publication을 위해 계속 AWS Runner로 전달된다.
+
+공개 매물·가격 통계의 주 저장소는 AWS SQLite다. `D1_BACKGROUND_MIRROR_ENABLED=false`와 Worker의 `D1_LISTING_FALLBACK_ENABLED=false`가 기본이다. 이 상태에서는 `D1_IMPORT_URL`과 token이 남아 있어도 scheduler와 lifecycle 확인이 D1 매물을 자동 갱신하거나 Worker가 오래된 D1 매물을 fallback으로 공개하지 않는다. D1 매물 fallback을 명시적으로 켜더라도 완전한 collection manifest가 있고 2시간 이내인 snapshot만 허용한다. 단순 `export-pc-listings-now.mjs` 결과 upsert는 누락된 판매완료·삭제 행을 퇴역시키지 않으므로 authoritative snapshot 교체로 취급하지 않는다. 가격 통계 publication용 `D1_STATS_IMPORT_URL`은 훨씬 작은 일일 fallback 데이터 경로이므로 매물 mirror와 별도로 계속 사용할 수 있다.
 
 기존 비활성 검색행은 자동으로 SOLD/DELETED로 추정하지 않는다. 서비스 중지 후 아래 명시 명령을 한 번 실행하면 먼저 SQLite 복구 백업을 만들고 `UNAVAILABLE_UNKNOWN`으로 이행한다.
 
@@ -208,7 +213,7 @@ journalctl -u used-market-tunnel.service -n 100 --no-pager
 - [ ] `/health`의 대상 사이트가 승인된 4개이고 `search_index.enabled`가 `true`다.
 - [ ] AWS 여유 디스크가 5GB 이상이다. 미만이면 배포 전에 EBS를 확장한다.
 - [ ] 현재 운영 모드는 `cache_first`이며 stale 비율·갱신 지연·자원 경고를 모니터링한다.
-- [ ] D1 저장이 필요하면 `D1_IMPORT_URL`과 import token을 모두 설정했다.
+- [ ] 연속 D1 매물 mirror와 매물 fallback은 각각 `D1_BACKGROUND_MIRROR_ENABLED=false`, `D1_LISTING_FALLBACK_ENABLED=false`다.
 - [ ] AWS 보안 그룹에서 8787을 공개하지 않았다.
 - [ ] 대상 사이트의 이용약관·robots·접근 제한을 준수한다.
 

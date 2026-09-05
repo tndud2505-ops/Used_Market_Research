@@ -41,7 +41,7 @@ Browser (used-pick.com)
 
 운영 확인에서는 사이트 탭 변경 직후 AWS `index_page_reads`가 증가하고, 이어지는 집중 보강에서 `source_collection_attempts`가 선택 사이트 수만큼만 증가해야 한다. 낮은 가격 전환은 `index_page_reads`만 증가하고 `live_collection_runs`·`source_collection_attempts`·`index_ingest_commits`는 증가하지 않아야 한다.
 
-Cloudflare만으로 이 경로를 대체하지 않는 이유는 Workers 런타임이 현재 프로젝트의 Node 서비스·원 사이트 수집 경계를 그대로 소유하지 않기 때문이다. AWS SQLite가 최대 100,000개 활성 상품의 주 색인이다. D1은 5개 사이트별 최근 2,500개, 전체 최대 10,000개만 보관한다. AWS 러너가 없으면 UI 자체는 열리지만 D1의 제한된 최근 결과만 반환하거나, 대체 데이터가 없으면 오류를 표시한다.
+Cloudflare만으로 이 경로를 대체하지 않는 이유는 Workers 런타임이 현재 프로젝트의 Node 서비스·원 사이트 수집 경계를 그대로 소유하지 않기 때문이다. AWS SQLite가 최대 100,000개 활성 상품의 주 색인이며, 공개 매물·가격 통계 응답은 Worker Cache API가 5분간 재사용한다. 연속 D1 매물 mirror와 D1 매물 fallback은 기본 비활성이다. 운영자가 fallback을 명시적으로 허용해도 완전한 collection manifest가 있으며 2시간 이내인 PC snapshot만 사용하고, 오래되거나 불완전한 D1 매물은 활성 재고처럼 노출하지 않는다. legacy 범용 검색용 D1 backup은 5개 사이트별 최근 2,500개, 전체 최대 10,000개 제한을 유지한다.
 
 ## 코드 위치
 

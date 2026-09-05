@@ -646,6 +646,10 @@ const [wrangler, deploySource, releaseSource, runnerSource, directCollectorSourc
   readFile(new URL("../aws-runner/collect-pc-source-now.mjs", import.meta.url), "utf8")
 ]);
 assert.match(wrangler, /"AWS_PC_SCHEDULER_AUTHORITY"\s*:\s*"true"/u);
+assert.match(wrangler, /"D1_LISTING_FALLBACK_ENABLED"\s*:\s*"false"/u,
+  "the AWS-primary profile must not expose stale D1 listings by default");
+assert.match(wrangler, /"PC_READ_CACHE_TTL_SECONDS"\s*:\s*"300"/u,
+  "public AWS listing and price-stat reads must use the bounded Worker response cache");
 assert.match(deploySource, /publication_configured !== true/u);
 assert.match(deploySource, /PC_COLLECTION_TARGET_SET_MISMATCH/u);
 assert.match(deploySource, /MONITOR_COLLECTION_TARGET_PRESENT/u);

@@ -21,6 +21,7 @@ export const FREE_TIER_POLICY = Object.freeze({
 });
 
 const D1_LISTING_CACHE_TTL_SECONDS = 60;
+const PC_READ_CACHE_TTL_SECONDS = 300;
 
 const CACHEABLE_GET_PATHS = new Set([
   "/api/categories",
@@ -145,6 +146,29 @@ async function pcListingCollectionFreshness(db, cohortScopes, asOf) {
     coveredTargetCount: coveredTimes.length,
     complete
   };
+}
+
+export async function isFreshCompletePcListingFallback(request, env, maximumAgeSeconds = 7_200) {
+  if (!hasD1(env)) return false;
+  try {
+    const query = parsePcListingsRequest(request, { allowedSites: OPERATIONAL_PC_DIRECTORY_SITES });
+    if (query.cursor) return false;
+    const catalogScope = resolvePcCatalogListingScope(query);
+    if (catalogScope && catalogScope.modelIds.length === 0) return false;
+    const asOf = new Date().toISOString();
+    const freshness = await pcListingCollectionFreshness(
+      env.DB,
+      requestedPcFreshnessScopes(query, catalogScope),
+      asOf
+    );
+    const collectedAtMs = Date.parse(String(freshness.lastCollectedAt || ""));
+    return freshness.complete
+      && Number.isFinite(collectedAtMs)
+      && Date.now() - collectedAtMs <= maximumAgeSeconds * 1_000;
+  } catch (error) {
+    console.warn("D1 listing fallback freshness check failed", error);
+    return false;
+  }
 }
 
 function pcListingItem(row) {
@@ -574,9 +598,14 @@ export async function fetchThroughFreeCache(request, env, originFetch) {
   return responseWithHeader(response, "x-free-tier-cache", "MISS");
 }
 
-export async function fetchThroughD1ListingCache(request, env, originFetch) {
+function isPcReadCacheable(url) {
+  return url.pathname === "/api/pc/listings"
+    || /^\/api\/products\/[^/]+\/price-stats$/u.test(url.pathname);
+}
+
+export async function fetchThroughPcReadCache(request, env, originFetch) {
   const url = new URL(request.url);
-  if (request.method !== "GET" || url.pathname !== "/api/pc/listings"
+  if (request.method !== "GET" || !isPcReadCacheable(url)
     || url.searchParams.has("reconciliation_audit") || !globalThis.caches?.default) {
     return originFetch(request);
   }
@@ -587,18 +616,32 @@ export async function fetchThroughD1ListingCache(request, env, originFetch) {
     ));
   normalizedUrl.search = "";
   normalizedEntries.forEach(([key, value]) => normalizedUrl.searchParams.append(key, value));
-  const cacheKey = await buildCacheKey(request, normalizedUrl);
-  if (!cacheKey) return originFetch(request);
-  const cached = await globalThis.caches.default.match(cacheKey);
-  if (cached) return responseWithHeader(cached, "x-d1-listing-cache", "HIT");
+  const cacheKey = new Request(
+    `https://used-market-pc-read-cache-v1.invalid${normalizedUrl.pathname}${normalizedUrl.search}`,
+    { method: "GET" }
+  );
+  let cached;
+  try {
+    cached = await globalThis.caches.default.match(cacheKey);
+  } catch (error) {
+    console.warn("PC read cache lookup failed", error);
+  }
+  if (cached) return responseWithHeader(cached, "x-pc-read-cache", "HIT");
 
   const response = await originFetch(request);
-  if (response.status < 200 || response.status >= 300
-    || response.headers.get("x-free-tier-data-source") !== "d1") {
-    return response;
+  if (response.status < 200 || response.status >= 300) return response;
+  const ttlSeconds = readPositiveInteger(
+    env.PC_READ_CACHE_TTL_SECONDS,
+    PC_READ_CACHE_TTL_SECONDS,
+    3_600
+  );
+  try {
+    await globalThis.caches.default.put(cacheKey, responseForCache(response.clone(), ttlSeconds));
+    return responseWithHeader(response, "x-pc-read-cache", "MISS");
+  } catch (error) {
+    console.warn("PC read cache write failed", error);
+    return responseWithHeader(response, "x-pc-read-cache", "BYPASS");
   }
-  await globalThis.caches.default.put(cacheKey, response.clone());
-  return responseWithHeader(response, "x-d1-listing-cache", "MISS");
 }
 
 async function shouldCacheResponse(response) {

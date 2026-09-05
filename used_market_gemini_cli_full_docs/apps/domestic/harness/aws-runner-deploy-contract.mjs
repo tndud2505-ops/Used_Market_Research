@@ -91,6 +91,26 @@ assertOrdered(runnerScript, [
   "await upsertPcProjectionsIncrementally(publicProjections, { observedAt: result.run_at });",
   "await importToD1BestEffort(publicProjections, tickSignal)"
 ], "incremental public projection publication");
+assert.match(runnerScript,
+  /const D1_BACKGROUND_MIRROR_ENABLED = String\(process\.env\.D1_BACKGROUND_MIRROR_ENABLED \?\? "false"\)/u,
+  "continuous D1 listing mirroring must default to disabled");
+for (const functionName of ["importToD1", "mirrorPcListingCollectionManifest"]) {
+  const functionStart = runnerScript.indexOf(`async function ${functionName}`);
+  const configurationCheck = runnerScript.indexOf("if (!IMPORT_URL || !IMPORT_TOKEN)", functionStart);
+  const mirrorGate = runnerScript.indexOf("if (!D1_BACKGROUND_MIRROR_ENABLED)", functionStart);
+  assert.ok(functionStart >= 0 && mirrorGate > functionStart && mirrorGate < configurationCheck,
+    `${functionName} must stop before any configured D1 background write when the mirror is disabled`);
+}
+assert.match(installScript, /^D1_BACKGROUND_MIRROR_ENABLED=false$/mu,
+  "new AWS runner installs must disable continuous D1 listing mirroring");
+assert.match(installScript,
+  /if ! grep -q '\^D1_BACKGROUND_MIRROR_ENABLED='[\s\S]*set_env_value D1_BACKGROUND_MIRROR_ENABLED false/u,
+  "repeat installs must add the disabled mirror default without overriding an explicit operator setting");
+assert.match(configureScript, /existing_d1_background_mirror="\$\(read_env_value D1_BACKGROUND_MIRROR_ENABLED\)"/u);
+assert.match(configureScript, /^D1_BACKGROUND_MIRROR_ENABLED=\$\{d1_background_mirror\}$/mu,
+  "runner reconfiguration must preserve the explicit D1 mirror setting");
+assert.match(readme, /D1_BACKGROUND_MIRROR_ENABLED=false/u,
+  "the AWS runbook must document AWS-primary reads and disabled continuous D1 listing mirroring");
 assert.match(runnerScript, /function isD1DailyRowWriteLimitError\(error\)/u,
   "a D1 free-tier write limit must be recognized as a deferred public sync");
 assert.match(runnerScript, /D1_DAILY_ROW_WRITE_LIMIT/u,

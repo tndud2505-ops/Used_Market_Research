@@ -32,6 +32,7 @@ read_env_value() {
 
 existing_runner_token="$(read_env_value CLOUDFLARE_RUNNER_TOKEN)"
 existing_import_url="$(read_env_value D1_IMPORT_URL)"
+existing_d1_background_mirror="$(read_env_value D1_BACKGROUND_MIRROR_ENABLED)"
 existing_stats_import_url="$(read_env_value D1_STATS_IMPORT_URL)"
 existing_import_token="$(read_env_value CLOUDFLARE_MANUAL_RUN_TOKEN)"
 existing_ebay_client_id="$(read_env_value EBAY_CLIENT_ID)"
@@ -114,6 +115,7 @@ pc_shadow_write="${existing_pc_shadow_write:-true}"
 pc_scheduler="${existing_pc_scheduler:-false}"
 pc_source_governance="${existing_pc_source_governance:-{}}"
 pc_specialist_urls="${existing_pc_specialist_urls:-{}}"
+d1_background_mirror="${existing_d1_background_mirror:-false}"
 
 umask 077
 env_tmp="${RUNNER_ENV_FILE}.tmp.$$"
@@ -133,6 +135,7 @@ PC_SOURCE_GOVERNANCE_JSON=${pc_source_governance}
 PC_SPECIALIST_SEARCH_URLS_JSON=${pc_specialist_urls}
 RUNNER_PUBLIC_URL=${public_url}
 D1_IMPORT_URL=${import_url}
+D1_BACKGROUND_MIRROR_ENABLED=${d1_background_mirror}
 D1_STATS_IMPORT_URL=${stats_import_url}
 CLOUDFLARE_MANUAL_RUN_TOKEN=${import_token}
 CHROMIUM_PATH=${chromium_path}

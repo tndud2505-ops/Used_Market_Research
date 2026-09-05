@@ -1,10 +1,11 @@
 import {
   fetchThroughFreeCache,
-  fetchThroughD1ListingCache,
+  fetchThroughPcReadCache,
   freeTierConfig,
   browsePcListingsD1,
   hasD1,
   isFreeTierEnabled,
+  isFreshCompletePcListingFallback,
   readRecentCollectionRuns,
   readFreeTierUsage,
   searchD1
@@ -544,6 +545,52 @@ async function proxyToSearchRunner(request, env, runnerPath = "/api/search") {
   } finally {
     clearTimeout(timer);
   }
+}
+
+function responseAsPcD1Fallback(response) {
+  const headers = new Headers(response.headers);
+  headers.set("x-search-data-source", "d1-fallback");
+  headers.set("x-search-runner-fallback", "true");
+  headers.set("x-search-quality-layer", "d1-backup");
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers
+  });
+}
+
+async function readFreshD1ListingFallback(request, env) {
+  const maximumAgeSeconds = readNonNegativeInteger(env, "D1_FALLBACK_MAX_AGE_SECONDS", 7_200, 86_400);
+  if (!(await isFreshCompletePcListingFallback(request, env, maximumAgeSeconds))) {
+    return responseAsPcD1Fallback(json(503, {
+      status: "error", error: "D1 listing fallback snapshot is stale or incomplete"
+    }));
+  }
+  return responseAsPcD1Fallback(await browsePcListingsD1(request, env));
+}
+
+async function readPcListingsFromPreferredStore(request, env) {
+  if (searchRunnerIsConfigured(env)) {
+    const runnerResponse = await proxyToSearchRunner(request, env, "/api/pc/listings");
+    const d1FallbackEnabled = String(env.D1_LISTING_FALLBACK_ENABLED || "false").toLowerCase() === "true";
+    if (runnerResponse.status < 500 || !hasD1(env) || !d1FallbackEnabled
+      || new URL(request.url).searchParams.has("cursor")) return runnerResponse;
+    console.warn("AWS PC listing read failed; using D1 fallback", runnerResponse.status);
+    return readFreshD1ListingFallback(request, env);
+  }
+  const explicitD1Primary = String(env.FREE_TIER_MODE || "false").toLowerCase() === "true";
+  if (explicitD1Primary && hasD1(env)) return browsePcListingsD1(request, env);
+  return json(503, { status: "error", error: "Stored PC listings are unavailable" });
+}
+
+async function readPriceStatsFromPreferredStore(request, env, runnerPath) {
+  if (searchRunnerIsConfigured(env)) {
+    const runnerResponse = await proxyToSearchRunner(request, env, runnerPath);
+    if (runnerResponse.status < 500 || !hasD1(env)) return runnerResponse;
+    console.warn("AWS price stats read failed; using D1 fallback", runnerResponse.status);
+    return responseAsPcD1Fallback(await serveProductPriceStats(request, env));
+  }
+  return serveProductPriceStats(request, env);
 }
 
 async function proxyToRunnerStatus(request, env) {
@@ -1292,16 +1339,12 @@ export default {
     }
 
     const isPriceStatsPath = /^\/api\/products\/[^/]+\/price-stats$/u.test(url.pathname);
-    if (request.method === "GET" && isPriceStatsPath && hasD1(env)) {
-      return serveProductPriceStats(request, env);
+    if (request.method === "GET" && isPriceStatsPath) {
+      return fetchThroughPcReadCache(request, env,
+        (statsRequest) => readPriceStatsFromPreferredStore(statsRequest, env, url.pathname));
     }
     if (isPriceStatsPath && searchRunnerIsConfigured(env)) {
-      const runnerResponse = await proxyToSearchRunner(request, env, url.pathname);
-      if (runnerResponse.status < 500 || !hasD1(env)) return runnerResponse;
-      return serveProductPriceStats(request, env);
-    }
-    if (request.method === "GET" && isPriceStatsPath) {
-      return serveProductPriceStats(request, env);
+      return proxyToSearchRunner(request, env, url.pathname);
     }
 
     if (request.method === "GET" && url.pathname === "/api/pc/catalog") {
@@ -1338,13 +1381,10 @@ export default {
     }
     if (request.method === "GET" && url.pathname === "/api/pc/listings") {
       try {
-        if (hasD1(env)) return await fetchThroughD1ListingCache(request, env,
-          (listingRequest) => browsePcListingsD1(listingRequest, env));
-        if (searchRunnerIsConfigured(env)) return await proxyToSearchRunner(request, env, url.pathname);
-        return json(503, { status: "error", error: "Stored PC listings are unavailable" });
+        return await fetchThroughPcReadCache(request, env,
+          (listingRequest) => readPcListingsFromPreferredStore(listingRequest, env));
       } catch (error) {
-        console.error("D1 PC listing browse failed", error);
-        if (searchRunnerIsConfigured(env)) return proxyToSearchRunner(request, env, url.pathname);
+        console.error("PC listing read failed", error);
         return json(503, { status: "error", error: "Stored PC listings are temporarily unavailable" });
       }
     }

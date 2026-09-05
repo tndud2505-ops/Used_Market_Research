@@ -8,7 +8,7 @@ import { DatabaseSync } from "node:sqlite";
 import { spawn } from "node:child_process";
 
 import worker from "../cloudflare/worker.mjs";
-import { buildCacheKey, fetchThroughD1ListingCache, isCacheableRequest } from "../cloudflare/free-tier.mjs";
+import { buildCacheKey, fetchThroughPcReadCache, isCacheableRequest } from "../cloudflare/free-tier.mjs";
 import { statsChecksum, statsPublicationKey } from "../cloudflare/public-product-stats.mjs";
 import {
   comparePcListingRows,
@@ -734,7 +734,7 @@ const child = spawn(process.execPath, ["aws-runner/runner.mjs"], {
     RUNNER_INDEX_PATH: indexPath,
     RUNNER_INDEX_DIR: directory,
     RUNNER_INDEX_MODE: "cache_first",
-    RUNNER_SEARCH_CURSOR_SECRET: secret,
+    SEARCH_CURSOR_SECRET: secret,
     PC_PARTS_SHADOW_WRITE_ENABLED: "true",
     PC_PARTS_SCHEDULER_ENABLED: "false"
   },
@@ -749,6 +749,10 @@ try {
     method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(pcRequest)
   });
   assert.equal(unauthorized.status, 401);
+  assert.equal((await fetch(`${baseUrl}/api/pc/listings`)).status, 401);
+  assert.equal((await fetch(
+    `${baseUrl}/api/products/gpu%3Anvidia%3Artx-3080/price-stats`
+  )).status, 401);
   const feedbackUnauthorized = await fetch(`${baseUrl}/api/admin/pc-classification-feedback`, {
     method: "POST", headers: { "content-type": "application/json" },
     body: JSON.stringify({ snapshot_id: 1 })
@@ -868,7 +872,7 @@ d1.prepare(`INSERT INTO listings(item_id, site, category_id, title, search_text,
   "gpu:nvidia:rtx-3080", "NVIDIA GeForce RTX 3080", null, "ASUS", "SINGLE_COMPONENT", "GPU", 1, "TOTAL",
   "USED_WORKING", "ACTIVE", "KR_C2C_USED"
 );
-const importEnv = { DB: d1Adapter(d1), MANUAL_RUN_TOKEN: "import-fixture-token" };
+const importEnv = { DB: d1Adapter(d1), MANUAL_RUN_TOKEN: "import-fixture-token", FREE_TIER_MODE: "true" };
 const nextTokenImportResponse = await worker.fetch(new Request("https://used-pick.test/admin/import-listings", {
   method: "POST",
   headers: { authorization: "Bearer next-import-fixture-token", "content-type": "application/json" },
@@ -1174,6 +1178,7 @@ for (const fixture of [
 }
 const paginationEnv = {
   DB: d1Adapter(paginationD1),
+  FREE_TIER_MODE: "true",
   SEARCH_CURSOR_SECRET: "fixture-pagination-secret-that-is-long-enough"
 };
 async function readPaginationFixture(url) {
@@ -1245,19 +1250,237 @@ try {
   const originRead = async () => {
     listingReads += 1;
     return new Response(JSON.stringify({ status: "success" }), {
-      headers: { "cache-control": "public, max-age=60", "x-free-tier-data-source": "d1" }
+      headers: { "content-type": "application/json", "x-search-data-source": "aws-runner" }
     });
   };
-  const firstCachedListing = await fetchThroughD1ListingCache(cachedListingRequest, {}, originRead);
-  const secondCachedListing = await fetchThroughD1ListingCache(cachedListingRequest, {}, originRead);
-  assert.equal(firstCachedListing.headers.get("x-d1-listing-cache"), "MISS");
-  assert.equal(secondCachedListing.headers.get("x-d1-listing-cache"), "HIT");
-  assert.equal(listingReads, 1, "identical public listing reads must share a D1 cache entry");
-  await fetchThroughD1ListingCache(new Request(`${cachedListingRequest.url}&reconciliation_audit=fixture`), {}, originRead);
+  const firstCachedListing = await fetchThroughPcReadCache(cachedListingRequest,
+    { PC_READ_CACHE_TTL_SECONDS: "60" }, originRead);
+  const secondCachedListing = await fetchThroughPcReadCache(
+    new Request("https://used-pick.test/api/pc/listings?sites=danawa"),
+    { PC_READ_CACHE_TTL_SECONDS: "60" }, originRead
+  );
+  assert.equal(firstCachedListing.headers.get("x-pc-read-cache"), "MISS");
+  assert.equal(secondCachedListing.headers.get("x-pc-read-cache"), "HIT");
+  assert.equal(secondCachedListing.headers.get("x-search-data-source"), "aws-runner");
+  assert.equal(secondCachedListing.headers.get("cache-control"), "public, max-age=60");
+  assert.equal(listingReads, 1, "identical public listing reads must share a Worker cache entry");
+  await fetchThroughPcReadCache(new Request(`${cachedListingRequest.url}&reconciliation_audit=fixture`), {}, originRead);
   assert.equal(listingReads, 2, "reconciliation audit reads must remain uncached");
+
+  let statsReads = 0;
+  const statsOriginRead = async () => {
+    statsReads += 1;
+    return new Response(JSON.stringify({ status: "success", data: { source: "aws" } }), {
+      headers: { "content-type": "application/json", "x-search-data-source": "aws-runner" }
+    });
+  };
+  const statsCacheUrl = "https://used-pick.test/api/products/gpu%3Anvidia%3Artx-3080/price-stats";
+  const firstCachedStats = await fetchThroughPcReadCache(new Request(
+    `${statsCacheUrl}?currency=KRW&days=30`
+  ), {}, statsOriginRead);
+  const secondCachedStats = await fetchThroughPcReadCache(new Request(
+    `${statsCacheUrl}?days=30&currency=KRW`
+  ), {}, statsOriginRead);
+  assert.equal(firstCachedStats.headers.get("x-pc-read-cache"), "MISS");
+  assert.equal(secondCachedStats.headers.get("x-pc-read-cache"), "HIT");
+  assert.equal(statsReads, 1, "normalized price-stat reads must share a Worker cache entry");
+
+  let failedReads = 0;
+  const failedOriginRead = async () => {
+    failedReads += 1;
+    return new Response(JSON.stringify({ status: "error" }), { status: 503 });
+  };
+  const failedRequest = new Request("https://used-pick.test/api/pc/listings?sites=ebay");
+  await fetchThroughPcReadCache(failedRequest, {}, failedOriginRead);
+  await fetchThroughPcReadCache(failedRequest, {}, failedOriginRead);
+  assert.equal(failedReads, 2, "failed PC reads must not be cached");
+
+  globalThis.caches.default.match = async () => { throw new Error("cache lookup unavailable"); };
+  globalThis.caches.default.put = async () => {};
+  const cacheLookupFailure = await fetchThroughPcReadCache(new Request(
+    "https://used-pick.test/api/pc/listings?sites=hellomarket"
+  ), {}, originRead);
+  assert.equal(cacheLookupFailure.status, 200,
+    "a cache lookup failure must not fail a successful origin read");
+  globalThis.caches.default.match = async () => undefined;
+  globalThis.caches.default.put = async () => { throw new Error("cache write unavailable"); };
+  const cacheWriteFailure = await fetchThroughPcReadCache(new Request(
+    "https://used-pick.test/api/pc/listings?sites=rethinkmall"
+  ), {}, originRead);
+  assert.equal(cacheWriteFailure.status, 200,
+    "a cache write failure must not fail a successful origin read");
+  assert.equal(cacheWriteFailure.headers.get("x-pc-read-cache"), "BYPASS");
 } finally {
   if (originalCaches === undefined) delete globalThis.caches;
   else globalThis.caches = originalCaches;
+}
+
+const originalPcReadFetch = globalThis.fetch;
+const originalPcReadCaches = globalThis.caches;
+const pcReadRouteCacheEntries = new Map();
+const pcReadRunnerCalls = [];
+const pcReadD1Binding = d1Adapter(d1);
+let pcReadD1PrepareCalls = 0;
+const countedPcReadD1Binding = {
+  ...pcReadD1Binding,
+  prepare(sql) {
+    pcReadD1PrepareCalls += 1;
+    return pcReadD1Binding.prepare(sql);
+  }
+};
+let pcReadRunnerMode = "success";
+try {
+  globalThis.caches = {
+    default: {
+      async match(request) { return pcReadRouteCacheEntries.get(request.url)?.clone() || undefined; },
+      async put(request, response) { pcReadRouteCacheEntries.set(request.url, response.clone()); }
+    }
+  };
+  globalThis.fetch = async (input, init) => {
+    const proxiedRequest = new Request(input, init);
+    const proxiedUrl = new URL(proxiedRequest.url);
+    pcReadRunnerCalls.push(proxiedUrl.pathname);
+    assert.equal(proxiedRequest.headers.get("authorization"), "Bearer fixture-runner-token",
+      "the Worker must replace client authorization with the runner token");
+    if (pcReadRunnerMode === "client-error") {
+      return new Response(JSON.stringify({ status: "error", error: "runner cursor rejected" }), {
+        status: 410, headers: { "content-type": "application/json" }
+      });
+    }
+    if (pcReadRunnerMode === "server-error") {
+      return new Response(JSON.stringify({ status: "error", error: "runner unavailable" }), {
+        status: 503, headers: { "content-type": "application/json" }
+      });
+    }
+    if (proxiedUrl.pathname === "/api/pc/listings") {
+      return new Response(JSON.stringify({
+        status: "success",
+        data: { items: [{ item_id: "aws:listing-fixture" }], total: 1, source: "aws" }
+      }), { headers: { "content-type": "application/json" } });
+    }
+    return new Response(JSON.stringify({
+      status: "success", data: { canonical_product_id: "gpu:nvidia:rtx-3080", source: "aws" }
+    }), { headers: { "content-type": "application/json" } });
+  };
+
+  const pcReadRouteEnv = {
+    ...importEnv,
+    DB: countedPcReadD1Binding,
+    SEARCH_RUNNER_URL: "https://runner.example.test/api/search",
+    RUNNER_TOKEN: "fixture-runner-token",
+    PC_READ_CACHE_TTL_SECONDS: "300",
+    D1_LISTING_FALLBACK_ENABLED: "true",
+    SEARCH_CURSOR_SECRET: "fixture-runner-token"
+  };
+  const firstAwsListing = await worker.fetch(new Request(
+    "https://used-pick.test/api/pc/listings?sites=danawa&canonical_product_id=gpu%3Anvidia%3Artx-3080"
+  ), pcReadRouteEnv);
+  assert.equal(firstAwsListing.status, 200);
+  assert.equal(firstAwsListing.headers.get("x-search-data-source"), "aws-runner");
+  assert.equal(firstAwsListing.headers.get("x-pc-read-cache"), "MISS");
+  assert.equal((await firstAwsListing.json()).data.source, "aws");
+  const cachedAwsListing = await worker.fetch(new Request(
+    "https://used-pick.test/api/pc/listings?canonical_product_id=gpu%3Anvidia%3Artx-3080&sites=danawa"
+  ), pcReadRouteEnv);
+  assert.equal(cachedAwsListing.headers.get("x-pc-read-cache"), "HIT");
+  assert.equal(pcReadRunnerCalls.filter((pathname) => pathname === "/api/pc/listings").length, 1,
+    "normalized repeated listing reads must call AWS only once");
+
+  const statsRoute = "https://used-pick.test/api/products/gpu%3Anvidia%3Artx-3080/price-stats";
+  const firstAwsStats = await worker.fetch(new Request(
+    `${statsRoute}?days=30&currency=KRW&market_pool=KR_C2C_USED&condition=USED_WORKING`
+  ), pcReadRouteEnv);
+  assert.equal(firstAwsStats.status, 200);
+  assert.equal(firstAwsStats.headers.get("x-search-data-source"), "aws-runner");
+  assert.equal(firstAwsStats.headers.get("x-pc-read-cache"), "MISS");
+  assert.equal((await firstAwsStats.json()).data.source, "aws");
+  const cachedAwsStats = await worker.fetch(new Request(
+    `${statsRoute}?condition=USED_WORKING&market_pool=KR_C2C_USED&currency=KRW&days=30`
+  ), pcReadRouteEnv);
+  assert.equal(cachedAwsStats.headers.get("x-pc-read-cache"), "HIT");
+  assert.equal(pcReadRunnerCalls.filter((pathname) => pathname.endsWith("/price-stats")).length, 1,
+    "normalized repeated price-stat reads must call AWS only once");
+
+  pcReadRunnerMode = "client-error";
+  const clientErrorResponse = await worker.fetch(new Request(
+    "https://used-pick.test/api/pc/listings?sites=danawa&limit=3"
+  ), pcReadRouteEnv);
+  assert.equal(clientErrorResponse.status, 410,
+    "runner client and cursor errors must not be hidden by D1 fallback");
+  assert.equal(clientErrorResponse.headers.get("x-search-data-source"), "aws-runner");
+  assert.equal((await clientErrorResponse.json()).error, "runner cursor rejected");
+  assert.equal(pcReadD1PrepareCalls, 0,
+    "AWS success and client errors must not read D1");
+
+  const missingRunnerResponse = await worker.fetch(new Request(
+    "https://used-pick.test/api/pc/listings?sites=danawa&limit=6"
+  ), {
+    ...pcReadRouteEnv,
+    SEARCH_RUNNER_URL: "",
+    FREE_TIER_MODE: "false",
+    D1_LISTING_FALLBACK_ENABLED: "false"
+  });
+  assert.equal(missingRunnerResponse.status, 503,
+    "AWS-primary mode must fail closed when runner configuration is missing");
+  assert.equal(pcReadD1PrepareCalls, 0,
+    "missing AWS configuration must not expose an old D1 listing snapshot");
+
+  pcReadRunnerMode = "server-error";
+  const disabledD1Fallback = await worker.fetch(new Request(
+    "https://used-pick.test/api/pc/listings?sites=danawa&limit=7"
+  ), { ...pcReadRouteEnv, D1_LISTING_FALLBACK_ENABLED: "false" });
+  assert.equal(disabledD1Fallback.status, 503,
+    "D1 listing fallback must remain disabled in the default AWS-primary profile");
+  assert.equal(pcReadD1PrepareCalls, 0);
+  const cursorFailureResponse = await worker.fetch(new Request(
+    "https://used-pick.test/api/pc/listings?sites=danawa&cursor=runner-page-cursor"
+  ), pcReadRouteEnv);
+  assert.equal(cursorFailureResponse.status, 503,
+    "an AWS cursor must never continue against a different D1 snapshot");
+  assert.equal(pcReadD1PrepareCalls, 0);
+
+  const fallbackManifestAt = new Date().toISOString();
+  const fallbackTargetId = "pc-target:2:category-v5:GPU";
+  d1.prepare(`INSERT INTO pc_listing_collection_manifests(
+    source_id, as_of, manifest_version, successful_target_ids_json, successful_target_count, mirrored_at
+  ) VALUES ('danawa', ?, 'pc-listing-collection-v1', ?, 1, ?)`).run(
+    fallbackManifestAt, JSON.stringify([fallbackTargetId]), fallbackManifestAt
+  );
+  d1.prepare(`INSERT INTO pc_listing_collection_target_runtime(
+    source_id, target_id, last_succeeded_at, manifest_version, mirrored_at
+  ) VALUES ('danawa', ?, ?, 'pc-listing-collection-v1', ?)`).run(
+    fallbackTargetId, fallbackManifestAt, fallbackManifestAt
+  );
+  const d1ListingFallback = await worker.fetch(new Request(
+    "https://used-pick.test/api/pc/listings?canonical_product_id=gpu%3Anvidia%3Artx-3080&sites=danawa&limit=4"
+  ), pcReadRouteEnv);
+  assert.equal(d1ListingFallback.status, 200);
+  assert.equal(d1ListingFallback.headers.get("x-search-data-source"), "d1-fallback");
+  assert.equal(d1ListingFallback.headers.get("x-search-runner-fallback"), "true");
+  assert.equal((await d1ListingFallback.json()).data.items.length > 0, true);
+  assert.equal(pcReadD1PrepareCalls > 0, true,
+    "runner server errors may read a fresh complete D1 fallback snapshot");
+  d1.prepare(`DELETE FROM pc_listing_collection_target_runtime
+    WHERE source_id = 'danawa' AND last_succeeded_at = ?`).run(fallbackManifestAt);
+  d1.prepare(`DELETE FROM pc_listing_collection_manifests
+    WHERE source_id = 'danawa' AND as_of = ?`).run(fallbackManifestAt);
+  const staleD1Fallback = await worker.fetch(new Request(
+    "https://used-pick.test/api/pc/listings?canonical_product_id=gpu%3Anvidia%3Artx-3080&sites=danawa&limit=5"
+  ), pcReadRouteEnv);
+  assert.equal(staleD1Fallback.status, 503,
+    "stale or incomplete D1 listings must not be exposed as active fallback inventory");
+  assert.equal(staleD1Fallback.headers.get("x-search-data-source"), "d1-fallback");
+  const d1StatsFallback = await worker.fetch(new Request(
+    `${statsRoute}?days=30&market_pool=KR_C2C_USED&condition=USED_WORKING&currency=KRW&fallback_test=1`
+  ), pcReadRouteEnv);
+  assert.equal(d1StatsFallback.status, 200);
+  assert.equal(d1StatsFallback.headers.get("x-search-data-source"), "d1-fallback");
+  assert.equal(d1StatsFallback.headers.get("x-search-runner-fallback"), "true");
+  assert.equal((await d1StatsFallback.json()).data.active.sample_count > 0, true);
+} finally {
+  globalThis.fetch = originalPcReadFetch;
+  if (originalPcReadCaches === undefined) delete globalThis.caches;
+  else globalThis.caches = originalPcReadCaches;
 }
 
 const insertBindingFixture = paginationD1.prepare(`INSERT INTO listings(
@@ -1278,6 +1501,7 @@ for (let index = 0; index < 105; index += 1) {
 const bindingObservations = [];
 const bindingBudgetEnv = {
   DB: d1Adapter(paginationD1, { maxBindings: 90, bindingObservations }),
+  FREE_TIER_MODE: "true",
   SEARCH_CURSOR_SECRET: "fixture-pagination-secret-that-is-long-enough"
 };
 const bindingBudgetResponse = await worker.fetch(new Request(
@@ -1360,6 +1584,7 @@ const emptyCatalogScopeResponse = await worker.fetch(new Request(
   "https://used-pick.test/api/pc/listings?category_code=RAM&q=no-such-public-model"
 ), {
   DB: { prepare() { emptyCatalogScopeDbCalls += 1; throw new Error("D1 must not be queried for an empty catalog scope"); } },
+  FREE_TIER_MODE: "true",
   SEARCH_CURSOR_SECRET: "fixture-pagination-secret-that-is-long-enough"
 });
 assert.equal(emptyCatalogScopeResponse.status, 200);
@@ -1573,6 +1798,7 @@ insertCoverageRuntime("danawa", freshnessTargetIds.danawaGpu, coverageDanawaAt);
 insertCoverageRuntime("bunjang", freshnessTargetIds.bunjangGpu, coverageBunjangAt);
 const coverageEnv = {
   DB: d1Adapter(coverageD1, { maxBindings: 90 }),
+  FREE_TIER_MODE: "true",
   SEARCH_CURSOR_SECRET: "fixture-coverage-secret-that-is-long-enough"
 };
 const multiSourceCoverage = await worker.fetch(new Request(
