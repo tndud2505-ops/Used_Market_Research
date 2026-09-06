@@ -72,10 +72,10 @@ const compactStats = script.slice(script.indexOf("function compactStatsRow("), s
 requireText(compactStats, "confirmed_transactions", "site transaction cells must use confirmed transaction evidence");
 assert.equal(compactStats.includes("soldMean"), false, "sold asking prices must not be labeled as confirmed transactions");
 requireText(script, "sourceRows(data)", "site price rows and charts must use actual per-source evidence");
-requireText(script, "renderPriceChart", "the dialog must retain the 30-day chart renderer");
+requireText(script, "renderPriceChart", "the dialog must retain the daily chart renderer");
 requireText(script, 'tabindex: 0', "chart points must be keyboard focusable");
 requireText(script, '"aria-label"', "chart points must expose exact values accessibly");
-requireText(script, "statsHasEvidence", "empty price data must not produce a fake chart");
+requireText(script, "statsHasEvidence", "empty price data must not produce fake price values");
 
 requireText(script, 'scope === "UNIT" ? "개당가격"', "RAM quantity/price-scope labels are required");
 requireText(script, 'quantity > 1 ? "일괄가격"', "RAM lot pricing must stay separate from unit pricing");

@@ -62,6 +62,8 @@ const COHORTS = [
 const mobileFacetMedia = window.matchMedia("(max-width: 640px)");
 const stackedLayoutMedia = window.matchMedia("(max-width: 1120px)");
 const compactFilterMedia = window.matchMedia("(max-width: 1120px)");
+const SCOPED_LISTING_AUTORUN_MODEL_LIMIT = 12;
+const SEARCH_LISTING_AUTORUN_MODEL_LIMIT = 18;
 let browseListingTimer = null;
 let catalogSearchTimer = null;
 let catalogSearchComposing = false;
@@ -954,8 +956,10 @@ function setListingOptionsCollapsed(collapsed) {
 }
 
 function syncListingSortTabs() {
+  const activeSort = state.listingSort || dom.listingSort.value || "recent";
+  dom.listingSort.value = activeSort;
   dom.listingSortTabs.forEach((button) => {
-    button.setAttribute("aria-pressed", String(button.dataset.sort === dom.listingSort.value));
+    button.setAttribute("aria-pressed", String(button.dataset.sort === activeSort));
   });
 }
 
@@ -988,7 +992,8 @@ function reloadListingsForControls(focusSourceValue) {
     showDetailMessage("선택한 사이트의 가격 통계를 불러오는 중입니다.");
     loadProductDetail();
   }
-  else loadListings(false);
+  else if (shouldAutoLoadScopedListings()) loadListings(false);
+  else showScopedListings(0, { load: false });
 }
 
 function renderSourceFilters() {
@@ -1081,10 +1086,10 @@ function updateWorkspaceHeading() {
       ? `중고 ${label} 검색 | ${label} 중고시세 비교 | USED PICK`
       : "중고 PC·컴퓨터 부품 검색 | 중고 시세 비교 | USED PICK";
   const pageDescription = query
-    ? `중고 PC 부품 검색 결과입니다. ${query} 모델별 매물과 최근 30일 중고 시세를 비교하세요.`
+    ? `중고 PC 부품 검색 결과입니다. ${query} 모델별 매물과 일별 중고 시세를 비교하세요.`
     : categoryRoute
-      ? `중고 ${label}를 모델별로 검색하고 현재 매물, 판매중 가격, 최근 30일 ${label} 중고시세를 비교하세요.`
-      : "중고 PC와 컴퓨터 부품을 모델별로 검색하세요. 중고 그래픽카드, CPU, RAM, SSD, 메인보드, 파워서플라이 매물과 최근 30일 중고 시세를 비교합니다.";
+      ? `중고 ${label}를 모델별로 검색하고 현재 매물, 판매중 가격, 일별 ${label} 중고시세를 비교하세요.`
+      : "중고 PC와 컴퓨터 부품을 모델별로 검색하세요. 중고 그래픽카드, CPU, RAM, SSD, 메인보드, 파워서플라이 매물과 일별 중고 시세를 비교합니다.";
   const heading = query
     ? `“${query}” 중고 PC 검색 결과`
     : categoryRoute
@@ -1276,7 +1281,7 @@ function resetDetail() {
   closeModelDetail(false);
   document.body.classList.remove("has-selected-product");
   dom.pricePanelTitle.textContent = "모델을 선택하세요";
-  showDetailMessage("검색된 모델을 누르면 최근 30일 가격을 표시합니다.");
+  showDetailMessage("검색된 모델을 누르면 일별 평균 가격을 표시합니다.");
   dom.priceSummary.hidden = true;
   dom.statsSection.hidden = true;
   dom.priceChartDisclosure.hidden = true;
@@ -1298,7 +1303,27 @@ function currentListingScopeTitle() {
   return `${scope} 현재 매물`;
 }
 
-function showScopedListings(listingDelayMs = 0) {
+function activeFacetValueCount() {
+  return Object.values(state.facets).reduce((total, values) => (
+    total + (Array.isArray(values) ? values.filter(Boolean).length : 0)
+  ), 0);
+}
+
+function shouldAutoLoadScopedListings() {
+  if (state.selectedProduct) return true;
+  const total = Number.isFinite(Number(state.productTotal)) ? Number(state.productTotal) : state.products.length;
+  if (total <= 0) return false;
+  if (state.query) return total <= SEARCH_LISTING_AUTORUN_MODEL_LIMIT;
+  return activeFacetValueCount() > 0 && total <= SCOPED_LISTING_AUTORUN_MODEL_LIMIT;
+}
+
+function scopedListingHoldMessage() {
+  const total = Number.isFinite(Number(state.productTotal)) ? Number(state.productTotal) : state.products.length;
+  if (total <= 0) return "조건에 맞는 모델이 없습니다.";
+  return `검색된 모델 ${total.toLocaleString("ko-KR")}개. 모델을 선택하면 현재 매물과 일별 평균 가격 그래프를 봅니다.`;
+}
+
+function showScopedListings(listingDelayMs = 0, options = {}) {
   cancelListingRequest();
   state.detailRequest?.abort();
   state.detailRequest = null;
@@ -1311,7 +1336,7 @@ function showScopedListings(listingDelayMs = 0) {
   closeModelDetail(false);
   document.body.classList.remove("has-selected-product");
   dom.pricePanelTitle.textContent = "모델을 선택하세요";
-  showDetailMessage("검색된 모델을 누르면 최근 30일 가격을 표시합니다.");
+  showDetailMessage("검색된 모델을 누르면 일별 평균 가격을 표시합니다.");
   dom.priceSummary.hidden = true;
   dom.statsSection.hidden = true;
   dom.priceChartDisclosure.hidden = true;
@@ -1324,6 +1349,12 @@ function showScopedListings(listingDelayMs = 0) {
     : "선택한 조건에 맞는 모델이 없습니다.";
   dom.listingRows.replaceChildren();
   renderProducts();
+  if (options.load === false) {
+    dom.listingEmpty.hidden = true;
+    renderListingPagination();
+    showListingMessage(scopedListingHoldMessage());
+    return;
+  }
   if (listingDelayMs > 0) {
     showListingMessage("현재 매물을 불러오는 중입니다.");
     browseListingTimer = window.setTimeout(() => {
@@ -1335,11 +1366,11 @@ function showScopedListings(listingDelayMs = 0) {
   }
 }
 
-function refreshBrowseScope(listingDelayMs = 0) {
+async function refreshBrowseScope(listingDelayMs = 0) {
   resetDetail();
-  const productsPromise = loadProducts();
-  showScopedListings(listingDelayMs);
-  return productsPromise;
+  await loadProducts();
+  if (state.selectedProduct) return;
+  showScopedListings(listingDelayMs, { load: shouldAutoLoadScopedListings() });
 }
 
 function closeModelDetail(restoreFocus = true) {
@@ -1403,7 +1434,7 @@ function selectProduct(product) {
   dom.workspaceTitle.textContent = productName(product);
   dom.listingTitle.textContent = `${productName(product)} 현재 매물`;
   clearSelectedPriceTable();
-  dom.priceSummary.hidden = false;
+  dom.priceSummary.hidden = true;
   dom.statsSection.hidden = true;
   dom.priceChartDisclosure.hidden = true;
   dom.listingSection.hidden = false;
@@ -1508,15 +1539,15 @@ async function loadProductDetail() {
     } else if (listingError) {
       showDetailMessage(state.visibleStatsCount
         ? "가격 통계는 표시했지만 현재 매물 목록을 불러오지 못했습니다."
-        : "현재 매물 목록을 불러오지 못했고, 확인된 범위에는 30일 가격 통계가 없습니다.", true);
+        : "현재 매물 목록을 불러오지 못했고, 확인된 범위에는 가격 통계가 없습니다.", true);
     } else if (allStatsFailed) {
       showDetailMessage("현재 매물은 표시했지만 가격 통계를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.", true);
     } else if (statsFailures && !state.visibleStatsCount) {
       showDetailMessage("현재 매물은 표시했지만 일부 가격 통계를 불러오지 못했고, 확인된 범위에는 가격 자료가 없습니다.", true);
     } else if (!state.visibleStatsCount) {
       showDetailMessage(state.selectedSites.size
-        ? "현재 매물은 표시했지만 선택한 사이트의 30일 가격 통계는 아직 없습니다."
-        : "현재 매물은 표시했지만 이 모델의 30일 가격 통계는 아직 없습니다.");
+        ? "현재 매물은 표시했지만 선택한 사이트의 일별 가격 통계는 아직 없습니다."
+        : "현재 매물은 표시했지만 이 모델의 일별 가격 통계는 아직 없습니다.");
     } else if (statsFailures) {
       showDetailMessage("일부 시장군 통계가 없어 확인 가능한 자료만 표시합니다.");
     } else {
@@ -1854,7 +1885,7 @@ function dateKey(value) {
   return Number.isNaN(date.getTime()) ? "" : date.toISOString().slice(0, 10);
 }
 
-function dailyWindow(data, days = 30) {
+function dailyWindow(data, days) {
   const rows = toArray(data?.daily)
     .map((row) => ({ ...row, date: dateKey(firstDefined(row?.date, row?.stat_date)) }))
     .filter((row) => row.date);
@@ -1863,7 +1894,11 @@ function dailyWindow(data, days = 30) {
   const anchor = dateKey(data?.as_of) || rows.map((row) => row.date).sort().at(-1);
   const end = new Date(`${anchor}T00:00:00Z`);
   const window = [];
-  for (let offset = Math.max(1, Number(days) || 30) - 1; offset >= 0; offset -= 1) {
+  const requestedDays = Number(days);
+  const span = Number.isFinite(requestedDays)
+    ? Math.max(1, requestedDays)
+    : Math.min(365, Math.max(rows.length, 30));
+  for (let offset = span - 1; offset >= 0; offset -= 1) {
     const date = new Date(end);
     date.setUTCDate(end.getUTCDate() - offset);
     const key = date.toISOString().slice(0, 10);
@@ -1873,24 +1908,48 @@ function dailyWindow(data, days = 30) {
 }
 
 function renderPriceChart(data, currency) {
-  const daily = dailyWindow(data, 30);
+  const daily = dailyWindow(data);
   const series = [
-    { key: "active", label: "현재 매물 30일 평균", className: "active-series" },
-    { key: "reserved", label: "예약중 표시가격 30일 평균", className: "reserved-series" },
-    { key: "sold", label: "판매완료 표시가격 30일 평균", className: "sold-series" },
-    { key: "confirmed_transactions", label: "확인된 실제 거래 30일 평균", className: "confirmed-series" },
+    { key: "active", label: "현재 매물 일평균", className: "active-series" },
+    { key: "reserved", label: "예약중 표시가 일평균", className: "reserved-series" },
+    { key: "sold", label: "판매완료 표시가 일평균", className: "sold-series" },
+    { key: "confirmed_transactions", label: "확인된 거래가 일평균", className: "confirmed-series" },
   ].map((entry) => ({
     ...entry,
     points: daily.map((row, index) => dailyAveragePoint(row, entry.key, index)).filter(Boolean),
   }));
   const values = series.flatMap((entry) => entry.points.map((point) => point.average));
   const figure = createElement("figure", "price-chart");
+  const width = 720;
+  const height = 230;
+  const margin = { top: 18, right: 18, bottom: 34, left: 78 };
+  const plotWidth = width - margin.left - margin.right;
+  const plotHeight = height - margin.top - margin.bottom;
   if (!values.length) {
     const activeCount = Number(firstDefined(data?.active?.sample_count, data?.active?.count, 0));
     const soldCount = Number(firstDefined(data?.sold?.sample_count, data?.sold?.count, 0));
     const reservedCount = Number(firstDefined(data?.reserved?.sample_count, data?.reserved?.count, 0));
     const confirmedCount = Number(firstDefined(data?.confirmed_transactions?.sample_count, data?.confirmed_transactions?.count, 0));
-    figure.append(createElement(
+    const svg = createSvgElement("svg", {
+      viewBox: `0 0 ${width} ${height}`,
+      role: "img",
+      "aria-label": "아직 표본이 없는 일별 평균 가격 그래프",
+    });
+    [0, 0.5, 1].forEach((ratio) => {
+      const y = margin.top + plotHeight * ratio;
+      svg.append(createSvgElement("line", { x1: margin.left, x2: width - margin.right, y1: y, y2: y, class: "chart-grid" }));
+    });
+    ["가격", "일별 수집"].forEach((labelText, index) => {
+      const label = createSvgElement("text", {
+        x: index === 0 ? margin.left - 10 : width - margin.right,
+        y: index === 0 ? margin.top + 4 : height - 10,
+        class: "chart-axis-label",
+        "text-anchor": index === 0 ? "end" : "end",
+      });
+      label.textContent = labelText;
+      svg.append(label);
+    });
+    figure.append(svg, createElement(
       "div",
       "price-chart-empty",
       `일별 그래프 누적 중 · 판매중 ${activeCount}건 · 예약중 ${reservedCount}건 · 판매완료 ${soldCount}건 · 확인된 실제 거래 ${confirmedCount}건`,
@@ -1898,11 +1957,6 @@ function renderPriceChart(data, currency) {
     return figure;
   }
 
-  const width = 720;
-  const height = 230;
-  const margin = { top: 18, right: 18, bottom: 34, left: 78 };
-  const plotWidth = width - margin.left - margin.right;
-  const plotHeight = height - margin.top - margin.bottom;
   const minimum = Math.min(...values);
   const maximum = Math.max(...values);
   const padding = Math.max((maximum - minimum) * 0.12, maximum * 0.03, 1);
@@ -1914,7 +1968,7 @@ function renderPriceChart(data, currency) {
   const svg = createSvgElement("svg", {
     viewBox: `0 0 ${width} ${height}`,
     role: "img",
-    "aria-label": `최근 ${daily.length}일 현재 매물, 예약중 표시가격, 판매완료 표시가격, 확인된 실제 거래 평균 그래프`,
+    "aria-label": `수집된 기간의 현재 매물, 예약중 표시가, 판매완료 표시가, 확인된 거래가 일별 평균 그래프`,
   });
   [0, 0.5, 1].forEach((ratio) => {
     const y = margin.top + plotHeight * ratio;
@@ -1991,7 +2045,8 @@ function renderStatsGroup(result) {
   const group = createElement("section", "stats-group");
   const title = createElement("div", "stats-group-title");
   const selectedSiteLabel = state.selectedSites.size ? ` · ${[...state.selectedSites].map(sourceLabel).join(" + ")}` : "";
-  title.append(createElement("h4", "", `${cohort.label}${selectedSiteLabel}`), createElement("span", "", `${cohort.currency} · 최근 30일`));
+  const hasEvidence = statsHasEvidence(data);
+  title.append(createElement("h4", "", `${cohort.label}${selectedSiteLabel}`), createElement("span", "", `${cohort.currency} · 일별 평균`));
   const table = createElement("table", "stats-table");
   const thead = createElement("thead");
   const headerRow = createElement("tr");
@@ -2016,12 +2071,16 @@ function renderStatsGroup(result) {
   } else {
     group.append(renderPriceChart(data, cohort.currency));
   }
-  group.append(table);
+  if (hasEvidence) {
+    group.append(table);
+  } else {
+    group.append(createElement("p", "stats-empty-note", "아직 계산된 가격 표본이 없습니다. 수집되는 일별 평균은 이 그래프에 누적됩니다."));
+  }
   return group;
 }
 
 function latestDailyAverage(data, key, currency) {
-  const points = dailyWindow(data, 30)
+  const points = dailyWindow(data)
     .map((row, index) => dailyAveragePoint(row, key, index))
     .filter(Boolean);
   return points.length ? normalizePrice(points.at(-1).average, currency) : null;
@@ -2064,29 +2123,31 @@ function renderPriceSummaryRow(key, block, data, currency, multipleSites) {
 function renderStats() {
   dom.statsGroups.replaceChildren();
   clearSelectedPriceTable();
-  const scopedResults = state.detailStats
+  const normalizedResults = state.detailStats
     .map((result) => ({ ...result, data: statsForSelectedSites(result.data) }))
-    .filter((result) => result.data && statsHasEvidence(result.data));
+    .filter((result) => result.data);
+  const scopedResults = normalizedResults.filter((result) => statsHasEvidence(result.data));
+  const chartResults = scopedResults.length ? scopedResults : normalizedResults.slice(0, 1);
   state.visibleStatsCount = scopedResults.length;
   const receivedStats = state.detailStats.length > 0;
-  dom.priceSummary.hidden = !state.selectedProduct;
-  dom.statsSection.hidden = scopedResults.length === 0;
-  dom.priceChartDisclosure.hidden = scopedResults.length === 0;
-  if (!scopedResults.length) {
-    if (receivedStats) {
-      const scope = state.selectedSites.size
-        ? `${[...state.selectedSites].map(sourceLabel).join(" · ")}의 `
-        : "이 모델의 ";
-      dom.statsGroups.append(createElement(
-        "div",
-        "price-chart-empty",
-        `${scope}최근 30일 가격 통계가 아직 없습니다. 확인된 실제 거래가 없으면 실제 거래 선도 표시하지 않습니다.`,
-      ));
-    }
+  dom.priceSummary.hidden = !state.selectedProduct || scopedResults.length === 0;
+  dom.statsSection.hidden = !state.selectedProduct || !chartResults.length;
+  dom.priceChartDisclosure.hidden = dom.statsSection.hidden;
+  if (!chartResults.length) {
+    if (receivedStats) dom.statsGroups.append(createElement("div", "price-chart-empty", "일별 가격 통계가 아직 없습니다. 확인된 실제 거래가 없으면 실제 거래 선도 표시하지 않습니다."));
     return;
   }
 
-  scopedResults.forEach((result) => dom.statsGroups.append(renderStatsGroup(result)));
+  chartResults.forEach((result) => dom.statsGroups.append(renderStatsGroup(result)));
+  const chartAsOf = firstDefined(...chartResults.map((result) => result.data?.as_of).filter(Boolean));
+  dom.statsAsOf.textContent = formatDateTime(chartAsOf);
+  if (chartAsOf) {
+    dom.statsAsOf.dateTime = normalizeText(chartAsOf);
+  } else {
+    dom.statsAsOf.removeAttribute("datetime");
+  }
+  if (!scopedResults.length) return;
+
   const summaryResult = scopedResults.find((result) => (
     Number(sampleCount(result.data?.active) || 0) > 0
       || Number(sampleCount(result.data?.reserved) || 0) > 0
@@ -2105,7 +2166,11 @@ function renderStats() {
   renderPriceSummaryRow("confirmed", summaryConfirmed, summaryResult.data, summaryCurrency, multipleSites);
   const asOf = firstDefined(...scopedResults.map((result) => result.data?.as_of).filter(Boolean));
   dom.statsAsOf.textContent = formatDateTime(asOf);
-  if (asOf) dom.statsAsOf.dateTime = normalizeText(asOf);
+  if (asOf) {
+    dom.statsAsOf.dateTime = normalizeText(asOf);
+  } else {
+    dom.statsAsOf.removeAttribute("datetime");
+  }
 }
 
 async function requestListingPage(pageNumber, cursor = "") {
@@ -2343,9 +2408,10 @@ dom.listingPagePrev.addEventListener("click", () => showListingPage(state.listin
 dom.listingPageNext.addEventListener("click", () => showListingPage(state.listingPage + 1));
 dom.listingSortTabs.forEach((button) => {
   button.addEventListener("click", () => {
-    if (!button.dataset.sort || button.dataset.sort === dom.listingSort.value) return;
-    dom.listingSort.value = button.dataset.sort;
-    state.listingSort = dom.listingSort.value;
+    const nextSort = button.dataset.sort;
+    if (!nextSort || nextSort === state.listingSort) return;
+    state.listingSort = nextSort;
+    dom.listingSort.value = nextSort;
     syncListingSortTabs();
     reloadListingsForControls();
   });
@@ -2366,7 +2432,8 @@ dom.backToModels.addEventListener("click", () => {
 
 dom.listingControls.addEventListener("submit", (event) => {
   event.preventDefault();
-  state.listingSort = dom.listingSort.value;
+  state.listingSort = dom.listingSort.value || state.listingSort || "recent";
+  dom.listingSort.value = state.listingSort;
   syncListingSortTabs();
   state.priceMin = digitsOnly(dom.priceMin.value);
   state.priceMax = digitsOnly(dom.priceMax.value);
