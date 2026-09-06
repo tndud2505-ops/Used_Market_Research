@@ -2253,6 +2253,13 @@ function digitsOnly(value) {
 function syncCatalogUrl() {
   const url = new URL(window.location.href);
   const categoryRoute = url.pathname.match(/^\/categories\/([a-z-]+)$/u);
+  if (state.query) {
+    url.pathname = "/";
+    url.search = "";
+    url.searchParams.set("q", state.query);
+    window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+    return;
+  }
   for (const key of PRODUCT_QUERY_KEYS) url.searchParams.delete(key);
   url.searchParams.delete("category");
   url.searchParams.delete("category_code");
@@ -2265,8 +2272,7 @@ function syncCatalogUrl() {
     if (!PRODUCT_QUERY_KEYS.has(key)) return;
     selectedFacetValues(key).forEach((value) => url.searchParams.append(key, value));
   });
-  if (state.query) url.searchParams.set("q", state.query);
-  else url.searchParams.delete("q");
+  url.searchParams.delete("q");
   window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
 }
 

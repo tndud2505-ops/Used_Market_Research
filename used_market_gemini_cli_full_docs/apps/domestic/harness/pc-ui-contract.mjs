@@ -58,6 +58,7 @@ requireText(script, "marketPools", "sources with multiple market pools must pres
 
 requireText(script, "openSingleSearchResult", "a unique text result must still open directly");
 requireText(script, "showScopedListings", "category/facet search must return listings without choosing one model");
+requireText(script, 'url.search = ""', "model search must drop stale facet query params");
 requireText(script, 'params.set("category_code", state.categoryCode)', "broad listing search must preserve the category");
 requireText(script, "params.append(key, value)", "broad listing search must preserve repeated facets");
 requireText(script, 'params.set("canonical_product_id", productId(state.selectedProduct))', "model selection must use an exact listing query");
@@ -89,6 +90,7 @@ requireText(script, '"이미지 없음"', "missing images need an honest empty s
 
 requireText(styles, ".model-selector", "the model selector needs a dedicated compact layout");
 requireText(styles, ".source-choice", "site checkboxes need a readable inline layout");
+requireText(styles, "grid-column: 1 / -1", "site filters must wrap below model controls instead of clipping at zoomed widths");
 requireText(styles, ".model-detail-dialog", "the modal needs bounded desktop styling");
 requireText(styles, ".model-detail-dialog::backdrop", "the modal needs a clear backdrop");
 assert.match(styles, /@media \(max-width: 640px\)[\s\S]*?\.model-detail-dialog\s*\{[\s\S]*?100vw - 16px/u,
