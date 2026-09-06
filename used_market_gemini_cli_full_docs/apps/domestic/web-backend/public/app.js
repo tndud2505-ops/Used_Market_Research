@@ -1532,7 +1532,9 @@ async function loadProductDetail() {
     if (listingSettled && statsSettled >= totalStats) {
       applyFinalDetailMessage();
     } else if (state.visibleStatsCount || state.detailStats.length) {
-      showDetailMessage("일별 가격 통계를 표시했고, 현재 매물을 불러오는 중입니다.");
+      showDetailMessage(listingSettled && !listingError
+        ? "일별 가격 통계를 표시했습니다. 나머지 시장군은 확인 중입니다."
+        : "일별 가격 통계를 표시했고, 현재 매물을 불러오는 중입니다.");
     } else if (listingSettled && !listingError) {
       showDetailMessage("현재 매물을 표시했고, 일별 가격 통계를 불러오는 중입니다.");
     } else {
