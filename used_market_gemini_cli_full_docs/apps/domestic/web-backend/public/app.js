@@ -1495,41 +1495,14 @@ async function loadProductDetail() {
   const controller = new AbortController();
   state.detailRequest = controller;
   const product = state.selectedProduct;
-  const listingPromise = fetchJson(`/api/pc/listings?${buildListingQuery()}`, { signal: controller.signal });
-  const statsPromises = COHORTS.map(async (cohort) => {
-    try {
-      const data = await fetchJson(buildStatsUrl(product, cohort), { signal: controller.signal });
-      return { cohort, data, error: null };
-    } catch (error) {
-      if (error.name === "AbortError") throw error;
-      return { cohort, data: null, error };
-    }
-  });
-
-  try {
-    const [listingResult, ...statsResults] = await Promise.allSettled([listingPromise, ...statsPromises]);
-    if (controller.signal.aborted || state.selectedProduct !== product) return;
-
-    let listingError = null;
-    if (listingResult.status === "fulfilled") {
-      applyListingPayload(listingResult.value, 1);
-      showListingMessage("");
-    } else {
-      listingError = listingResult.reason;
-      state.listings = [];
-      resetListingPagination();
-      renderListings();
-      showListingMessage("현재 매물 목록을 불러오지 못했습니다.", true);
-    }
-
-    state.detailStats = statsResults
-      .filter((result) => result.status === "fulfilled")
-      .map((result) => result.value)
-      .filter((result) => result.data);
-    renderStats();
-
-    const statsFailures = statsResults.filter((result) => result.status === "rejected" || result.value.error).length;
-    const allStatsFailed = statsResults.length > 0 && statsFailures === statsResults.length;
+  let listingSettled = false;
+  let listingError = null;
+  let statsSettled = 0;
+  let statsFailures = 0;
+  const totalStats = COHORTS.length;
+  const isActiveDetail = () => !controller.signal.aborted && state.selectedProduct === product;
+  const applyFinalDetailMessage = () => {
+    const allStatsFailed = totalStats > 0 && statsFailures === totalStats;
     if (listingError && allStatsFailed) {
       showDetailMessage("현재 매물 목록과 가격 통계를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.", true);
     } else if (listingError && statsFailures) {
@@ -1553,6 +1526,59 @@ async function loadProductDetail() {
     } else {
       showDetailMessage("");
     }
+  };
+  const updateDetailProgressMessage = () => {
+    if (!isActiveDetail()) return;
+    if (listingSettled && statsSettled >= totalStats) {
+      applyFinalDetailMessage();
+    } else if (state.visibleStatsCount || state.detailStats.length) {
+      showDetailMessage("일별 가격 통계를 표시했고, 현재 매물을 불러오는 중입니다.");
+    } else if (listingSettled && !listingError) {
+      showDetailMessage("현재 매물을 표시했고, 일별 가격 통계를 불러오는 중입니다.");
+    } else {
+      showDetailMessage("가격 통계와 현재 매물을 불러오는 중입니다.");
+    }
+  };
+  const listingPromise = fetchJson(`/api/pc/listings?${buildListingQuery()}`, { signal: controller.signal });
+  const listingTask = listingPromise.then((payload) => {
+    if (!isActiveDetail()) return;
+    applyListingPayload(payload, 1);
+    showListingMessage("");
+  }).catch((error) => {
+    if (error.name === "AbortError") throw error;
+    if (!isActiveDetail()) return;
+    listingError = error;
+    state.listings = [];
+    resetListingPagination();
+    renderListings();
+    showListingMessage("현재 매물 목록을 불러오지 못했습니다.", true);
+  }).finally(() => {
+    if (!isActiveDetail()) return;
+    listingSettled = true;
+    updateDetailProgressMessage();
+  });
+  const statsTasks = COHORTS.map(async (cohort) => {
+    try {
+      const data = await fetchJson(buildStatsUrl(product, cohort), { signal: controller.signal });
+      if (!isActiveDetail()) return;
+      state.detailStats = [
+        ...state.detailStats.filter((result) => result.cohort.marketPool !== cohort.marketPool || result.cohort.currency !== cohort.currency),
+        { cohort, data, error: null },
+      ];
+      renderStats();
+    } catch (error) {
+      if (error.name === "AbortError") throw error;
+      if (isActiveDetail()) statsFailures += 1;
+    } finally {
+      if (!isActiveDetail()) return;
+      statsSettled += 1;
+      updateDetailProgressMessage();
+    }
+  });
+
+  try {
+    await Promise.allSettled([listingTask, ...statsTasks]);
+    if (isActiveDetail()) applyFinalDetailMessage();
   } catch (error) {
     if (error.name !== "AbortError") showDetailMessage(`상세 정보를 불러오지 못했습니다. ${error.message}`, true);
   } finally {
