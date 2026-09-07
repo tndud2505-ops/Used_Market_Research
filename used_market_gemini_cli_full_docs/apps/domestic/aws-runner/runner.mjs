@@ -2198,7 +2198,7 @@ const server = http.createServer(async (req, res) => {
         ruleVersion: activePipelineVersion.rule_version,
         filterVersion: activePipelineVersion.filter_version
       } : {};
-      const stats = pcLedger.getPriceStats({
+      const stats = pcLedger.getStoredDailyPriceStats({
         canonicalProductId: query.canonicalProductId,
         days: query.days,
         marketPool: query.marketPool,

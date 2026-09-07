@@ -117,6 +117,8 @@ assert.match(runnerScript, /D1_DAILY_ROW_WRITE_LIMIT/u,
   "D1 daily write exhaustion must be visible without failing the local crawl");
 assert.match(runnerScript, /const PC_SCHEDULER_CATCHUP_MS = 0;/u,
   "runner startup must not synchronously replay a multi-hour scheduler backlog");
+assert.match(runnerScript, /pcLedger\.getStoredDailyPriceStats/u,
+  "public price-stat reads must use stored daily aggregates instead of rebuilding from raw ledger rows");
 assertOrdered(runnerScript, [
   "const runtimeBeforeRun = pcSchedulerRuntime[result.source_key] || getSourceRuntimeDefaults(result.source_key);",
   'if (result.status === "skipped")',

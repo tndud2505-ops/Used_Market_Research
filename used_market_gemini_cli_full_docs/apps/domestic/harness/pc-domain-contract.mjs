@@ -449,6 +449,19 @@ assert.ok(krStats.daily.every((row) => row.active && row.reserved && row.sold &&
   "the 30-day series keeps explicit zero-sample dates and all metric scopes");
 assert.equal(krStats.methodology.market_pool, "KR_C2C_USED");
 assert.equal(krStats.methodology.currency, "KRW");
+const storedKrStats = ledger.getStoredDailyPriceStats({
+  canonicalProductId: "gpu:nvidia:rtx-3080", days: 30, marketPool: "KR_C2C_USED",
+  condition: "USED_WORKING", currency: "KRW", asOf: new Date(now).toISOString(),
+  parserVersion: "pc-parser-v1", ruleVersion: "pc-rules-v1", filterVersion: "pc-filter-v1"
+});
+assert.equal(storedKrStats.daily.length, 30, "stored price stats keep the daily chart window");
+assert.equal(storedKrStats.sold.sample_count, krStats.sold.sample_count,
+  "stored price stats reuse precomputed daily rows instead of dropping samples");
+assert.equal(storedKrStats.by_source.find((source) => source.source_id === "joonggonara").sold.sample_count,
+  krStats.by_source.find((source) => source.source_id === "joonggonara").sold.sample_count,
+  "stored price stats keep source-filterable daily rows");
+assert.equal(storedKrStats.by_manufacturer.length, 0,
+  "stored public price stats avoid the heavy manufacturer regrouping path");
 assert.ok(ledger.traceStatMembers({
   canonicalProductId: "gpu:nvidia:rtx-3080", marketPool: "KR_C2C_USED",
   condition: "USED_WORKING", currency: "KRW"

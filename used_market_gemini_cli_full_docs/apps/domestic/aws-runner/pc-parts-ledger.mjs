@@ -327,6 +327,19 @@ function round(value) {
   return value == null ? null : Number(Number(value).toFixed(2));
 }
 
+function finiteOrNull(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function firstFiniteValue(...values) {
+  for (const value of values) {
+    const number = finiteOrNull(value);
+    if (number != null) return number;
+  }
+  return null;
+}
+
 function summarize(values, unitCount = null) {
   const sorted = values.filter(Number.isFinite).sort((left, right) => left - right);
   const sampleCount = sorted.length;
@@ -758,6 +771,8 @@ export class PcPartsLedger {
         ) STRICT;
         CREATE INDEX IF NOT EXISTS idx_daily_source_price_stats_lookup
           ON daily_source_price_stats(source_id, daily_price_stat_id);
+        CREATE INDEX IF NOT EXISTS idx_daily_source_price_stats_stat_lookup
+          ON daily_source_price_stats(daily_price_stat_id, source_id);
 
         CREATE TABLE IF NOT EXISTS daily_source_price_stat_members (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2282,6 +2297,191 @@ export class PcPartsLedger {
       }
       return { statCount, memberCount: [...groups.values()].reduce((sum, members) => sum + members.length, 0), from, asOf };
     });
+  }
+
+  storedDailyMetric(row) {
+    if (!row) return summarize([]);
+    const sampleCount = Math.max(0, Number(row.sample_count) || 0);
+    const unitCount = Math.max(0, Number(row.unit_count) || 0);
+    const average = sampleCount > 0
+      ? firstFiniteValue(row.mean_value, row.median_value, row.min_value, row.max_value)
+      : null;
+    return {
+      sample_count: sampleCount,
+      unit_count: unitCount,
+      min: round(finiteOrNull(row.min_value)),
+      max: round(finiteOrNull(row.max_value)),
+      mean: round(finiteOrNull(row.mean_value)),
+      average: round(average),
+      median: round(finiteOrNull(row.median_value)),
+      trimmed_mean: round(finiteOrNull(row.trimmed_mean_value)),
+      p25: round(finiteOrNull(row.p25_value)),
+      p75: round(finiteOrNull(row.p75_value)),
+      seven_day_sold_median: row.metric_scope === "SOLD" ? round(finiteOrNull(row.seven_day_sold_median)) : null,
+      outlier_count: Math.max(0, Number(row.outlier_count) || 0),
+      outlier_lower_bound: round(finiteOrNull(row.outlier_lower_bound)),
+      outlier_upper_bound: round(finiteOrNull(row.outlier_upper_bound)),
+      confidence_level: cleanText(row.confidence_level || "INSUFFICIENT", 40)
+    };
+  }
+
+  storedSummaryFromDailyRows(rows) {
+    const sampleRows = rows.filter((row) => Number(row.sample_count || 0) > 0);
+    if (!sampleRows.length) return summarize([]);
+    let sampleCount = 0;
+    let unitCount = 0;
+    let outlierCount = 0;
+    let minValue = null;
+    let maxValue = null;
+    let averageWeightedSum = 0;
+    let averageWeight = 0;
+    let meanWeightedSum = 0;
+    let meanWeight = 0;
+    for (const row of sampleRows) {
+      const rowSampleCount = Math.max(0, Number(row.sample_count) || 0);
+      sampleCount += rowSampleCount;
+      unitCount += Math.max(0, Number(row.unit_count) || 0);
+      outlierCount += Math.max(0, Number(row.outlier_count) || 0);
+      const rowMin = finiteOrNull(row.min_value);
+      const rowMax = finiteOrNull(row.max_value);
+      if (rowMin != null) minValue = minValue == null ? rowMin : Math.min(minValue, rowMin);
+      if (rowMax != null) maxValue = maxValue == null ? rowMax : Math.max(maxValue, rowMax);
+      const displayAverage = firstFiniteValue(row.mean_value, row.median_value, row.min_value, row.max_value);
+      if (displayAverage != null) {
+        averageWeightedSum += displayAverage * rowSampleCount;
+        averageWeight += rowSampleCount;
+      }
+      const rowMean = finiteOrNull(row.mean_value);
+      if (rowMean != null) {
+        meanWeightedSum += rowMean * rowSampleCount;
+        meanWeight += rowSampleCount;
+      }
+    }
+    const singleDayMetric = sampleRows.length === 1 ? this.storedDailyMetric(sampleRows[0]) : null;
+    const confidenceLevel = sampleCount < 3 ? "INSUFFICIENT" : sampleCount < 5 ? "LOW_SAMPLE" : sampleCount < 10 ? "MEDIUM" : "HIGH";
+    return {
+      sample_count: sampleCount,
+      unit_count: unitCount,
+      min: round(minValue),
+      max: round(maxValue),
+      mean: meanWeight === sampleCount && meanWeight > 0 ? round(meanWeightedSum / meanWeight) : null,
+      average: averageWeight > 0 ? round(averageWeightedSum / averageWeight) : null,
+      median: singleDayMetric?.median ?? null,
+      trimmed_mean: singleDayMetric?.trimmed_mean ?? null,
+      p25: singleDayMetric?.p25 ?? null,
+      p75: singleDayMetric?.p75 ?? null,
+      outlier_count: outlierCount,
+      outlier_lower_bound: null,
+      outlier_upper_bound: null,
+      confidence_level: confidenceLevel
+    };
+  }
+
+  appendStoredDailyMetric(dailyMap, row) {
+    if (!dailyMap.has(row.stat_date)) dailyMap.set(row.stat_date, { date: row.stat_date });
+    dailyMap.get(row.stat_date)[row.metric_scope === "CONFIRMED_TRANSACTION" ? "confirmed_transactions" : row.metric_scope.toLowerCase()] = this.storedDailyMetric(row);
+  }
+
+  getStoredDailyPriceStats(options) {
+    const canonicalProductId = requireValue(options.canonicalProductId, "canonicalProductId");
+    const marketPool = requireValue(options.marketPool, "marketPool");
+    const condition = requireValue(options.condition, "condition");
+    const currency = requireValue(options.currency, "currency").toUpperCase();
+    const { asOf, days, from } = priceStatsWindow(options.asOf || new Date(this.now()), options.days);
+    const normalizationVersion = Math.max(1, Number(options.normalizationVersion) || 1);
+    const parserVersion = cleanText(options.parserVersion || "pc-parser-v1", 100);
+    const ruleVersion = cleanText(options.ruleVersion || "pc-rules-v1", 100);
+    const filterVersion = cleanText(options.filterVersion || "pc-filter-v1", 100);
+    const dailyRows = this.db.prepare(`
+      SELECT * FROM daily_price_stats WHERE canonical_product_id = ? AND market_pool = ? AND condition_code = ?
+        AND currency = ? AND stat_date >= ? AND stat_date <= ?
+        AND normalization_version = ?
+        AND parser_version = ? AND rule_version = ? AND filter_version = ?
+      ORDER BY stat_date, metric_scope
+    `).all(canonicalProductId, marketPool, condition, currency, from.slice(0, 10), asOf.slice(0, 10),
+      normalizationVersion, parserVersion, ruleVersion, filterVersion);
+    const versionKeys = new Set(dailyRows.map((row) => `${row.parser_version}\u0000${row.rule_version}\u0000${row.filter_version}`));
+    if (versionKeys.size > 1) throw new Error("MIXED_STAT_RULE_VERSIONS");
+    const dailyMap = new Map();
+    const rowsByScope = new Map();
+    for (const row of dailyRows) {
+      this.appendStoredDailyMetric(dailyMap, row);
+      if (!rowsByScope.has(row.metric_scope)) rowsByScope.set(row.metric_scope, []);
+      rowsByScope.get(row.metric_scope).push(row);
+    }
+    const dailySourceRows = this.db.prepare(`
+      SELECT d.stat_date, d.metric_scope, ds.*
+        FROM daily_price_stats d
+        JOIN daily_source_price_stats ds ON ds.daily_price_stat_id = d.id
+       WHERE d.canonical_product_id = ? AND d.market_pool = ? AND d.condition_code = ?
+         AND d.currency = ? AND d.stat_date >= ? AND d.stat_date <= ?
+         AND d.normalization_version = ?
+         AND d.parser_version = ? AND d.rule_version = ? AND d.filter_version = ?
+       ORDER BY ds.source_id, d.stat_date, d.metric_scope
+    `).all(canonicalProductId, marketPool, condition, currency, from.slice(0, 10), asOf.slice(0, 10),
+      normalizationVersion, parserVersion, ruleVersion, filterVersion);
+    const sourceDailyMaps = new Map();
+    const sourceRowsByScope = new Map();
+    for (const row of dailySourceRows) {
+      if (!sourceDailyMaps.has(row.source_id)) sourceDailyMaps.set(row.source_id, new Map());
+      this.appendStoredDailyMetric(sourceDailyMaps.get(row.source_id), row);
+      const key = `${row.source_id}\u0000${row.metric_scope}`;
+      if (!sourceRowsByScope.has(key)) sourceRowsByScope.set(key, []);
+      sourceRowsByScope.get(key).push(row);
+    }
+    const sourceMetric = (sourceId, scope) => this.storedSummaryFromDailyRows(sourceRowsByScope.get(`${sourceId}\u0000${scope}`) || []);
+    const bySource = [...sourceDailyMaps.entries()]
+      .filter(([sourceId]) => PRICE_STAT_METRIC_SCOPES.some((scope) => sourceMetric(sourceId, scope).sample_count > 0))
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([sourceId, daily]) => {
+        const reserved = sourceMetric(sourceId, "RESERVED");
+        const sold = sourceMetric(sourceId, "SOLD");
+        reserved.disclosure = "예약중 매물에 표시된 가격이며 실제 거래가격이 아닙니다.";
+        sold.disclosure = "판매완료 매물에 마지막으로 표시된 가격이며 실제 거래가격이 아닙니다.";
+        return {
+          source_id: sourceId,
+          active: sourceMetric(sourceId, "ACTIVE"),
+          reserved,
+          sold,
+          confirmed_transactions: sourceMetric(sourceId, "CONFIRMED_TRANSACTION"),
+          daily: [...daily.values()],
+          traceability: { member_count: null }
+        };
+      });
+    const reserved = this.storedSummaryFromDailyRows(rowsByScope.get("RESERVED") || []);
+    const sold = this.storedSummaryFromDailyRows(rowsByScope.get("SOLD") || []);
+    reserved.disclosure = "예약중 매물에 표시된 가격이며 실제 거래가격이 아닙니다.";
+    sold.disclosure = "판매완료 매물에 마지막으로 표시된 가격이며 실제 거래가격이 아닙니다.";
+    const versionRow = dailyRows.at(-1);
+    return {
+      canonical_product_id: canonicalProductId,
+      active: this.storedSummaryFromDailyRows(rowsByScope.get("ACTIVE") || []),
+      reserved,
+      sold,
+      confirmed_transactions: this.storedSummaryFromDailyRows(rowsByScope.get("CONFIRMED_TRANSACTION") || []),
+      by_source: bySource,
+      by_manufacturer: [],
+      daily: [...dailyMap.values()],
+      confidence: { level: sold.sample_count < 3 ? "INSUFFICIENT" : sold.sample_count < 5 ? "LOW_SAMPLE" : sold.sample_count < 10 ? "MEDIUM" : "HIGH", reasons: sold.sample_count < 5 ? ["판매완료 표본 부족"] : [] },
+      exclusions: { total: null, reasons: {} },
+      methodology: {
+        days,
+        market_pool: marketPool,
+        condition,
+        currency,
+        read_rule: "저장된 일별 가격 통계만 조회",
+        active_rule: "일별 저장 통계의 표본 가중 평균",
+        sold_rule: "일별 저장 통계의 표본 가중 평균"
+      },
+      versions: {
+        normalization: normalizationVersion,
+        parser: versionRow?.parser_version || parserVersion,
+        rule: versionRow?.rule_version || ruleVersion,
+        filter: versionRow?.filter_version || filterVersion
+      },
+      traceability: { member_count: null },
+      as_of: versionRow?.as_of || asOf
+    };
   }
 
   getPriceStats(options) {
