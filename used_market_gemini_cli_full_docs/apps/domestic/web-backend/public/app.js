@@ -64,6 +64,7 @@ const stackedLayoutMedia = window.matchMedia("(max-width: 1120px)");
 const compactFilterMedia = window.matchMedia("(max-width: 1120px)");
 const SCOPED_LISTING_AUTORUN_MODEL_LIMIT = 12;
 const SEARCH_LISTING_AUTORUN_MODEL_LIMIT = 18;
+const DEFAULT_QUICK_SOURCE_IDS = Object.freeze(["joonggonara", "bunjang"]);
 let browseListingTimer = null;
 let catalogSearchTimer = null;
 let catalogSearchComposing = false;
@@ -1405,9 +1406,11 @@ function listingPriceControlsActive() {
 }
 
 function listingSourceScope() {
-  return state.selectedSites.size
-    ? state.sources.filter((source) => state.selectedSites.has(source.id))
-    : state.sources;
+  if (state.selectedSites.size) return state.sources.filter((source) => state.selectedSites.has(source.id));
+  const quickSources = DEFAULT_QUICK_SOURCE_IDS
+    .map((sourceId) => state.sources.find((source) => source.id === sourceId))
+    .filter(Boolean);
+  return quickSources.length ? quickSources : state.sources;
 }
 
 function listingCurrencyScope() {
@@ -1465,11 +1468,12 @@ function buildListingQuery(cursor = "") {
     });
     if (state.query) params.set("q", state.query);
   }
-  if (state.selectedSites.size) params.set("sites", [...state.selectedSites].join(","));
   if (state.listingSort) params.set("sort", state.listingSort);
   if (state.priceMin) params.set("price_min", state.priceMin);
   if (state.priceMax) params.set("price_max", state.priceMax);
   const sourceScope = listingSourceScope();
+  const sourceIds = sourceScope.map((source) => source.id).filter(Boolean);
+  if (sourceIds.length && sourceIds.length < state.sources.length) params.set("sites", sourceIds.join(","));
   const marketPools = [...new Set(sourceScope.flatMap((source) => source.marketPools).filter(Boolean))];
   const currencyScope = listingCurrencyScope();
   if (currencyScope) params.set("currency", currencyScope);
