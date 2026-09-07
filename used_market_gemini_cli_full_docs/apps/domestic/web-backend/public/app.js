@@ -99,6 +99,7 @@ const state = {
   priceMin: "",
   priceMax: "",
   detailStats: [],
+  detailStatsFailures: 0,
   visibleStatsCount: 0,
   productRequest: null,
   listingRequest: null,
@@ -138,6 +139,7 @@ const dom = {
   pricePanelTitle: document.querySelector("#price-panel-title"),
   detailMessage: document.querySelector("#detail-message"),
   priceSummary: document.querySelector("#price-summary"),
+  priceSummaryScope: document.querySelector("#price-summary-scope"),
   activeLatest: document.querySelector("#active-latest"),
   activeChange: document.querySelector("#active-change"),
   activeMean: document.querySelector("#active-mean"),
@@ -164,11 +166,14 @@ const dom = {
   listingOptions: document.querySelector("#listing-options"),
   listingOptionsToggle: document.querySelector("#listing-options-toggle"),
   backToModels: document.querySelector("#back-to-models"),
+  modelDetailOpen: document.querySelector("#model-detail-open"),
   listingControls: document.querySelector("#listing-controls"),
   listingSort: document.querySelector("#listing-sort"),
   listingSortTabs: [...document.querySelectorAll(".listing-sort-tab")],
   priceMin: document.querySelector("#price-min"),
   priceMax: document.querySelector("#price-max"),
+  priceReset: document.querySelector("#price-reset"),
+  priceError: document.querySelector("#price-error"),
   listingRows: document.querySelector("#listing-rows"),
   listingEmpty: document.querySelector("#listing-empty"),
   listingPagination: document.querySelector("#listing-pagination"),
@@ -330,10 +335,10 @@ function normalizePrice(value, fallbackCurrency = "KRW") {
   return { amount, currency: fallbackCurrency };
 }
 
-function metricValue(block, keys) {
+function metricValue(block, keys, fallbackCurrency = "KRW") {
   if (!block || typeof block !== "object") return null;
   for (const key of keys) {
-    const price = normalizePrice(block[key], normalizeText(block.currency) || "KRW");
+    const price = normalizePrice(block[key], normalizeText(block.currency) || fallbackCurrency);
     if (price) return price;
   }
   return null;
@@ -928,7 +933,8 @@ function updateFacetSelectionUi(definitions = facetDefinitionsForCategory(state.
   });
 
   renderActiveFilterSummary(definitions);
-  dom.resetFilters.hidden = !hasSelectedFacets() && !state.query;
+  dom.resetFilters.hidden = !hasSelectedFacets() && !state.query
+    && !state.selectedSites.size && !listingPriceControlsActive();
   updateMatchedModelButton();
 }
 
@@ -961,7 +967,8 @@ function setListingOptionsCollapsed(collapsed) {
   state.listingOptionsCollapsed = Boolean(mobileFacetMedia.matches && collapsed);
   dom.listingOptions.hidden = state.listingOptionsCollapsed;
   dom.listingOptionsToggle.setAttribute("aria-expanded", String(!state.listingOptionsCollapsed));
-  dom.listingOptionsToggle.textContent = state.listingOptionsCollapsed ? "정렬·가격 열기" : "정렬·가격 닫기";
+  const suffix = listingPriceControlsActive() ? " · 적용 중" : "";
+  dom.listingOptionsToggle.textContent = (state.listingOptionsCollapsed ? "정렬·가격 열기" : "정렬·가격 닫기") + suffix;
 }
 
 function syncListingSortTabs() {
@@ -986,6 +993,9 @@ function syncSourceFilterSummary() {
 }
 
 function reloadListingsForControls(focusSourceValue) {
+  updateFacetSelectionUi();
+  dom.priceReset.hidden = !state.priceMin && !state.priceMax;
+  setListingOptionsCollapsed(state.listingOptionsCollapsed);
   renderSourceFilters();
   if (focusSourceValue !== undefined) {
     window.requestAnimationFrame(() => {
@@ -994,12 +1004,11 @@ function reloadListingsForControls(focusSourceValue) {
     });
   }
   if (state.selectedProduct) {
-    clearSelectedPriceTable();
-    dom.statsGroups.replaceChildren();
-    dom.statsSection.hidden = true;
-    dom.priceChartDisclosure.hidden = true;
-    showDetailMessage("선택한 사이트의 가격 통계를 불러오는 중입니다.");
-    loadProductDetail();
+    if (focusSourceValue !== undefined) {
+      renderStats();
+      updateStatsMessage();
+    }
+    loadListings(false);
   }
   else if (shouldAutoLoadScopedListings()) loadListings(false);
   else showScopedListings();
@@ -1066,14 +1075,8 @@ function selectCategory(code) {
   state.facets = {};
   state.openFacetRows.clear();
   state.expandedFacetOptions.clear();
-  state.listingSort = "recent";
-  state.priceMin = "";
-  state.priceMax = "";
-  dom.listingSort.value = "recent";
-  syncListingSortTabs();
+  resetListingControls();
   state.sourceMoreOpen = false;
-  dom.priceMin.value = "";
-  dom.priceMax.value = "";
   const firstFacet = state.categoryCode ? browseFlowForCategory(state.categoryCode)[0]?.key : "";
   if (firstFacet) state.openFacetRows.add(firstFacet);
   clearTimeout(catalogSearchTimer);
@@ -1179,7 +1182,7 @@ function renderProducts() {
     : state.products.length;
   dom.modelSelect.replaceChildren();
   const placeholder = createElement("option", "", total
-    ? `검색된 모델 ${total.toLocaleString("ko-KR")}개`
+    ? `전체 모델 · ${total.toLocaleString("ko-KR")}개`
     : "검색된 모델 없음");
   placeholder.value = "";
   dom.modelSelect.append(placeholder);
@@ -1296,6 +1299,7 @@ function resetDetail() {
   dom.priceChartDisclosure.hidden = true;
   dom.listingSection.hidden = true;
   dom.backToModels.hidden = true;
+  dom.modelDetailOpen.hidden = true;
   dom.statsGroups.replaceChildren();
   dom.listingRows.replaceChildren();
   showListingMessage("");
@@ -1341,6 +1345,7 @@ function showScopedListings(listingDelayMs = 0) {
   dom.statsGroups.replaceChildren();
   dom.listingSection.hidden = false;
   dom.backToModels.hidden = true;
+  dom.modelDetailOpen.hidden = true;
   dom.listingTitle.textContent = currentListingScopeTitle();
   dom.listingEmpty.textContent = state.productTotal
     ? "선택한 조건에 맞는 현재 매물이 없습니다."
@@ -1374,17 +1379,23 @@ async function refreshBrowseScope(listingDelayMs = 0) {
 function closeModelDetail(restoreFocus = true) {
   dom.modelDetailDialog.hidden = true;
   document.body.classList.remove("has-model-insight");
-  if (state.selectedProduct) {
-    dom.modelSelect.value = "";
-    const placeholder = dom.modelSelect.options[0];
-    if (placeholder) placeholder.textContent = `선택: ${productName(state.selectedProduct)}`;
-  }
-  if (restoreFocus) dom.modelSelect.focus({ preventScroll: true });
+  dom.modelDetailOpen.setAttribute("aria-expanded", "false");
+  if (restoreFocus) dom.modelDetailOpen.focus({ preventScroll: true });
 }
 
 function openModelDetail() {
   dom.modelDetailDialog.hidden = false;
   document.body.classList.add("has-model-insight");
+  dom.modelDetailOpen.setAttribute("aria-expanded", "true");
+}
+
+function revealSection(section) {
+  const headerHeight = document.querySelector(".site-header")?.getBoundingClientRect().height || 0;
+  section.style.scrollMarginTop = `${Math.ceil(headerHeight) + 12}px`;
+  section.scrollIntoView({
+    behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth",
+    block: "start",
+  });
 }
 
 function clearSelectedPriceTable() {
@@ -1439,6 +1450,7 @@ function selectProduct(product) {
   dom.priceChartDisclosure.hidden = true;
   dom.listingSection.hidden = false;
   dom.backToModels.hidden = false;
+  dom.modelDetailOpen.hidden = false;
   dom.backToModels.textContent = "← 전체 조건 매물";
   dom.listingRows.replaceChildren();
   dom.listingEmpty.hidden = true;
@@ -1447,11 +1459,14 @@ function selectProduct(product) {
   showDetailMessage("가격 통계와 현재 매물을 불러오는 중입니다.");
   renderProducts();
   openModelDetail();
+  loadListings(false);
   loadProductDetail();
   window.requestAnimationFrame(() => {
-    dom.pricePanelTitle.focus({ preventScroll: true });
     if (stackedInsightMedia.matches) {
-      dom.modelDetailDialog.scrollIntoView({ behavior: "smooth", block: "start" });
+      dom.listingTitle.focus({ preventScroll: true });
+      revealSection(dom.listingSection);
+    } else {
+      dom.pricePanelTitle.focus({ preventScroll: true });
     }
   });
 }
@@ -1493,77 +1508,30 @@ function buildStatsUrl(product, cohort) {
   return `/api/products/${encodeURIComponent(productId(product))}/price-stats?${params}`;
 }
 
+function updateStatsMessage() {
+  if (state.detailRequest) {
+    showDetailMessage(state.visibleStatsCount
+      ? "가격 통계 표시 중 · 나머지 사이트를 확인하고 있습니다."
+      : "일별 가격 통계를 불러오는 중입니다.");
+  } else if (state.detailStatsFailures === COHORTS.length) {
+    showDetailMessage("가격 통계를 불러오지 못했습니다. 모델을 다시 선택해 주세요.", true);
+  } else if (!state.visibleStatsCount) {
+    showDetailMessage(state.detailStatsFailures
+      ? "일부 가격 통계를 불러오지 못했습니다. 확인된 범위에는 가격 표본이 없습니다."
+      : "선택한 범위의 일별 가격 표본이 아직 없습니다.", Boolean(state.detailStatsFailures));
+  } else {
+    showDetailMessage(state.detailStatsFailures ? "일부 가격 통계를 불러오지 못해 확인된 자료만 표시합니다." : "");
+  }
+}
+
 async function loadProductDetail() {
-  cancelListingRequest();
-  resetListingPagination();
   state.detailRequest?.abort();
   const controller = new AbortController();
   state.detailRequest = controller;
   const product = state.selectedProduct;
-  let listingSettled = false;
-  let listingError = null;
-  let statsSettled = 0;
-  let statsFailures = 0;
-  const totalStats = COHORTS.length;
+  state.detailStatsFailures = 0;
   const isActiveDetail = () => !controller.signal.aborted && state.selectedProduct === product;
-  const applyFinalDetailMessage = () => {
-    const allStatsFailed = totalStats > 0 && statsFailures === totalStats;
-    if (listingError && allStatsFailed) {
-      showDetailMessage("현재 매물 목록과 가격 통계를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.", true);
-    } else if (listingError && statsFailures) {
-      showDetailMessage(state.visibleStatsCount
-        ? "확인 가능한 가격 통계만 표시하며, 현재 매물 목록은 불러오지 못했습니다."
-        : "현재 매물 목록과 일부 가격 통계를 불러오지 못했습니다. 확인된 범위에는 가격 자료가 없습니다.", true);
-    } else if (listingError) {
-      showDetailMessage(state.visibleStatsCount
-        ? "가격 통계는 표시했지만 현재 매물 목록을 불러오지 못했습니다."
-        : "현재 매물 목록을 불러오지 못했고, 확인된 범위에는 가격 통계가 없습니다.", true);
-    } else if (allStatsFailed) {
-      showDetailMessage("현재 매물은 표시했지만 가격 통계를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.", true);
-    } else if (statsFailures && !state.visibleStatsCount) {
-      showDetailMessage("현재 매물은 표시했지만 일부 가격 통계를 불러오지 못했고, 확인된 범위에는 가격 자료가 없습니다.", true);
-    } else if (!state.visibleStatsCount) {
-      showDetailMessage(state.selectedSites.size
-        ? "현재 매물은 표시했지만 선택한 사이트의 일별 가격 통계는 아직 없습니다."
-        : "현재 매물은 표시했지만 이 모델의 일별 가격 통계는 아직 없습니다.");
-    } else if (statsFailures) {
-      showDetailMessage("일부 시장군 통계가 없어 확인 가능한 자료만 표시합니다.");
-    } else {
-      showDetailMessage("");
-    }
-  };
-  const updateDetailProgressMessage = () => {
-    if (!isActiveDetail()) return;
-    if (listingSettled && statsSettled >= totalStats) {
-      applyFinalDetailMessage();
-    } else if (state.visibleStatsCount || state.detailStats.length) {
-      showDetailMessage(listingSettled && !listingError
-        ? "일별 가격 통계를 표시했습니다. 나머지 시장군은 확인 중입니다."
-        : "일별 가격 통계를 표시했고, 현재 매물을 불러오는 중입니다.");
-    } else if (listingSettled && !listingError) {
-      showDetailMessage("현재 매물을 표시했고, 일별 가격 통계를 불러오는 중입니다.");
-    } else {
-      showDetailMessage("가격 통계와 현재 매물을 불러오는 중입니다.");
-    }
-  };
-  const listingPromise = fetchJson(`/api/pc/listings?${buildListingQuery()}`, { signal: controller.signal });
-  const listingTask = listingPromise.then((payload) => {
-    if (!isActiveDetail()) return;
-    applyListingPayload(payload, 1);
-    showListingMessage("");
-  }).catch((error) => {
-    if (error.name === "AbortError") throw error;
-    if (!isActiveDetail()) return;
-    listingError = error;
-    state.listings = [];
-    resetListingPagination();
-    renderListings();
-    showListingMessage("현재 매물 목록을 불러오지 못했습니다.", true);
-  }).finally(() => {
-    if (!isActiveDetail()) return;
-    listingSettled = true;
-    updateDetailProgressMessage();
-  });
+  updateStatsMessage();
   const statsTasks = COHORTS.map(async (cohort) => {
     try {
       const data = await fetchJson(buildStatsUrl(product, cohort), { signal: controller.signal });
@@ -1575,21 +1543,20 @@ async function loadProductDetail() {
       renderStats();
     } catch (error) {
       if (error.name === "AbortError") throw error;
-      if (isActiveDetail()) statsFailures += 1;
+      if (isActiveDetail()) state.detailStatsFailures += 1;
     } finally {
       if (!isActiveDetail()) return;
-      statsSettled += 1;
-      updateDetailProgressMessage();
+      updateStatsMessage();
     }
   });
 
   try {
-    await Promise.allSettled([listingTask, ...statsTasks]);
-    if (isActiveDetail()) applyFinalDetailMessage();
-  } catch (error) {
-    if (error.name !== "AbortError") showDetailMessage(`상세 정보를 불러오지 못했습니다. ${error.message}`, true);
+    await Promise.allSettled(statsTasks);
   } finally {
-    if (state.detailRequest === controller) state.detailRequest = null;
+    if (state.detailRequest === controller) {
+      state.detailRequest = null;
+      updateStatsMessage();
+    }
   }
 }
 
@@ -1807,12 +1774,12 @@ function statsRow(label, data, currency, combined = false) {
   const sold = firstDefined(data?.sold, data?.sold_last_ask, data?.sold_stats, {});
   const confirmed = firstDefined(data?.confirmed_transactions, data?.confirmed_transaction, data?.transactions, {});
   const activeCount = firstDefined(sampleCount(active), data?.active_count, data?.n_active);
-  const mean = metricValue(active, ["mean", "average", "avg", "mean_price"]) || normalizePrice(firstDefined(data?.active_mean, data?.average), currency);
-  const median = metricValue(active, ["median", "median_price"]) || normalizePrice(data?.active_median, currency);
-  const soldMean = metricValue(sold, ["mean", "average", "avg", "mean_price", "sold_last_ask_mean"]) || normalizePrice(firstDefined(data?.sold_last_ask_mean, data?.sold_mean), currency);
-  const soldMedian = metricValue(sold, ["median", "median_price", "sold_last_ask_median"]) || normalizePrice(firstDefined(data?.sold_last_ask_median, data?.sold_median), currency);
+  const mean = metricValue(active, ["mean", "average", "avg", "mean_price"], currency) || normalizePrice(firstDefined(data?.active_mean, data?.average), currency);
+  const median = metricValue(active, ["median", "median_price"], currency) || normalizePrice(data?.active_median, currency);
+  const soldMean = metricValue(sold, ["mean", "average", "avg", "mean_price", "sold_last_ask_mean"], currency) || normalizePrice(firstDefined(data?.sold_last_ask_mean, data?.sold_mean), currency);
+  const soldMedian = metricValue(sold, ["median", "median_price", "sold_last_ask_median"], currency) || normalizePrice(firstDefined(data?.sold_last_ask_median, data?.sold_median), currency);
   const soldCount = firstDefined(sampleCount(sold), data?.sold_count, data?.n_sold);
-  const confirmedPrice = metricValue(confirmed, ["median", "median_price", "mean", "average", "amount", "transaction_price_median"])
+  const confirmedPrice = metricValue(confirmed, ["median", "median_price", "mean", "average", "amount", "transaction_price_median"], currency)
     || normalizePrice(firstDefined(data?.confirmed_transaction_median, data?.transaction_price_median), currency);
   const confirmedCount = firstDefined(sampleCount(confirmed), data?.confirmed_transaction_count, data?.n_confirmed_transactions);
 
@@ -1835,10 +1802,10 @@ function compactStatsRow(label, data, currency, combined = false) {
   const row = createElement("tr", combined ? "combined-row" : "");
   const active = firstDefined(data?.active, data?.active_stats, {});
   const confirmed = firstDefined(data?.confirmed_transactions, data?.confirmed_transaction, data?.transactions, {});
-  const activeMean = metricValue(active, ["mean", "average", "avg", "mean_price"]);
-  const activeMedian = metricValue(active, ["median", "median_price"]);
-  const confirmedMean = metricValue(confirmed, ["mean", "average", "avg", "mean_price", "transaction_price_mean"]);
-  const confirmedMedian = metricValue(confirmed, ["median", "median_price", "transaction_price_median"]);
+  const activeMean = metricValue(active, ["mean", "average", "avg", "mean_price"], currency);
+  const activeMedian = metricValue(active, ["median", "median_price"], currency);
+  const confirmedMean = metricValue(confirmed, ["mean", "average", "avg", "mean_price", "transaction_price_mean"], currency);
+  const confirmedMedian = metricValue(confirmed, ["median", "median_price", "transaction_price_median"], currency);
   const activeCell = createElement("td", "metric-pair");
   activeCell.append(createElement("strong", "", formatMoney(activeMean, currency)), createElement("small", "", `중앙 ${formatMoney(activeMedian, currency)}`));
   const confirmedCell = createElement("td", "metric-pair confirmed-metric");
@@ -1946,9 +1913,9 @@ function renderPriceChart(data, currency) {
   }));
   const values = series.flatMap((entry) => entry.points.map((point) => point.average));
   const figure = createElement("figure", "price-chart");
-  const width = 720;
+  const width = 420;
   const height = 230;
-  const margin = { top: 18, right: 18, bottom: 34, left: 78 };
+  const margin = { top: 18, right: 18, bottom: 34, left: 70 };
   const plotWidth = width - margin.left - margin.right;
   const plotHeight = height - margin.top - margin.bottom;
   if (!values.length) {
@@ -2046,22 +2013,10 @@ function renderPriceChart(data, currency) {
 
   const caption = createElement("figcaption", "price-chart-legend");
   series.forEach((entry) => {
-    const item = createElement("span", entry.className, entry.label);
+    const item = createElement("span", entry.className,
+      `${entry.label}${entry.points.length ? "" : " · 표본 없음"}`);
     caption.append(item);
   });
-  const reservedSeries = series.find((entry) => entry.key === "reserved");
-  if (!reservedSeries?.points.length) {
-    caption.append(createElement("span", "chart-sample-note", "예약중 표본 수집 중 (0건)"));
-  }
-  const soldSeries = series.find((entry) => entry.key === "sold");
-  if (!soldSeries?.points.length) {
-    caption.append(createElement("span", "chart-sample-note", "판매완료 표본 수집 중 (0건)"));
-  }
-  const confirmedSeries = series.find((entry) => entry.key === "confirmed_transactions");
-  if (!confirmedSeries?.points.length) {
-    caption.append(createElement("span", "chart-sample-note", "확인된 실제 거래 표본 없음 · 예약중 제외"));
-  }
-  caption.append(createElement("span", "chart-gap-note", "자료 없는 날짜는 연결하지 않음"));
   figure.append(svg, caption);
   return figure;
 }
@@ -2135,7 +2090,7 @@ function renderPriceSummaryRow(key, block, data, currency, multipleSites) {
       ? ["mean", "average", "avg", "mean_price", "transaction_price_mean"]
       : ["mean", "average", "avg", "mean_price"];
   const dailyKey = key === "confirmed" ? "confirmed_transactions" : key;
-  const mean = metricValue(block, meanKeys);
+  const mean = metricValue(block, meanKeys, currency);
   const latest = multipleSites ? null : latestDailyAverage(data, dailyKey, currency);
   const change = formatPriceChange(latest, mean, currency);
   latestCell.textContent = formatMoney(latest, currency);
@@ -2149,7 +2104,9 @@ function renderPriceSummaryRow(key, block, data, currency, multipleSites) {
 function renderStats() {
   dom.statsGroups.replaceChildren();
   clearSelectedPriceTable();
-  const normalizedResults = state.detailStats
+  const normalizedResults = COHORTS.flatMap((cohort) => state.detailStats.filter((result) => (
+    result.cohort.marketPool === cohort.marketPool && result.cohort.currency === cohort.currency
+  )))
     .map((result) => ({ ...result, data: statsForSelectedSites(result.data) }))
     .filter((result) => result.data);
   const scopedResults = normalizedResults.filter((result) => statsHasEvidence(result.data));
@@ -2181,6 +2138,7 @@ function renderStats() {
       || Number(sampleCount(result.data?.confirmed_transactions) || 0) > 0
   )) || scopedResults[0];
   const summaryCurrency = summaryResult.cohort.currency;
+  dom.priceSummaryScope.textContent = `${summaryResult.cohort.label} · ${summaryCurrency} · 최근 30일`;
   const summaryActive = summaryResult.data?.active || {};
   const summaryReserved = summaryResult.data?.reserved || {};
   const summarySold = firstDefined(summaryResult.data?.sold, summaryResult.data?.sold_last_ask, {});
@@ -2212,13 +2170,14 @@ async function requestListingPage(pageNumber, cursor = "") {
   if (pageNumber === 1) {
     state.listings = [];
     renderListings();
+    dom.listingEmpty.hidden = true;
     showListingMessage("현재 매물을 불러오는 중입니다.");
   } else {
     showListingMessage(`${pageNumber}페이지 매물을 불러오는 중입니다.`);
   }
   try {
     const payload = await fetchJson(`/api/pc/listings?${scopeKey}`, { signal: controller.signal });
-    if (state.listingScopeKey !== scopeKey) return;
+    if (controller.signal.aborted || state.listingRequest !== controller || state.listingScopeKey !== scopeKey) return;
     applyListingPayload(payload, pageNumber);
     showListingMessage("");
     if (pageNumber > 1) {
@@ -2227,7 +2186,10 @@ async function requestListingPage(pageNumber, cursor = "") {
       });
     }
   } catch (error) {
-    if (error.name !== "AbortError") showListingMessage(`현재 매물을 불러오지 못했습니다. ${error.message}`, true);
+    if (!controller.signal.aborted && state.listingRequest === controller) {
+      dom.listingEmpty.hidden = true;
+      showListingMessage(`현재 매물을 불러오지 못했습니다. ${error.message}`, true);
+    }
   } finally {
     if (state.listingRequest === controller) {
       state.listingRequest = null;
@@ -2248,6 +2210,48 @@ async function loadListings(append = false) {
 
 function digitsOnly(value) {
   return normalizeText(value).replace(/[^0-9]/g, "");
+}
+
+function readPriceRange(minimum, maximum) {
+  const range = { min: digitsOnly(minimum), max: digitsOnly(maximum), error: "", field: "" };
+  for (const [field, raw] of [["min", minimum], ["max", maximum]]) {
+    const text = normalizeText(raw);
+    if (text && (!/^\d[\d,\s]*$/u.test(text) || !Number.isSafeInteger(Number(range[field])))) {
+      return { ...range, error: "가격은 0 이상의 숫자로 입력해 주세요.", field };
+    }
+  }
+  if (range.min && range.max && Number(range.min) > Number(range.max)) {
+    return { ...range, error: "최고가는 최저가 이상이어야 합니다.", field: "max" };
+  }
+  return range;
+}
+
+function clearPriceError() {
+  dom.priceError.hidden = true;
+  dom.priceError.textContent = "";
+  dom.priceMin.removeAttribute("aria-invalid");
+  dom.priceMax.removeAttribute("aria-invalid");
+}
+
+function resetPriceRange() {
+  state.priceMin = "";
+  state.priceMax = "";
+  dom.priceMin.value = "";
+  dom.priceMax.value = "";
+  dom.priceReset.hidden = true;
+  clearPriceError();
+}
+
+function resetListingControls() {
+  resetPriceRange();
+  state.listingSort = "recent";
+  syncListingSortTabs();
+  setListingOptionsCollapsed(state.listingOptionsCollapsed);
+}
+
+function showAllModels() {
+  updateWorkspaceHeading();
+  showScopedListings();
 }
 
 function syncCatalogUrl() {
@@ -2400,6 +2404,7 @@ dom.resetFilters.addEventListener("click", () => {
   state.openFacetRows.clear();
   state.expandedFacetOptions.clear();
   state.selectedSites.clear();
+  resetListingControls();
   state.query = "";
   dom.catalogQuery.value = "";
   if (!state.categoryCode) state.categoryCode = categoryCode(state.categories[0]);
@@ -2413,9 +2418,13 @@ dom.resetFilters.addEventListener("click", () => {
 });
 
 dom.showMatchedModels?.addEventListener("click", () => {
-  dom.listingSection.scrollIntoView({ behavior: "smooth", block: "start" });
+  revealSection(dom.listingSection);
 });
 dom.modelSelect.addEventListener("change", () => {
+  if (!dom.modelSelect.value) {
+    showAllModels();
+    return;
+  }
   const product = state.products.find((item) => productId(item) === dom.modelSelect.value);
   if (product) selectProduct(product);
 });
@@ -2449,25 +2458,47 @@ dom.listingSortTabs.forEach((button) => {
   });
 });
 dom.modelDetailClose.addEventListener("click", () => closeModelDetail());
+dom.modelDetailOpen.addEventListener("click", () => {
+  if (!state.selectedProduct) return;
+  openModelDetail();
+  dom.pricePanelTitle.focus({ preventScroll: true });
+  if (stackedInsightMedia.matches) revealSection(dom.modelDetailDialog);
+});
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && !dom.modelDetailDialog.hidden) closeModelDetail();
 });
 dom.backToModels.addEventListener("click", () => {
-  updateWorkspaceHeading();
-  showScopedListings();
+  showAllModels();
   window.requestAnimationFrame(() => dom.modelSelect.focus({ preventScroll: true }));
 });
 
 dom.listingControls.addEventListener("submit", (event) => {
   event.preventDefault();
+  const range = readPriceRange(dom.priceMin.value, dom.priceMax.value);
+  clearPriceError();
+  if (range.error) {
+    dom.priceError.textContent = range.error;
+    dom.priceError.hidden = false;
+    const input = range.field === "min" ? dom.priceMin : dom.priceMax;
+    input.setAttribute("aria-invalid", "true");
+    input.focus({ preventScroll: true });
+    return;
+  }
   state.listingSort = dom.listingSort.value || state.listingSort || "recent";
   dom.listingSort.value = state.listingSort;
   syncListingSortTabs();
-  state.priceMin = digitsOnly(dom.priceMin.value);
-  state.priceMax = digitsOnly(dom.priceMax.value);
+  state.priceMin = range.min;
+  state.priceMax = range.max;
   dom.priceMin.value = state.priceMin;
   dom.priceMax.value = state.priceMax;
   reloadListingsForControls();
+});
+dom.priceMin.addEventListener("input", clearPriceError);
+dom.priceMax.addEventListener("input", clearPriceError);
+dom.priceReset.addEventListener("click", () => {
+  resetPriceRange();
+  reloadListingsForControls();
+  dom.priceMin.focus({ preventScroll: true });
 });
 
 setModelFiltersCollapsed(compactFilterMedia.matches);

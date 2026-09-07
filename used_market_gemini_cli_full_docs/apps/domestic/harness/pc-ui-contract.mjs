@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import vm from "node:vm";
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const html = readFileSync(path.join(appRoot, "web-backend/public/index.html"), "utf8");
@@ -28,6 +29,7 @@ for (const id of [
   "reserved-change", "reserved-count", "sold-latest", "sold-mean", "sold-change", "sold-count",
   "confirmed-latest", "confirmed-mean", "confirmed-change", "confirmed-count", "listing-section", "listing-rows",
   "listing-options", "listing-options-toggle", "listing-pagination", "listing-page-numbers", "listing-page-prev", "listing-page-next",
+  "model-detail-open", "price-summary-scope", "price-reset", "price-error",
 ]) {
   requireText(html, `id="${id}"`, `missing required UI region #${id}`);
   requireText(script, `querySelector("#${id}")`, `app.js must bind #${id}`);
@@ -46,8 +48,7 @@ requireText(script, "dom.modelDetailDialog.hidden = false", "selecting a model m
 requireText(script, "dom.modelDetailDialog.hidden = true", "the inline insight panel must be closable");
 requireText(script, 'document.addEventListener("keydown"', "the modeless panel must retain an Escape close action");
 requireText(script, 'event.key === "Escape"', "Escape must close the insight panel accessibly");
-requireText(script, 'dom.modelSelect.focus({ preventScroll: true })', "closing the dialog must restore model-selector focus");
-requireText(script, 'dom.modelSelect.value = ""', "a closed selected model must be selectable again");
+requireText(script, 'dom.modelDetailOpen.focus({ preventScroll: true })', "closing analysis must restore focus to its reopen action");
 requireText(script, 'dom.modelSelect.addEventListener("change"', "the compact model selector must drive exact-model selection");
 requireText(script, 'createElement("option"', "matching models must populate native selector options");
 requireText(script, "productSpecText(product)", "model choices must retain useful distinguishing specifications");
@@ -120,5 +121,100 @@ assert.equal(html.includes("contextual-offer"), false, "the public flow must not
 assert.equal(script.includes("/api/monetization/"), false, "the public UI must not request monetization APIs");
 assert.equal(/['"`]\/api\/search(?:-only)?(?:[?'"`])/u.test(script), false, "the public UI must not call generic used-market search APIs");
 assert.equal(html.includes("�") || script.includes("�") || styles.includes("�"), false, "public UI files contain replacement characters");
+
+// Run UI functions without network or browser dependencies; rendered flows are checked separately.
+const declarations = [...script.matchAll(/^(?:async )?function \w+\([\s\S]*?^\}/gm)]
+  .map((match) => match[0]).join("\n");
+const context = vm.createContext({ Intl, URLSearchParams, AbortController, clearTimeout });
+vm.runInContext(declarations, context);
+assert.equal(context.readPriceRange("5,000", "100,000").min, "5000");
+assert.equal(context.readPriceRange("50000", "10000").field, "max");
+assert.equal(context.readPriceRange("0", "0").error, "");
+assert.equal(context.readPriceRange("", "").error, "");
+for (const invalid of ["-100", "1.5", "1e5", "가격없음", "999999999999999999999"]) {
+  assert.notEqual(context.readPriceRange(invalid, "").error, "", "invalid prices must not silently become another amount");
+}
+assert.equal(context.metricValue({ mean: 150 }, ["mean"], "USD").currency, "USD",
+  "a source metric without a nested currency must inherit its market currency");
+assert.equal(context.metricValue({ mean: null }, ["mean"], "USD"), null,
+  "missing transaction evidence must not become a zero-priced transaction");
+
+const node = () => ({ hidden: false, value: "", textContent: "", attributes: {},
+  setAttribute(key, value) { this.attributes[key] = value; },
+  removeAttribute(key) { delete this.attributes[key]; },
+  replaceChildren() {}, append() {}, focus() {},
+});
+context.state = { priceMin: "100", priceMax: "200", listingSort: "price_asc", listingOptionsCollapsed: true };
+context.mobileFacetMedia = { matches: true };
+context.dom = Object.fromEntries(["priceMin", "priceMax", "priceError", "priceReset", "listingSort", "listingOptions", "listingOptionsToggle"]
+  .map((key) => [key, node()]));
+context.dom.listingSortTabs = [];
+context.resetListingControls();
+assert.equal(context.state.priceMin, "");
+assert.equal(context.state.priceMax, "");
+assert.equal(context.state.listingSort, "recent");
+assert.equal(context.dom.priceReset.hidden, true);
+assert.equal(context.dom.listingOptionsToggle.textContent.includes("적용 중"), false);
+
+let listingLoads = 0;
+let statsRenders = 0;
+Object.assign(context, {
+  updateFacetSelectionUi() {}, renderSourceFilters() {}, updateStatsMessage() {},
+  window: { requestAnimationFrame() {} },
+  renderStats() { statsRenders += 1; },
+  loadListings() { listingLoads += 1; },
+  loadProductDetail() { assert.fail("listing controls must not restart price-stat requests"); },
+});
+context.state.selectedProduct = { id: "cpu:intel:i5-7400" };
+context.reloadListingsForControls();
+assert.equal(listingLoads, 1);
+assert.equal(statsRenders, 0, "sorting must keep the current chart intact");
+context.reloadListingsForControls("ebay");
+assert.equal(listingLoads, 2);
+assert.equal(statsRenders, 1, "changing sources must re-scope the already received statistics");
+
+const statsContext = vm.createContext({ Intl });
+vm.runInContext(declarations, statsContext);
+statsContext.COHORTS = [
+  { marketPool: "KR_C2C_USED", currency: "KRW", label: "국내 개인 중고" },
+  { marketPool: "OVERSEAS_USED", currency: "USD", label: "해외 중고" },
+];
+statsContext.state = { selectedProduct: {}, selectedSites: new Set(), detailStats: statsContext.COHORTS
+  .map((cohort) => ({ cohort, data: { active: { sample_count: 2, mean: 100 }, confirmed_transactions: { sample_count: 0, mean: null } } })).reverse() };
+statsContext.dom = Object.fromEntries(["statsGroups", "priceSummary", "priceSummaryScope", "statsSection", "priceChartDisclosure", "statsAsOf"]
+  .map((key) => [key, node()]));
+const summaryKeys = [];
+Object.assign(statsContext, { clearSelectedPriceTable() {}, renderStatsGroup() {},
+  renderPriceSummaryRow(key, block, data, currency) { summaryKeys.push([key, currency]); },
+});
+statsContext.renderStats();
+assert.equal(statsContext.dom.priceSummaryScope.textContent, "국내 개인 중고 · KRW · 최근 30일",
+  "out-of-order HTTP responses must not select the overseas summary first");
+assert.deepEqual(summaryKeys, [["active", "KRW"], ["reserved", "KRW"], ["sold", "KRW"], ["confirmed", "KRW"]]);
+
+const requestContext = vm.createContext({ URLSearchParams, AbortController, clearTimeout });
+vm.runInContext(declarations, requestContext);
+const pending = [];
+const applied = [];
+Object.assign(requestContext, {
+  state: { selectedProduct: {}, listingRequest: null }, browseListingTimer: null,
+  dom: { listingSection: node(), listingEmpty: node() },
+  buildListingQuery: () => new URLSearchParams({ canonical_product_id: "cpu:intel:i5-7400" }),
+  fetchJson: () => new Promise((resolve, reject) => pending.push({ resolve, reject })),
+  renderListings() {}, showListingMessage() {},
+  applyListingPayload: (payload) => applied.push(payload.id),
+});
+const oldRequest = requestContext.requestListingPage(1);
+assert.equal(requestContext.dom.listingEmpty.hidden, true, "loading must not show a no-listings claim");
+const newRequest = requestContext.requestListingPage(1);
+pending[1].resolve({ id: "new" });
+await newRequest;
+pending[0].resolve({ id: "old" });
+await oldRequest;
+assert.deepEqual(applied, ["new"], "late same-scope responses must not overwrite the latest page");
+const failedRequest = requestContext.requestListingPage(1);
+pending[2].reject(new Error("fixture failure"));
+await failedRequest;
+assert.equal(requestContext.dom.listingEmpty.hidden, true, "a request failure must not claim there are no listings");
 
 console.log("PC UI contract passed");

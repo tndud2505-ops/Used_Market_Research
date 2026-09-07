@@ -1300,7 +1300,7 @@ body.has-selected-product .workspace-heading {
 
 .chart-axis-label {
   fill: var(--muted);
-  font-size: 9px;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
 
@@ -1346,10 +1346,12 @@ body.has-selected-product .workspace-heading {
   flex-wrap: wrap;
   gap: 7px 14px;
   color: var(--muted);
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .price-chart-legend .active-series::before,
+.price-chart-legend .reserved-series::before,
+.price-chart-legend .confirmed-series::before,
 .price-chart-legend .sold-series::before {
   display: inline-block;
   width: 13px;
@@ -4630,12 +4632,12 @@ body.has-selected-product .model-filters {
 }
 
 .model-detail-dialog .price-chart-disclosure {
-  order: 2;
+  order: 3;
   margin-top: 8px;
 }
 
 .model-detail-dialog .price-summary {
-  order: 3;
+  order: 2;
 }
 
 @media (max-width: 1180px) {
@@ -4691,7 +4693,65 @@ body.has-selected-product .model-filters {
   }
 }
 
-/* v84: keep exact-model price analysis visible without covering the listings. */
+/* Keep model analysis next to the listings, and restore their width when closed. */
+body.has-selected-product:not(.has-model-insight) .results-flow {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.model-detail-open {
+  padding: 6px 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent-strong);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.listing-heading:has(.model-detail-open:not([hidden])) {
+  display: flex;
+  flex-direction: row;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.selected-price-table caption {
+  padding: 8px 0;
+  color: var(--muted);
+  font-size: 11px;
+  text-align: left;
+}
+
+@media (max-width: 640px) {
+  .selected-price-table caption {
+    display: block;
+    width: 100%;
+  }
+}
+
+.price-error {
+  margin: 6px 0;
+  color: #a52626;
+  font-size: 12px;
+}
+
+.listing-controls .price-reset {
+  background: transparent;
+  color: var(--muted);
+}
+
+.listing-price-range:has(.price-reset:not([hidden])) {
+  flex-wrap: wrap;
+}
+
+.model-detail-open:focus-visible,
+#price-min[aria-invalid="true"],
+#price-max[aria-invalid="true"] {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 body.has-model-insight {
   overflow: visible;
 }
