@@ -61,6 +61,8 @@ requireText(script, 'params.set("sites", sourceIds.join(","))', "default listing
 requireText(script, "openSingleSearchResult", "a unique text result must still open directly");
 requireText(script, "showScopedListings", "category/facet search must return listings without choosing one model");
 requireText(script, 'url.search = ""', "model search must drop stale facet query params");
+requireText(script, 'if (state.categoryCode) url.searchParams.set("category_code", state.categoryCode);',
+  "text search must preserve the selected component category when one is active");
 requireText(script, 'params.set("category_code", state.categoryCode)', "broad listing search must preserve the category");
 requireText(script, "params.append(key, value)", "broad listing search must preserve repeated facets");
 requireText(script, 'params.set("canonical_product_id", productId(state.selectedProduct))', "model selection must use an exact listing query");

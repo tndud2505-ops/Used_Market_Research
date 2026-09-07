@@ -765,13 +765,11 @@ function facetDefinitionsForCategory(category) {
 
 function renderCategories() {
   dom.categorySelect.replaceChildren();
-  if (!state.categoryCode) {
-    const placeholder = createElement("option", "", state.query ? "전체 부품 검색" : "부품 선택");
-    placeholder.value = "";
-    placeholder.selected = true;
-    placeholder.disabled = true;
-    dom.categorySelect.append(placeholder);
-  }
+  const placeholder = createElement("option", "", state.query ? "전체 부품 검색" : "부품 선택");
+  placeholder.value = "";
+  placeholder.selected = !state.categoryCode;
+  placeholder.disabled = !state.query;
+  dom.categorySelect.append(placeholder);
   state.categories.forEach((category) => {
     const code = categoryCode(category);
     const option = createElement("option", "", categoryLabel(category));
@@ -1051,10 +1049,10 @@ function updateFacet(key, value, rowKey = key) {
 }
 
 function selectCategory(code) {
-  if (!code || code === state.categoryCode) return;
-  state.categoryCode = code;
-  state.query = "";
-  dom.catalogQuery.value = "";
+  const nextCode = normalizeText(code).toUpperCase();
+  if (!nextCode && !state.query) return;
+  if (nextCode === state.categoryCode) return;
+  state.categoryCode = nextCode;
   state.facets = {};
   state.openFacetRows.clear();
   state.expandedFacetOptions.clear();
@@ -1066,7 +1064,7 @@ function selectCategory(code) {
   state.sourceMoreOpen = false;
   dom.priceMin.value = "";
   dom.priceMax.value = "";
-  const firstFacet = browseFlowForCategory(code)[0]?.key;
+  const firstFacet = state.categoryCode ? browseFlowForCategory(state.categoryCode)[0]?.key : "";
   if (firstFacet) state.openFacetRows.add(firstFacet);
   clearTimeout(catalogSearchTimer);
   renderCategories();
@@ -2262,6 +2260,7 @@ function syncCatalogUrl() {
   if (state.query) {
     url.pathname = "/";
     url.search = "";
+    if (state.categoryCode) url.searchParams.set("category_code", state.categoryCode);
     url.searchParams.set("q", state.query);
     window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
     return;
@@ -2304,14 +2303,12 @@ async function loadCatalog() {
     const initialQuery = normalizeText(initialParams.get("q") || "");
     const routeCategory = window.location.pathname.match(/^\/categories\/([a-z-]+)$/u)?.[1]?.toUpperCase();
     const queryCategory = normalizeText(initialParams.get("category_code") || initialParams.get("category")).toUpperCase();
-    const initialCategory = state.categories.find((category) => categoryCode(category) === queryCategory)
-      || state.categories.find((category) => categoryCode(category) === routeCategory)
-      || state.categories[0];
+    const requestedCategory = state.categories.find((category) => categoryCode(category) === queryCategory)
+      || state.categories.find((category) => categoryCode(category) === routeCategory);
+    const initialCategory = requestedCategory || state.categories[0];
     state.query = initialQuery;
     dom.catalogQuery.value = initialQuery;
-    state.categoryCode = initialQuery
-      ? ""
-      : categoryCode(initialCategory);
+    state.categoryCode = initialQuery && !requestedCategory ? "" : categoryCode(initialCategory);
     state.facets = {};
     if (state.categoryCode) {
       const categoryFlow = browseFlowForCategory(state.categoryCode);
@@ -2351,10 +2348,11 @@ function applyCatalogSearch(rawQuery, force = false) {
   if (!force && nextQuery === state.query) return;
   state.query = nextQuery;
   if (state.query) {
-    state.categoryCode = "";
     state.facets = {};
     state.openFacetRows.clear();
     state.expandedFacetOptions.clear();
+    const firstFacet = state.categoryCode ? browseFlowForCategory(state.categoryCode)[0]?.key : "";
+    if (firstFacet) state.openFacetRows.add(firstFacet);
     renderCategories();
   } else if (!state.categoryCode) {
     state.categoryCode = categoryCode(state.categories[0]);
