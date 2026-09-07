@@ -24,11 +24,11 @@ export const joonggonaraAdapter = createBrowserSiteAdapter({
     "SSR search payload embeds an items array that the collector can parse before falling back to selectors"
   ],
   categoryPagination: "page",
-  searchPagination: "page",
+  searchPagination: "offset",
   searchUrl(keyword: string, _limit: number, cursor?: string | null): string {
     const url = new URL(`https://web.joongna.com/search/${encodeURIComponent(keyword)}`);
-    const page = parsePageCursor(cursor);
-    if (page > 0) url.searchParams.set("page", String(page));
+    const offset = parseOffsetCursor(cursor);
+    if (offset > 0) url.searchParams.set("offset", String(offset));
     return url.toString();
   },
   categoryUrl(sourceCategoryId: string, _limit: number, cursor?: string | null): string {
@@ -42,5 +42,10 @@ export const joonggonaraAdapter = createBrowserSiteAdapter({
 
 function parsePageCursor(cursor?: string | null) {
   const match = typeof cursor === "string" ? cursor.match(/^page:(\d+)$/) : null;
+  return match ? Number(match[1]) : 0;
+}
+
+function parseOffsetCursor(cursor?: string | null) {
+  const match = typeof cursor === "string" ? cursor.match(/^offset:(\d+)$/) : null;
   return match ? Number(match[1]) : 0;
 }

@@ -30,12 +30,15 @@ import {
   stabilizeIncrementalPcProjections
 } from "../aws-runner/pc-projection-republish-policy.mjs";
 import {
+  buildTrustedPriceSummary,
   createWebSearchRunner,
   enrichPcWebItem,
   toSearchOnlyWebItem,
   validateWebSearchRequest,
   WebSearchValidationError
 } from "../dist/web-backend/logic/search-service.js";
+import { extractSearchListingsFromHtml } from "../dist/collector/logic/browserCollector.js";
+import { isHardPruneNoiseReason } from "../dist/market/logic/noise-filter.js";
 import {
   listSearchOnlySourceCatalog,
   SearchOnlyValidationError,
@@ -393,14 +396,24 @@ assert.throws(() => assertPcProjectionApplyConfirmation(
 const approvedWebRequest = validateWebSearchRequest({
   keyword: "RTX 3080",
   category_id: "pc",
-  sites: ["joonggonara", "rethinkmall", "ebay"]
+  sites: ["joonggonara", "ebay"]
 });
-assert.deepEqual(approvedWebRequest.sites, ["joonggonara", "rethinkmall", "ebay"]);
+assert.deepEqual(approvedWebRequest.sites, ["joonggonara", "ebay"]);
 const facetRequest = validateWebSearchRequest({
   keyword: "RTX", category_id: "pc", sites: ["joonggonara"], pc_category_code: "gpu", manufacturer: "NVIDIA"
 });
 assert.equal(facetRequest.pcCategoryCode, "GPU");
 assert.equal(facetRequest.manufacturer, "NVIDIA");
+assert.equal(
+  validateWebSearchRequest({ keyword: "i5 7400", category_id: "pc", sites: ["joonggonara"], pc_category_code: "CPU", manufacturer: "Intel" }).manufacturer,
+  "Intel",
+  "V2-only CPU models and manufacturers must be accepted by local web search"
+);
+assert.equal(
+  validateWebSearchRequest({ keyword: "DDR5 32GB", category_id: "pc", sites: ["joonggonara"], pc_category_code: "RAM", manufacturer: "Samsung" }).manufacturer,
+  "Samsung",
+  "V2 RAM manufacturers must be accepted by local web search"
+);
 assert.notEqual(
   collectionIdentity({ keyword: "RTX", category_id: "pc", sites: ["joonggonara"], pc_category_code: "GPU", manufacturer: "NVIDIA" }).key,
   collectionIdentity({ keyword: "RTX", category_id: "pc", sites: ["joonggonara"], pc_category_code: "GPU", manufacturer: "AMD" }).key,
@@ -422,6 +435,59 @@ assert.equal(localPcProjection.canonical_manufacturer, "NVIDIA");
 assert.equal(localPcProjection.market_pool, "KR_C2C_USED");
 assert.equal(localPcProjection.price_eligible, true);
 assert.deepEqual(localPcProjection.exclusion_reasons, []);
+const localI57400Projection = enrichPcWebItem({
+  id: "joonggonara:i5-7400", site: "joonggonara", title: "CPU i5 7400 단품 정상 작동",
+  price: 35_000, currency: "KRW", status: "active", url: "https://web.joongna.com/product/i5-7400"
+});
+assert.equal(localI57400Projection.canonical_product_id, "cpu:intel:i5-7400");
+assert.equal(localI57400Projection.price_eligible, true);
+const localSamsungRamProjection = enrichPcWebItem({
+  id: "joonggonara:ddr5-32", site: "joonggonara", title: "Samsung DDR5 32GB 메모리 정상 작동",
+  price: 80_000, currency: "KRW", status: "active", url: "https://web.joongna.com/product/ddr5-32"
+});
+assert.equal(localSamsungRamProjection.canonical_product_id, "ram:samsung:ddr5:32gb");
+assert.equal(localSamsungRamProjection.price_eligible, true);
+const lifecyclePriceSummary = buildTrustedPriceSummary([
+  { price: 10_000, currency: "KRW", status: "active" },
+  { price: 50_000, currency: "KRW", status: "sold" },
+  { price: 90_000, currency: "KRW", status: "unknown" },
+  { price: 70_000, currency: "KRW", status: "active", statistics_eligible: false },
+  { price: 80_000, currency: "KRW", status: "active", model_unclear: true }
+]);
+assert.equal(lifecyclePriceSummary.average_price, 10_000,
+  "headline asking price must use active listings only");
+assert.equal(lifecyclePriceSummary.active_asking.average_price, 10_000);
+assert.equal(lifecyclePriceSummary.sold_last_ask.average_price, 50_000);
+assert.deepEqual(lifecyclePriceSummary.status_counts, { active: 3, reserved: 0, sold: 1, unknown: 1 });
+assert.equal(lifecyclePriceSummary.unknown_count, 1);
+assert.equal(isHardPruneNoiseReason("stale_listing"), false,
+  "active stale listings remain visible and are only excluded from comparison statistics");
+assert.equal(isHardPruneNoiseReason("inactive_listing"), false,
+  "sold and reserved listings remain visible so lifecycle prices can be reported separately");
+
+const joongProducts = Array.from({ length: 16 }, (_, index) => ({
+  seq: 7000 + index,
+  title: `CPU i5 7400 단품 ${index + 1}`,
+  price: 30_000 + index,
+  state: 0,
+  articleUrl: `/product/${7000 + index}`,
+  sortDate: "2026-09-07T00:00:00+09:00"
+}));
+const joongHtml = `<script>{"items":${JSON.stringify(joongProducts)},"changedProductFilterType":null}</script>`;
+const joongFirstPage = await extractSearchListingsFromHtml({
+  site: "joonggonara", keyword: "i5 7400", keywordIsExplicit: true, limit: 12,
+  category: { id: "pc", label: "PC", path: ["PC"] }
+}, joongHtml, "https://web.joongna.com/search/i5%207400");
+assert.equal(joongFirstPage.items.length, 12);
+assert.equal(joongFirstPage.items[0].source_category_id, "",
+  "an explicit Joonggonara keyword must not be replaced by the broad PC category route");
+assert.equal(joongFirstPage.pagination.next_cursor, "offset:12");
+const joongSecondPage = await extractSearchListingsFromHtml({
+  site: "joonggonara", keyword: "i5 7400", keywordIsExplicit: true, limit: 12,
+  category: { id: "pc", label: "PC", path: ["PC"] }, cursor: joongFirstPage.pagination.next_cursor
+}, joongHtml, "https://web.joongna.com/search/i5%207400");
+assert.equal(joongSecondPage.items.length, 4);
+assert.equal(joongSecondPage.pagination.has_more, false);
 assert.deepEqual(
   validateWebSearchRequest({ keyword: "RTX 3080", category_id: "pc", sites: ["bunjang"] }).sites,
   ["bunjang"],
@@ -467,7 +533,7 @@ assert.throws(
 );
 assert.deepEqual(
   listSearchOnlySourceCatalog().sources.map((source) => source.key),
-  ["rethinkmall"],
+  [],
   "search-only source discovery must expose approved and enabled sources only"
 );
 assert.deepEqual(
@@ -997,7 +1063,7 @@ const searchOnlyCatalogResponse = await worker.fetch(
 assert.equal(searchOnlyCatalogResponse.status, 200);
 assert.deepEqual(
   (await searchOnlyCatalogResponse.json()).data.sources.map((source) => source.key),
-  ["rethinkmall"],
+  [],
   "the edge search-only catalog must not advertise denied sources"
 );
 d1.prepare(`INSERT INTO public_stats_publications(publication_id, checksum, expected_row_count,
@@ -1323,7 +1389,7 @@ try {
   globalThis.caches.default.match = async () => undefined;
   globalThis.caches.default.put = async () => { throw new Error("cache write unavailable"); };
   const cacheWriteFailure = await fetchThroughPcReadCache(new Request(
-    "https://used-pick.test/api/pc/listings?sites=rethinkmall"
+    "https://used-pick.test/api/pc/listings?sites=ebay"
   ), {}, originRead);
   assert.equal(cacheWriteFailure.status, 200,
     "a cache write failure must not fail a successful origin read");

@@ -25,7 +25,7 @@ function lifecycle(item) {
   const lifecycleText = `${item.title || ""} ${item.description || ""}`;
   const explicit = explicitSoldText(lifecycleText);
   if (explicit) return { status: "SOLD", evidence: { type: "EXPLICIT_TEXT", value: explicit } };
-  return { status: "ACTIVE", evidence: { type: "INFERRED_DEFAULT", value: "ACTIVE" } };
+  return { status: "UNAVAILABLE_UNKNOWN", evidence: { type: "STATUS_NOT_SUPPLIED", value: "UNAVAILABLE_UNKNOWN" } };
 }
 
 function fingerprint(value) {

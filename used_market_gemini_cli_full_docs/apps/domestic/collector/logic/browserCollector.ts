@@ -277,12 +277,13 @@ function buildUnavailableSearchResult(adapter: BrowserSiteAdapter, input: Search
 
 function categoryPagination(adapter: BrowserSiteAdapter, input: SearchCommandInput, result: Pick<SearchResult, "items" | "quality_meta" | "pagination">) {
   const observedCount = Math.max(result.items.length, result.quality_meta.extracted_count);
+  const fullJoonggonaraPage = adapter.siteKey === "joonggonara" && observedCount >= 16;
   const hasMore = Boolean(
     input.category
     && adapter.categoryPagination === "page"
-    && (result.pagination.has_more || observedCount >= input.limit)
+    && (result.pagination.has_more || observedCount >= input.limit || fullJoonggonaraPage)
   );
-  const existingCursor = result.pagination.next_cursor;
+  const existingCursor = result.pagination.next_cursor?.match(/^page:\d+$/) ? result.pagination.next_cursor : null;
   const currentPage = input.cursor?.match(/^page:(\d+)$/)?.[1];
   const nextPage = currentPage ? Number(currentPage) + 1 : 2;
   return {
@@ -586,7 +587,7 @@ async function extractSearchItems(
   sourceCategoryIdOverride?: string,
   options: { skipNavigation?: boolean } = {}
 ): Promise<SearchResult> {
-  const plannedCategory = input.category && input.category.id !== "all"
+  const plannedCategory = input.keywordIsExplicit !== true && input.category && input.category.id !== "all"
     ? resolveCategoryCollectionPlan(adapter.siteKey, input.category.id)
     : null;
   const categoryPlan: CategoryCollectionPlan | null = plannedCategory
@@ -715,7 +716,7 @@ async function extractSearchItems(
   const fallbackCurrency = resolveSite(adapter.siteKey).currency;
   const pageUrl = await session.currentUrl();
   for (const [index, row] of rows.entries()) {
-    if (items.length >= input.limit) {
+    if (!categoryPlan && items.length >= input.limit) {
       break;
     }
 

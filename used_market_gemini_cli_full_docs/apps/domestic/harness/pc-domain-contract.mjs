@@ -398,7 +398,7 @@ const acceptedTransaction = ledger.recordObservation({
 assert.equal(acceptedTransaction.snapshotCreated, true, "explicit official transaction evidence is stored even after SOLD");
 assert.equal(db.prepare("SELECT transaction_price FROM listing_snapshots WHERE id = ?").get(acceptedTransaction.snapshotId).transaction_price, 480_000);
 
-function addSold({ sourceId, id, price, currency, marketPool }) {
+function addSold({ sourceId, id, price, currency, marketPool, transactionPrice = null }) {
   const activeAt = new Date(now + Number(id) * 1_000).toISOString();
   const soldAt = new Date(now + DAY_MS + Number(id) * 1_000).toISOString();
   const observation = {
@@ -415,12 +415,23 @@ function addSold({ sourceId, id, price, currency, marketPool }) {
   ledger.recordObservation(observation);
   ledger.recordObservation({
     ...observation, observedAt: soldAt, status: "SOLD",
-    statusEvidence: { type: "STRUCTURED_STATUS", value: "SOLD" }
+    statusEvidence: { type: "STRUCTURED_STATUS", value: "SOLD" },
+    ...(transactionPrice == null ? {} : {
+      transactionPrice,
+      transactionEvidence: {
+        type: "OFFICIAL_API", source_field: "transaction_price", meaning: "TRANSACTION_PRICE",
+        value: String(transactionPrice)
+      }
+    })
   });
 }
 
 for (let index = 1; index <= 5; index += 1) {
-  addSold({ sourceId: "joonggonara", id: index, price: 400_000 + index * 10_000, currency: "KRW", marketPool: "KR_C2C_USED" });
+  const price = 400_000 + index * 10_000;
+  addSold({
+    sourceId: "joonggonara", id: index, price, transactionPrice: price - 5_000,
+    currency: "KRW", marketPool: "KR_C2C_USED"
+  });
 }
 for (let index = 1; index <= 3; index += 1) {
   addSold({ sourceId: "ebay", id: index, price: 300 + index * 10, currency: "USD", marketPool: "OVERSEAS_USED" });
@@ -442,6 +453,9 @@ assert.equal(krStats.sold.unit_count, 6);
 assert.equal(krStats.sold.min, 410_000);
 assert.equal(krStats.sold.max, 500_000);
 assert.equal(krStats.sold.median, 435_000);
+assert.equal(krStats.confirmed_transactions.sample_count, 6);
+assert.equal(krStats.confirmed_transactions.mean, 434_166.67,
+  "confirmed transaction mean uses only prices with explicit transaction evidence");
 assert.equal(krStats.by_manufacturer[0].manufacturer, "ASUS");
 assert.equal(krStats.by_manufacturer[0].sold.sample_count, 6);
 assert.ok(krStats.daily.some((row) => Number.isFinite(row.sold?.seven_day_sold_median)));

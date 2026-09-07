@@ -62,7 +62,7 @@ export function toPcProjectionImportItem(item) {
     quantity: item.quantity ?? null,
     price_scope: item.price_scope || "UNKNOWN",
     condition_code: item.condition_code || "UNKNOWN",
-    lifecycle_status: item.lifecycle_status || "ACTIVE",
+    lifecycle_status: item.lifecycle_status || "UNAVAILABLE_UNKNOWN",
     market_pool: item.market_pool || null,
     confidence: item.confidence || {},
     evidence: item.evidence || {},

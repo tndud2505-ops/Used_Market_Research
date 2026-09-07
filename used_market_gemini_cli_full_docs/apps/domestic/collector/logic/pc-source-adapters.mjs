@@ -219,9 +219,11 @@ function parseCsvRows(input) {
 
 function bunjangCatalogStatus(value) {
   const status = normalizeText(value).toUpperCase();
-  if (status === "SELLING") return "ACTIVE";
+  if (status === "SELLING" || status === "ACTIVE") return "ACTIVE";
+  if (status === "RESERVED" || status === "HOLD") return "RESERVED";
+  if (status === "SOLD" || status === "COMPLETED" || status === "CLOSED") return "SOLD";
   if (status === "DELETED") return "DELETED";
-  return "UNKNOWN";
+  return "UNAVAILABLE_UNKNOWN";
 }
 
 function parseJsonValue(value) {
@@ -364,72 +366,73 @@ export function parseDanawaListingsHtml(html) {
   return listings;
 }
 
-export async function collectDanawaCategoryListings({ categoryCode, page = 1, fetchImpl = fetch, userAgent = "USED-PICK-PC-Collector/2.0" }) {
+export async function collectDanawaCategoryListings({ categoryCode, page = 1, maxPages = 5, fetchImpl = fetch, userAgent = "USED-PICK-PC-Collector/2.0" }) {
   const targets = danawaTargetsForCategory(categoryCode);
   if (targets.length === 0) throw new Error(`DANAWA_CATEGORY_NOT_MAPPED:${categoryCode}`);
   const items = [];
   const diagnostics = [];
   for (const target of targets) {
     const endpoint = "https://dmall.danawa.com/v3/?controller=sale&methods=getGoodsList";
-    const form = new URLSearchParams({
-      parentCategoryCode: String(target.parent_category_code),
-      childCategoryCode: String(target.child_category_code),
-      searchField: "sProdN",
-      localeCode: "0",
-      searchKeyword: "",
-      userLevel: "",
-      newProd: "",
-      buyWay: "",
-      orderBy: "nRegistDate DESC",
-      page: String(page),
-      searchType: "NORMAL_LIST",
-      makerCode: "",
-      attribute: ""
-    });
-    let payload;
-    let lastFailure = `DANAWA_RESPONSE_INVALID:${categoryCode}`;
-    for (let attempt = 1; attempt <= 3; attempt += 1) {
-      if (attempt > 1) await new Promise((resolve) => setTimeout(resolve, 900 * (attempt - 1)));
-      const response = await fetchImpl(endpoint, {
-        method: "POST",
-        headers: {
-          "user-agent": userAgent,
-          accept: "application/json,text/plain,*/*",
-          "content-type": "application/x-www-form-urlencoded; charset=UTF-8",
-          "x-requested-with": "XMLHttpRequest",
-          referer: `https://dmall.danawa.com/v3/?controller=sale&methods=index&parentCategoryCode=${target.parent_category_code}&childCategoryCode=${target.child_category_code}`
-        },
-        body: form,
-        signal: AbortSignal.timeout(15_000)
+    const targetItems = new Map();
+    const boundedMaxPages = Math.min(10, Math.max(1, Number(maxPages) || 1));
+    for (let pageOffset = 0; pageOffset < boundedMaxPages; pageOffset += 1) {
+      const requestedPage = Math.max(1, Number(page) || 1) + pageOffset;
+      const form = new URLSearchParams({
+        parentCategoryCode: String(target.parent_category_code), childCategoryCode: String(target.child_category_code),
+        searchField: "sProdN", localeCode: "0", searchKeyword: "", userLevel: "", newProd: "", buyWay: "",
+        orderBy: "nRegistDate DESC", page: String(requestedPage), searchType: "NORMAL_LIST", makerCode: "", attribute: ""
       });
-      const body = await response.text();
-      if (!response.ok) {
-        lastFailure = `DANAWA_HTTP_${response.status}:${categoryCode}`;
-        continue;
+      let payload;
+      let lastFailure = `DANAWA_RESPONSE_INVALID:${categoryCode}`;
+      for (let attempt = 1; attempt <= 3; attempt += 1) {
+        if (attempt > 1) await new Promise((resolve) => setTimeout(resolve, 900 * (attempt - 1)));
+        const response = await fetchImpl(endpoint, {
+          method: "POST",
+          headers: {
+            "user-agent": userAgent,
+            accept: "application/json,text/plain,*/*",
+            "content-type": "application/x-www-form-urlencoded; charset=UTF-8",
+            "x-requested-with": "XMLHttpRequest",
+            referer: `https://dmall.danawa.com/v3/?controller=sale&methods=index&parentCategoryCode=${target.parent_category_code}&childCategoryCode=${target.child_category_code}`
+          },
+          body: form,
+          signal: AbortSignal.timeout(15_000)
+        });
+        const body = await response.text();
+        if (!response.ok) {
+          lastFailure = `DANAWA_HTTP_${response.status}:${categoryCode}`;
+          continue;
+        }
+        try {
+          payload = JSON.parse(body);
+        } catch {
+          lastFailure = `DANAWA_RESPONSE_NOT_JSON:${categoryCode}`;
+          continue;
+        }
+        if (payload?.status === true && typeof payload.goodsList === "string") break;
+        payload = undefined;
       }
-      try {
-        payload = JSON.parse(body);
-      } catch {
-        lastFailure = `DANAWA_RESPONSE_NOT_JSON:${categoryCode}`;
-        continue;
-      }
-      if (payload?.status === true && typeof payload.goodsList === "string") break;
-      payload = undefined;
+      if (!payload) throw new Error(lastFailure);
+      const parsed = parseDanawaListingsHtml(payload.goodsList).map((item) => ({
+        ...item,
+        site: "danawa",
+        source_category_code: `${target.parent_category_code}:${target.child_category_code}`,
+        requested_category_code: String(categoryCode).toUpperCase()
+      }));
+      const before = targetItems.size;
+      for (const item of parsed) targetItems.set(item.source_listing_id, item);
+      const reportedCount = Number(String(payload.totalCount || "0").replace(/[^\d]/gu, "")) || 0;
+      diagnostics.push({
+        parent_category_code: target.parent_category_code,
+        child_category_code: target.child_category_code,
+        page: requestedPage,
+        reported_count: reportedCount,
+        parsed_count: parsed.length,
+        unique_parsed_count: targetItems.size
+      });
+      if (parsed.length === 0 || targetItems.size === before || (reportedCount > 0 && targetItems.size >= reportedCount)) break;
     }
-    if (!payload) throw new Error(lastFailure);
-    const parsed = parseDanawaListingsHtml(payload.goodsList).map((item) => ({
-      ...item,
-      site: "danawa",
-      source_category_code: `${target.parent_category_code}:${target.child_category_code}`,
-      requested_category_code: String(categoryCode).toUpperCase()
-    }));
-    items.push(...parsed);
-    diagnostics.push({
-      parent_category_code: target.parent_category_code,
-      child_category_code: target.child_category_code,
-      reported_count: Number(String(payload.totalCount || "0").replace(/[^\d]/gu, "")) || 0,
-      parsed_count: parsed.length
-    });
+    items.push(...targetItems.values());
   }
   const deduped = new Map(items.map((item) => [item.source_listing_id, item]));
   return { items: [...deduped.values()], diagnostics };

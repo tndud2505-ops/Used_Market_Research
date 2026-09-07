@@ -35,17 +35,47 @@ function median(values: number[]) {
 }
 
 function buildSearchOnlySummary(items: Array<Record<string, unknown>>) {
-  const prices = items
-    .map((item) => typeof item.price === 'number' ? item.price : item.sale_price)
-    .filter((price): price is number => typeof price === 'number' && price > 0);
+  const lifecycle = (item: Record<string, unknown>) => {
+    const raw = String(item.lifecycle_status ?? item.status ?? item.sale_status ?? '').trim().toUpperCase();
+    if (raw === 'ACTIVE' || raw === 'SELLING') return 'ACTIVE';
+    if (raw === 'RESERVED' || raw === 'HOLD') return 'RESERVED';
+    if (raw === 'SOLD' || raw === 'COMPLETED' || raw === 'CLOSED') return 'SOLD';
+    return 'UNKNOWN';
+  };
+  const metric = (scopeItems: Array<Record<string, unknown>>) => {
+    const prices = scopeItems
+      .map((item) => typeof item.price === 'number' ? item.price : item.sale_price)
+      .filter((price): price is number => typeof price === 'number' && price > 0);
+    return {
+      sample_count: prices.length,
+      median_price: median(prices),
+      average_price: prices.length > 0 ? Math.round(prices.reduce((sum, price) => sum + price, 0) / prices.length) : null,
+      lowest_price: prices.length > 0 ? Math.min(...prices) : null,
+      highest_price: prices.length > 0 ? Math.max(...prices) : null
+    };
+  };
+  const active = metric(items.filter((item) => lifecycle(item) === 'ACTIVE'));
+  const reserved = metric(items.filter((item) => lifecycle(item) === 'RESERVED'));
+  const sold = metric(items.filter((item) => lifecycle(item) === 'SOLD'));
   return {
     item_count: items.length,
-    priced_item_count: prices.length,
-    currency: prices.length > 0 && items.every((item) => !item.currency || item.currency === 'KRW') ? 'KRW' : null,
-    median_price: median(prices),
-    average_price: prices.length > 0 ? Math.round(prices.reduce((sum, price) => sum + price, 0) / prices.length) : null,
-    lowest_price: prices.length > 0 ? Math.min(...prices) : null,
-    highest_price: prices.length > 0 ? Math.max(...prices) : null
+    priced_item_count: active.sample_count,
+    currency: items.every((item) => !item.currency || item.currency === 'KRW') ? 'KRW' : null,
+    median_price: active.median_price,
+    average_price: active.average_price,
+    lowest_price: active.lowest_price,
+    highest_price: active.highest_price,
+    active_asking: active,
+    reserved_asking: reserved,
+    sold_last_ask: sold,
+    status_counts: {
+      active: items.filter((item) => lifecycle(item) === 'ACTIVE').length,
+      reserved: items.filter((item) => lifecycle(item) === 'RESERVED').length,
+      sold: items.filter((item) => lifecycle(item) === 'SOLD').length,
+      unknown: items.filter((item) => lifecycle(item) === 'UNKNOWN').length
+    },
+    unknown_count: items.filter((item) => lifecycle(item) === 'UNKNOWN').length,
+    sold_price_disclosure: '판매완료 직전 마지막 표시가격이며 실제 거래가격이 아닐 수 있습니다.'
   };
 }
 

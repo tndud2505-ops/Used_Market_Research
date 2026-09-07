@@ -239,6 +239,9 @@ function mostSpecificCategoryIds(categoryIds) {
 }
 
 function matchesCategory(categoryId, text, aliases, rawText = text) {
+  if (categoryId === "pc" && /(?:\bI[3579][\s-]?\d{4,5}[A-Z]{0,3}\b|\b(?:RTX|GTX|GT)\s*\d{3,4}(?:\s*(?:TI|SUPER))?\b|\bRX\s*\d{3,4}(?:\s*XT[X]?)?\b|\bARC\s*[AB]\d{3}\b|\bRADEON\s*VII\b|\bDDR[345]\s*\d+\s*(?:GB|G)\b|\b(?:970|980|990)\s*PRO\s*\d+(?:\.\d+)?\s*(?:TB|GB)\b|\b(?:A320|B350|X370|B450|X470|A520|B550|X570|A620|B650|X670|B840|B850|X870|H110|B150|Z170|B250|Z270|B360|B365|Z370|Z390|B460|Z490|B560|Z590|H610|B660|Z690|B760|Z790|B860|Z890)(?:M|I|E)?\b|\b\d{3,4}\s*W\b.{0,16}(?:파워|파워서플라이|PSU|POWER\s*SUPPLY)|(?:파워|파워서플라이|PSU|POWER\s*SUPPLY).{0,16}\b\d{3,4}\s*W\b)/iu.test(rawText)) {
+    return true;
+  }
   const rule = CATEGORY_MATCH_RULES[categoryId];
   if (rule?.all) {
     return rule.all.every((group, index) => index === 0 && (categoryId.includes("women") || categoryId.includes("men"))

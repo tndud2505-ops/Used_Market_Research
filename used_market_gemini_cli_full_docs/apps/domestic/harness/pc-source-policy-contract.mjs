@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
-import { collectOne, resetEbayAccessTokenCacheForTests } from "../cloudflare/live-search.mjs";
+import { buildLivePayload, collectOne, matchesRequestedKeyword, pcSearchQueryVariants, resetEbayAccessTokenCacheForTests } from "../cloudflare/live-search.mjs";
+import { filterCategoryItems } from "../cloudflare/category-filter.mjs";
 import { OPERATIONAL_PC_DIRECTORY_SITES, OPERATIONAL_TARGET_SITES } from "../cloudflare/target-sites.mjs";
 import {
   PC_SOURCE_REGISTRY,
@@ -124,10 +125,15 @@ assert.equal(getPcSource("hellomarket").directory_source, true,
 assert.equal(getPcSource("hellomarket").policy_status, "APPROVED");
 assert.equal(getPcSource("hellomarket").policy_basis_url, "https://hellomarket.com/terms.hm");
 assert.equal(OPERATIONAL_TARGET_SITES.includes("hellomarket"), false);
+assert.equal(getPcSource("rethinkmall").public_search, false);
+assert.equal(getPcSource("rethinkmall").directory_source, false);
+assert.equal(OPERATIONAL_TARGET_SITES.includes("rethinkmall"), false,
+  "complete-system retail must not appear in standalone PC-parts search");
+assert.equal(OPERATIONAL_PC_DIRECTORY_SITES.includes("rethinkmall"), false);
 assert.equal(getPcSource("bunjang").directory_source, true,
   "approved Bunjang collection must feed the precollected PC directory");
 assert.deepEqual(OPERATIONAL_PC_DIRECTORY_SITES,
-  ["joonggonara", "bunjang", "danawa", "hellomarket", "rethinkmall", "ebay", "coolenjoy"]);
+  ["joonggonara", "bunjang", "danawa", "hellomarket", "ebay", "coolenjoy"]);
 assert.equal(OPERATIONAL_PC_DIRECTORY_SITES.includes("bunjang"), true);
 const collectionTargetSet = pcCollectionTargetSetV2();
 const specialistTargets = collectionTargetSet.targets.filter((target) => target.sourceKeys.includes("danawa"));
@@ -143,8 +149,8 @@ assert.equal(hellomarketTargets.length, marketplaceTargets.length,
   "approved Hellomarket receives the same full PC master sweep as other search marketplaces");
 assert.equal(bunjangTargets.length, marketplaceTargets.length,
   "approved Bunjang receives the same full PC master sweep as other search marketplaces");
-assert.equal(rethinkmallTargets.length, marketplaceTargets.length,
-  "refurbished PC retail receives the same master sweep in its separate market pool");
+assert.equal(rethinkmallTargets.length, 0,
+  "refurbished complete-system retail must not receive standalone PC-parts collection targets");
 assert.ok(dailyMarketplaceTargets.length >= PC_PRODUCT_MASTER_V2.length,
   "every master node must receive at least one daily marketplace query");
 assert.deepEqual(
@@ -172,12 +178,13 @@ assert.deepEqual(Object.keys(Object.fromEntries(PC_PART_CATEGORY_CODES.map((code
 const bunjangCatalogFixture = [
   "pid,name,description,quantity,price,shippingFee,condition,saleStatus,keywords,images,categoryId,brandId,options,uid,updatedAt,createdAt",
   "1001,MSI RTX 3060 12GB,working,1,300000,0,USED,SELLING,RTX 3060,https://media.bunjang.co.kr/product/1001.jpg,600700001,110,\"[{\"\"id\"\":\"\"memory\"\",\"\"value\"\":\"\"12GB\"\"}]\",99,2026-08-31T00:10:00Z,2026-08-30T00:00:00Z",
-  "1002,ASUS RTX 3070,removed,1,350000,0,USED,DELETED,RTX 3070,https://media.bunjang.co.kr/product/1002.jpg,600700001,111,,100,2026-08-31T00:10:00Z,2026-08-29T00:00:00Z"
+  "1002,ASUS RTX 3070,removed,1,350000,0,USED,DELETED,RTX 3070,https://media.bunjang.co.kr/product/1002.jpg,600700001,111,,100,2026-08-31T00:10:00Z,2026-08-29T00:00:00Z",
+  "1003,Intel i5-7400,sold,1,30000,0,USED,SOLD,i5-7400,https://media.bunjang.co.kr/product/1003.jpg,600700001,112,,101,2026-08-31T00:10:00Z,2026-08-28T00:00:00Z"
 ].join("\n");
 const bunjangCatalogRows = parseBunjangPartnerCatalogCsv(bunjangCatalogFixture);
-assert.equal(bunjangCatalogRows.length, 2);
-assert.deepEqual(bunjangCatalogRows.map((item) => item.status), ["ACTIVE", "DELETED"],
-  "the official segment feed's DELETED state must never be fabricated as SOLD");
+assert.equal(bunjangCatalogRows.length, 3);
+assert.deepEqual(bunjangCatalogRows.map((item) => item.status), ["ACTIVE", "DELETED", "SOLD"],
+  "the official segment feed must preserve SOLD while keeping DELETED distinct");
 assert.equal(bunjangCatalogRows[0].source_listing_id, "1001");
 assert.equal(bunjangCatalogRows[0].url, "https://m.bunjang.co.kr/products/1001");
 assert.equal(bunjangCatalogRows[0].image_url, "https://media.bunjang.co.kr/product/1001.jpg");
@@ -247,6 +254,33 @@ assert.equal(validateSourceActivation("joonggonara", {
 
 assert.equal(explicitSoldText("2개 중 1개 판매완료, 남은 1개 판매"), null);
 assert.equal(explicitSoldText("판매완료"), "판매완료");
+assert.deepEqual(pcSearchQueryVariants("Intel i5-7400"), ["Intel i5-7400", "Intel i5 7400", "i5-7400"],
+  "PC keyword collection must use bounded punctuation and manufacturer variants");
+
+const lifecycleSeparatedPayload = buildLivePayload({
+  keyword: "i5 7400",
+  category_id: "pc",
+  sites: ["joonggonara"],
+  limit: 10,
+  sort: "recommended"
+}, [{
+  site: "joonggonara",
+  items: [
+    { id: "active", site: "joonggonara", title: "i5 7400 판매중", price: 10_000, currency: "KRW", status: "ACTIVE", posted_at: "2026-09-07", seller_name: "a", image_url: "https://img.example/a.jpg", url: "https://web.joongna.com/product/active" },
+    { id: "sold", site: "joonggonara", title: "i5 7400 판매완료", price: 50_000, currency: "KRW", status: "SOLD", posted_at: "2026-09-07", seller_name: "b", image_url: "https://img.example/b.jpg", url: "https://web.joongna.com/product/sold" },
+    { id: "unknown", site: "joonggonara", title: "i5 7400 판매완료 아님", price: 90_000, currency: "KRW", posted_at: "2026-09-07", seller_name: "c", image_url: "https://img.example/c.jpg", url: "https://web.joongna.com/product/unknown" },
+    { id: "stale", site: "joonggonara", title: "i5 7400 오래된 판매글", price: 70_000, currency: "KRW", status: "ACTIVE", posted_at: "2020-01-01", seller_name: "d", image_url: "https://img.example/d.jpg", url: "https://web.joongna.com/product/stale" },
+    { id: "system", site: "joonggonara", title: "i5 7400 램8GB SSD 사양 컴퓨터", price: 300_000, currency: "KRW", status: "ACTIVE", posted_at: "2026-09-07", seller_name: "e", image_url: "https://img.example/e.jpg", url: "https://web.joongna.com/product/system" }
+  ]
+}], { items: [] });
+assert.equal(lifecycleSeparatedPayload.items.length, 5, "sold, unknown, stale, and price-scope-unclear listings remain visible");
+assert.equal(lifecycleSeparatedPayload.sources[0].search_urls[0], "https://web.joongna.com/search/i5%207400",
+  "an explicit Joonggonara keyword must keep the keyword URL even when a category is also selected");
+assert.equal(lifecycleSeparatedPayload.summary.average_price, 10_000, "headline average must use active asking prices only");
+assert.equal(lifecycleSeparatedPayload.summary.active_asking.average_price, 10_000);
+assert.equal(lifecycleSeparatedPayload.summary.sold_last_ask.average_price, 50_000);
+assert.deepEqual(lifecycleSeparatedPayload.summary.status_counts, { active: 3, reserved: 0, sold: 1, unknown: 1 });
+assert.equal(lifecycleSeparatedPayload.summary.unknown_count, 1, "negated sold wording must stay unknown");
 
 const specialistFixtures = await Promise.all([
   readFile(new URL("./fixtures/source-pages/danawa-market.html", import.meta.url), "utf8"),
@@ -364,6 +398,20 @@ assert.equal(danawaCollected.items[0].requested_category_code, "CPU");
 assert.equal(danawaCollected.items[0].image_url, "https://img.example.test/cpu.jpg");
 assert.equal(danawaCollected.diagnostics[0].parsed_count, 1);
 assert.equal(trustedSpecialistCategory(danawaCollected.items[0]), "CPU");
+let pagedDanawaCalls = 0;
+const pagedDanawa = await collectDanawaCategoryListings({
+  categoryCode: "CPU",
+  fetchImpl: async (_url, init) => {
+    pagedDanawaCalls += 1;
+    const requestedPage = Number(new URLSearchParams(String(init.body)).get("page"));
+    const markup = requestedPage === 1
+      ? currentDanawaMarkup
+      : currentDanawaMarkup.replaceAll("52439768", "52439769").replace("i5-9600K", "i5-9700K");
+    return new Response(JSON.stringify({ status: true, totalCount: "2", goodsList: markup }), { status: 200 });
+  }
+});
+assert.equal(pagedDanawaCalls, 2, "Danawa collection must continue through reported result pages");
+assert.deepEqual(pagedDanawa.items.map((item) => item.source_listing_id), ["52439768", "52439769"]);
 const noopAdapter = createSourceAdapter({
   sourceKey: "danawa",
   async collectIncremental(input) {
@@ -404,6 +452,16 @@ assert.equal(pcCategoryTitleMatches("RAM", "Dodge Ram 2500 wheel hub bearing"), 
 assert.equal(pcCategoryTitleMatches("RAM", "Samsung DDR4 16GB desktop memory"), true);
 assert.equal(pcCategoryTitleMatches("CASE", "iPhone leather case"), false);
 assert.equal(pcCategoryTitleMatches("ODD", "odd vintage pin button"), false);
+assert.equal(matchesRequestedKeyword({ title: "CPU i5 7400 단품" }, "i5-7400"), true,
+  "hyphen and spacing variants must match the same PC model");
+assert.equal(matchesRequestedKeyword({ title: "RTX 3080 10GB 그래픽카드" }, "ASUS RTX 3080"), true,
+  "a missing optional board manufacturer must not hide the requested GPU model");
+const modelOnlyPcTitles = ["i5-7400", "Arc A770 16GB 그래픽카드", "DDR4 16GB", "980 PRO 1TB", "B650M 메인보드", "850W 파워서플라이"];
+assert.deepEqual(
+  filterCategoryItems(modelOnlyPcTitles.map((title) => ({ title })), { category_id: "pc" }).map((item) => item.title),
+  modelOnlyPcTitles,
+  "bounded PC model evidence must keep model-only component listings"
+);
 assert.equal(trustedSpecialistCategory({
   site: "ebay", requested_category_code: "RAM", source_category_code: "170083",
   title: "Samsung DDR4 16GB desktop memory"
@@ -625,6 +683,8 @@ try {
   assert.equal(pcItems[0].source_category_code, "170083");
   assert.deepEqual(pcItems[0].source_leaf_category_ids, ["170084"]);
   const pcUrl = new URL(pcRequests[0].url);
+  assert.equal(pcUrl.searchParams.get("q"), "RAM RAM",
+    "eBay PC targets must preserve the exact target query instead of replacing it with a broad category query");
   assert.equal(pcUrl.searchParams.get("category_ids"), "170083");
   assert.equal(pcUrl.searchParams.get("filter"), "conditions:{USED}");
 } finally {

@@ -220,7 +220,7 @@ const SEARCH_ONLY_CATEGORY_IDS = Object.freeze([
 ]);
 const SEARCH_ONLY_SOURCES = Object.freeze([
   { key: "hellomarket", name: "헬로마켓", market_kind: "used_market", login_required: false, ui_registered: true, main_search_registered: true, category_mode: "keyword_inferred", classifiable_category_ids: SEARCH_ONLY_CATEGORY_IDS },
-  { key: "rethinkmall", name: "리씽크몰", market_kind: "refurb_retail", login_required: false, ui_registered: true, main_search_registered: true, category_mode: "keyword_inferred", classifiable_category_ids: SEARCH_ONLY_CATEGORY_IDS }
+  { key: "rethinkmall", name: "리씽크몰", market_kind: "refurb_retail", login_required: false, ui_registered: true, main_search_registered: false, category_mode: "keyword_inferred", classifiable_category_ids: SEARCH_ONLY_CATEGORY_IDS }
 ]);
 const OPERATIONAL_SEARCH_ONLY_SOURCES = Object.freeze(
   SEARCH_ONLY_SOURCES.filter((source) => TARGET_SITES.includes(source.key))
@@ -517,7 +517,7 @@ function toImportItem(item) {
     quantity: item.quantity || null,
     price_scope: item.price_scope || "UNKNOWN",
     condition_code: item.condition_code || "UNKNOWN",
-    lifecycle_status: item.lifecycle_status || "ACTIVE",
+    lifecycle_status: item.lifecycle_status || "UNAVAILABLE_UNKNOWN",
     market_pool: item.market_pool || null,
     confidence: item.confidence || {},
     evidence: item.evidence || {},
@@ -1366,13 +1366,13 @@ function dedupeCollectedItems(items) {
 
 async function collectSpecialistSource(sourceKey, target, parentSignal) {
   if (sourceKey === "danawa") {
-    return (await collectDanawaCategoryListings({
+    return collectDanawaCategoryListings({
       categoryCode: target.category_code,
       fetchImpl: (input, init = {}) => fetchDanawaPublicWithPacing(input, {
         ...init,
         signal: boundedFetchSignal(parentSignal, 20_000)
       })
-    })).items;
+    });
   }
   const template = String(PC_SPECIALIST_SEARCH_URLS[sourceKey] || "").trim();
   if (!template) throw new Error(`SPECIALIST_SEARCH_URL_NOT_CONFIGURED:${sourceKey}`);
@@ -1393,7 +1393,10 @@ async function collectSpecialistSource(sourceKey, target, parentSignal) {
     signal: boundedFetchSignal(parentSignal, 20_000)
   });
   if (!response.ok) throw new Error(`SPECIALIST_HTTP_${response.status}:${sourceKey}`);
-  return parser(await response.text()).map((item) => ({ ...item, site: sourceKey }));
+  return {
+    items: parser(await response.text()).map((item) => ({ ...item, site: sourceKey })),
+    diagnostics: [{ page: 1, url: url.toString(), status: response.status }]
+  };
 }
 
 function listingIdentityIsPresent(html, listing) {
@@ -1494,12 +1497,14 @@ function pcSourceAdapter(sourceKey) {
       };
       const collectTarget = async (target) => {
         throwIfAborted(input.signal);
-        const items = SPECIALIST_FIXTURE_PARSERS[sourceKey]
+        const collected = SPECIALIST_FIXTURE_PARSERS[sourceKey]
           ? await collectSpecialistSource(sourceKey, target, input.signal)
           : await collectOne(sourceKey, target.query_text, sourceKey === "ebay" ? target.category_code : "pc",
             sourceKey === "ebay" ? 40 : 80,
             target.query_text, "recent", { min: null, max: null });
-        return { target, items };
+        const items = Array.isArray(collected) ? collected : collected.items;
+        const diagnostics = Array.isArray(collected?.diagnostics) ? collected.diagnostics : [];
+        return { target, items, diagnostics, request_count: Math.max(1, diagnostics.length) };
       };
       const settled = [];
       if (SPECIALIST_FIXTURE_PARSERS[sourceKey] || Object.hasOwn(PC_SOURCE_TARGET_PACING_MS, sourceKey)) {
@@ -1529,7 +1534,7 @@ function pcSourceAdapter(sourceKey) {
       const failed = settled.filter((result) => result.status === "rejected");
       const failureMessages = failed.map((result) => result.reason instanceof Error ? result.reason.message : String(result.reason));
       const collectionMetrics = {
-        request_count: settled.length,
+        request_count: successful.reduce((sum, result) => sum + result.value.request_count, 0) + failed.length,
         request_failure_count: failed.length,
         parsed_count: 0,
         parse_failure_count: failureMessages.filter((message) => /(?:parse|parser|selector|invalid[_ ]listing|html)/iu.test(message)).length,
@@ -1564,7 +1569,7 @@ function pcSourceAdapter(sourceKey) {
             source_listing_id: sourceListingId,
             price: Number.isSafeInteger(numericPrice) && numericPrice >= 0 ? numericPrice : null,
             currency: String(item.currency || (sourceKey === "ebay" ? "USD" : "KRW")).toUpperCase(),
-            status: String(item.status || item.lifecycle_status || "ACTIVE").toUpperCase(),
+            status: String(item.status || item.lifecycle_status || "UNAVAILABLE_UNKNOWN").toUpperCase(),
             raw_payload: item.raw_payload && typeof item.raw_payload === "object"
               ? item.raw_payload
               : { ...item, source_listing_id: sourceListingId }
@@ -1583,6 +1588,8 @@ function pcSourceAdapter(sourceKey) {
           target_id: dueTargets[index].target_id,
           status: result.status === "fulfilled" ? "SUCCEEDED" : "FAILED",
           cursor: result.status === "fulfilled" ? incremental.next_cursor : dueTargets[index].incremental_cursor || null,
+          request_count: result.status === "fulfilled" ? result.value.request_count : 1,
+          diagnostics: result.status === "fulfilled" ? result.value.diagnostics : [],
           error: result.status === "rejected"
             ? (result.reason instanceof Error ? result.reason.message : String(result.reason))
             : null

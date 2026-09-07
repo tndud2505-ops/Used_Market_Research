@@ -13,8 +13,8 @@ import { collectOne as collectOneLiveSite } from '../../../cloudflare/live-searc
 // consumed here so the local app and AWS runner expose the same projection.
 // @ts-ignore no declaration file for the shared ESM classifier
 import { classifyPcPartListing, classifyPcPartListingPublic } from '../../../market/logic/pc-parts-classifier.mjs';
-// @ts-ignore no declaration file for the versioned product master
-import { PC_PRODUCT_MASTER_V1 } from '../../../market/data/pc-product-master-v1.mjs';
+// @ts-ignore no declaration file for the shared V2 public product registry
+import { publicPcProducts } from '../../../market/logic/pc-public-catalog.mjs';
 // @ts-ignore no declaration file for the canonical source registry
 import { PC_SOURCE_REGISTRY } from '../../../collector/logic/pc-source-registry.mjs';
 
@@ -49,21 +49,23 @@ export class WebSearchValidationError extends Error {
 }
 
 // PC search exposes only sources approved and enabled by the canonical source
-// registry. Hello Market and Rethink Mall keep their existing site scripts;
-// they are not forced through the browser-adapter orchestrator.
+// registry. Hello Market keeps its existing site script and is not forced
+// through the browser-adapter orchestrator. Rethink Mall is retained only as
+// a complete-system research integration, outside PC-parts search.
 const DEFAULT_SITES = (PC_SOURCE_REGISTRY as Array<Record<string, unknown>>)
   .filter((source) => source.public_search === true && source.policy_status === 'APPROVED' && source.runtime_status === 'ENABLED')
   .sort((left, right) => Number(left.public_search_order || 0) - Number(right.public_search_order || 0))
   .map((source) => String(source.key));
 const ORCHESTRATOR_SITES = new Set<string>(['joonggonara', 'ebay']);
-const SEARCH_ONLY_SITES = new Set<string>(['hellomarket', 'rethinkmall']);
+const SEARCH_ONLY_SITES = new Set<string>(['hellomarket']);
 const COLLECT_ONE_SITES = new Set<string>(['bunjang']);
-const KEYWORD_ONLY_SITES = new Set<string>(['hellomarket', 'rethinkmall', 'ebay']);
+const KEYWORD_ONLY_SITES = new Set<string>(['hellomarket', 'ebay']);
 const SUPPORTED_WEB_SEARCH_SITES = new Set(DEFAULT_SITES);
 const MAX_KEYWORD_LENGTH = 80;
 const MAX_LIMIT = 40;
 const SEARCH_SORTS = new Set<SearchSort>(['recommended', 'price_asc', 'price_desc', 'recent']);
 const orchestrator = new Orchestrator(new MockProvider());
+const PC_PRODUCT_MASTER = publicPcProducts() as Array<Record<string, any>>;
 
 type ValidatedWebSearchRequest = ReturnType<typeof validateWebSearchRequest>;
 
@@ -327,8 +329,8 @@ async function runSingleWebSearch(
       return {
         key: siteKey,
         name: siteName(siteKey),
-        search_url: sourceSearchUrl(siteKey, request.effectiveKeyword, request.category?.id),
-        search_urls: sourceSearchUrls(siteKey, request.effectiveKeyword, request.category?.id),
+        search_url: sourceSearchUrl(siteKey, request.effectiveKeyword, request.keyword ? undefined : request.category?.id),
+        search_urls: sourceSearchUrls(siteKey, request.effectiveKeyword, request.keyword ? undefined : request.category?.id),
         count: collected.items.length,
         normalized_count: collected.items.length,
         extracted_count: collected.items.length,
@@ -371,8 +373,8 @@ async function runSingleWebSearch(
     return {
       key: siteKey,
       name: siteName(siteKey),
-      search_url: sourceSearchUrl(siteKey, request.effectiveKeyword, request.category?.id),
-      search_urls: sourceSearchUrls(siteKey, request.effectiveKeyword, request.category?.id),
+      search_url: sourceSearchUrl(siteKey, request.effectiveKeyword, request.keyword ? undefined : request.category?.id),
+      search_urls: sourceSearchUrls(siteKey, request.effectiveKeyword, request.keyword ? undefined : request.category?.id),
       count: asArray(raw.items).length,
       normalized_count: asArray(normalized.normalized_items).length,
       extracted_count: readNumber(asRecord(raw.quality_meta).extracted_count, asArray(raw.items).length),
@@ -427,7 +429,7 @@ async function runSingleWebSearch(
       || left.index - right.index
     ))
     .map((entry) => entry.item);
-  const priceMedians = priceMediansByCurrency(baseItems);
+  const priceMedians = priceMediansByCurrency(baseItems.filter((item) => webLifecycleStatus(item) === 'ACTIVE'));
   const markedItems = baseItems.map((item) => ({
     ...item,
     price_suspect: typeof item.price === 'number'
@@ -541,7 +543,7 @@ export function mergeCombinedSearchPayload(
     }
   }
 
-  const priceMedians = priceMediansByCurrency(items);
+  const priceMedians = priceMediansByCurrency(items.filter((item) => webLifecycleStatus(item) === 'ACTIVE'));
   const markedItems: Record<string, unknown>[] = items.map((item) => ({
     ...item,
     price_suspect: typeof item.price === 'number'
@@ -658,9 +660,9 @@ export function validateWebSearchRequest(input: Record<string, unknown>) {
   const keyword = typeof input.keyword === 'string' ? input.keyword.trim() : '';
   const pcCategoryCode = typeof input.pc_category_code === 'string' ? input.pc_category_code.trim().toUpperCase() : '';
   const manufacturer = typeof input.manufacturer === 'string' ? input.manufacturer.trim() : '';
-  const knownCategoryCodes = new Set((PC_PRODUCT_MASTER_V1 as Array<Record<string, unknown>>)
+  const knownCategoryCodes = new Set((PC_PRODUCT_MASTER as Array<Record<string, unknown>>)
     .map((product) => String(product.category || '').toUpperCase()).filter(Boolean));
-  const knownManufacturers = new Set((PC_PRODUCT_MASTER_V1 as Array<Record<string, unknown>>)
+  const knownManufacturers = new Set((PC_PRODUCT_MASTER as Array<Record<string, unknown>>)
     .map((product) => String(product.manufacturer || '')).filter(Boolean));
   if (pcCategoryCode && !knownCategoryCodes.has(pcCategoryCode)) {
     throw new WebSearchValidationError(`Unknown pc_category_code: ${pcCategoryCode}`);
@@ -668,7 +670,7 @@ export function validateWebSearchRequest(input: Record<string, unknown>) {
   if (manufacturer && (!knownManufacturers.has(manufacturer) || manufacturer.length > 80)) {
     throw new WebSearchValidationError(`Unknown manufacturer: ${manufacturer}`);
   }
-  if (manufacturer && pcCategoryCode && !(PC_PRODUCT_MASTER_V1 as Array<Record<string, unknown>>).some((product) => (
+  if (manufacturer && pcCategoryCode && !(PC_PRODUCT_MASTER as Array<Record<string, unknown>>).some((product) => (
     String(product.category || '').toUpperCase() === pcCategoryCode && String(product.manufacturer || '') === manufacturer
   ))) {
     throw new WebSearchValidationError('manufacturer is unavailable for the selected PC part category');
@@ -854,7 +856,7 @@ function toWebItem(value: unknown) {
     image_url: readString(item.image_url, ''),
     shipping: readString(item.shipping, ''),
     currency: readString(item.currency, 'KRW'),
-    status: readString(item.sale_status, readString(item.item_status, 'unknown')),
+    status: readString(item.item_status, readString(item.sale_status, 'unknown')),
     listing_type: readString(item.listing_type, 'unknown'),
     score: typeof item.score_hint === 'number' ? item.score_hint : null,
     baseline_price: typeof item.baseline_price === 'number' ? item.baseline_price : null,
@@ -897,7 +899,7 @@ export function toSearchOnlyWebItem(site: string, value: unknown) {
     image_url: readString(item.image_url, ''),
     shipping: readString(item.shipping, ''),
     currency: readString(item.currency, 'KRW'),
-    status: readString(item.status, 'active'),
+    status: readString(item.status, 'unknown'),
     listing_type: site === 'rethinkmall' ? 'refurb_retail' : 'used_market',
     score: null,
     baseline_price: null,
@@ -924,6 +926,34 @@ function normalizedMasterText(value: unknown) {
   return String(value ?? '').normalize('NFKC').toUpperCase().replace(/[^A-Z0-9가-힣]+/gu, ' ').trim();
 }
 
+function resolvePcWebProduct(classified: Record<string, any>, item: Record<string, unknown>) {
+  const category = String(classified.category_code || '').toUpperCase();
+  const model = normalizedMasterText(classified.canonical_model);
+  const manufacturer = normalizedMasterText(classified.manufacturer);
+  const title = normalizedMasterText(item.title);
+  const candidates = PC_PRODUCT_MASTER.filter((candidate) => String(candidate.category || '').toUpperCase() === category);
+  const aliases = (candidate: Record<string, any>) => [candidate.name, ...(Array.isArray(candidate.aliases) ? candidate.aliases : [])]
+    .map(normalizedMasterText).filter(Boolean);
+  const unique = (matches: Array<Record<string, any>>) => matches.length === 1 ? matches[0] : null;
+
+  if (model) {
+    const exact = unique(candidates.filter((candidate) => aliases(candidate).includes(model)));
+    if (exact) return exact;
+    if (manufacturer) {
+      const composite = normalizedMasterText(`${manufacturer} ${model}`);
+      const composed = unique(candidates.filter((candidate) => aliases(candidate).includes(composite)));
+      if (composed) return composed;
+    }
+  }
+
+  const titleMatches = candidates.map((candidate) => ({
+    candidate,
+    score: Math.max(0, ...aliases(candidate).filter((alias) => alias.length >= 4 && title.includes(alias)).map((alias) => alias.length))
+  })).filter(({ score }) => score > 0).sort((left, right) => right.score - left.score);
+  if (titleMatches.length === 0 || (titleMatches[1] && titleMatches[1].score === titleMatches[0].score)) return null;
+  return titleMatches[0].candidate;
+}
+
 export function enrichPcWebItem<T extends Record<string, unknown>>(item: T): T & Record<string, unknown> {
   const classified = classifyPcPartListing({
     title: readString(item.title, ''),
@@ -939,17 +969,16 @@ export function enrichPcWebItem<T extends Record<string, unknown>>(item: T): T &
     currency: readString(item.currency, 'KRW'),
     seller_type: readString(item.seller_type, '')
   }) as Record<string, any>;
-  const model = normalizedMasterText(classified.canonical_model);
-  const product = (PC_PRODUCT_MASTER_V1 as Array<Record<string, any>>).find((candidate) => (
-    [candidate.name, ...(Array.isArray(candidate.aliases) ? candidate.aliases : [])]
-      .some((alias) => normalizedMasterText(alias) === model)
-  ));
+  const product = resolvePcWebProduct(classified, item);
   const exclusions = Array.from(new Set<string>([
     ...(Array.isArray(classified.exclusion_reasons) ? classified.exclusion_reasons.map(String) : []),
     ...(Array.isArray(publicClassified.statistics_exclusion_reasons) ? publicClassified.statistics_exclusion_reasons.map(String) : []),
     ...(!product ? ['MODEL_NOT_IN_MASTER'] : [])
   ]));
-  const lifecycleStatus = String(item.status || classified.lifecycle_status || 'ACTIVE').toUpperCase();
+  const lifecycleStatus = webLifecycleStatus({
+    ...item,
+    lifecycle_status: item.lifecycle_status || classified.lifecycle_status
+  });
   const source = (PC_SOURCE_REGISTRY as Array<Record<string, any>>).find((candidate) => candidate.key === item.site);
   const publicCategory = String(publicClassified.category_code || 'UNSUPPORTED_CATEGORY');
   const priceEligible = publicClassified.statistics_eligible === true && Boolean(product) && lifecycleStatus === 'ACTIVE';
@@ -1321,24 +1350,60 @@ function absoluteDateTimestamp(value: unknown) {
 export function buildTrustedPriceSummary(items: Array<{
   price?: unknown;
   currency?: unknown;
+  status?: unknown;
+  lifecycle_status?: unknown;
+  item_status?: unknown;
+  sale_status?: unknown;
   price_suspect?: boolean;
   noise_filtered?: boolean;
   fraud_risk?: number | null;
+  statistics_eligible?: boolean;
+  model_unclear?: boolean;
 }>) {
-  const currencies = new Set(items.map((item) => normalizeCurrency(item.currency)).filter(Boolean));
-  const currency = currencies.size === 1 ? Array.from(currencies)[0] : currencies.size > 1 ? 'MIXED' : 'KRW';
-  if (currency === 'MIXED') {
-    return { currency, median_price: null, average_price: null, lowest_price: null, highest_price: null };
-  }
-  const prices = items
-    .filter((item) => !item.price_suspect && item.noise_filtered !== true && (item.fraud_risk === null || typeof item.fraud_risk !== 'number' || item.fraud_risk <= 0.45))
-    .map((item) => item.price)
-    .filter((price): price is number => typeof price === 'number' && Number.isFinite(price) && price > 0);
-  return {
-    currency,
-    median_price: median(prices),
-    average_price: prices.length > 0 ? Math.round(prices.reduce((sum, price) => sum + price, 0) / prices.length) : null,
-    lowest_price: prices.length > 0 ? Math.min(...prices) : null,
-    highest_price: prices.length > 0 ? Math.max(...prices) : null
+  const trusted = items.filter((item) => !item.price_suspect && item.noise_filtered !== true
+    && item.statistics_eligible !== false && item.model_unclear !== true
+    && (item.fraud_risk === null || typeof item.fraud_risk !== 'number' || item.fraud_risk <= 0.45));
+  const metric = (scopeItems: typeof trusted) => {
+    const currencies = new Set(scopeItems.map((item) => normalizeCurrency(item.currency)).filter(Boolean));
+    const currency = currencies.size === 1 ? Array.from(currencies)[0] : currencies.size > 1 ? 'MIXED' : 'KRW';
+    const prices = currency === 'MIXED' ? [] : scopeItems.map((item) => item.price)
+      .filter((price): price is number => typeof price === 'number' && Number.isFinite(price) && price > 0);
+    return {
+      sample_count: prices.length,
+      currency,
+      median_price: median(prices),
+      average_price: prices.length > 0 ? Math.round(prices.reduce((sum, price) => sum + price, 0) / prices.length) : null,
+      lowest_price: prices.length > 0 ? Math.min(...prices) : null,
+      highest_price: prices.length > 0 ? Math.max(...prices) : null
+    };
   };
+  const active = metric(trusted.filter((item) => webLifecycleStatus(item) === 'ACTIVE'));
+  const reserved = metric(trusted.filter((item) => webLifecycleStatus(item) === 'RESERVED'));
+  const sold = metric(trusted.filter((item) => webLifecycleStatus(item) === 'SOLD'));
+  return {
+    currency: active.currency,
+    median_price: active.median_price,
+    average_price: active.average_price,
+    lowest_price: active.lowest_price,
+    highest_price: active.highest_price,
+    active_asking: active,
+    reserved_asking: reserved,
+    sold_last_ask: sold,
+    status_counts: {
+      active: items.filter((item) => webLifecycleStatus(item) === 'ACTIVE').length,
+      reserved: items.filter((item) => webLifecycleStatus(item) === 'RESERVED').length,
+      sold: items.filter((item) => webLifecycleStatus(item) === 'SOLD').length,
+      unknown: items.filter((item) => webLifecycleStatus(item) === 'UNAVAILABLE_UNKNOWN').length
+    },
+    unknown_count: items.filter((item) => webLifecycleStatus(item) === 'UNAVAILABLE_UNKNOWN').length,
+    sold_price_disclosure: '판매완료 직전 마지막 표시가격이며 실제 거래가격이 아닐 수 있습니다.'
+  };
+}
+
+function webLifecycleStatus(item: Record<string, unknown>): 'ACTIVE' | 'RESERVED' | 'SOLD' | 'UNAVAILABLE_UNKNOWN' {
+  const raw = String(item.lifecycle_status ?? item.status ?? item.item_status ?? item.sale_status ?? '').trim().toUpperCase();
+  if (raw === 'ACTIVE' || raw === 'SELLING') return 'ACTIVE';
+  if (raw === 'RESERVED' || raw === 'HOLD') return 'RESERVED';
+  if (raw === 'SOLD' || raw === 'COMPLETED' || raw === 'CLOSED') return 'SOLD';
+  return 'UNAVAILABLE_UNKNOWN';
 }

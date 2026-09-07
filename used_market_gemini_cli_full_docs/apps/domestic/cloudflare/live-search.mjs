@@ -308,12 +308,18 @@ function listingAgeDays(item) {
 }
 
 function sitePolicyExclusionReason(item, body) {
-  const sortMode = requestedSort(body);
   const categoryIds = categoryIdsFromBody(body);
   const categoryId = clean(item?.category_id, 80) || (categoryIds.length === 1 ? categoryIds[0] : "all");
   const price = Number(item?.price);
   const minimumPrice = minimumPriceForSite(item?.site, categoryId);
   if (minimumPrice > 0 && Number.isFinite(price) && price >= 0 && price < minimumPrice) return "site_price_floor";
+  return "";
+}
+
+function listingIsStaleForPolicy(item, body) {
+  const sortMode = requestedSort(body);
+  const categoryIds = categoryIdsFromBody(body);
+  const categoryId = clean(item?.category_id, 80) || (categoryIds.length === 1 ? categoryIds[0] : "all");
   const policy = siteSearchPolicy(item?.site);
   const baseMaxAgeDays = sortMode === "recommended" ? policy.recommendedMaxAgeDays : policy.priceMaxAgeDays;
   const categoryMultiplier = ["vehicles", "motorcycle"].includes(categoryId)
@@ -325,8 +331,31 @@ function sitePolicyExclusionReason(item, body) {
     ? (categoryId === "tickets" ? Math.min(baseMaxAgeDays, sortMode === "recommended" ? 14 : 30) : baseMaxAgeDays * categoryMultiplier)
     : null;
   const ageDays = listingAgeDays(item);
-  if (Number.isFinite(maxAgeDays) && ageDays !== null && ageDays > maxAgeDays) return "stale_listing";
-  return "";
+  return Number.isFinite(maxAgeDays) && ageDays !== null && ageDays > maxAgeDays;
+}
+
+function listingModelIsUnclearForStats(item, body) {
+  if (!categoryIdsFromBody(body).includes("pc")) return false;
+  const text = clean(item?.title, 500).normalize("NFKC");
+  return !/(?:\bi[3579]\s*[- ]?\s*\d{3,5}[a-z0-9]*\b|\b(?:ryzen|라이젠)\s*[3579]?\s*\d{4,5}[a-z0-9]*\b|\b(?:rtx|gtx)\s*\d{3,4}(?:\s*ti)?\b|\brx\s*\d{3,4}(?:\s*xt)?\b|\b(?:arc\s*[ab]\d{3}|radeon\s*vii)\b|\bddr[345]\b.{0,20}\b\d{1,3}\s*gb\b|\b(?:970|980|990)\s*pro\b.{0,20}\b\d+(?:\s*tb|\s*gb)\b|\b(?:h|b|z|x)\d{3}\b|\b\d{3,4}\s*w\b)/iu.test(text);
+}
+
+function listingPcPriceScopeIsUnclearForStats(item, body) {
+  if (!categoryIdsFromBody(body).includes("pc")) return false;
+  const query = clean(body?.keyword, 80).normalize("NFKC");
+  const title = clean(item?.title, 500).normalize("NFKC");
+  const systemContext = /(?:조립\s*pc|게이밍\s*pc|사무용\s*pc|컴퓨터\s*본체|데스크탑\s*본체|반본체|사양\s*컴퓨터)/iu.test(title);
+  if (systemContext) return true;
+  if (/\bi[3579]\s*[- ]?\s*\d{3,5}\b|\b(?:ryzen|라이젠)\s*[3579]?\s*\d{4,5}\b/iu.test(query)) {
+    return /(?:메인\s*보드|메인보드|\b[hbzx]\d{3}\b|램\s*\d|\bddr[345]\b|\bssd\b|\bhdd\b|\b(?:rtx|gtx|rx)\s*\d{3,4}\b)/iu.test(title);
+  }
+  if (/\b(?:rtx|gtx|rx)\s*\d{3,4}\b/iu.test(query)) {
+    return /(?:메인\s*보드|메인보드|램\s*\d|\bddr[345]\b|\bssd\b|\bhdd\b|\bi[3579]\s*[- ]?\s*\d{3,5}\b|\b(?:ryzen|라이젠)\s*\d{4,5}\b)/iu.test(title);
+  }
+  if (/\bddr[345]\b/iu.test(query)) {
+    return /(?:메인\s*보드|메인보드|\bssd\b|\bhdd\b|\bi[3579]\s*[- ]?\s*\d{3,5}\b|\b(?:ryzen|라이젠)\s*\d{4,5}\b|\b(?:rtx|gtx|rx)\s*\d{3,4}\b)/iu.test(title);
+  }
+  return false;
 }
 
 function sourceCandidateLimit(body) {
@@ -338,7 +367,7 @@ function sourceFetchLimit(limit, categoryId, queryKeyword) {
   return Math.min(Math.max(limit, 40), SOURCE_CANDIDATE_MAX_ITEMS);
 }
 
-function sourceItem({ site, categoryId, sourceListingId, title, price, currency = "KRW", url, imageUrl, seller, postedAt, searchText, description, location }) {
+function sourceItem({ site, categoryId, sourceListingId, title, price, currency = "KRW", url, imageUrl, seller, postedAt, searchText, description, location, lifecycleStatus }) {
   const cleanTitle = clean(title, 500);
   const baseBySite = {
     joonggonara: "https://web.joongna.com",
@@ -367,7 +396,8 @@ function sourceItem({ site, categoryId, sourceListingId, title, price, currency 
     location: clean(location, 120) || null,
     posted_at: parseTimestamp(postedAt, site === "joonggonara" ? 9 * 60 : null),
     updated_at: new Date().toISOString(),
-    search_text: clean(searchText, 1000) || cleanTitle
+    search_text: clean(searchText, 1000) || cleanTitle,
+    ...(lifecycleStatus ? { status: lifecycleStatus, lifecycle_status: lifecycleStatus } : {})
   };
 }
 
@@ -395,8 +425,13 @@ const SEARCH_TERM_ALIASES = Object.freeze({
 });
 
 function normalizedSearchText(value) {
-  return clean(value, 1000).toLowerCase().replace(/\s+/g, "");
+  return clean(value, 1000).toLowerCase().replace(/[^a-z0-9가-힣]+/gu, "");
 }
+
+const OPTIONAL_PC_QUERY_TERMS = new Set([
+  "asus", "gigabyte", "msi", "asrock", "zotac", "palit", "galax", "sapphire", "powercolor", "pny", "evga", "xfx",
+  "samsung", "삼성", "sk", "hynix", "하이닉스", "crucial", "micron", "corsair", "seasonic", "micronics", "마이크로닉스", "intel", "인텔", "amd"
+].map(normalizedSearchText));
 
 function searchTermVariants(term) {
   const normalized = normalizedSearchText(term);
@@ -435,7 +470,9 @@ function matchesRequestedKeyword(item, keyword) {
   const normalizedKeyword = normalizedSearchText(keyword);
   if (normalizedKeyword === "ps5" && /3ps5/i.test(text)) return false;
   if (normalizedKeyword === "3ps5") return /(?:^|[^a-z0-9])3ps5(?![a-z0-9])/i.test(text);
-  const allTermsMatch = terms.every((term) => searchTermMatchesTitle(term, title, text));
+  const requiredTerms = terms.filter((term) => !OPTIONAL_PC_QUERY_TERMS.has(normalizedSearchText(term)));
+  const allTermsMatch = (requiredTerms.length > 0 ? requiredTerms : terms)
+    .every((term) => searchTermMatchesTitle(term, title, text));
   if (!allTermsMatch) return false;
   const numericTerm = terms.find((term) => /^\d{1,4}$/.test(term));
   if (!numericTerm) return true;
@@ -640,7 +677,8 @@ async function collectBunjangCategory(sourceCategoryId, categoryId, limit, sortM
     imageUrl: typeof row?.productImage === "string" ? row.productImage.replace("{res}", "640") : "",
     seller: row?.shop?.uid ? `user:${row.shop.uid}` : "",
     postedAt: row?.updatedAt,
-    searchText: row?.name
+    searchText: row?.name,
+    lifecycleStatus: marketplaceLifecycleStatus(row?.status)
   })).filter(Boolean);
 }
 
@@ -686,7 +724,8 @@ async function collectBunjangKeyword(keyword, categoryId, limit, queryKeyword = 
       imageUrl: typeof row?.product_image === "string" ? row.product_image.replace("{res}", "640") : "",
       seller: row?.uid ? `user:${row.uid}` : "",
       postedAt: row?.update_time,
-      searchText: `${row?.name || ""} ${row?.tag || ""}`
+      searchText: `${row?.name || ""} ${row?.tag || ""}`,
+      lifecycleStatus: marketplaceLifecycleStatus(row?.status)
     })).filter(Boolean).filter((item) => matchesRequestedKeyword(item, queryKeyword || keyword))
       .filter((item) => !isObviousKeywordNoise(categoryId, item, queryKeyword || keyword));
     items.push(...pageItems);
@@ -716,7 +755,8 @@ async function collectBunjangKeyword(keyword, categoryId, limit, queryKeyword = 
         imageUrl: typeof row?.product_image === "string" ? row.product_image.replace("{res}", "640") : "",
         seller: row?.uid ? `user:${row.uid}` : "",
         postedAt: row?.update_time,
-        searchText: `${row?.name || ""} ${row?.tag || ""}`
+        searchText: `${row?.name || ""} ${row?.tag || ""}`,
+        lifecycleStatus: marketplaceLifecycleStatus(row?.status)
       })).filter(Boolean).filter((item) => matchesRequestedKeyword(item, queryKeyword || keyword))
         .filter((item) => !isObviousKeywordNoise(categoryId, item, queryKeyword || keyword));
       const floor = relativePriceFloor(recentItems);
@@ -789,6 +829,41 @@ function parseJoongnaItems(html) {
   return [];
 }
 
+function marketplaceLifecycleStatus(value) {
+  const normalized = String(value ?? "").trim().toUpperCase();
+  if (["0", "ACTIVE", "SELLING", "FORSALE", "ONSALE"].includes(normalized)) return "ACTIVE";
+  if (normalized === "1" || normalized === "RESERVED" || normalized === "HOLD") return "RESERVED";
+  if (["2", "SOLD", "SOLDOUT", "SOLD_OUT", "COMPLETED", "CLOSED"].includes(normalized)) return "SOLD";
+  return "UNAVAILABLE_UNKNOWN";
+}
+
+function hasExplicitSoldText(value) {
+  const text = clean(value, 1000).normalize("NFKC");
+  if (/(?:\d+|한|하나|두|둘|세|셋|네|넷)\s*(?:개|장|매)\s*중\s*(?:\d+|한|하나|두|둘|세|셋|네|넷)\s*(?:개|장|매)?\s*(?:만\s*)?판매\s*완료|남은\s*(?:\d+|한|하나|두|둘|세|셋|네|넷)\s*(?:개|장|매)\s*판매|일부\s*판매\s*완료/iu.test(text)) return false;
+  if (/미판매\s*완료/iu.test(text)) return false;
+  if (/(?:판매\s*완료|거래\s*완료|sold(?:\s*out)?).{0,12}(?:아님|아닙니다|아니며|오류|잘못|취소)/iu.test(text)) return false;
+  if (/(?:아직|현재|당분간).{0,12}(?:판매\s*완료|거래\s*완료|sold(?:\s*out)?).{0,8}(?:아님|아닙니다|아니)/iu.test(text)) return false;
+  if (/(?:판매\s*완료|거래\s*완료)\s*(?:되면|하면|시|후|예정|처리\s*예정)/iu.test(text)) return false;
+  return /판매\s*완료|거래\s*완료|\bsold(?:\s*out)?\b/iu.test(text);
+}
+
+function listingLifecycleStatus(item) {
+  const structured = marketplaceLifecycleStatus(item?.lifecycle_status ?? item?.status ?? item?.sale_status);
+  if (structured !== "UNAVAILABLE_UNKNOWN") return structured;
+  const text = `${clean(item?.title, 500)} ${clean(item?.description, 500)}`;
+  if (hasExplicitSoldText(text)) return "SOLD";
+  if (/예약\s*(?:중|완료)|\breserved\b/iu.test(text)) return "RESERVED";
+  return "UNAVAILABLE_UNKNOWN";
+}
+
+export function pcSearchQueryVariants(value) {
+  const original = clean(value, 80);
+  const spaced = original.replace(/(?<=[a-z0-9])[-_](?=[a-z0-9])/giu, " ").replace(/\s+/gu, " ").trim();
+  const optionalManufacturerPattern = /^(?:ASUS|GIGABYTE|MSI|ASROCK|ZOTAC|PALIT|GALAX|SAPPHIRE|POWERCOLOR|PNY|EVGA|XFX|SAMSUNG|삼성|SK\s*HYNIX|하이닉스|CRUCIAL|MICRON|CORSAIR|SEASONIC|MICRONICS|마이크로닉스|INTEL|인텔|AMD)\s+/iu;
+  const withoutManufacturer = original.replace(optionalManufacturerPattern, "").trim();
+  return [...new Set([original, spaced, withoutManufacturer].filter(Boolean))].slice(0, 3);
+}
+
 export function joongnaPagePlan(limit) {
   const safeLimit = Math.max(1, Math.min(Number(limit) || 1, SOURCE_CANDIDATE_MAX_ITEMS));
   const pageSize = 50;
@@ -802,7 +877,7 @@ async function collectJoongna(keyword, categoryId, limit, queryKeyword = "", sor
   const categoryIds = sourceCategoryIds("joonggonara", categoryId);
   const rawUrls = categoryIds.length > 0 && !queryKeyword
     ? categoryIds.map((sourceCategoryId) => `https://web.joongna.com/search?category=${encodeURIComponent(sourceCategoryId)}`)
-    : [`https://web.joongna.com/search/${encodeURIComponent(keyword)}`];
+    : pcSearchQueryVariants(queryKeyword || keyword).map((variant) => `https://web.joongna.com/search/${encodeURIComponent(variant)}`);
   let referenceItems = [];
   let adaptiveMinPrice = minimumPriceForSite("joonggonara", categoryId);
   if (sortMode === "price_asc" && queryKeyword && rawUrls.length === 1) {
@@ -820,17 +895,20 @@ async function collectJoongna(keyword, categoryId, limit, queryKeyword = "", sor
         imageUrl: row?.detailImgUrl || row?.url,
         seller: row?.storeSeq ? `store:${row.storeSeq}` : "",
         postedAt: row?.sortDate,
-        searchText: row?.title
+        searchText: row?.title,
+        lifecycleStatus: marketplaceLifecycleStatus(row?.state)
       })).filter(Boolean).filter((item) => matchesRequestedKeyword(item, queryKeyword))
         .filter((item) => !isObviousKeywordNoise(categoryId, item, queryKeyword));
       adaptiveMinPrice = Math.max(adaptiveMinPrice, relativePriceFloor(referenceItems));
     }
   }
   const { maxPages } = joongnaPagePlan(limit);
-  const pagesPerSource = rawUrls.length === 1 ? maxPages : 1;
+  const pagesPerSource = rawUrls.length === 1 ? maxPages : Math.min(2, maxPages);
   const urls = rawUrls.flatMap((rawUrl) => Array.from({ length: pagesPerSource }, (_, pageIndex) => {
     const url = new URL(rawUrl);
-    url.searchParams.set("sort", sortMode === "price_asc" ? "PRICE_ASC_SORT" : "RECENT_SORT");
+    if (!(queryKeyword && sortMode === "recent" && pageIndex === 0)) {
+      url.searchParams.set("sort", sortMode === "price_asc" ? "PRICE_ASC_SORT" : "RECENT_SORT");
+    }
     if (pageIndex > 0) url.searchParams.set("page", String(pageIndex + 1));
     const effectiveMinPrice = priceRange.min !== null
       ? Math.max(priceRange.min, categoryId === "free_share" ? 0 : minimumPriceForSite("joonggonara", categoryId))
@@ -862,7 +940,8 @@ async function collectJoongna(keyword, categoryId, limit, queryKeyword = "", sor
     imageUrl: row?.detailImgUrl || row?.url,
     seller: row?.storeSeq ? `store:${row.storeSeq}` : "",
     postedAt: row?.sortDate,
-    searchText: row?.title
+    searchText: row?.title,
+    lifecycleStatus: marketplaceLifecycleStatus(row?.state)
   })).filter(Boolean);
   const localMinPrice = priceRange.min !== null
     ? Math.max(priceRange.min, categoryId === "free_share" ? 0 : minimumPriceForSite("joonggonara", categoryId))
@@ -954,7 +1033,7 @@ async function collectHelloMarket(keyword, categoryId, limit, queryKeyword = "",
       receivedCount += recentRows.length;
       const upstreamStartTime = Number(recentPayload?.result?.startTime);
       if (Number.isFinite(upstreamStartTime)) startTime = upstreamStartTime;
-      const recentItems = recentRows.filter((row) => row?.sellState?.code !== "SoldOut").map((row) => sourceItem({
+      const recentItems = recentRows.map((row) => sourceItem({
         site: "hellomarket",
         categoryId,
         title: row?.title,
@@ -963,7 +1042,8 @@ async function collectHelloMarket(keyword, categoryId, limit, queryKeyword = "",
         imageUrl: row?.imageUrl,
         seller: "",
         postedAt: row?.timestamp,
-        searchText: `${row?.title || ""} ${(row?.categories || []).map((value) => value?.name || "").join(" ")}`
+        searchText: `${row?.title || ""} ${(row?.categories || []).map((value) => value?.name || "").join(" ")}`,
+        lifecycleStatus: marketplaceLifecycleStatus(row?.sellState?.code)
       })).filter(Boolean).filter((item) => !queryKeyword || matchesRequestedKeyword(item, queryKeyword))
         .filter((item) => !queryKeyword || !isObviousKeywordNoise(categoryId, item, queryKeyword));
       adaptiveMinPrice = relativePriceFloor(recentItems);
@@ -990,7 +1070,7 @@ async function collectHelloMarket(keyword, categoryId, limit, queryKeyword = "",
     const upstreamStartTime = Number(payload?.result?.startTime);
     if (Number.isFinite(upstreamStartTime)) startTime = upstreamStartTime;
     receivedCount += rows.length;
-    const pageItems = rows.filter((row) => row?.sellState?.code !== "SoldOut").map((row) => sourceItem({
+    const pageItems = rows.map((row) => sourceItem({
       site: "hellomarket",
       categoryId,
       title: row?.title,
@@ -999,7 +1079,8 @@ async function collectHelloMarket(keyword, categoryId, limit, queryKeyword = "",
       imageUrl: row?.imageUrl,
       seller: "",
       postedAt: row?.timestamp,
-      searchText: `${row?.title || ""} ${(row?.categories || []).map((value) => value?.name || "").join(" ")}`
+      searchText: `${row?.title || ""} ${(row?.categories || []).map((value) => value?.name || "").join(" ")}`,
+      lifecycleStatus: marketplaceLifecycleStatus(row?.sellState?.code)
     })).filter(Boolean).filter((item) => !queryKeyword || matchesRequestedKeyword(item, queryKeyword))
       .filter((item) => !queryKeyword || !isObviousKeywordNoise(categoryId, item, queryKeyword));
     items.push(...pageItems);
@@ -1185,8 +1266,8 @@ async function collectRethinkLivewire(html, pageResponse, pageUrl, categoryId, l
 
   const hasEnoughItems = () => (
     priceRange.min !== null
-      ? filterItemsByPriceRange(items, priceRange).length >= limit
-      : items.length >= limit
+      ? filterItemsByPriceRange([...new Map(items.map((item) => [item.id, item])).values()], priceRange).length >= limit
+      : new Set(items.map((item) => item.id)).size >= limit
   );
   const maxAdditionalPages = priceRange.min !== null
     ? Math.min(Math.max(8, Math.ceil(limit / 20)), 32)
@@ -1275,10 +1356,10 @@ async function getEbayAccessToken() {
   }
 }
 
-async function collectEbay(keyword, categoryId, limit) {
+async function collectEbay(keyword, categoryId, limit, queryKeyword = "") {
   const token = await getEbayAccessToken();
   const pcTarget = ebayTargetForCategory(categoryId);
-  const searchKeyword = ebaySearchKeyword(pcTarget?.query || keyword);
+  const searchKeyword = ebaySearchKeyword(queryKeyword || keyword || pcTarget?.query);
   const targetCount = Math.min(Math.max(Number(limit) || 1, 1), SOURCE_CANDIDATE_MAX_ITEMS);
   const items = [];
   let offset = 0;
@@ -1361,17 +1442,46 @@ async function collectOne(site, keyword, categoryId, limit, queryKeyword = keywo
   const pending = sourceSearchInflight.get(key);
   if (pending) return pending;
   const promise = (async () => {
-    const items = site === "bunjang"
-      ? await collectBunjang(keyword, categoryId, limit, queryKeyword, sortMode, priceRange)
+    const collectVariant = (variant) => site === "bunjang"
+      ? collectBunjang(variant, categoryId, limit, queryKeyword, sortMode, priceRange)
       : site === "joonggonara"
-        ? await collectJoongna(keyword, categoryId, limit, queryKeyword, sortMode, priceRange)
-      : site === "hellomarket"
-          ? await collectHelloMarket(keyword, categoryId, limit, queryKeyword, sortMode, priceRange)
+        ? collectJoongna(variant, categoryId, limit, queryKeyword, sortMode, priceRange)
+        : site === "hellomarket"
+          ? collectHelloMarket(variant, categoryId, limit, queryKeyword, sortMode, priceRange)
           : site === "rethinkmall"
-            ? await collectRethinkMall(keyword, categoryId, limit, queryKeyword, sortMode, priceRange)
+            ? collectRethinkMall(variant, categoryId, limit, queryKeyword, sortMode, priceRange)
             : site === "ebay"
-              ? await collectEbay(keyword, categoryId, limit)
-            : null;
+              ? collectEbay(variant, categoryId, limit, queryKeyword)
+              : Promise.resolve(null);
+    if (site === "joonggonara" || site === "ebay" || !queryKeyword) {
+      return filterItemsByPriceRange(await collectVariant(keyword), priceRange);
+    }
+    const variants = pcSearchQueryVariants(keyword);
+    const variantResults = [];
+    const variantErrors = [];
+    for (const variant of variants) {
+      try {
+        const result = await collectVariant(variant);
+        if (Array.isArray(result)) variantResults.push(result);
+      } catch (error) {
+        variantErrors.push(error);
+      }
+      const uniqueCount = new Set(variantResults.flat().map((item) => item?.id || canonicalListingKey(item))).size;
+      if (uniqueCount >= limit) break;
+    }
+    if (variantResults.length === 0) throw variantErrors[0] || new Error("SOURCE_UNAVAILABLE");
+    const items = dedupeItems(variantResults.flat(), limit);
+    items.received_count = variantResults.reduce((sum, result) => sum + (Number(result.received_count) || result.length), 0);
+    items.price_range_removed_count = variantResults.reduce((sum, result) => sum + (Number(result.price_range_removed_count) || 0), 0);
+    items.stale_cache = variantResults.some((result) => result.stale_cache === true);
+    const partialErrors = [
+      ...variantResults.map((result) => result.partial_error).filter(Boolean),
+      ...variantErrors.map((error) => String(error?.message || error))
+    ];
+    if (partialErrors.length > 0) items.partial_error = `PARTIAL_QUERY_VARIANT_FAILURE:${partialErrors.length}`;
+    const notices = variantResults.map((result) => result.partial_notice).filter(Boolean);
+    if (notices.length > 0) items.partial_notice = [...new Set(notices)].join("; ");
+    items.suggested_items = variantResults.flatMap((result) => Array.isArray(result.suggested_items) ? result.suggested_items : []);
     return filterItemsByPriceRange(items, priceRange);
   })();
   sourceSearchInflight.set(key, promise);
@@ -1496,6 +1606,14 @@ export async function collectLiveSite(site, body, limit, rawKeyword) {
 }
 
 function sourceSearchUrls(site, body) {
+  const explicitKeyword = clean(body?.keyword, 80);
+  if (explicitKeyword) {
+    const encoded = encodeURIComponent(explicitKeyword);
+    if (site === "bunjang") return [`https://m.bunjang.co.kr/search/products?keyword=${encoded}`];
+    if (site === "joonggonara") return [`https://web.joongna.com/search/${encoded}`];
+    if (site === "hellomarket") return [`https://www.hellomarket.com/search?q=${encoded}`];
+    if (site === "rethinkmall") return [`https://web.rethinkmall.com/search?utm_source=bu&keyword=${encoded}`];
+  }
   const categoryIds = categorySearchIds(body).filter((categoryId) => categoryId !== "all");
   const officialUrls = categoryIds.flatMap((categoryId) => {
     if (site === "bunjang") {
@@ -1579,7 +1697,6 @@ function hardExclusionReason(item, body) {
   const title = clean(item?.title, 500);
   if (!title || !clean(item?.url, 2000)) return "missing_required";
   if (!priceInRange(item, requestedPriceRange(body))) return "price_range";
-  if (/(?:판매|거래)\s*(?:완료|종료)|sold\s*out/i.test(title)) return "sold";
   if (/(?:^|[\s([{\/])(?:삽니다|구합니다|구해요|구함|구매글|구매합니다|구매해요|구매원합니다|매입합니다|매입해요)(?=$|[\s)\]}.,!?:\/])|최고가\s*매입|매입\s*문의|(?:팔아|판매해|나눔\s*해)\s*주실\s*분|구해\s*봅니다|구매\s*희망/i.test(title)) return "purchase_request";
   if (/^\s*\[?교환\]?|(?:교환|교신)\s*(?:원합니다|구합니다|해요|합니다|희망|하실\s*분|만|원함|봅니다)(?=$|[\s)\]}.,!?:\/])|(?:^|[\s([{\/])교환(?:만|원함|희망)(?=$|[\s)\]}.,!?:\/])|(?:^|[\s([{\/])교환\s*$/i.test(title)) return "exchange_only";
   if (/(?:^|\s)(?:광고|홍보)(?:\s|$)|구매\s*가이드|시세\s*(?:정보|안내)|가격\s*(?:문의|제시)|0원\s*(?:실화|특가)|요금제\s*(?:가입|조건)|사기\s*(?:당|피해|주의|$)|전\s*색상|선착순\s*(?:한정|특가)|할인\s*특가|특가\s*재고|재고\s*정리|마지막\s*재고|극\s*소량\s*재고|색상\s*별도\s*문의|별도\s*문의/i.test(title)) return "ad_or_guide";
@@ -1620,8 +1737,12 @@ function listingQualityScore(item, body, priceMedian, priceSampleSize) {
   const completeness = (isLikelyProductImage(item?.image_url) ? 7 : 0) + (clean(item?.seller_name || item?.seller, 200) ? 3 : 0);
   const trust = (/^https:\/\//i.test(clean(item?.url, 2000)) ? 6 : 2)
     + (SUPPORTED_LIVE_SITES.has(item?.site) ? 4 : 0);
-  const reservationPenalty = /예약\s*(?:중|완료)/i.test(clean(item?.title, 500)) ? 8 : 0;
-  relevance = Math.max(0, relevance - reservationPenalty);
+  const lifecyclePenalty = listingLifecycleStatus(item) === "SOLD"
+    ? 24
+    : listingLifecycleStatus(item) === "RESERVED"
+      ? 8
+      : 0;
+  relevance = Math.max(0, relevance - lifecyclePenalty);
   return relevance + freshness + priceReliability + completeness + trust;
 }
 
@@ -1715,12 +1836,18 @@ function selectQualifiedItems(items, limit, body) {
       && Number.isFinite(price)
       && price >= 100_000
       && price % 1_000 !== 0;
+    const lifecycleStatus = listingLifecycleStatus(item);
     return {
       ...item,
+      status: lifecycleStatus,
+      lifecycle_status: lifecycleStatus,
       score: listingQualityScore(item, body, priceMedian, prices.length),
       price_suspect: item?.price_suspect === true || priceSuspect,
       quality_suspect: item?.quality_suspect === true
         || (listingAgeDays(item) === null && item?.site !== "rethinkmall")
+        || listingIsStaleForPolicy(item, body)
+        || listingModelIsUnclearForStats(item, body)
+        || listingPcPriceScopeIsUnclearForStats(item, body)
         || conditionSuspect
         || commercialSuspect
         || sourceCommercialSuspect
@@ -1994,7 +2121,24 @@ function buildLivePayload(body, liveResults, fallbackPayload) {
       status: totalCount > 0 ? "ready" : "warning"
     };
   });
-  const prices = visibleItems.map((item) => item.price).filter((value) => typeof value === "number" && value > 0);
+  const metric = (scopeItems) => {
+    const scopeCurrencies = new Set(scopeItems.map((item) => clean(item?.currency, 10) || "KRW"));
+    const currency = scopeCurrencies.size === 1 ? [...scopeCurrencies][0] : scopeCurrencies.size > 1 ? "MIXED" : "KRW";
+    const prices = currency === "MIXED" ? [] : scopeItems.map((item) => item.price)
+      .filter((value) => typeof value === "number" && value > 0);
+    return {
+      sample_count: prices.length,
+      currency,
+      median_price: median(prices),
+      average_price: prices.length ? Math.round(prices.reduce((sum, value) => sum + value, 0) / prices.length) : null,
+      lowest_price: prices.length ? Math.min(...prices) : null,
+      highest_price: prices.length ? Math.max(...prices) : null
+    };
+  };
+  const trustedItems = visibleItems.filter((item) => !item.price_suspect && !item.quality_suspect && item.noise_filtered !== true);
+  const activeAsking = metric(trustedItems.filter((item) => listingLifecycleStatus(item) === "ACTIVE"));
+  const reservedAsking = metric(trustedItems.filter((item) => listingLifecycleStatus(item) === "RESERVED"));
+  const soldLastAsk = metric(trustedItems.filter((item) => listingLifecycleStatus(item) === "SOLD"));
   const liveCount = liveResults.filter((result) => result.items?.length > 0 && !result.stale_cache).length;
   const fallbackCount = sources.filter((source) => source.data_source === "fallback" || source.data_source === "unsupported").length;
   const unavailableCount = sources.filter((source) => source.data_source === "unavailable").length;
@@ -2033,11 +2177,22 @@ function buildLivePayload(body, liveResults, fallbackPayload) {
     summary: {
       item_count: visibleItems.length,
       source_count: visibleSources.filter((source) => source.visible_count > 0).length,
-      currency: new Set(visibleItems.map((item) => item.currency)).size === 1 ? (visibleItems[0]?.currency || "KRW") : "MIXED",
-      median_price: median(prices),
-      average_price: prices.length ? Math.round(prices.reduce((sum, value) => sum + value, 0) / prices.length) : null,
-      lowest_price: prices.length ? Math.min(...prices) : null,
-      highest_price: prices.length ? Math.max(...prices) : null,
+      currency: activeAsking.currency,
+      median_price: activeAsking.median_price,
+      average_price: activeAsking.average_price,
+      lowest_price: activeAsking.lowest_price,
+      highest_price: activeAsking.highest_price,
+      active_asking: activeAsking,
+      reserved_asking: reservedAsking,
+      sold_last_ask: soldLastAsk,
+      status_counts: {
+        active: visibleItems.filter((item) => listingLifecycleStatus(item) === "ACTIVE").length,
+        reserved: visibleItems.filter((item) => listingLifecycleStatus(item) === "RESERVED").length,
+        sold: visibleItems.filter((item) => listingLifecycleStatus(item) === "SOLD").length,
+        unknown: visibleItems.filter((item) => listingLifecycleStatus(item) === "UNAVAILABLE_UNKNOWN").length
+      },
+      unknown_count: visibleItems.filter((item) => listingLifecycleStatus(item) === "UNAVAILABLE_UNKNOWN").length,
+      sold_price_disclosure: "판매완료 직전 마지막 표시가격이며 실제 거래가격이 아닐 수 있습니다.",
       suspect_count: visibleItems.filter((item) => item.price_suspect || item.quality_suspect).length
     },
     market_snapshot: null,

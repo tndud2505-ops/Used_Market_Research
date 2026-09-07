@@ -12,9 +12,7 @@ export type NoiseFilterReason =
 
 const HARD_PRUNE_NOISE_REASONS = new Set<NoiseFilterReason>([
   "non_pc_product",
-  "faulty_or_parts_only",
-  "inactive_listing",
-  "stale_listing"
+  "faulty_or_parts_only"
 ]);
 
 type NoiseFilterCandidate = Pick<
@@ -344,7 +342,9 @@ function isPlaceholderPrice(price: number, listingScope: ReturnType<typeof getLi
 }
 
 function isFaultyOrPartsOnlyListing(item: NoiseFilterCandidate) {
-  const combinedText = `${item.title} ${item.raw_notes} ${item.detail_excerpt ?? ""}`.trim();
+  const combinedText = `${item.title} ${item.raw_notes} ${item.detail_excerpt ?? ""}`.trim()
+    .replace(/(?:고장|불량|작동\s*불가|미작동|정크|junk).{0,8}(?:아님|아닙니다|없음|없습니다|아니며)/giu, " ")
+    .replace(/(?:고장|불량)\s*(?:없음|무|제로)/giu, " ");
   if (!combinedText) {
     return false;
   }

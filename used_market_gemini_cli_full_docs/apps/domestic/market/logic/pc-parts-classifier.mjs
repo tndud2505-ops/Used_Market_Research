@@ -35,7 +35,8 @@ function addEvidence(evidence, field, matchedText, value) {
 }
 
 function detectCondition(text, evidence) {
-  const broken = firstMatch(text, /고장품?|부품용|화면\s*깨짐|파손|불량|작동\s*안[\s됨돼]|for\s+parts|not\s+working/i);
+  const defectScanText = text.replace(/(?:고장\s*(?:아님|아닙니다|없음|없습니다)|부품용\s*(?:아님|아닙니다)|불량\s*(?:아님|아닙니다|없음|없습니다)|작동\s*안\s*되는\s*것\s*아님)/giu, ' ');
+  const broken = firstMatch(defectScanText, /고장품?|부품용|화면\s*깨짐|파손|불량|작동\s*안[\s됨돼]|for\s+parts|not\s+working/i);
   if (broken) {
     addEvidence(evidence, 'condition', broken.matchedText, 'BROKEN');
     return 'BROKEN';
@@ -178,7 +179,9 @@ function detectSpecialKind(text, evidence, title = text) {
   const componentRichSystem = componentGroups.has('CPU') && componentGroups.has('RAM')
     && componentGroups.size >= 4;
   const cpuComponentWording = /컴퓨터.{0,20}\bCPU\b.{0,20}(?:RYZEN|라이젠|I[3579][ -]?\d{3,5}|\d{4,5}X(?:3D)?)/iu.test(title);
-  const clearDesktopSystem = !cpuComponentWording
+  const componentRemovalWording = componentGroups.size === 1
+    && /(?:분리|탈거|적출|장착\s*테스트|테스트\s*후|컴퓨터\s*부품|데스크탑\s*부품)/iu.test(title);
+  const clearDesktopSystem = !cpuComponentWording && !componentRemovalWording
     && /(?:중고|게임용|사무용|업무용|브랜드)\s*컴퓨터|(?:게임용|사무용|업무용)\s*(?:PC|데스크탑)|미니\s*컴퓨터|HP\s*(?:PRODESK|프로\s*데스크|PAVILION|파빌리온|일체형)|컴퓨터.{0,30}(?:RYZEN|라이젠|\d{4,5}X(?:3D)?|울트라\s*[3579]?[- ]?\d{3}[A-Z]*|I[3579][ -]?\d{4,5}[A-Z]*)|(?:RYZEN|라이젠|\d{4,5}X(?:3D)?|울트라\s*[3579]?[- ]?\d{3}[A-Z]*|I[3579][ -]?\d{4,5}[A-Z]*).{0,30}(?:데스크탑(?:\s*PC)?|컴퓨터\s*(?:팝니다|판매|급처)?)/iu.test(title);
   const fullSystem = explicitSystem || describedSystem || describedPortableSystem || namedPortableSystem
     || workstationSystem || describedCompactSystem || componentRichSystem || clearDesktopSystem;
@@ -268,6 +271,12 @@ function gpuModel(text) {
   if (gtx) return { model: `GTX ${gtx[1]}${gtx[2] ? ` ${gtx[2].toUpperCase()}` : ''}`, matchedText: gtx[0] };
   const rx = text.match(/\bRX\s*(\d{3,4})(?:\s*(XTX|XT))?\b/i);
   if (rx) return { model: `RX ${rx[1]}${rx[2] ? ` ${rx[2].toUpperCase()}` : ''}`, matchedText: rx[0] };
+  const arc = text.match(/\b(?:INTEL\s*)?ARC\s*([AB]\d{3})\b/i);
+  if (arc) return { model: `ARC ${arc[1].toUpperCase()}`, matchedText: arc[0] };
+  const radeonVii = text.match(/\b(?:AMD\s*)?RADEON\s*VII\b/i);
+  if (radeonVii) return { model: 'RADEON VII', matchedText: radeonVii[0] };
+  const vega = text.match(/\b(?:RADEON\s*)?(?:RX\s*)?VEGA\s*(56|64)\b/i);
+  if (vega) return { model: `RX VEGA ${vega[1]}`, matchedText: vega[0] };
   return null;
 }
 

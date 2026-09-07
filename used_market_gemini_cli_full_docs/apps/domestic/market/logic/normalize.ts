@@ -27,6 +27,22 @@ type InferredListingStatus = {
   saleStatus: "active" | "reserved" | "completed";
 };
 
+function isPartialSaleText(value: string): boolean {
+  const text = String(value || "").normalize("NFKC");
+  return /(?:(?:\d+|한|하나|두|둘|세|셋|네|넷)\s*(?:개|장|매)\s*중\s*(?:\d+|한|하나|두|둘|세|셋|네|넷)\s*(?:개|장|매)?\s*(?:만\s*)?판매\s*완료|남은\s*(?:\d+|한|하나|두|둘|세|셋|네|넷)\s*(?:개|장|매)\s*판매|일부\s*판매\s*완료)/iu.test(text);
+}
+
+function explicitSoldText(value: string): string | null {
+  const text = String(value || "").normalize("NFKC");
+  if (isPartialSaleText(text)) return null;
+  if (/(?:미판매\s*완료|판매\s*완료|거래\s*완료|sold(?:\s*out)?).{0,12}(?:아님|아닙니다|아니며|오류|잘못|취소)/iu.test(text)) return null;
+  if (/(?:아직|현재|당분간).{0,12}(?:판매\s*완료|거래\s*완료|sold(?:\s*out)?).{0,8}(?:아님|아닙니다|아니)/iu.test(text)) return null;
+  if (/(?:미판매\s*완료)/iu.test(text)) return null;
+  if (/(?:판매\s*완료|거래\s*완료)\s*(?:되면|하면|시|후|예정|처리\s*예정)/iu.test(text)) return null;
+  if (/(?:판매\s*완료|거래\s*완료).{0,20}(?:삭제|내립니다|내림|변경)\s*(?:예정)?/iu.test(text) && /(?:되면|하면|시|후|예정)/iu.test(text)) return null;
+  return text.match(/판매\s*완료|거래\s*완료|\bsold(?:\s*out)?\b/iu)?.[0] || null;
+}
+
 export interface NormalizeSearchResultOptions {
   detailByUrl?: Map<string, DetailLookupEntry> | Record<string, DetailLookupEntry>;
   additionalWarnings?: string[];
@@ -746,7 +762,7 @@ function inferListingStatus(
   const initialSaleStatus = item.sale_status;
   const combined = `${item.title} ${item.notes} ${detailText}`.replace(/\s+/g, " ").trim();
 
-  if (/판매완료|거래완료|sold\s*out|completed/i.test(combined)) {
+  if (explicitSoldText(combined) || /\bcompleted\b/i.test(combined)) {
     return {
       itemStatus: "sold",
       saleStatus: "completed"
@@ -896,4 +912,3 @@ export function normalizeSearchResult(
   });
   return result;
 }
-

@@ -131,7 +131,7 @@ function toImportItem(item) {
     quantity_confidence: Number(item.quantity_confidence || 0), price_scope_confidence: Number(item.price_scope_confidence || 0),
     statistics_eligible: item.statistics_eligible === true, statistics_exclusion_reasons: item.statistics_exclusion_reasons || [],
     price_scope: item.price_scope || "UNKNOWN", condition_code: item.condition_code || "UNKNOWN",
-    lifecycle_status: item.lifecycle_status || "ACTIVE", market_pool: item.market_pool || null,
+    lifecycle_status: item.lifecycle_status || "UNAVAILABLE_UNKNOWN", market_pool: item.market_pool || null,
     confidence: item.confidence || {}, evidence: item.evidence || {}, price_eligible: item.price_eligible === true,
     exclusion_reasons: item.exclusion_reasons || [], good_listing_eligible: item.good_listing_eligible === true,
     reference_price: item.reference_price ?? null

@@ -162,8 +162,14 @@ export function pcProductsResponse(urlOrRequest) {
 }
 
 export function pcCollectionTargetSetV2() {
-  const categoryEndpointSources = ["danawa", "ebay"];
-  const searchMarketplaceSources = ["joonggonara", "hellomarket", "bunjang", "rethinkmall", "coolenjoy"];
+  const operationalDirectorySources = new Set(PC_SOURCE_REGISTRY
+    .filter((source) => source.directory_source === true
+      && source.policy_status === "APPROVED"
+      && source.runtime_status === "ENABLED")
+    .map((source) => source.key));
+  const categoryEndpointSources = ["danawa", "ebay"].filter((source) => operationalDirectorySources.has(source));
+  const searchMarketplaceSources = ["joonggonara", "hellomarket", "bunjang", "rethinkmall", "coolenjoy"]
+    .filter((source) => operationalDirectorySources.has(source));
   const exactMasterSources = [...searchMarketplaceSources, "ebay"];
   const generalQueries = [
     ["GPU", "그래픽카드"],

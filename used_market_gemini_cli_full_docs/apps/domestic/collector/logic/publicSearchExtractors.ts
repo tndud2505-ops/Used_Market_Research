@@ -1185,8 +1185,9 @@ export async function tryExtractPublicSearchResult(
       return null;
     }
 
-     const items = products.slice(0, input.limit).map(mapJoonggonaraItem);
-     return buildResult(adapter, input, items, [], 0, [], buildSearchPagination(adapter, input, items.length));
+     const offset = parseOffsetCursor(input.cursor);
+     const items = products.slice(offset, offset + input.limit).map(mapJoonggonaraItem);
+     return buildResult(adapter, input, items, [], 0, [], buildSearchPagination(adapter, input, items.length, products.length));
   }
 
   if (adapter.siteKey === "ebay") {
