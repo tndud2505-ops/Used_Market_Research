@@ -25,7 +25,7 @@ USED-PICK의 기본 PC 화면은 원 사이트 실시간 검색을 실행하지 
 
 운영 디렉터리 source는 중고나라·번개장터·다나와 장터·헬로마켓·리씽크몰·eBay·쿨엔조이 7개다. 다나와의 PC 주요부품과 주변기기 카테고리는 11개 부품군에 직접 매핑한다. 리씽크몰은 `KR_REFURB_RETAIL`, eBay는 `OVERSEAS_USED`로 분리하며 국내 개인 중고 통계와 합치지 않는다.
 
-검색형 source는 매시간 11개 부품군의 19개 대표 검색을 먼저 수행하고, versioned master 전체를 24시간 간격으로 분할 순회한다. 현재 target set은 `pc-targets:2:full-master-v5`이며 총 955개 target이다. 공개 API 요청은 이 target을 실행하지 않는다.
+검색형 source는 매시간 11개 부품군의 19개 대표 검색을 먼저 수행하고, versioned master 전체를 24시간 간격으로 분할 순회한다. 현재 target set은 `pc-targets:2:full-master-v6`이며 총 955개 target이다. 공개 API 요청은 이 target을 실행하지 않는다.
 
 정상 공개 요청에도 HTTP 403을 반환하는 시점에는 우회·로그인·captcha 처리를 하지 않는다. 해당 source만 backoff·격리하고 마지막 정상 publication을 유지한다. 쿨엔조이는 공개 목록에서 확인되는 명시적 판매/판매완료 상태만 기록한다.
 
