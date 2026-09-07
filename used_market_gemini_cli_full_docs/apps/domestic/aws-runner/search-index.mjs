@@ -23,7 +23,7 @@ const SITE_RESULT_WINDOW_MAX = 640;
 const MISSING_PRICE_SORT_VALUE = 9_007_199_254_740_991;
 const PC_COLLECTION_NAMESPACE = "pc_parts_v1";
 const LEGACY_COLLECTION_NAMESPACE = "legacy_general";
-export const SEARCH_INDEX_SCHEMA_VERSION = 9;
+export const SEARCH_INDEX_SCHEMA_VERSION = 10;
 
 const DEFAULT_LIMITS = Object.freeze({
   maxActiveListings: 100_000,
@@ -318,7 +318,7 @@ export class SearchIndex {
       this.configure();
       const currentVersion = Number(this.db.prepare("PRAGMA user_version").get()?.user_version || 0);
       if (existingFileNeedsInspection && currentVersion < SEARCH_INDEX_SCHEMA_VERSION) {
-        this.createMigrationBackup(currentVersion);
+        if (!this.recentMigrationBackupExists(currentVersion)) this.createMigrationBackup(currentVersion);
       }
       this.migrate();
     } catch (error) {
@@ -682,7 +682,8 @@ export class SearchIndex {
       }
       // Full database checks are migration gates. Running them on every service
       // restart keeps the HTTP port closed for minutes once the index grows.
-      if (initialUserVersion < SEARCH_INDEX_SCHEMA_VERSION) {
+      const requiresFullMigrationGate = initialUserVersion > 0 && initialUserVersion < 8;
+      if (requiresFullMigrationGate) {
         const foreignKeyFailures = this.db.prepare("PRAGMA foreign_key_check").all();
         if (foreignKeyFailures.length > 0) throw new Error("SQLite migration failed foreign_key_check");
         const integrity = this.db.prepare("PRAGMA integrity_check").get()?.integrity_check;
@@ -1895,6 +1896,16 @@ export class SearchIndex {
       .sort((left, right) => right.modified - left.modified);
     for (const backup of backups.slice(3)) unlinkSync(backup.path);
     return destination;
+  }
+
+  recentMigrationBackupExists(fromVersion, maxAgeMs = DAY_MS) {
+    if (!this.backupDir || this.filePath === ":memory:" || !existsSync(this.backupDir)) return false;
+    const version = Number(fromVersion) || 0;
+    const pattern = new RegExp(`^search-index-pre-migration-v${version}-.*\\.sqlite$`, "u");
+    const cutoff = this.now() - maxAgeMs;
+    return readdirSync(this.backupDir)
+      .filter((name) => pattern.test(name))
+      .some((name) => statSync(path.join(this.backupDir, name)).mtimeMs >= cutoff);
   }
 
   createMigrationBackup(fromVersion) {
