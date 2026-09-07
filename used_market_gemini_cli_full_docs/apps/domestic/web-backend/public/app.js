@@ -217,7 +217,9 @@ async function fetchJson(url, options = {}) {
     method: "GET",
     headers: { Accept: "application/json" },
     credentials: "same-origin",
-    signal: options.signal,
+    signal: options.signal
+      ? AbortSignal.any([options.signal, AbortSignal.timeout(20000)])
+      : AbortSignal.timeout(20000),
   });
   let payload;
   try {

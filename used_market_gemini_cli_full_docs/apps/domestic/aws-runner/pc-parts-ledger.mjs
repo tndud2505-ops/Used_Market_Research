@@ -591,6 +591,8 @@ export class PcPartsLedger {
           created_at TEXT NOT NULL
         ) STRICT;
         CREATE INDEX IF NOT EXISTS idx_listing_snapshots_identity ON listing_snapshots(source_id, source_listing_id, observed_at DESC, id DESC);
+        CREATE INDEX IF NOT EXISTS idx_listing_snapshots_canonical_identity
+          ON listing_snapshots(pc_source_listing_identity(source_id, source_listing_id), observed_at, id);
         CREATE INDEX IF NOT EXISTS idx_listing_snapshots_status ON listing_snapshots(lifecycle_status, observed_at);
 
         CREATE TABLE IF NOT EXISTS normalized_listings (
@@ -2081,7 +2083,6 @@ export class PcPartsLedger {
     const identities = [...new Set((Array.isArray(rows) ? rows : []).map(priceStatsListingIdentity))].sort();
     const candidates = new Set(identities);
     const latest = new Map();
-    const sourceIdentitySql = "pc_source_listing_identity(s.source_id, s.source_listing_id)";
     const clusterIdentitySql = "'cluster:' || dc.cluster_key";
     const keepLatest = (identity, row) => {
       if (!candidates.has(identity)) return;
@@ -2098,12 +2099,15 @@ export class PcPartsLedger {
       const identityConditions = [];
       const identityBindings = [];
       if (sourceIdentities.length > 0) {
-        identityConditions.push(`${sourceIdentitySql} IN (${sourceIdentities.map(() => "?").join(", ")})`);
+        identityConditions.push(`SELECT id FROM listing_snapshots
+          WHERE pc_source_listing_identity(source_id, source_listing_id) IN (${sourceIdentities.map(() => "?").join(", ")})`);
         identityBindings.push(...sourceIdentities);
       }
       if (clusterIdentities.length > 0) {
-        identityConditions.push(`(dc.cluster_status = 'CONFIRMED' AND ${clusterIdentitySql} IN (${clusterIdentities.map(() => "?").join(", ")}))`);
-        identityBindings.push(...clusterIdentities);
+        identityConditions.push(`SELECT members.snapshot_id FROM duplicate_clusters clusters
+          JOIN duplicate_cluster_members members ON members.cluster_id = clusters.id
+          WHERE clusters.cluster_status = 'CONFIRMED' AND clusters.cluster_key IN (${clusterIdentities.map(() => "?").join(", ")})`);
+        identityBindings.push(...clusterIdentities.map((identity) => identity.slice("cluster:".length)));
       }
       const stateRows = this.db.prepare(`
         SELECT s.id, s.source_id, s.source_listing_id, s.observed_at, s.lifecycle_status, s.currency,
@@ -2116,7 +2120,7 @@ export class PcPartsLedger {
             AND n.parser_version = ? AND n.rule_version = ? AND n.filter_version = ?
           LEFT JOIN duplicate_cluster_members dcm ON dcm.snapshot_id = s.id
           LEFT JOIN duplicate_clusters dc ON dc.id = dcm.cluster_id
-         WHERE s.observed_at <= ? AND (${identityConditions.join(" OR ")})
+         WHERE s.observed_at <= ? AND s.id IN (${identityConditions.join(" UNION ")})
          ORDER BY s.observed_at, s.id
       `).all(normalizationVersion, parserVersion, ruleVersion, filterVersion, asOf, ...identityBindings);
       for (const row of stateRows) {
