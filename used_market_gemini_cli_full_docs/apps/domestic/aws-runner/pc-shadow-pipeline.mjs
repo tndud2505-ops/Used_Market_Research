@@ -170,6 +170,27 @@ export class PcShadowPipeline {
     if (!ledger) throw new TypeError("ledger is required");
     this.ledger = ledger;
     this.initialized = false;
+    this.priceReferenceCache = new Map();
+  }
+
+  priceReference(options) {
+    const key = [
+      options.canonicalProductId, options.marketPool, options.condition, options.currency,
+      options.normalizationVersion, options.parserVersion, options.ruleVersion, options.filterVersion,
+    ].join("\u0000");
+    const cached = this.priceReferenceCache.get(key);
+    if (cached && cached.expiresAt > Date.now()) return cached.stats;
+    const stats = this.ledger.getPriceStats(options);
+    if (this.priceReferenceCache.size >= 2_000) this.priceReferenceCache.clear();
+    this.priceReferenceCache.set(key, { stats, expiresAt: Date.now() + 5 * 60 * 1_000 });
+    return stats;
+  }
+
+  invalidatePriceReference(canonicalProductId) {
+    const prefix = `${canonicalProductId}\u0000`;
+    for (const key of this.priceReferenceCache.keys()) {
+      if (key.startsWith(prefix)) this.priceReferenceCache.delete(key);
+    }
   }
 
   async initialize() {
@@ -323,6 +344,12 @@ export class PcShadowPipeline {
       ? comparablePrices(price, classified.quantity, classified.price_scope)
       : { unitPrice: null, totalPrice: null };
     const state = lifecycle(item);
+    const previousLifecycleStatus = matched
+      ? this.ledger.latestSnapshot(source.key, sourceListingId(item))?.lifecycle_status || null
+      : null;
+    if (matched && previousLifecycleStatus && previousLifecycleStatus !== state.status) {
+      this.invalidatePriceReference(product.canonical_product_id);
+    }
     const listingMarketPool = classified.seller_type === "DEALER" && source.market_pools.includes("KR_DEALER_USED")
       ? "KR_DEALER_USED"
       : source.market_pool;
@@ -346,7 +373,7 @@ export class PcShadowPipeline {
       && publicClassified.statistics_eligible === true && statsExclusionReasons.length === 0;
     let stats = null;
     if (matched && priceEligible) {
-      stats = this.ledger.getPriceStats({
+      stats = this.priceReference({
         canonicalProductId: product.canonical_product_id,
         days: 30,
         marketPool: listingMarketPool,
@@ -433,6 +460,7 @@ export class PcShadowPipeline {
       classified,
       versions: effectiveVersions,
       state,
+      previousLifecycleStatus,
       price,
       prices,
       stats,
@@ -451,6 +479,7 @@ export class PcShadowPipeline {
       classified,
       versions,
       state,
+      previousLifecycleStatus,
       price,
       stats,
       reference,
@@ -492,6 +521,10 @@ export class PcShadowPipeline {
       normalized,
       versions
     });
+    if (normalized.canonicalProductId && (state.status !== "ACTIVE"
+      || (previousLifecycleStatus && previousLifecycleStatus !== state.status))) {
+      this.invalidatePriceReference(normalized.canonicalProductId);
+    }
     const activeVersion = this.ledger.getActivePipelineVersion?.();
     const rollbackVersion = activeVersion?.previous_version_key
       ? this.ledger.db.prepare("SELECT * FROM pc_pipeline_versions WHERE version_key = ?").get(activeVersion.previous_version_key)
@@ -528,6 +561,7 @@ export class PcShadowPipeline {
         confidence: 0.99,
         evidence: duplicate.evidence
       });
+      if (normalized.canonicalProductId) this.invalidatePriceReference(normalized.canonicalProductId);
     }
     const modelCandidateText = classified.canonical_model || unknownModelCandidate(item.title);
     if (!normalized.exactProduct && modelCandidateText) {

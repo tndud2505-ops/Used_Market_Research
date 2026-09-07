@@ -62,8 +62,6 @@ const COHORTS = [
 const mobileFacetMedia = window.matchMedia("(max-width: 640px)");
 const stackedLayoutMedia = window.matchMedia("(max-width: 1120px)");
 const compactFilterMedia = window.matchMedia("(max-width: 1120px)");
-const SCOPED_LISTING_AUTORUN_MODEL_LIMIT = 12;
-const SEARCH_LISTING_AUTORUN_MODEL_LIMIT = 30;
 const DEFAULT_QUICK_SOURCE_IDS = Object.freeze(["joonggonara", "bunjang"]);
 let browseListingTimer = null;
 let catalogSearchTimer = null;
@@ -994,7 +992,7 @@ function reloadListingsForControls(focusSourceValue) {
     loadProductDetail();
   }
   else if (shouldAutoLoadScopedListings()) loadListings(false);
-  else showScopedListings(0, { load: false });
+  else showScopedListings();
 }
 
 function renderSourceFilters() {
@@ -1295,37 +1293,25 @@ function resetDetail() {
 }
 
 function currentListingScopeTitle() {
-  if (state.query) return `“${state.query}” 검색 매물`;
+  const modelCount = Number.isFinite(Number(state.productTotal)) && Number(state.productTotal) > 0
+    ? ` · 모델 ${Number(state.productTotal).toLocaleString("ko-KR")}개`
+    : "";
+  if (state.query) return `“${state.query}” 검색 매물${modelCount}`;
   const category = state.categories.find((item) => categoryCode(item) === state.categoryCode);
   const selected = Object.entries(state.facets)
     .flatMap(([key]) => selectedFacetValues(key).map((value) => facetOptionLabel(key, value)))
     .slice(0, 3);
   const scope = [category ? categoryLabel(category) : "PC 부품", ...selected].join(" · ");
-  return `${scope} 현재 매물`;
-}
-
-function activeFacetValueCount() {
-  return Object.values(state.facets).reduce((total, values) => (
-    total + (Array.isArray(values) ? values.filter(Boolean).length : 0)
-  ), 0);
+  return `${scope} 현재 매물${modelCount}`;
 }
 
 function shouldAutoLoadScopedListings() {
   if (state.selectedProduct) return true;
   const total = Number.isFinite(Number(state.productTotal)) ? Number(state.productTotal) : state.products.length;
-  if (total <= 0) return false;
-  if (state.categoryCode && !state.query && activeFacetValueCount() === 0) return true;
-  if (state.query) return total <= SEARCH_LISTING_AUTORUN_MODEL_LIMIT;
-  return activeFacetValueCount() > 0 && total <= SCOPED_LISTING_AUTORUN_MODEL_LIMIT;
+  return total > 0;
 }
 
-function scopedListingHoldMessage() {
-  const total = Number.isFinite(Number(state.productTotal)) ? Number(state.productTotal) : state.products.length;
-  if (total <= 0) return "조건에 맞는 모델이 없습니다.";
-  return `검색된 모델 ${total.toLocaleString("ko-KR")}개. 모델을 선택하면 현재 매물과 일별 평균 가격 그래프를 봅니다.`;
-}
-
-function showScopedListings(listingDelayMs = 0, options = {}) {
+function showScopedListings(listingDelayMs = 0) {
   cancelListingRequest();
   state.detailRequest?.abort();
   state.detailRequest = null;
@@ -1351,10 +1337,10 @@ function showScopedListings(listingDelayMs = 0, options = {}) {
     : "선택한 조건에 맞는 모델이 없습니다.";
   dom.listingRows.replaceChildren();
   renderProducts();
-  if (options.load === false) {
-    dom.listingEmpty.hidden = true;
+  if (!shouldAutoLoadScopedListings()) {
+    dom.listingEmpty.hidden = false;
     renderListingPagination();
-    showListingMessage(scopedListingHoldMessage());
+    showListingMessage("");
     return;
   }
   if (listingDelayMs > 0) {
@@ -1372,7 +1358,7 @@ async function refreshBrowseScope(listingDelayMs = 0) {
   resetDetail();
   await loadProducts();
   if (state.selectedProduct) return;
-  showScopedListings(listingDelayMs, { load: shouldAutoLoadScopedListings() });
+  showScopedListings(listingDelayMs);
 }
 
 function closeModelDetail(restoreFocus = true) {

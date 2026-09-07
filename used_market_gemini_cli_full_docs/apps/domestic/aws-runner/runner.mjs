@@ -137,7 +137,7 @@ function throwIfAborted(signal) {
   throw signal.reason instanceof Error ? signal.reason : new Error("PC_SCHEDULER_ABORTED");
 }
 
-const PC_LEDGER_RECORD_YIELD_EVERY = 4;
+const PC_LEDGER_RECORD_YIELD_EVERY = 1;
 const PC_INDEX_WRITE_BATCH_SIZE = 25;
 
 function yieldToEventLoop() {
@@ -1299,7 +1299,8 @@ async function persistCollectedSearch(body, collected, { deep = false, complete 
     .flatMap((result) => result.items || []);
   const projectedByIdentity = new Map();
   if (pcPipeline) {
-    for (const item of shadowCandidates) {
+    for (let index = 0; index < shadowCandidates.length; index += 1) {
+      const item = shadowCandidates[index];
       try {
         const projected = pcPipeline.recordItem(item, observedAt);
         projectedByIdentity.set(String(item.item_id || item.id || item.url || ""), projected);
@@ -1307,26 +1308,34 @@ async function persistCollectedSearch(body, collected, { deep = false, complete 
         pcPipelineError = error instanceof Error ? error.message : String(error);
         console.warn("[aws-runner] PC shadow observation failed", pcPipelineError);
       }
+      if (index + 1 < shadowCandidates.length) await yieldToEventLoop();
     }
   }
-  const indexedItems = pcPipeline
-    ? collected.data.items.map((item) => {
-        const projected = projectedByIdentity.get(String(item.item_id || item.id || item.url || ""));
-        if (projected) return projected;
+  let indexedItems = collected.data.items;
+  if (pcPipeline) {
+    indexedItems = [];
+    for (let index = 0; index < collected.data.items.length; index += 1) {
+      const item = collected.data.items[index];
+      const projected = projectedByIdentity.get(String(item.item_id || item.id || item.url || ""));
+      if (projected) {
+        indexedItems.push(projected);
+      } else {
         try {
-          return pcPipeline.recordItem(item, observedAt);
+          indexedItems.push(pcPipeline.recordItem(item, observedAt));
         } catch (error) {
           pcPipelineError = error instanceof Error ? error.message : String(error);
           console.warn("[aws-runner] PC shadow observation failed", pcPipelineError);
-          return {
+          indexedItems.push({
             ...item,
             price_eligible: false,
             good_listing_eligible: false,
             exclusion_reasons: [...new Set([...(item.exclusion_reasons || []), "PC_PIPELINE_ERROR"])]
-          };
+          });
         }
-      })
-    : collected.data.items;
+      }
+      if (index + 1 < collected.data.items.length) await yieldToEventLoop();
+    }
+  }
   const ingest = searchIndex.ingest(body, indexedItems, {
     deep,
     complete,

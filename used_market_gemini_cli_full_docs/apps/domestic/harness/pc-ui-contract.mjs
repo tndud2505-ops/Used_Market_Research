@@ -60,10 +60,10 @@ requireText(script, 'params.set("sites", sourceIds.join(","))', "default listing
 
 requireText(script, "openSingleSearchResult", "a unique text result must still open directly");
 requireText(script, "showScopedListings", "category/facet search must return listings without choosing one model");
-requireText(script, "state.categoryCode && !state.query && activeFacetValueCount() === 0",
-  "selecting only a component category must immediately load current listings");
-requireText(script, "const SEARCH_LISTING_AUTORUN_MODEL_LIMIT = 30;",
-  "category-scoped searches like RAM 16GB must load current listings without forcing exact model selection first");
+requireText(script, "return total > 0;",
+  "every non-empty category, facet, or text scope must load current listings without a model-count gate");
+assert.equal(script.includes("LISTING_AUTORUN_MODEL_LIMIT"), false,
+  "broad listing searches must not stop at an arbitrary matching-model threshold");
 requireText(script, 'url.search = ""', "model search must drop stale facet query params");
 requireText(script, 'if (state.categoryCode) url.searchParams.set("category_code", state.categoryCode);',
   "text search must preserve the selected component category when one is active");
