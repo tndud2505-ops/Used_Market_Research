@@ -4699,6 +4699,117 @@ body.has-selected-product .model-filters {
   }
 }
 
+/* Compact listing results */
+.listing-row {
+  grid-template-columns: 56px minmax(0, 1fr) minmax(82px, auto);
+  min-height: 64px;
+  gap: 12px;
+  padding: 6px 0;
+}
+
+.listing-media {
+  width: 50px;
+  height: 50px;
+  grid-row: auto;
+  border-color: var(--line);
+}
+
+.listing-source {
+  margin: 0;
+  flex: 0 0 auto;
+  font-size: 10px;
+}
+
+.listing-time {
+  flex: 0 0 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.listing-meta > :not(:first-child)::before {
+  margin-right: 5px;
+  color: var(--line-strong);
+  content: "·";
+}
+
+.listing-title {
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 1.35;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.listing-meta {
+  min-width: 0;
+  margin-top: 4px;
+  flex-wrap: nowrap;
+  gap: 5px;
+  line-height: 1.25;
+}
+
+.listing-model-action {
+  min-width: 0;
+  min-height: 0;
+  max-width: 100%;
+  flex: 0 1 auto;
+  overflow: hidden;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.listing-commerce {
+  display: block;
+  min-width: 82px;
+  grid-column: auto;
+  grid-row: auto;
+  text-align: right;
+}
+
+.listing-price {
+  font-size: 14px;
+  font-weight: 850;
+}
+
+.listing-pagination {
+  padding: 10px 0 2px;
+}
+
+@media (max-width: 640px) {
+  .listing-row {
+    grid-template-columns: 48px minmax(0, 1fr) minmax(72px, auto);
+    min-height: 58px;
+    gap: 8px;
+    padding: 6px 0;
+  }
+
+  .listing-media {
+    width: 44px;
+    height: 44px;
+  }
+
+  .listing-commerce {
+    min-width: 72px;
+  }
+
+  .listing-price {
+    font-size: 13px;
+  }
+
+  .listing-time {
+    display: none;
+  }
+
+  .listing-page-direction {
+    min-width: 36px !important;
+    padding-right: 3px !important;
+    padding-left: 3px !important;
+  }
+}
+
 /* v76: align the title bar with the working surface and keep selected results beside filters */
 .site-header {
   width: 100%;

@@ -376,6 +376,15 @@ function formatDateTime(value) {
   }).format(date);
 }
 
+function formatListingTime(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return "";
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  return `${date.getMonth() + 1}.${date.getDate()} ${hours}:${minutes}`;
+}
+
 function safeHttpsUrl(value) {
   try {
     const url = new URL(value, window.location.origin);
@@ -1445,6 +1454,7 @@ function selectProduct(product) {
 
 function buildListingQuery(cursor = "") {
   const params = new URLSearchParams();
+  params.set("limit", "10");
   if (state.selectedProduct) {
     params.set("canonical_product_id", productId(state.selectedProduct));
   } else {
@@ -1672,19 +1682,20 @@ function renderListings() {
     }
     const body = createElement("div", "listing-body");
     const source = createElement("span", "listing-source", sourceLabel(firstDefined(listing.source_id, listing.site, listing.source)));
+    const observedAt = formatListingTime(firstDefined(listing.observed_at, listing.posted_at, listing.created_at, listing.updated_at));
     const title = createElement(url ? "a" : "span", "listing-title", titleText);
     if (url) {
       title.href = url;
       title.target = "_blank";
       title.rel = "noopener noreferrer";
     }
-    body.append(source, title);
+    body.append(title);
     const meta = createElement("div", "listing-meta");
     const canonicalModel = normalizeText(listing.canonical_display_name);
     const canonicalProductId = normalizeText(listing.canonical_product_id);
     if (!state.selectedProduct && canonicalModel) {
       if (canonicalProductId) {
-        const modelAction = createElement("button", "listing-model listing-model-action", `${canonicalModel} 시세`);
+        const modelAction = createElement("button", "listing-model listing-model-action", canonicalModel);
         modelAction.type = "button";
         modelAction.setAttribute("aria-label", `${canonicalModel} 가격 인사이트 보기`);
         modelAction.addEventListener("click", () => {
@@ -1701,24 +1712,16 @@ function renderListings() {
         meta.append(createElement("span", "listing-model", canonicalModel));
       }
     }
-    const maker = normalizeText(firstDefined(listing.board_manufacturer, listing.canonical_manufacturer, listing.manufacturer));
-    if (maker) meta.append(createElement("span", "listing-maker", maker));
-    meta.append(createElement("span", "listing-state", listingConditionLabel(firstDefined(listing.condition_code, listing.lifecycle_status, listing.status, listing.availability))));
-    meta.append(createElement("span", "listing-scope", listingScopeLabel(listing)));
-    body.append(meta);
-    const observed = createElement("div", "listing-observed");
-    const observedAt = formatDateTime(firstDefined(listing.observed_at, listing.posted_at, listing.created_at, listing.updated_at));
-    if (observedAt) observed.append(createElement("time", "", observedAt));
+    meta.append(source);
+    if (observedAt) meta.append(createElement("time", "listing-time", observedAt));
+    const lifecycle = normalizeText(firstDefined(listing.lifecycle_status, listing.status, listing.availability)).toUpperCase();
+    if (lifecycle === "RESERVED") meta.append(createElement("span", "listing-state", listingConditionLabel(lifecycle)));
+    const quantity = Math.max(1, Number(firstDefined(listing?.quantity, 1)) || 1);
+    if (quantity > 1) meta.append(createElement("span", "listing-scope", listingScopeLabel(listing)));
+    if (meta.childElementCount) body.append(meta);
     const commerce = createElement("div", "listing-commerce");
     commerce.append(createElement("span", "listing-price", listingPrice(listing)));
-    if (url) {
-      const action = createElement("a", "listing-action", "매물 보기");
-      action.href = url;
-      action.target = "_blank";
-      action.rel = "noopener noreferrer";
-      commerce.append(action);
-    }
-    row.append(media, body, observed, commerce);
+    row.append(media, body, commerce);
     dom.listingRows.append(row);
   });
   dom.listingEmpty.hidden = visibleListings.length > 0;

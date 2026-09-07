@@ -70,6 +70,7 @@ requireText(script, 'if (state.categoryCode) url.searchParams.set("category_code
 requireText(script, 'params.set("category_code", state.categoryCode)', "broad listing search must preserve the category");
 requireText(script, "params.append(key, value)", "broad listing search must preserve repeated facets");
 requireText(script, 'params.set("canonical_product_id", productId(state.selectedProduct))', "model selection must use an exact listing query");
+requireText(script, 'params.set("limit", "10")', "listing pages must stay compact enough to expose numbered navigation");
 requireText(script, "listing-model-action", "broad listing rows must offer direct model insight");
 requireText(script, "state.listingRequest", "listing and stats requests need independent cancellation");
 requireText(script, "function cancelListingRequest", "scope changes must cancel stale listing requests");
