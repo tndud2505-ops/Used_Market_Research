@@ -37,10 +37,15 @@ assert.equal(html.includes('id="model-directory"'), false, "the old persistent m
 assert.equal(html.includes('class="overview-panels"'), false, "the old two-panel model/price overview must be removed");
 assert.equal(html.includes('class="price-panel"'), false, "price insight must not occupy the main results layout");
 assert.equal(html.includes('id="model-pagination"'), false, "the removed model table must not retain pagination controls");
-requireText(html, '<dialog class="model-detail-dialog"', "model insight must use an in-page modal dialog");
-requireText(script, "dom.modelDetailDialog.showModal()", "selecting a model must open the insight dialog");
-requireText(script, "dom.modelDetailDialog.close()", "the insight dialog must be closable");
-requireText(script, 'addEventListener("cancel"', "Escape must close the insight dialog accessibly");
+requireText(html, '<aside class="model-detail-dialog"', "model insight must use an in-page analysis panel");
+assert.equal(html.includes('<dialog class="model-detail-dialog"'), false,
+  "the insight panel must not retain modal semantics");
+assert.equal(styles.includes(".model-detail-dialog::backdrop"), false,
+  "the inline insight panel must not retain backdrop styling");
+requireText(script, "dom.modelDetailDialog.hidden = false", "selecting a model must reveal the inline insight panel");
+requireText(script, "dom.modelDetailDialog.hidden = true", "the inline insight panel must be closable");
+requireText(script, 'document.addEventListener("keydown"', "the modeless panel must retain an Escape close action");
+requireText(script, 'event.key === "Escape"', "Escape must close the insight panel accessibly");
 requireText(script, 'dom.modelSelect.focus({ preventScroll: true })', "closing the dialog must restore model-selector focus");
 requireText(script, 'dom.modelSelect.value = ""', "a closed selected model must be selectable again");
 requireText(script, 'dom.modelSelect.addEventListener("change"', "the compact model selector must drive exact-model selection");
@@ -100,10 +105,11 @@ requireText(script, '"이미지 없음"', "missing images need an honest empty s
 requireText(styles, ".model-selector", "the model selector needs a dedicated compact layout");
 requireText(styles, ".source-choice", "site checkboxes need a readable inline layout");
 requireText(styles, "grid-column: 1 / -1", "site filters must wrap below model controls instead of clipping at zoomed widths");
-requireText(styles, ".model-detail-dialog", "the modal needs bounded desktop styling");
-requireText(styles, ".model-detail-dialog::backdrop", "the modal needs a clear backdrop");
-assert.match(styles, /@media \(max-width: 640px\)[\s\S]*?\.model-detail-dialog\s*\{[\s\S]*?100vw - 16px/u,
-  "the price dialog must fit narrow mobile viewports");
+requireText(styles, "body.has-selected-product .results-flow", "selected listings and analysis need a shared layout");
+requireText(styles, ".model-detail-dialog:not([hidden])", "the inline analysis panel needs explicit visible-state styling");
+requireText(styles, "position: sticky", "the desktop analysis panel must remain visible beside listings");
+assert.match(styles, /@media \(max-width: 1180px\)[\s\S]*?\.model-detail-dialog:not\(\[hidden\]\)\s*\{[\s\S]*?position: static/u,
+  "the analysis panel must return to document flow on narrower screens");
 requireText(styles, ".model-facet-values", "catalog facet choices must keep their dedicated grid");
 requireText(script, "mobileFacetMedia", "facet disclosures must follow responsive layout");
 requireText(script, "setListingOptionsCollapsed", "mobile sort/price controls must remain collapsible");

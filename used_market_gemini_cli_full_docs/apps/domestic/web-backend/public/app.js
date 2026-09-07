@@ -62,6 +62,7 @@ const COHORTS = [
 const mobileFacetMedia = window.matchMedia("(max-width: 640px)");
 const stackedLayoutMedia = window.matchMedia("(max-width: 1120px)");
 const compactFilterMedia = window.matchMedia("(max-width: 1120px)");
+const stackedInsightMedia = window.matchMedia("(max-width: 1180px)");
 const DEFAULT_QUICK_SOURCE_IDS = Object.freeze(["joonggonara", "bunjang"]);
 let browseListingTimer = null;
 let catalogSearchTimer = null;
@@ -1371,8 +1372,8 @@ async function refreshBrowseScope(listingDelayMs = 0) {
 }
 
 function closeModelDetail(restoreFocus = true) {
-  if (dom.modelDetailDialog.open) dom.modelDetailDialog.close();
-  document.body.classList.remove("has-model-dialog");
+  dom.modelDetailDialog.hidden = true;
+  document.body.classList.remove("has-model-insight");
   if (state.selectedProduct) {
     dom.modelSelect.value = "";
     const placeholder = dom.modelSelect.options[0];
@@ -1382,8 +1383,8 @@ function closeModelDetail(restoreFocus = true) {
 }
 
 function openModelDetail() {
-  if (!dom.modelDetailDialog.open) dom.modelDetailDialog.showModal();
-  document.body.classList.add("has-model-dialog");
+  dom.modelDetailDialog.hidden = false;
+  document.body.classList.add("has-model-insight");
 }
 
 function clearSelectedPriceTable() {
@@ -1449,6 +1450,9 @@ function selectProduct(product) {
   loadProductDetail();
   window.requestAnimationFrame(() => {
     dom.pricePanelTitle.focus({ preventScroll: true });
+    if (stackedInsightMedia.matches) {
+      dom.modelDetailDialog.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
   });
 }
 
@@ -2445,12 +2449,8 @@ dom.listingSortTabs.forEach((button) => {
   });
 });
 dom.modelDetailClose.addEventListener("click", () => closeModelDetail());
-dom.modelDetailDialog.addEventListener("cancel", (event) => {
-  event.preventDefault();
-  closeModelDetail();
-});
-dom.modelDetailDialog.addEventListener("click", (event) => {
-  if (event.target === dom.modelDetailDialog) closeModelDetail();
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !dom.modelDetailDialog.hidden) closeModelDetail();
 });
 dom.backToModels.addEventListener("click", () => {
   updateWorkspaceHeading();

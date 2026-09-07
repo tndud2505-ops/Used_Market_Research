@@ -3266,10 +3266,6 @@ body.has-selected-product .workspace-heading {
   box-shadow: 0 18px 48px rgb(20 31 25 / 18%);
 }
 
-.model-detail-dialog::backdrop {
-  background: rgb(24 35 29 / 42%);
-}
-
 .model-detail-window {
   max-height: inherit;
   overflow-y: auto;
@@ -3353,10 +3349,6 @@ body.has-selected-product .workspace-heading {
 
 .model-detail-dialog .stats-group {
   border-top: 1px solid var(--line-strong);
-}
-
-body.has-model-dialog {
-  overflow: hidden;
 }
 
 @media (max-width: 640px) {
@@ -4696,6 +4688,101 @@ body.has-selected-product .model-filters {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr);
     align-items: start;
+  }
+}
+
+/* v84: keep exact-model price analysis visible without covering the listings. */
+body.has-model-insight {
+  overflow: visible;
+}
+
+body.has-selected-product .results-flow {
+  display: grid;
+  grid-template-columns: minmax(520px, 1fr) minmax(340px, 400px);
+  column-gap: 24px;
+  align-items: start;
+}
+
+body.has-selected-product .catalog-message {
+  grid-column: 1 / -1;
+  grid-row: 1;
+}
+
+body.has-selected-product .listing-section {
+  grid-column: 1;
+  grid-row: 2;
+  min-width: 0;
+}
+
+.model-detail-dialog:not([hidden]) {
+  position: sticky;
+  inset: auto;
+  top: 64px;
+  display: block;
+  grid-column: 2;
+  grid-row: 2;
+  width: 100%;
+  max-width: none;
+  max-height: calc(100dvh - 80px);
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-top: 1px solid var(--ink);
+  border-radius: 0;
+  background: var(--surface);
+  box-shadow: none;
+}
+
+.model-detail-dialog:not([hidden]) .model-detail-header {
+  min-height: 56px;
+  padding: 10px 0 10px 14px;
+}
+
+.model-detail-dialog:not([hidden]) .price-panel-content {
+  padding: 12px 0 18px 14px;
+}
+
+.model-detail-dialog:not([hidden]) .selected-price-table {
+  min-width: 0;
+}
+
+.model-detail-dialog:not([hidden]) .selected-price-table th,
+.model-detail-dialog:not([hidden]) .selected-price-table td {
+  padding-right: 3px;
+  padding-left: 3px;
+  white-space: normal;
+}
+
+@media (max-width: 1180px) {
+  body.has-selected-product .results-flow {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 20px;
+  }
+
+  body.has-selected-product .listing-section {
+    grid-column: 1;
+    grid-row: 2;
+  }
+
+  .model-detail-dialog:not([hidden]) {
+    position: static;
+    grid-column: 1;
+    grid-row: 3;
+    width: 100%;
+    max-height: none;
+    scroll-margin-top: 12px;
+  }
+
+  .model-detail-dialog:not([hidden]) .model-detail-window {
+    max-height: none;
+    overflow: visible;
+  }
+
+  .model-detail-dialog:not([hidden]) .model-detail-header,
+  .model-detail-dialog:not([hidden]) .price-panel-content {
+    padding-right: 0;
+    padding-left: 0;
   }
 }
 
