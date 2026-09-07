@@ -129,6 +129,10 @@ assert.match(runnerScript, /if \(pcPublicReadsRecentlyActive\(\)\) return;/u,
   "the PC scheduler must yield to active public listing and price-stat reads");
 assert.doesNotMatch(runnerScript, /try\s*\{\s*searchIndex\.createBackup\(\);\s*pcLedger = new PcPartsLedger/u,
   "runner startup must not unconditionally VACUUM a multi-GB index before serving public reads");
+assert.match(runnerScript, /const categoryOnlyCatalogScope = Boolean/u,
+  "broad component listing requests must use the category index instead of a large product-id list");
+assert.match(runnerScript, /categoryCode: categoryOnlyCatalogScope \? query\.catalogScope\.categoryCode : ""/u,
+  "category-only public listing reads must pass the indexed component category to SearchIndex");
 assertOrdered(runnerScript, [
   "const runtimeBeforeRun = pcSchedulerRuntime[result.source_key] || getSourceRuntimeDefaults(result.source_key);",
   'if (result.status === "skipped")',

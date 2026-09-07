@@ -2196,11 +2196,17 @@ const server = http.createServer(async (req, res) => {
           ...query.catalogScope.facets
         }).models
         : null;
+      const categoryOnlyCatalogScope = Boolean(query.catalogScope?.categoryCode
+        && !query.catalogScope.query
+        && Object.keys(query.catalogScope.facets || {}).length === 0);
       const cursorState = decodePcListingsCursor(query, SEARCH_CURSOR_SECRET);
       const asOf = cursorState?.asOf || new Date().toISOString();
       const result = searchIndex.browsePcListings({
         ...query,
-        canonicalProductIds: catalogModels?.map((model) => model.canonical_product_id) ?? null,
+        categoryCode: categoryOnlyCatalogScope ? query.catalogScope.categoryCode : "",
+        canonicalProductIds: categoryOnlyCatalogScope
+          ? null
+          : catalogModels?.map((model) => model.canonical_product_id) ?? null,
         asOf,
         after: cursorState?.after || null
       });

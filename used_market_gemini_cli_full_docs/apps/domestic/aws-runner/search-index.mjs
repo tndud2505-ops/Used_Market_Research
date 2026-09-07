@@ -1048,6 +1048,7 @@ export class SearchIndex {
     const canonicalProductIds = Array.isArray(options.canonicalProductIds)
       ? [...new Set(options.canonicalProductIds.map((value) => cleanText(value, 300)).filter(Boolean))]
       : null;
+    const categoryCode = cleanText(options.categoryCode, 40).toUpperCase();
     const manufacturer = cleanText(options.manufacturer, 120);
     const boardManufacturer = cleanText(options.boardManufacturer, 120);
     const marketPool = cleanText(options.marketPool, 80);
@@ -1085,6 +1086,9 @@ export class SearchIndex {
     } else if (canonicalProductIds) {
       where.push("pc_canonical_product_id IN (SELECT value FROM json_each(?))");
       params.push(JSON.stringify(canonicalProductIds));
+    } else if (categoryCode) {
+      where.push("pc_category_code = ?");
+      params.push(categoryCode);
     }
     if (manufacturer) {
       where.push("(pc_canonical_manufacturer = ? OR pc_board_manufacturer = ?)");

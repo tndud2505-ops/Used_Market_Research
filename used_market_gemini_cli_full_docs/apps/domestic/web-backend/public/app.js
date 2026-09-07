@@ -1312,6 +1312,7 @@ function shouldAutoLoadScopedListings() {
   if (state.selectedProduct) return true;
   const total = Number.isFinite(Number(state.productTotal)) ? Number(state.productTotal) : state.products.length;
   if (total <= 0) return false;
+  if (state.categoryCode && !state.query && activeFacetValueCount() === 0) return true;
   if (state.query) return total <= SEARCH_LISTING_AUTORUN_MODEL_LIMIT;
   return activeFacetValueCount() > 0 && total <= SCOPED_LISTING_AUTORUN_MODEL_LIMIT;
 }
