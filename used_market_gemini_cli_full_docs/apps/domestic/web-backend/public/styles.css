@@ -4698,3 +4698,125 @@ body.has-selected-product .model-filters {
     align-items: start;
   }
 }
+
+/* v76: align the title bar with the working surface and keep selected results beside filters */
+.site-header {
+  width: 100%;
+  max-width: 1480px;
+  min-height: 48px;
+  height: 48px;
+  margin: 0 auto;
+  padding: 0 24px;
+  border-right: 1px solid var(--line);
+  border-left: 1px solid var(--line);
+  grid-template-columns: 136px minmax(320px, 620px) minmax(0, 1fr);
+  gap: 18px;
+}
+
+.brand {
+  min-height: 48px;
+  height: 48px;
+  align-items: center;
+  font-size: 17px;
+  line-height: 1;
+}
+
+.catalog-search {
+  height: 34px;
+  padding-left: 0;
+}
+
+.directory-shell,
+body:not(.has-selected-product) .directory-shell,
+body.has-selected-product .directory-shell {
+  max-width: 1480px;
+}
+
+.catalog-workspace,
+body.has-selected-product .catalog-workspace {
+  padding: 16px 24px 40px;
+}
+
+.workspace-heading,
+body.has-selected-product .workspace-heading {
+  grid-template-columns: 170px minmax(220px, 340px);
+  gap: 6px 12px;
+  margin-bottom: 10px;
+  padding-bottom: 10px;
+}
+
+.workspace-content {
+  grid-template-columns: 196px minmax(0, 1fr);
+  gap: 24px;
+}
+
+.model-filters,
+body.has-selected-product .model-filters {
+  width: 196px;
+  padding-right: 14px;
+}
+
+.results-flow,
+body.has-selected-product .results-flow {
+  grid-column: 2;
+  grid-row: 1;
+  width: auto;
+  min-width: 0;
+}
+
+.listing-section {
+  margin-top: 0;
+}
+
+@media (max-width: 1180px) {
+  .site-header {
+    max-width: none;
+    border-right: 0;
+    border-left: 0;
+  }
+
+  .workspace-content {
+    display: block;
+  }
+
+  .model-filters,
+  body.has-selected-product .model-filters {
+    width: auto;
+  }
+
+  .results-flow,
+  body.has-selected-product .results-flow {
+    width: 100%;
+  }
+}
+
+@media (max-width: 900px) {
+  .site-header {
+    grid-template-columns: 116px minmax(0, 1fr);
+    gap: 12px;
+    padding: 0 16px;
+  }
+}
+
+@media (max-width: 760px) {
+  .site-header {
+    height: auto;
+    min-height: 0;
+    grid-template-columns: minmax(0, 1fr);
+    padding: 0 12px 8px;
+  }
+
+  .brand {
+    height: 42px;
+    min-height: 42px;
+  }
+
+  .catalog-search {
+    height: 34px;
+  }
+
+  .workspace-heading,
+  body.has-selected-product .workspace-heading {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
