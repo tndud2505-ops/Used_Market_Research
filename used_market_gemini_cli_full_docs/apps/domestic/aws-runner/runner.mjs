@@ -100,8 +100,14 @@ const INDEX_SOFT_LIMIT_BYTES = Math.min(8 * 1024 * 1024 * 1024, Math.max(1024 * 
 const INDEX_HARD_LIMIT_BYTES = Math.min(16 * 1024 * 1024 * 1024, Math.max(INDEX_SOFT_LIMIT_BYTES + 512 * 1024 * 1024,
   Number.parseInt(process.env.RUNNER_INDEX_HARD_LIMIT_BYTES || String(4 * 1024 * 1024 * 1024), 10)
     || 4 * 1024 * 1024 * 1024));
+const BACKGROUND_REFRESH_ENABLED = String(process.env.RUNNER_BACKGROUND_REFRESH_ENABLED ?? "false").toLowerCase() === "true";
 const BACKGROUND_MAX_PER_HOUR = 12;
 const BACKGROUND_TICK_MS = 60_000;
+const INDEX_STARTUP_BACKUP_ENABLED = String(process.env.RUNNER_INDEX_STARTUP_BACKUP_ENABLED ?? "false").toLowerCase() === "true";
+const INDEX_BACKGROUND_MAINTENANCE_ENABLED = String(process.env.RUNNER_INDEX_BACKGROUND_MAINTENANCE_ENABLED ?? "false").toLowerCase() === "true";
+const INDEX_DAILY_BACKUP_ENABLED = String(process.env.RUNNER_INDEX_DAILY_BACKUP_ENABLED ?? "false").toLowerCase() === "true";
+const INDEX_STATUS_CACHE_TTL_MS = 10_000;
+const PC_READ_SCHEDULER_PAUSE_MS = 5_000;
 const PC_SCHEDULER_TICK_MS = 30_000;
 // Do not replay a multi-hour backlog synchronously during process startup.
 // The persisted per-target runtime still catches up on the normal cadence,
@@ -113,10 +119,10 @@ const PC_SOURCE_RECENT_MS = 2 * 60 * 60 * 1000;
 const PC_SHADOW_READY_MS = 7 * 24 * 60 * 60 * 1000;
 const PC_PUBLICATION_RECENT_MS = 26 * 60 * 60 * 1000;
 const PC_RECHECK_LIMIT_PER_RUN = 20;
-const PC_SOURCE_TARGETS_PER_RUN = Math.min(128, Math.max(20,
-  Number.parseInt(process.env.PC_SOURCE_TARGETS_PER_RUN || "64", 10) || 64));
+const PC_SOURCE_TARGETS_PER_RUN = Math.min(128, Math.max(4,
+  Number.parseInt(process.env.PC_SOURCE_TARGETS_PER_RUN || "12", 10) || 12));
 const PC_SOURCE_TARGET_CONCURRENCY = Math.min(8, Math.max(1,
-  Number.parseInt(process.env.PC_SOURCE_TARGET_CONCURRENCY || "6", 10) || 6));
+  Number.parseInt(process.env.PC_SOURCE_TARGET_CONCURRENCY || "2", 10) || 2));
 const PC_EXTERNAL_FETCH_TIMEOUT_MS = 30_000;
 const PC_SCHEDULER_WATCHDOG_MS = Math.min(30 * 60 * 1000, Math.max(5 * 60 * 1000,
   Number.parseInt(process.env.PC_SCHEDULER_WATCHDOG_MS || String(20 * 60 * 1000), 10) || 20 * 60 * 1000));
@@ -250,6 +256,9 @@ let backgroundRefreshActive = false;
 let backgroundWindowStartedAt = Date.now();
 let backgroundRunsThisHour = 0;
 let lastMaintenanceDate = "";
+let lastPcPublicReadAt = 0;
+let indexRuntimeStatusCache = { expiresAt: 0, value: null };
+let pcOperationalReadinessCache = { expiresAt: 0, value: null };
 const searchExecutionStorage = new AsyncLocalStorage();
 const searchRuntimeMetrics = {
   index_page_reads_total: 0,
@@ -257,6 +266,27 @@ const searchRuntimeMetrics = {
   source_collection_attempts_total: 0,
   index_ingest_commits_total: 0
 };
+
+function markPcPublicRead() {
+  lastPcPublicReadAt = Date.now();
+}
+
+function pcPublicReadsRecentlyActive() {
+  return lastPcPublicReadAt > 0 && Date.now() - lastPcPublicReadAt < PC_READ_SCHEDULER_PAUSE_MS;
+}
+
+function pcPartsLedgerMigrationNeedsBackup(db) {
+  try {
+    const table = db.prepare(`
+      SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'pc_parts_schema_migrations'
+    `).get();
+    if (!table) return true;
+    const version = Number(db.prepare("SELECT MAX(version) AS version FROM pc_parts_schema_migrations").get()?.version || 0);
+    return version < 9;
+  } catch {
+    return true;
+  }
+}
 
 if (INDEX_ENABLED) {
   try {
@@ -267,7 +297,11 @@ if (INDEX_ENABLED) {
     });
     if (PC_PARTS_SHADOW_WRITE_ENABLED) {
       try {
-        searchIndex.createBackup();
+        const databaseSize = typeof searchIndex.databaseSizeBytes === "function" ? searchIndex.databaseSizeBytes() : 0;
+        if (INDEX_STARTUP_BACKUP_ENABLED
+          || (databaseSize > 10 * 1024 * 1024 && pcPartsLedgerMigrationNeedsBackup(searchIndex.db))) {
+          searchIndex.createBackup();
+        }
         pcLedger = new PcPartsLedger({ db: searchIndex.db });
         pcLedger.migrate();
         pcPipeline = new PcShadowPipeline({ ledger: pcLedger });
@@ -882,7 +916,7 @@ function recentTimestamp(value, maxAgeMs, now = Date.now()) {
   return Number.isFinite(parsed) && parsed <= now && now - parsed <= maxAgeMs;
 }
 
-function pcOperationalReadiness() {
+function computePcOperationalReadiness() {
   const now = Date.now();
   const requiredSources = PC_SOURCE_REGISTRY.filter((source) => (
     source.directory_source === true && source.policy_status === "APPROVED" && source.runtime_status === "ENABLED"
@@ -979,6 +1013,16 @@ function pcOperationalReadiness() {
   };
 }
 
+function pcOperationalReadiness() {
+  const now = Date.now();
+  if (pcOperationalReadinessCache.value && pcOperationalReadinessCache.expiresAt > now) {
+    return pcOperationalReadinessCache.value;
+  }
+  const value = computePcOperationalReadiness();
+  pcOperationalReadinessCache = { value, expiresAt: now + INDEX_STATUS_CACHE_TTL_MS };
+  return value;
+}
+
 function runnerStatus() {
   const readiness = pcOperationalReadiness();
   return {
@@ -1008,7 +1052,7 @@ function runnerStatus() {
   };
 }
 
-function indexRuntimeStatus() {
+function computeIndexRuntimeStatus() {
   if (!searchIndex) return {
     enabled: false,
     error: searchIndexError || (INDEX_ENABLED ? "unavailable" : "disabled"),
@@ -1042,6 +1086,16 @@ function indexRuntimeStatus() {
   status.process_instance = PROCESS_INSTANCE;
   status.request_metrics = { ...searchRuntimeMetrics };
   return status;
+}
+
+function indexRuntimeStatus() {
+  const now = Date.now();
+  if (indexRuntimeStatusCache.value && indexRuntimeStatusCache.expiresAt > now) {
+    return indexRuntimeStatusCache.value;
+  }
+  const value = computeIndexRuntimeStatus();
+  indexRuntimeStatusCache = { value, expiresAt: now + INDEX_STATUS_CACHE_TTL_MS };
+  return value;
 }
 
 function searchOnlyItem(site, item) {
@@ -1565,6 +1619,7 @@ function pcSourceAdapter(sourceKey) {
 
 async function runPcSourceSchedulerTick() {
   if (!PC_PARTS_SCHEDULER_ENABLED || !pcPipeline || !pcLedger || pcSchedulerActive) return;
+  if (pcPublicReadsRecentlyActive()) return;
   pcSchedulerActive = true;
   const through = new Date().toISOString();
   const tickSignal = AbortSignal.timeout(PC_SCHEDULER_WATCHDOG_MS);
@@ -1740,6 +1795,7 @@ async function runPcSourceSchedulerTick() {
   } finally {
     pcSchedulerAfter = through;
     pcSchedulerActive = false;
+    pcOperationalReadinessCache.expiresAt = 0;
   }
 }
 
@@ -1760,6 +1816,7 @@ async function refreshIndexedSearch(body, { incremental = true, deep = false, to
 }
 
 function queueIndexedRefresh(body) {
+  if (!BACKGROUND_REFRESH_ENABLED) return null;
   if (!searchIndex || !searchIndex.canBackgroundWrite()) return null;
   const job = searchIndex.createRefreshJob(body);
   queueMicrotask(() => { void runBackgroundRefreshTick(); });
@@ -1998,16 +2055,18 @@ function requestForIndexedQuery(query) {
 }
 
 async function runBackgroundRefreshTick() {
+  if (!BACKGROUND_REFRESH_ENABLED) return;
   if (!searchIndex || backgroundRefreshActive || !refreshBudgetAvailable()) return;
   if (activeSearchJobs >= Math.max(1, SEARCH_MAX_CONCURRENT - 1) || waitingSearchJobs.length > 0) return;
   if (!searchIndex.canBackgroundWrite()) return;
 
   const today = new Date().toISOString().slice(0, 10);
-  if (lastMaintenanceDate !== today) {
+  if (INDEX_BACKGROUND_MAINTENANCE_ENABLED && lastMaintenanceDate !== today) {
     lastMaintenanceDate = today;
     try {
       searchIndex.maintenance();
-      searchIndex.createBackup();
+      if (INDEX_DAILY_BACKUP_ENABLED) searchIndex.createBackup();
+      indexRuntimeStatusCache.expiresAt = 0;
     } catch (error) {
       console.warn("[aws-runner] index maintenance failed", error instanceof Error ? error.message : String(error));
     }
@@ -2126,6 +2185,7 @@ const server = http.createServer(async (req, res) => {
     if (!tokenMatches((req.headers.authorization || "").replace(/^Bearer\s+/i, ""), RUNNER_TOKEN)) {
       return json(res, 401, { ok: false, error: "Unauthorized" });
     }
+    markPcPublicRead();
     if (!searchIndex) return json(res, 503, { status: "error", error: "PC listing projection is unavailable" });
     try {
       const query = parsePcListingsRequest(url, { allowedSites: PC_DIRECTORY_SITES });
@@ -2179,6 +2239,7 @@ const server = http.createServer(async (req, res) => {
     if (!tokenMatches((req.headers.authorization || "").replace(/^Bearer\s+/i, ""), RUNNER_TOKEN)) {
       return json(res, 401, { ok: false, error: "Unauthorized" });
     }
+    markPcPublicRead();
     if (!pcLedger) return json(res, 503, { status: "error", error: "PC parts ledger is unavailable" });
     let query;
     try {
@@ -2347,14 +2408,16 @@ server.listen(PORT, "0.0.0.0", () => {
   console.log(`[aws-runner] listening on ${PORT}; targets=${TARGET_SITES.join(",")}`);
 });
 
-const backgroundTimer = setInterval(() => { void runBackgroundRefreshTick(); }, BACKGROUND_TICK_MS);
-backgroundTimer.unref();
+const backgroundTimer = BACKGROUND_REFRESH_ENABLED
+  ? setInterval(() => { void runBackgroundRefreshTick(); }, BACKGROUND_TICK_MS)
+  : null;
+backgroundTimer?.unref();
 const pcSchedulerTimer = setInterval(() => { void runPcSourceSchedulerTick(); }, PC_SCHEDULER_TICK_MS);
 pcSchedulerTimer.unref();
 
 for (const signal of ["SIGTERM", "SIGINT"]) {
   process.once(signal, () => {
-    clearInterval(backgroundTimer);
+    if (backgroundTimer) clearInterval(backgroundTimer);
     clearInterval(pcSchedulerTimer);
     try { searchIndex?.close(); } catch {}
     server.close(() => process.exit(0));

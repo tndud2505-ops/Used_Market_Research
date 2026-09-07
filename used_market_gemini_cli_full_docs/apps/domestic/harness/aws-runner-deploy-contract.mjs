@@ -119,6 +119,16 @@ assert.match(runnerScript, /const PC_SCHEDULER_CATCHUP_MS = 0;/u,
   "runner startup must not synchronously replay a multi-hour scheduler backlog");
 assert.match(runnerScript, /pcLedger\.getStoredDailyPriceStats/u,
   "public price-stat reads must use stored daily aggregates instead of rebuilding from raw ledger rows");
+assert.match(runnerScript, /const BACKGROUND_REFRESH_ENABLED = String\(process\.env\.RUNNER_BACKGROUND_REFRESH_ENABLED \?\? "false"\)/u,
+  "legacy background refresh must be opt-in so it cannot starve public PC reads");
+assert.match(runnerScript, /const INDEX_STARTUP_BACKUP_ENABLED = String\(process\.env\.RUNNER_INDEX_STARTUP_BACKUP_ENABLED \?\? "false"\)/u,
+  "large startup index backups must be opt-in outside schema migrations");
+assert.match(runnerScript, /const INDEX_BACKGROUND_MAINTENANCE_ENABLED = String\(process\.env\.RUNNER_INDEX_BACKGROUND_MAINTENANCE_ENABLED \?\? "false"\)/u,
+  "large background index maintenance must be opt-in on the public runner");
+assert.match(runnerScript, /if \(pcPublicReadsRecentlyActive\(\)\) return;/u,
+  "the PC scheduler must yield to active public listing and price-stat reads");
+assert.doesNotMatch(runnerScript, /try\s*\{\s*searchIndex\.createBackup\(\);\s*pcLedger = new PcPartsLedger/u,
+  "runner startup must not unconditionally VACUUM a multi-GB index before serving public reads");
 assertOrdered(runnerScript, [
   "const runtimeBeforeRun = pcSchedulerRuntime[result.source_key] || getSourceRuntimeDefaults(result.source_key);",
   'if (result.status === "skipped")',
