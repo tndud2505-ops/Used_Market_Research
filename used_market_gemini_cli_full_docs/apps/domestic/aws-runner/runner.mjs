@@ -2198,7 +2198,7 @@ const server = http.createServer(async (req, res) => {
         ruleVersion: activePipelineVersion.rule_version,
         filterVersion: activePipelineVersion.filter_version
       } : {};
-      const stats = pcLedger.rebuildAndGetPriceStats({
+      const stats = pcLedger.getPriceStats({
         canonicalProductId: query.canonicalProductId,
         days: query.days,
         marketPool: query.marketPool,
@@ -2207,18 +2207,9 @@ const server = http.createServer(async (req, res) => {
         asOf,
         ...priceVersionOptions
       });
-      const memberCount = pcLedger.traceStatMembers({
-        canonicalProductId: query.canonicalProductId,
-        marketPool: query.marketPool,
-        condition: query.condition,
-        currency: query.currency,
-        days: query.days,
-        asOf,
-        ...priceVersionOptions
-      }).length;
       return json(res, 200, {
         status: "success",
-        data: priceStatsResponse(query, { ...stats, traceability: { member_count: memberCount } })
+        data: priceStatsResponse(query, { ...stats, traceability: { member_count: null } })
       });
     } catch (error) {
       return json(res, 503, { status: "error", error: error instanceof Error ? error.message : String(error) });
