@@ -66,6 +66,24 @@ assert.deepEqual(catalogScopedPcListingsRequest.catalogScope.facets.module_capac
 assert.deepEqual(catalogScopedPcListingsRequest.catalogScope.facets.manufacturer, ["SK hynix", "Samsung"]);
 assert.equal(catalogScopedPcListingsRequest.manufacturer, "",
   "manufacturer is a catalog facet whenever category_code defines a multi-model scope");
+const sortedCatalogScopeWithoutCurrency = parsePcListingsRequest(
+  "https://used-pick.test/api/pc/listings?category_code=RAM&q=16GB&sort=price_asc",
+  { allowedSites: [] }
+);
+assert.equal(sortedCatalogScopeWithoutCurrency.currency, "KRW",
+  "catalog-scoped price sorting defaults to KRW instead of failing the public UI");
+const sortedDomesticSiteWithoutCurrency = parsePcListingsRequest(
+  "https://used-pick.test/api/pc/listings?sites=danawa&sort=price_desc",
+  { allowedSites: ["danawa"] }
+);
+assert.equal(sortedDomesticSiteWithoutCurrency.currency, "KRW",
+  "domestic source price sorting defaults to KRW");
+const sortedEbayWithoutCurrency = parsePcListingsRequest(
+  "https://used-pick.test/api/pc/listings?sites=ebay&sort=price_asc",
+  { allowedSites: ["ebay"] }
+);
+assert.equal(sortedEbayWithoutCurrency.currency, "USD",
+  "eBay-only price sorting defaults to USD");
 const reversedCatalogScopedRequest = parsePcListingsRequest(
   "https://used-pick.test/api/pc/listings?manufacturer=SK%20hynix&manufacturer=Samsung&module_capacity_gb=16&category_code=RAM",
   { allowedSites: [] }

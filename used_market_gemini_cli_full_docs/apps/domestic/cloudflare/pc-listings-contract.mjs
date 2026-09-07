@@ -76,7 +76,7 @@ export function parsePcListingsRequest(urlOrRequest, { allowedSites = [] } = {})
   if (requestedSites.some((site) => !allowed.has(site))) throw new TypeError("unsupported site filter");
   const sort = text(url.searchParams.get("sort"), 30) || "recent";
   if (!SORTS.has(sort)) throw new TypeError("sort must be recent, price_asc, or price_desc");
-  const currency = text(url.searchParams.get("currency"), 12).toUpperCase() || null;
+  let currency = text(url.searchParams.get("currency"), 12).toUpperCase() || null;
   if (currency && !CURRENCIES.has(currency)) throw new TypeError("currency must be KRW or USD");
   const marketPool = text(url.searchParams.get("market_pool"), 80).toUpperCase() || null;
   if (marketPool && !MARKET_POOLS.has(marketPool)) throw new TypeError("unsupported market_pool filter");
@@ -91,6 +91,14 @@ export function parsePcListingsRequest(urlOrRequest, { allowedSites = [] } = {})
   const minPrice = price(url.searchParams.get("price_min") ?? url.searchParams.get("min_price"), "price_min");
   const maxPrice = price(url.searchParams.get("price_max") ?? url.searchParams.get("max_price"), "price_max");
   if (minPrice !== null && maxPrice !== null && minPrice > maxPrice) throw new TypeError("price_min must be <= price_max");
+  if (!currency && (sort !== "recent" || minPrice !== null || maxPrice !== null)) {
+    const explicitSitesAreDomestic = requestedSites.length > 0 && requestedSites.every((site) => site !== "ebay");
+    if (marketPool === "OVERSEAS_USED" || (requestedSites.length > 0 && requestedSites.every((site) => site === "ebay"))) {
+      currency = "USD";
+    } else if (catalogScope || DOMESTIC_MARKET_POOLS.has(marketPool) || explicitSitesAreDomestic) {
+      currency = "KRW";
+    }
+  }
   if (!currency && (sort !== "recent" || minPrice !== null || maxPrice !== null)) {
     throw new TypeError("currency is required for price sorting or price filters");
   }
