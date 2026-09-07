@@ -1524,7 +1524,7 @@ try {
   assert.equal(pcReadD1PrepareCalls, 0);
 
   const fallbackManifestAt = new Date().toISOString();
-  const fallbackTargetId = "pc-target:2:category-v5:GPU";
+  const fallbackTargetId = "pc-target:2:category-v6:GPU";
   d1.prepare(`INSERT INTO pc_listing_collection_manifests(
     source_id, as_of, manifest_version, successful_target_ids_json, successful_target_count, mirrored_at
   ) VALUES ('danawa', ?, 'pc-listing-collection-v1', ?, 1, ?)`).run(
@@ -1743,9 +1743,9 @@ const d1ListingItemsBeforeFreshnessMirror = structuredClone(workerListingsPayloa
 const sourceRuntimeCollectedAt = new Date(Date.now() - 30_000).toISOString();
 const unrelatedSourceRuntimeCollectedAt = new Date(Date.now() - 5_000).toISOString();
 const freshnessTargetIds = Object.freeze({
-  bunjangGpu: "pc-target:2:market-v5:GPU:0",
-  danawaGpu: "pc-target:2:category-v5:GPU",
-  danawaCpu: "pc-target:2:category-v5:CPU"
+  bunjangGpu: "pc-target:2:market-v6:GPU:0",
+  danawaGpu: "pc-target:2:category-v6:GPU",
+  danawaCpu: "pc-target:2:category-v6:CPU"
 });
 const mirrorCollectionManifest = async (sourceId, asOf, successfulTargetIds) => {
   const response = await worker.fetch(new Request("https://used-pick.test/admin/import-listings", {
