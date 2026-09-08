@@ -1,4 +1,4 @@
-import { shiftDate } from './pc-tools-core.mjs?v=coverage-v3';
+import { shiftDate } from './pc-tools-core.mjs?v=coverage-v4';
 
 // A small, keyboard-accessible calendar; the input also accepts a typed date.
 export function createDatePicker(root, { id, label }) {

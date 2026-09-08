@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { SERIES, metricValue, metricIsConsistent, buildTotals, compatibility, groupProducts, validateBuild, dailySeries, percentChange, overviewIndex, priceDateRange, shiftDate, sourceStats, coherentStats, modelPageItems } from '../web-backend/public/pc-tools-core.mjs';
+import { SERIES, money, metricValue, metricIsConsistent, buildTotals, compatibility, groupProducts, validateBuild, dailySeries, percentChange, overviewIndex, priceDateRange, shiftDate, sourceStats, coherentStats, modelPageItems } from '../web-backend/public/pc-tools-core.mjs';
 import { pcCatalogResponse } from '../cloudflare/pc-directory-http.mjs';
 const p = (id, category, name, specs = {}) => ({ canonical_product_id: id, category_code: category, canonical_display_name: name, key_specs: specs });
 const cpu = p('cpu', 'CPU', 'CPU 5600', { socket: 'AM4' });
@@ -18,6 +18,7 @@ assert.equal(metricValue({ sample_count: 1, min: 100, max: 100, mean: null, medi
 assert.equal(metricIsConsistent({ sample_count: 1, min: 100, max: 100, mean: null, median: null }), true,
   'a valid low-sample asking price must not be treated as an integrity failure');
 assert.equal(SERIES.find((series) => series.key === 'active').label, '판매중 가격');
+assert.equal(money(1234.5, 'USD'), '$1,234.50');
 const totals = buildTotals(entries, e => ({ active: { mean: e.id === 'cpu' ? 100 : 50, sample_count: 5 }, sold: e.id === 'cpu' ? { mean: 80, sample_count: 5 } : null }));
 assert.equal(totals.active.amount, 200);
 assert.equal(totals.sold.amount, 80);

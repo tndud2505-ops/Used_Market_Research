@@ -96,6 +96,7 @@ assert.equal(compactStats.includes("confirmed_transactions"), false,
 requireText(script, "sourceRows(data)", "site price rows and charts must use actual per-source evidence");
 requireText(script, "sourceRowsWithEvidence", "sites without price evidence must not render in analysis");
 requireText(script, "sourceRowsWithCoherentSummary", "contradictory source averages must stay out of the visible comparison");
+requireText(script, "metricHasCoherentSummary", "valid one- or two-listing site evidence must remain selectable without inventing an average");
 requireText(script, "statsWithCoherentSources", "invalid source summaries must be removed before chart and summary aggregation");
 requireText(script, "mean < minimum", "a source average below its minimum must be rejected");
 requireText(script, "renderPriceChart", "the dialog must retain the daily chart renderer");
@@ -206,6 +207,10 @@ assert.equal(coherentStats.by_source.length, 1,
   "invalid sources must not remain in the visible source comparison");
 assert.equal(coherentStats.integrity_filtered_source_ids[0], "invalid",
   "a removed source must remain identifiable as awaiting a statistics refresh");
+assert.equal(context.metricHasCoherentSummary({ sample_count: 1, min: 50000, max: 50000, mean: null, median: null }), true,
+  "one exact asking price is valid site evidence even when no aggregate average is published");
+assert.equal(context.metricDisplayValue({ sample_count: 1, min: 50000, max: 50000, mean: null, median: null }, "KRW").amount, 50000,
+  "one exact asking price must be displayed as evidence without being promoted to an aggregate mean");
 const pendingStats = context.statsWithCoherentSources({
   by_source: [{ source_id: "invalid", active: { sample_count: 1, min: 200, max: 200, mean: 50 } }],
 });

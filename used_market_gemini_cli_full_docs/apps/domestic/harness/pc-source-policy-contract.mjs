@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
-import { buildLivePayload, collectOne, matchesRequestedKeyword, pcSearchQueryVariants, resetEbayAccessTokenCacheForTests } from "../cloudflare/live-search.mjs";
+import { buildLivePayload, collectOne, matchesRequestedKeyword, parseHelloMarketDetailHtml, pcSearchQueryVariants, resetEbayAccessTokenCacheForTests } from "../cloudflare/live-search.mjs";
 import { filterCategoryItems } from "../cloudflare/category-filter.mjs";
 import { OPERATIONAL_PC_DIRECTORY_SITES, OPERATIONAL_TARGET_SITES } from "../cloudflare/target-sites.mjs";
 import {
@@ -254,6 +254,12 @@ assert.equal(validateSourceActivation("joonggonara", {
 
 assert.equal(explicitSoldText("2개 중 1개 판매완료, 남은 1개 판매"), null);
 assert.equal(explicitSoldText("판매완료"), "판매완료");
+const helloSsdDetail = parseHelloMarketDetailHtml(`<meta name="description" content="삼성 850 PRO 512GB SSD 여러 개 판매합니다."/><meta name="keywords" content="SSD,저장장치"/><meta property="og:image" content="https://ccimg.hellomarket.com/item.jpg"/>`, "https://www.hellomarket.com/item/183908019");
+assert.equal(helloSsdDetail.description, "삼성 850 PRO 512GB SSD 여러 개 판매합니다.");
+assert.equal(helloSsdDetail.keywords, "SSD,저장장치");
+assert.equal(helloSsdDetail.image_url, "https://ccimg.hellomarket.com/item.jpg");
+const helloPcDetail = parseHelloMarketDetailHtml(`<meta name="description" content="16GB 5TB 윈도우 10프로 모든게임 잘돌아갑니다"/><meta name="keywords" content="본체,컴퓨터"/>`, "https://www.hellomarket.com/item/182653333");
+assert.match(`${helloPcDetail.description} ${helloPcDetail.keywords}`, /본체|컴퓨터/u);
 assert.deepEqual(pcSearchQueryVariants("Intel i5-7400"), ["Intel i5-7400", "Intel i5 7400", "i5-7400"],
   "PC keyword collection must use bounded punctuation and manufacturer variants");
 

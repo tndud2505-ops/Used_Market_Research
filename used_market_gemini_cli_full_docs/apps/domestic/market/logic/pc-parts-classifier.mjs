@@ -145,8 +145,13 @@ function detectSpecialKind(text, evidence, title = text) {
   const denseSystemConfiguration = hasGpuModel && hasCpuConfigurationModel
     && hasMemoryConfiguration && hasStorageConfiguration
     && !/(?:에서|으로)\s*(?:테스트|사용)|호환|장착\s*테스트/iu.test(title);
-  if (compactSlashSystem || denseSystemConfiguration) {
-    addEvidence(evidence, 'listing_kind', title, 'FULL_SYSTEM');
+  const describedSystemConfiguration = combinedHasGpuModel
+    && /(?:\b(?:RAM|DDR[345])\b|\b(?:8|16|24|32|48|64|96|128)\s*G(?:B)?\b)/iu.test(text)
+    && /\b(?:128|240|250|256|480|500|512)\s*G(?:B)?\b|\b(?:1|2|4|5|8)\s*T(?:B)?\b|\b(?:SSD|HDD|NVME|M\.2)\b/iu.test(text)
+    && /(?:본체|컴퓨터|데스크탑|윈도우\s*(?:10|11)|WINDOWS\s*(?:10|11)|모든\s*게임)/iu.test(text)
+    && !/(?:에서|으로)\s*(?:테스트|사용)|호환|장착\s*테스트|탈거|분리/iu.test(text);
+  if (compactSlashSystem || denseSystemConfiguration || describedSystemConfiguration) {
+    addEvidence(evidence, 'listing_kind', describedSystemConfiguration ? text : title, 'FULL_SYSTEM');
     return 'FULL_SYSTEM';
   }
   const componentGroups = new Set();

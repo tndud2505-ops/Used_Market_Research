@@ -1,4 +1,4 @@
-import { idOf, coherentStats } from './pc-tools-core.mjs?v=coverage-v3';
+import { idOf, coherentStats } from './pc-tools-core.mjs?v=coverage-v4';
 
 export async function readJson(url, signal) {
   const request = new AbortController();
@@ -15,7 +15,10 @@ export async function readJson(url, signal) {
   } finally { clearTimeout(timeout); signal?.removeEventListener('abort', abort); }
 }
 
-export function createPriceStore(onChange) {
+export function createPriceStore(onChange, options = {}) {
+  const marketPool = String(options.marketPool || 'KR_C2C_USED');
+  const condition = String(options.condition || 'USED_WORKING');
+  const currency = String(options.currency || 'KRW').toUpperCase();
   const cache = new Map();
   let generation = 0;
   let controller = new AbortController();
@@ -38,7 +41,7 @@ export function createPriceStore(onChange) {
         cache.set(key, { state: 'loading' });
         onChange();
         try {
-          const params = new URLSearchParams({ days: String(days), market_pool: 'KR_C2C_USED', condition: 'USED_WORKING', currency: 'KRW' });
+          const params = new URLSearchParams({ days: String(days), market_pool: marketPool, condition, currency });
           if (asOf) params.set('as_of', asOf);
           const data = await readJson(`/api/products/${encodeURIComponent(id)}/price-stats?${params}`, signal);
           if (signal.aborted) break;
@@ -46,8 +49,8 @@ export function createPriceStore(onChange) {
           const scope = data.methodology || {};
           if (scope.days != null && Number(scope.days) !== days) throw new Error('가격 집계 기간이 일치하지 않습니다.');
           if (asOf && data.window?.to !== asOf) throw new Error('요청한 날짜의 가격 기록이 아닙니다.');
-          if ((scope.currency && scope.currency !== 'KRW') || (scope.market_pool && scope.market_pool !== 'KR_C2C_USED')
-            || (scope.condition && scope.condition !== 'USED_WORKING')) throw new Error('가격 집계 범위가 일치하지 않습니다.');
+          if ((scope.currency && scope.currency !== currency) || (scope.market_pool && scope.market_pool !== marketPool)
+            || (scope.condition && scope.condition !== condition)) throw new Error('가격 집계 범위가 일치하지 않습니다.');
           cache.set(key, { state: 'ready', data: coherentStats(data), loadedAt: Date.now() });
         } catch (error) {
           if (signal.aborted) { if (current === generation && cache.get(key)?.state === 'loading') cache.delete(key); break; }

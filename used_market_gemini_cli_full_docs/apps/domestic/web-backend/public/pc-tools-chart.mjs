@@ -1,4 +1,4 @@
-import { SERIES, money } from './pc-tools-core.mjs?v=coverage-v3';
+import { SERIES, money } from './pc-tools-core.mjs?v=coverage-v4';
 const ns = 'http://www.w3.org/2000/svg';
 const svgNode = (name, attrs = {}, text = '') => {
   const element = document.createElementNS(ns, name);
@@ -7,7 +7,7 @@ const svgNode = (name, attrs = {}, text = '') => {
   return element;
 };
 
-export function drawChart(container, series, { index = false, label = '가격 변화', selectedDate = '' } = {}) {
+export function drawChart(container, series, { index = false, label = '가격 변화', selectedDate = '', currency = 'KRW' } = {}) {
   container.replaceChildren();
   const points = series.flatMap(s => s.points).filter(p => p.value != null);
   if (!points.length) {
@@ -29,7 +29,7 @@ export function drawChart(container, series, { index = false, label = '가격 �
   for (let i = 0; i < 5; i++) {
     const value = low + (high - low) * i / 4;
     svg.append(svgNode('line', { x1: left, x2: width - right, y1: y(value), y2: y(value), stroke: '#e5ddd2' }));
-    svg.append(svgNode('text', { x: left - 10, y: y(value) + 4, 'text-anchor': 'end' }, index ? value.toFixed(1) : Math.round(value).toLocaleString('ko-KR')));
+    svg.append(svgNode('text', { x: left - 10, y: y(value) + 4, 'text-anchor': 'end' }, index ? value.toFixed(1) : currency === 'USD' ? `$${value.toLocaleString('en-US', { maximumFractionDigits: 0 })}` : Math.round(value).toLocaleString('ko-KR')));
   }
   [...new Set([0, Math.floor((dates.length - 1) / 3), Math.floor((dates.length - 1) * 2 / 3), dates.length - 1])].forEach(i => {
     svg.append(svgNode('text', { x: x(dates[i]), y: height - 10, 'text-anchor': 'middle' }, dates[i].slice(5).replace('-', '/')));
@@ -42,7 +42,7 @@ export function drawChart(container, series, { index = false, label = '가격 �
       path += `${drawing ? 'L' : 'M'}${x(point.date)},${y(point.value)} `;
       drawing = true;
       const dot = svgNode('circle', { cx: x(point.date), cy: y(point.value), r: 3, fill: color });
-      dot.append(svgNode('title', {}, `${point.date} ${index ? point.value.toFixed(1) : money(point.value)}`));
+      dot.append(svgNode('title', {}, `${point.date} ${index ? point.value.toFixed(1) : money(point.value, currency)}`));
       svg.append(dot);
     });
     svg.append(svgNode('path', { d: path, fill: 'none', stroke: color, 'stroke-width': 2, 'stroke-dasharray': key === 'sold' ? '6 3' : key === 'confirmed_transactions' ? '2 3' : 'none' }));
@@ -57,7 +57,7 @@ export function drawChart(container, series, { index = false, label = '가격 �
     const definition = SERIES.find(s => s.key === key);
     const value = points.find(p => p.date === date)?.value;
     const span = document.createElement('span'); span.className = `series-${key}`;
-    span.textContent = `${definition.label} ${value == null ? '—' : index ? value.toFixed(1) : money(value)}`;
+    span.textContent = `${definition.label} ${value == null ? '—' : index ? value.toFixed(1) : money(value, currency)}`;
     detail.append(span);
   });
   container.append(detail);

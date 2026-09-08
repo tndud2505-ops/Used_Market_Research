@@ -28,6 +28,15 @@ assert.equal(structuredSoldEvidenceFromHtml(
   `<script type="application/ld+json">{"name":"다른 상품","offers":{"availability":"https://schema.org/SoldOut"}}</script>`,
   { source_listing_id: "target-3080", title: "RTX 3080 정상 작동", url: "https://example.test/item/target-3080" }
 ), null, "unrelated JSON-LD SoldOut is not listing evidence");
+const helloMarketFullPc = classifyPcPartListing({
+  title: "RTX3060",
+  description: "16GB 5TB 윈도우 10프로 모든게임 잘돌아갑니다 본체,컴퓨터",
+  price: 500000,
+  currency: "KRW"
+});
+assert.equal(helloMarketFullPc.listing_kind, "FULL_SYSTEM",
+  "a model-only HelloMarket title must use public detail specifications to reject a complete PC");
+assert.equal(helloMarketFullPc.price_eligible, false);
 const qualityProbe = evaluatePcQualityDataset([{ id: "quality-probe", input: { title: "RTX 3080" }, truth: {
   category_code: "GPU", canonical_model: "RTX 3080", quantity: 1, price_scope: "TOTAL",
   listing_kind: "SINGLE_COMPONENT", lifecycle_status: "ACTIVE", market_pool: "KR_C2C_USED", duplicate: false

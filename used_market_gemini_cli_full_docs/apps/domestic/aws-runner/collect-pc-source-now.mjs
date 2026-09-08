@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { collectOne } from "../cloudflare/live-search.mjs";
+import { collectOne, enrichHelloMarketDetails } from "../cloudflare/live-search.mjs";
 import { pcCollectionTargetSetV2 } from "../cloudflare/pc-directory-http.mjs";
 import {
   PC_SOURCE_REGISTRY,
@@ -49,6 +49,8 @@ const collectTargetOffset = Math.max(0, Number.parseInt(process.env.PC_COLLECT_T
 const collectTargetLimit = process.env.PC_COLLECT_TARGET_LIMIT
   ? Math.min(200, Math.max(1, Number.parseInt(process.env.PC_COLLECT_TARGET_LIMIT, 10) || 1))
   : null;
+const helloMarketDetailLimit = Math.min(120, Math.max(0,
+  Number.parseInt(process.env.PC_HELLOMARKET_DETAIL_LIMIT || "40", 10) || 0));
 
 const DANAWA_REQUEST_MIN_INTERVAL_MS = 650;
 let lastDanawaRequestAt = 0;
@@ -261,6 +263,9 @@ try {
           ? item.raw_payload : { ...item, source_listing_id: sourceListingId }
       });
     }
+  }
+  if (sourceKey === "hellomarket" && helloMarketDetailLimit > 0) {
+    await enrichHelloMarketDetails([...deduped.values()], { maxItems: helloMarketDetailLimit });
   }
   settled.forEach((result, index) => ledger.updateSourceTargetRuntime({
     sourceId: sourceKey,

@@ -7,7 +7,13 @@ export const SERIES = [
 export const idOf = p => String(p?.canonical_product_id || '');
 export const nameOf = p => String(p?.canonical_display_name || '모델 미확인');
 export const naturalCompare = (a, b) => String(a).localeCompare(String(b), 'ko', { numeric: true, sensitivity: 'base' });
-export const money = value => value == null || !Number.isFinite(value) ? '자료 없음' : `${Math.round(value).toLocaleString('ko-KR')}원`;
+export const money = (value, currency = 'KRW') => {
+  if (value == null || !Number.isFinite(value)) return '자료 없음';
+  const code = String(currency || 'KRW').toUpperCase();
+  if (code === 'KRW') return `${Math.round(value).toLocaleString('ko-KR')}원`;
+  if (code === 'USD') return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }).format(value);
+  return `${Number(value).toLocaleString('ko-KR')} ${code}`;
+};
 export function metricValue(metric) {
   if (!(Number(metric?.sample_count) > 0)) return null;
   for (const key of ['mean', 'median']) {

@@ -1983,13 +1983,43 @@ function metricHasCoherentAverage(block) {
   return true;
 }
 
+function metricHasCoherentSummary(block) {
+  const count = Number(sampleCount(block) || 0);
+  if (count <= 0) return false;
+  const minimum = block?.min == null ? null : Number(block.min);
+  const maximum = block?.max == null ? null : Number(block.max);
+  const mean = block?.mean == null ? null : Number(firstDefined(block.mean, block.average, block.avg, block.mean_price));
+  const median = block?.median == null ? null : Number(block.median);
+  if (Number.isFinite(minimum) && Number.isFinite(maximum) && minimum > maximum) return false;
+  if (mean !== null && (!Number.isFinite(mean) || mean <= 0)) return false;
+  if (median !== null && (!Number.isFinite(median) || median <= 0)) return false;
+  if (Number.isFinite(mean) && Number.isFinite(minimum) && minimum > 0 && mean < minimum) return false;
+  if (Number.isFinite(mean) && Number.isFinite(maximum) && maximum > 0 && mean > maximum) return false;
+  if (Number.isFinite(median) && Number.isFinite(minimum) && minimum > 0 && median < minimum) return false;
+  if (Number.isFinite(median) && Number.isFinite(maximum) && maximum > 0 && median > maximum) return false;
+  if (count >= 5) return Number.isFinite(mean) && mean > 0;
+  if (count >= 3) return Number.isFinite(median) && median > 0;
+  return Number.isFinite(minimum) && minimum > 0 && Number.isFinite(maximum) && maximum >= minimum;
+}
+
+function metricDisplayValue(block, currency) {
+  const aggregate = metricValue(block, ["mean", "average", "avg", "mean_price", "median", "median_price"], currency);
+  if (aggregate) return aggregate;
+  const count = Number(sampleCount(block) || 0);
+  const minimum = Number(block?.min);
+  const maximum = Number(block?.max);
+  return count > 0 && Number.isFinite(minimum) && minimum > 0 && minimum === maximum
+    ? normalizePrice(minimum, currency)
+    : null;
+}
+
 function sourceRowsWithCoherentSummary(data) {
   return sourceRowsWithEvidence(data).filter((row) => {
     const sampled = [
       row?.active,
       firstDefined(row?.sold, row?.sold_last_ask),
     ].filter((block) => Number(sampleCount(block) || 0) > 0);
-    return sampled.length > 0 && sampled.every(metricHasCoherentAverage);
+    return sampled.length > 0 && sampled.every(metricHasCoherentSummary);
   });
 }
 
@@ -2034,11 +2064,12 @@ function sourceEvidenceRow(label, data, currency) {
     const block = firstDefined(data?.[entry.key], entry.key === "sold" ? data?.sold_last_ask : null, {});
     const count = Number(sampleCount(block) || 0);
     const item = createElement("span", `${entry.key}-metric`);
-    const hasMetric = metricHasCoherentAverage(block);
+    const displayValue = metricDisplayValue(block, currency);
+    const hasMetric = metricHasCoherentSummary(block) && Boolean(displayValue);
     item.classList.toggle("is-empty", !hasMetric);
     item.append(
       createElement("small", "", entry.label),
-      createElement("strong", "", hasMetric ? formatMoney(metricValue(block, entry.keys, currency), currency) : "—"),
+      createElement("strong", "", hasMetric ? formatMoney(displayValue, currency) : "—"),
       createElement("em", "", `${count.toLocaleString("ko-KR")}건`),
     );
     metrics.append(item);
