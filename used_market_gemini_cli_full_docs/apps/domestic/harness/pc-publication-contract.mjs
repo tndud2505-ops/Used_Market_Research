@@ -12,6 +12,7 @@ import { parsePriceStatsRequest, priceStatsResponse } from "../aws-runner/pc-pri
 
 const runnerSource = await readFile(new URL("../aws-runner/runner.mjs", import.meta.url), "utf8");
 const statsRunnerSource = await readFile(new URL("../aws-runner/publish-pc-stats-runner.mjs", import.meta.url), "utf8");
+const repairSource = await readFile(new URL("../cloudflare/repair-active-stats-manifest.mjs", import.meta.url), "utf8");
 const workerSource = await readFile(new URL("../cloudflare/worker.mjs", import.meta.url), "utf8");
 assert.match(statsRunnerSource, /SELECT DISTINCT n\.canonical_product_id, n\.market_pool/u,
   "daily publication must calculate only product/cohort scopes that have observations");
@@ -25,6 +26,14 @@ assert.match(statsRunnerSource, /Number\(activated\.input_row_count\) !== rows\.
   "publication child must reject an activation manifest that does not match its input and active scope keys");
 assert.match(runnerSource, /pcSchedulerLastSucceededAt = persistedSchedulerSuccesses\.at\(-1\) \|\| null/u,
   "runner restarts must recover truthful scheduler readiness from persisted source successes");
+assert.match(repairSource, /Number\(metadata\.expected_row_count\) !== rows\.length/u,
+  "manifest repair must verify the active row count before changing metadata");
+assert.match(repairSource, /Number\(metadata\.expected_non_empty_scope_count\) !== nonEmptyScopeCount/u,
+  "manifest repair must verify sampled scope integrity before changing metadata");
+assert.match(repairSource, /AND checksum = \$\{sqlString\(storedChecksum\)\}/u,
+  "manifest repair must use the old checksum as a compare-and-swap guard");
+assert.doesNotMatch(repairSource, /SET active = 0/u,
+  "checksum repair must never deactivate the currently served publication");
 assert.match(workerSource, /\/admin\/import-product-stats[\s\S]{0,500}readJsonPayload\(request, MAX_STATS_PUBLICATION_BYTES\)/u,
   "only the authenticated statistics publication route may accept the larger manifest");
 assert.doesNotMatch(workerSource, /\/api\/monetization\/contextual-offer[\s\S]{0,250}MAX_STATS_PUBLICATION_BYTES/u,
