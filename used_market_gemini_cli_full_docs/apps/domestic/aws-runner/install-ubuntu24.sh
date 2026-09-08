@@ -264,6 +264,7 @@ install -o root -g root -m 0644 "$tunnel_tmp" /etc/systemd/system/used-market-tu
 rm -f -- "$tunnel_tmp"
 
 node --check "$APP_ROOT/aws-runner/runner.mjs"
+node --check "$APP_ROOT/aws-runner/publish-pc-stats-runner.mjs"
 node --check "$APP_ROOT/aws-runner/search-index.mjs"
 node --check "$APP_ROOT/aws-runner/migration-smoke.mjs"
 migration_smoke_dir="$(mktemp -d)"

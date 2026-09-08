@@ -11,17 +11,18 @@ import {
 import { parsePriceStatsRequest, priceStatsResponse } from "../aws-runner/pc-price-stats-http.mjs";
 
 const runnerSource = await readFile(new URL("../aws-runner/runner.mjs", import.meta.url), "utf8");
+const statsRunnerSource = await readFile(new URL("../aws-runner/publish-pc-stats-runner.mjs", import.meta.url), "utf8");
 const workerSource = await readFile(new URL("../cloudflare/worker.mjs", import.meta.url), "utf8");
-assert.match(runnerSource, /SELECT DISTINCT n\.canonical_product_id, n\.market_pool/u,
+assert.match(statsRunnerSource, /SELECT DISTINCT n\.canonical_product_id, n\.market_pool/u,
   "daily publication must calculate only product/cohort scopes that have observations");
-assert.doesNotMatch(runnerSource, /for \(const product of products\)[\s\S]{0,500}for \(const cohort of cohorts\)/u,
+assert.doesNotMatch(statsRunnerSource, /for \(const product of products\)[\s\S]{0,500}for \(const cohort of cohorts\)/u,
   "daily publication must not materialize the full product by cohort cross-product");
-assert.match(runnerSource, /const publication = \{[\s\S]{0,240}merge_with_active: true/u,
+assert.match(statsRunnerSource, /const publication = \{[\s\S]{0,240}merge_with_active: true/u,
   "daily publication must explicitly preserve same-version active scopes missing from a partial refresh");
-assert.match(runnerSource, /const activatedPublication = payload\?\.publication;[\s\S]{0,1600}recordPublicationSuccess\(\{[\s\S]{0,240}checksum: activatedChecksum,[\s\S]{0,120}rowCount: activatedRowCount/u,
-  "runner publication runtime must record the Worker's activated union checksum and row count");
-assert.match(runnerSource, /activatedInputRowCount !== rows\.length[\s\S]{0,120}activatedScopeKeyCount !== activatedRowCount/u,
-  "runner must reject a statistics activation manifest that does not match its input and active scope keys");
+assert.match(statsRunnerSource, /const activated = payload\?\.publication;[\s\S]{0,1200}ledger\.recordPublicationSuccess\(\{[\s\S]{0,200}checksum: activated\.checksum,[\s\S]{0,120}rowCount: Number\(activated\.row_count\)/u,
+  "publication child must record the Worker's activated union checksum and row count");
+assert.match(statsRunnerSource, /Number\(activated\.input_row_count\) !== rows\.length[\s\S]{0,180}Number\(activated\.scope_key_count\) !== Number\(activated\.row_count\)/u,
+  "publication child must reject an activation manifest that does not match its input and active scope keys");
 assert.match(runnerSource, /pcSchedulerLastSucceededAt = persistedSchedulerSuccesses\.at\(-1\) \|\| null/u,
   "runner restarts must recover truthful scheduler readiness from persisted source successes");
 assert.match(workerSource, /\/admin\/import-product-stats[\s\S]{0,500}readJsonPayload\(request, MAX_STATS_PUBLICATION_BYTES\)/u,

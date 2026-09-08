@@ -1,9 +1,11 @@
 import http from "node:http";
 import { AsyncLocalStorage } from "node:async_hooks";
+import { spawn } from "node:child_process";
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { statfsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   buildCollectionRequest,
   buildLivePayload,
@@ -25,7 +27,6 @@ import { parsePriceStatsRequest, priceStatsResponse } from "./pc-price-stats-htt
 import { PcShadowPipeline } from "./pc-shadow-pipeline.mjs";
 import { evaluatePipelineQualityReports, loadPipelineQualityReports } from "./pc-pipeline-governance.mjs";
 import { explicitSoldText, structuredSoldEvidenceFromHtml } from "../market/logic/listing-lifecycle.mjs";
-import { compactStatsForPublication, statsChecksum, statsPublicationKey } from "../cloudflare/public-product-stats.mjs";
 import { pcCatalogResponse, pcCollectionTargetSetV2, pcProductsResponse } from "../cloudflare/pc-directory-http.mjs";
 import { publicPcModelsForApi } from "../market/logic/pc-public-catalog.mjs";
 import {
@@ -124,9 +125,6 @@ const PC_SOURCE_TARGETS_PER_RUN = Math.min(128, Math.max(4,
 const PC_SOURCE_TARGET_CONCURRENCY = Math.min(8, Math.max(1,
   Number.parseInt(process.env.PC_SOURCE_TARGET_CONCURRENCY || "2", 10) || 2));
 const PC_EXTERNAL_FETCH_TIMEOUT_MS = 30_000;
-const PC_STATS_PUBLICATION_TIMEOUT_MS = Math.min(15 * 60 * 1000, Math.max(2 * 60 * 1000,
-  Number.parseInt(process.env.PC_STATS_PUBLICATION_TIMEOUT_MS || String(15 * 60 * 1000), 10)
-    || 15 * 60 * 1000));
 const PC_SCHEDULER_WATCHDOG_MS = Math.min(30 * 60 * 1000, Math.max(5 * 60 * 1000,
   Number.parseInt(process.env.PC_SCHEDULER_WATCHDOG_MS || String(20 * 60 * 1000), 10) || 20 * 60 * 1000));
 
@@ -633,131 +631,63 @@ async function mirrorPcListingCollectionManifest({ sourceId, asOf, successfulTar
   };
 }
 
+function runPcStatsPublisher() {
+  const scriptPath = fileURLToPath(new URL("./publish-pc-stats-runner.mjs", import.meta.url));
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [scriptPath], {
+      cwd: path.dirname(scriptPath),
+      env: process.env,
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true
+    });
+    let stdout = "";
+    let stderr = "";
+    const append = (current, chunk) => {
+      const next = current + String(chunk);
+      if (Buffer.byteLength(next) > 1_048_576) {
+        child.kill();
+        throw new Error("PC_STATS_PUBLISHER_OUTPUT_TOO_LARGE");
+      }
+      return next;
+    };
+    child.stdout.on("data", (chunk) => {
+      try { stdout = append(stdout, chunk); } catch (error) { reject(error); }
+    });
+    child.stderr.on("data", (chunk) => {
+      try { stderr = append(stderr, chunk); } catch (error) { reject(error); }
+    });
+    child.once("error", reject);
+    child.once("exit", (code, signal) => {
+      if (code !== 0) {
+        reject(new Error(`PC_STATS_PUBLISHER_FAILED:${signal || code || 1}:${stderr.trim().slice(-2_000)}`));
+        return;
+      }
+      try {
+        const lines = stdout.trim().split(/\r?\n/u).filter(Boolean);
+        resolve(JSON.parse(lines.at(-1) || "{}"));
+      } catch (error) {
+        reject(new Error(`PC_STATS_PUBLISHER_INVALID_OUTPUT:${error instanceof Error ? error.message : String(error)}`));
+      }
+    });
+  });
+}
+
 async function publishPcProductStats() {
   if (!pcLedger) return { published: false, skipped: true, warning: "PC parts ledger is unavailable" };
-  const asOf = new Date().toISOString();
-  const integrityAudit = pcLedger.runIntegrityAudit(asOf);
-  const aliasEvaluations = pcLedger.evaluateDueAliasShadows(asOf, PC_ALIAS_PROMOTION_EVIDENCE);
+  const evaluatedAt = new Date().toISOString();
+  const integrityAudit = pcLedger.runIntegrityAudit(evaluatedAt);
+  const aliasEvaluations = pcLedger.evaluateDueAliasShadows(evaluatedAt, PC_ALIAS_PROMOTION_EVIDENCE);
   const pipelineDecisions = evaluatePipelineQualityReports({
     ledger: pcLedger,
     reports: loadPipelineQualityReports(PC_PIPELINE_QUALITY_REPORTS_PATH),
-    evaluatedAt: asOf
+    evaluatedAt
   });
-  const activePipelineVersion = pcLedger.getActivePipelineVersion();
-  const priceVersionOptions = activePipelineVersion ? {
-    normalizationVersion: activePipelineVersion.normalization_version,
-    parserVersion: activePipelineVersion.parser_version,
-    ruleVersion: activePipelineVersion.rule_version,
-    filterVersion: activePipelineVersion.filter_version
-  } : {};
-  const scopes = pcLedger.db.prepare(`SELECT DISTINCT n.canonical_product_id, n.market_pool,
-      n.condition_code, s.currency
-    FROM normalized_listings n
-    JOIN listing_snapshots s ON s.id = n.snapshot_id
-    WHERE n.canonical_product_id IS NOT NULL
-      AND n.normalization_version = ?
-      AND n.parser_version = ? AND n.rule_version = ? AND n.filter_version = ?
-    ORDER BY n.canonical_product_id, n.market_pool, n.condition_code, s.currency`).all(
-      Number(activePipelineVersion?.normalization_version || 1),
-      priceVersionOptions.parserVersion || "pc-parser-v1",
-      priceVersionOptions.ruleVersion || "pc-rules-v1",
-      priceVersionOptions.filterVersion || "pc-filter-v1"
-    );
-  const rows = [];
-  for (const scope of scopes) {
-    const options = {
-      canonicalProductId: scope.canonical_product_id,
-      days: 30,
-      marketPool: scope.market_pool,
-      condition: scope.condition_code,
-      currency: scope.currency,
-      asOf,
-      ...priceVersionOptions
-    };
-    const stats = compactStatsForPublication(pcLedger.rebuildAndGetPriceStats(options));
-    const memberCount = pcLedger.traceStatMembers(options).length;
-    rows.push({
-      canonical_product_id: scope.canonical_product_id,
-      market_pool: scope.market_pool,
-      condition_code: scope.condition_code,
-      currency: scope.currency,
-      days: 30,
-      stats_json: { ...stats, traceability: { member_count: memberCount } },
-      as_of: asOf
-    });
-    await yieldToEventLoop();
+  const publication = await runPcStatsPublisher();
+  if (publication?.published !== true || !publication?.publication_id || !publication?.published_at) {
+    throw new Error("PC_STATS_PUBLISHER_RESULT_INVALID");
   }
-  const nonEmptyScopeCount = rows.filter((row) => {
-    const stats = row.stats_json || {};
-    return Number(stats.active?.sample_count || 0) + Number(stats.reserved?.sample_count || 0) + Number(stats.sold?.sample_count || 0)
-      + Number(stats.confirmed_transactions?.sample_count || 0) > 0;
-  }).length;
-  if (nonEmptyScopeCount === 0) throw new Error("STATS_PUBLICATION_HAS_NO_SAMPLES");
-  const checksum = await statsChecksum(rows);
-  const publication = {
-    publication_id: randomUUID(),
-    checksum,
-    expected_row_count: rows.length,
-    merge_with_active: true,
-    parser_version: priceVersionOptions.parserVersion || "pc-parser-v1",
-    rule_version: priceVersionOptions.ruleVersion || "pc-rules-v1",
-    filter_version: priceVersionOptions.filterVersion || "pc-filter-v1",
-    created_at: asOf,
-    expected_non_empty_scope_count: nonEmptyScopeCount,
-    expected_keys: rows.map(statsPublicationKey).sort(),
-    rows
-  };
-  if (!STATS_IMPORT_URL || !IMPORT_TOKEN) {
-    throw new Error("D1_STATS_PUBLICATION_NOT_CONFIGURED");
-  }
-  const publicationBody = JSON.stringify(publication);
-  console.info("pc stats publication payload prepared", {
-    publication_id: publication.publication_id,
-    row_count: rows.length,
-    non_empty_scope_count: nonEmptyScopeCount,
-    body_bytes: Buffer.byteLength(publicationBody)
-  });
-  const response = await fetch(STATS_IMPORT_URL, {
-    method: "POST",
-    headers: { authorization: `Bearer ${IMPORT_TOKEN}`, "content-type": "application/json" },
-    body: publicationBody,
-    signal: boundedFetchSignal(undefined, PC_STATS_PUBLICATION_TIMEOUT_MS)
-  });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(`D1_STATS_IMPORT_HTTP_${response.status}: ${JSON.stringify(payload)}`);
-  const activatedPublication = payload?.publication;
-  const activatedPublicationId = String(activatedPublication?.publication_id || "");
-  const activatedChecksum = String(activatedPublication?.checksum || "");
-  const activatedRowCount = Number(activatedPublication?.row_count);
-  const activatedInputRowCount = Number(activatedPublication?.input_row_count);
-  const activatedScopeKeyCount = Number(activatedPublication?.scope_key_count);
-  if (payload?.ok !== true || activatedPublication?.active !== true
-    || activatedPublicationId !== publication.publication_id
-    || !/^[a-f0-9]{64}$/iu.test(activatedChecksum)
-    || !Number.isInteger(activatedRowCount) || activatedRowCount < rows.length
-    || activatedInputRowCount !== rows.length
-    || activatedScopeKeyCount !== activatedRowCount) {
-    throw new Error("D1_STATS_IMPORT_ACTIVATION_MANIFEST_MISMATCH");
-  }
-  pcPublicationLastSucceededAt = new Date().toISOString();
-  pcLedger.recordPublicationSuccess({
-    publicationId: activatedPublicationId,
-    checksum: activatedChecksum,
-    rowCount: activatedRowCount,
-    publishedAt: pcPublicationLastSucceededAt
-  });
-  return {
-    published: true,
-    row_count: activatedRowCount,
-    input_row_count: rows.length,
-    preserved_row_count: Number(activatedPublication.preserved_row_count || 0),
-    overwritten_row_count: Number(activatedPublication.overwritten_row_count || 0),
-    checksum: activatedChecksum,
-    publication_id: activatedPublicationId,
-    integrity_audit: integrityAudit,
-    alias_evaluations: aliasEvaluations,
-    pipeline_decisions: pipelineDecisions
-  };
+  pcPublicationLastSucceededAt = publication.published_at;
+  return { ...publication, integrity_audit: integrityAudit, alias_evaluations: aliasEvaluations, pipeline_decisions: pipelineDecisions };
 }
 
 async function collectJob(jobName) {

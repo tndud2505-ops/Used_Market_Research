@@ -5,7 +5,7 @@ import { pcStatsTraceability } from "../aws-runner/pc-stats-traceability.mjs";
 const read = (relativePath) => readFile(new URL(`../${relativePath}`, import.meta.url), "utf8");
 const [runnerUnit, tunnelUnit, installScript, configureScript, healthScript, readme,
   publishStatsScript, completeStatsScript, importStatsScript, statsTraceabilityScript, runnerScript,
-  publicClassificationMigration, retiredSourceMigration] = await Promise.all([
+  statsRunnerScript, publicClassificationMigration, retiredSourceMigration] = await Promise.all([
   read("aws-runner/used-market-runner.service"),
   read("aws-runner/used-market-tunnel.service"),
   read("aws-runner/install-ubuntu24.sh"),
@@ -17,6 +17,7 @@ const [runnerUnit, tunnelUnit, installScript, configureScript, healthScript, rea
   read("aws-runner/import-pc-stats-publication.mjs"),
   read("aws-runner/pc-stats-traceability.mjs"),
   read("aws-runner/runner.mjs"),
+  read("aws-runner/publish-pc-stats-runner.mjs"),
   read("cloudflare/migrations/0012_pc_public_classification.sql"),
   read("cloudflare/migrations/0013_retire_quasarzone.sql")
 ]);
@@ -117,12 +118,17 @@ assert.match(runnerScript, /D1_DAILY_ROW_WRITE_LIMIT/u,
   "D1 daily write exhaustion must be visible without failing the local crawl");
 assert.match(runnerScript, /const PC_SCHEDULER_CATCHUP_MS = 0;/u,
   "runner startup must not synchronously replay a multi-hour scheduler backlog");
-assert.match(runnerScript, /const PC_STATS_PUBLICATION_TIMEOUT_MS = Math\.min\(15 \* 60 \* 1000/u,
+assert.match(statsRunnerScript, /const publicationTimeoutMs = Math\.min\(15 \* 60 \* 1000/u,
   "large product-stat publications must have a dedicated bounded timeout");
-assert.match(runnerScript, /signal: boundedFetchSignal\(undefined, PC_STATS_PUBLICATION_TIMEOUT_MS\)/u,
-  "product-stat publication must not inherit the short marketplace fetch timeout");
-assert.match(runnerScript, /stats_json: \{ \.\.\.stats, traceability: \{ member_count: memberCount \} \},[\s\S]*?await yieldToEventLoop\(\);/u,
-  "product-stat generation must yield so health and public reads remain responsive");
+assert.match(statsRunnerScript, /request as httpsRequest/u,
+  "large product-stat imports must avoid the default fetch header timeout");
+assert.match(installScript, /node --check "\$APP_ROOT\/aws-runner\/publish-pc-stats-runner\.mjs"/u,
+  "AWS deployment must syntax-check the isolated statistics publisher before restarting services");
+assert.match(runnerScript, /spawn\(process\.execPath, \[scriptPath\]/u,
+  "product-stat generation must run outside the public runner event loop");
+assert.match(runnerScript, /const publication = await runPcStatsPublisher\(\);/u);
+assert.doesNotMatch(runnerScript, /compactStatsForPublication\(pcLedger\.rebuildAndGetPriceStats/u,
+  "the public runner process must not build every product-stat scope synchronously");
 assert.match(runnerScript, /pcLedger\.getStoredDailyPriceStats/u,
   "public price-stat reads must use stored daily aggregates instead of rebuilding from raw ledger rows");
 assert.match(runnerScript, /const BACKGROUND_REFRESH_ENABLED = String\(process\.env\.RUNNER_BACKGROUND_REFRESH_ENABLED \?\? "false"\)/u,

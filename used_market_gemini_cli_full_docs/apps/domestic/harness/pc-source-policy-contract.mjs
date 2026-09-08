@@ -720,11 +720,12 @@ try {
   else process.env.EBAY_BROWSE_API_TOKEN = previousToken;
 }
 
-const [wrangler, deploySource, releaseSource, runnerSource, directCollectorSource] = await Promise.all([
+const [wrangler, deploySource, releaseSource, runnerSource, statsRunnerSource, directCollectorSource] = await Promise.all([
   readFile(new URL("../cloudflare/wrangler.jsonc", import.meta.url), "utf8"),
   readFile(new URL("../cloudflare/deploy.mjs", import.meta.url), "utf8"),
   readFile(new URL("../cloudflare/release.mjs", import.meta.url), "utf8"),
   readFile(new URL("../aws-runner/runner.mjs", import.meta.url), "utf8"),
+  readFile(new URL("../aws-runner/publish-pc-stats-runner.mjs", import.meta.url), "utf8"),
   readFile(new URL("../aws-runner/collect-pc-source-now.mjs", import.meta.url), "utf8")
 ]);
 assert.match(wrangler, /"AWS_PC_SCHEDULER_AUTHORITY"\s*:\s*"true"/u);
@@ -741,7 +742,7 @@ assert.match(releaseSource, /wrangler', 'rollback'/u);
 assert.match(releaseSource, /'rollback', previousWorkerVersion, '--yes'/u);
 assert.match(releaseSource, /verifyRollbackRestored\(previousWorkerVersion\)/u);
 assert.match(runnerSource, /createSourceAdapter\(\{/u);
-assert.match(runnerSource, /D1_STATS_PUBLICATION_NOT_CONFIGURED/u);
+assert.match(statsRunnerSource, /D1_STATS_PUBLICATION_NOT_CONFIGURED/u);
 assert.match(runnerSource, /PC_SCHEDULER_WATCHDOG_MS/u);
 assert.match(runnerSource, /RUNNER_INDEX_SOFT_LIMIT_BYTES/u);
 assert.match(runnerSource, /RUNNER_INDEX_HARD_LIMIT_BYTES/u);
