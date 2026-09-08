@@ -494,6 +494,9 @@ const storedKrStats = ledger.getStoredDailyPriceStats({
 assert.equal(storedKrStats.daily.length, 30, "stored price stats keep the daily chart window");
 assert.equal(storedKrStats.sold.sample_count, krStats.sold.sample_count,
   "stored price stats reuse precomputed daily rows instead of dropping samples");
+assert.ok(storedKrStats.daily.filter((row) => row.active.sample_count === 0)
+  .every((row) => row.active.min === null && row.active.max === null && row.active.mean === null),
+"stored empty chart dates must remain null gaps instead of becoming zero-price observations");
 assert.equal(storedKrStats.by_source.find((source) => source.source_id === "joonggonara").sold.sample_count,
   krStats.by_source.find((source) => source.source_id === "joonggonara").sold.sample_count,
   "stored price stats keep source-filterable daily rows");
