@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { metricValue, buildTotals, compatibility, groupProducts, validateBuild, dailySeries, percentChange, overviewIndex, historyWindow, shiftDate, sourceStats } from '../web-backend/public/pc-tools-core.mjs';
+import { metricValue, buildTotals, compatibility, groupProducts, validateBuild, dailySeries, percentChange, overviewIndex, historyWindow, shiftDate, sourceStats, coherentStats } from '../web-backend/public/pc-tools-core.mjs';
 import { pcCatalogResponse } from '../cloudflare/pc-directory-http.mjs';
 const p = (id, category, name, specs = {}) => ({ canonical_product_id: id, category_code: category, canonical_display_name: name, key_specs: specs });
 const cpu = p('cpu', 'CPU', 'CPU 5600', { socket: 'AM4' });
@@ -37,6 +37,16 @@ assert.equal(historyWindow('2030-01-01', '2026-09-08').next, false);
 assert.equal(shiftDate('2026-03-31', -1, 'month'), '2026-02-28');
 assert.equal(shiftDate('2024-03-31', -1, 'month'), '2024-02-29');
 assert.equal(sourceStats({ active: { mean: 100, sample_count: 10 }, by_source: [] }, 'bunjang'), null, 'missing site must not fall back to overall averages');
+const scoped = coherentStats({ active: { mean: 41862.5, sample_count: 64 }, by_manufacturer: [{ manufacturer: 'Intel' }], by_source: [
+  { source_id: 'bunjang', active: { mean: 43269.39, sample_count: 49, min: 9000, max: 200000 }, daily: data.daily },
+  { source_id: 'joonggonara', active: { mean: 15866.67, sample_count: 15, min: 20000, max: 45000 }, daily: data.daily },
+] });
+assert.equal(scoped.active.mean, 43269.39);
+assert.equal(scoped.active.sample_count, 49);
+assert.equal(scoped.by_source.length, 1);
+assert.equal(scoped.by_manufacturer.length, 0);
+assert.equal(scoped.daily.length, 2);
+assert.equal(scoped.integrity_filtered_source_count, 1);
 const catalog = pcCatalogResponse();
 assert.ok(catalog.tools_catalog.products.some(p => p.category_code === 'CASE'));
 assert.ok(catalog.tools_catalog.products.some(p => p.category_code === 'COOLING'));

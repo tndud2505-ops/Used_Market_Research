@@ -1,6 +1,6 @@
-import { SERIES, idOf, nameOf, naturalCompare, money, metricValue, groupProducts, scopedStats, sourceStats, sourceId, shiftDate, historyWindow, buildTotals, compatibility, validateBuild, dailySeries, percentChange, overviewIndex } from './pc-tools-core.mjs?v=4';
-import { readJson, createPriceStore } from './pc-tools-data.mjs?v=4';
-import { drawChart } from './pc-tools-chart.mjs?v=4';
+import { SERIES, idOf, nameOf, naturalCompare, money, metricValue, groupProducts, scopedStats, sourceStats, sourceId, shiftDate, historyWindow, buildTotals, compatibility, validateBuild, dailySeries, percentChange, overviewIndex } from './pc-tools-core.mjs?v=7';
+import { readJson, createPriceStore } from './pc-tools-data.mjs?v=7';
+import { drawChart } from './pc-tools-chart.mjs?v=7';
 
 const builder = document.body.dataset.page === 'builder';
 const $ = selector => document.querySelector(selector);
@@ -95,6 +95,7 @@ function priceCell(data, key, record, { showChange = false } = {}) {
   if (value == null && metric?.sample_count > 0) td.append(el('small', '', `표본 ${metric.sample_count}건 · 평균 미제공`));
   else if (metric?.sample_count > 0) td.append(el('small', '', `표본 ${Number(metric.sample_count).toLocaleString('ko-KR')}건`));
   if (data?.availability?.status === 'unavailable') td.append(el('small', '', '공개 통계 미제공'));
+  if (data?.integrity_filtered_source_count) td.append(el('small', '', '불일치 사이트 제외'));
   if (showChange) {
     const change = percentChange(dailySeries(data, key, state.days));
     if (change != null) td.append(el('span', `tools-change ${change > 0 ? 'up' : 'down'}`, `${state.days}일 ${change > 0 ? '▲' : change < 0 ? '▼' : '—'} ${Math.abs(change).toFixed(1)}%`));
@@ -185,7 +186,7 @@ function renderSummary() {
   } else if (!state.overview && state.selectedId) {
     const data = scopedStats(sourceStats(payload(state.selectedId), state.source), state.selectedManufacturer);
     SERIES.filter(s => s.key !== 'confirmed_transactions' || metricValue(data?.[s.key]) != null).forEach(s => {
-      summary.append(summaryItem(s.label, money(metricValue(data?.[s.key])), `표본 ${Number(data?.[s.key]?.sample_count || 0)}건 · 최근 30일${state.source ? ` · ${SOURCE_LABELS[state.source] || state.source}` : ''}`, `series-${s.key}`));
+      summary.append(summaryItem(s.label, money(metricValue(data?.[s.key])), `표본 ${Number(data?.[s.key]?.sample_count || 0)}건 · 최근 30일${state.source ? ` · ${SOURCE_LABELS[state.source] || state.source}` : data?.integrity_filtered_source_count ? ' · 불일치 사이트 제외' : ''}`, `series-${s.key}`));
     });
     const a = metricValue(data?.active), b = metricValue(data?.sold);
     summary.append(summaryItem('판매중 − 판매완료', a != null && b != null ? money(a - b) : '자료 없음', state.selectedManufacturer || nameOf(state.byId.get(state.selectedId))));

@@ -49,6 +49,30 @@ export function sourceStats(data, source = '') {
   const row = data?.by_source?.find(row => sourceId(row) === source);
   return row ? { ...row, as_of: data.as_of, window: data.window } : null;
 }
+// Match the existing marketplace's exclusion of internally inconsistent source summaries.
+export function coherentStats(data) {
+  if (!data) return data;
+  const sampled = row => ['active', 'sold'].filter(key => Number(row?.[key]?.sample_count) > 0);
+  const rows = (data.by_source || []).filter(row => sampled(row).length || row.daily?.some(day => sampled(day).length));
+  if (!rows.length) return data;
+  const valid = rows.filter(row => sampled(row).length && sampled(row).every(key => metricValue(row[key]) != null));
+  if (valid.length === rows.length) return data;
+  const combine = (rows, key) => {
+    const metrics = rows.map(row => row[key]).filter(metric => metricValue(metric) != null);
+    const count = metrics.reduce((sum, metric) => sum + Number(metric.sample_count), 0);
+    return { sample_count: count, mean: count ? metrics.reduce((sum, metric) => sum + metric.mean * Number(metric.sample_count), 0) / count : null };
+  };
+  const days = new Map();
+  valid.forEach(row => (row.daily || []).forEach(day => {
+    const date = String(day.date || day.stat_date).slice(0, 10);
+    if (!days.has(date)) days.set(date, []);
+    days.get(date).push(day);
+  }));
+  return { ...data, active: combine(valid, 'active'), sold: combine(valid, 'sold'), by_source: valid,
+    // Manufacturer totals cannot be assigned to the remaining sources without joint evidence.
+    by_manufacturer: [], integrity_filtered_source_count: rows.length - valid.length,
+    daily: [...days].sort(([a], [b]) => a.localeCompare(b)).map(([date, rows]) => ({ date, active: combine(rows, 'active'), sold: combine(rows, 'sold') })) };
+}
 export function shiftDate(date, amount, unit = 'day') {
   const value = new Date(`${date}T00:00:00Z`);
   if (unit === 'month') {

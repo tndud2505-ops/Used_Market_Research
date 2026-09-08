@@ -1,4 +1,4 @@
-import { SERIES, money } from './pc-tools-core.mjs?v=4';
+import { SERIES, money } from './pc-tools-core.mjs?v=7';
 const ns = 'http://www.w3.org/2000/svg';
 const svgNode = (name, attrs = {}, text = '') => {
   const element = document.createElementNS(ns, name);

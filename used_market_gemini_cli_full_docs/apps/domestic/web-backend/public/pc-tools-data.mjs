@@ -1,4 +1,4 @@
-import { idOf } from './pc-tools-core.mjs?v=4';
+import { idOf, coherentStats } from './pc-tools-core.mjs?v=7';
 
 export async function readJson(url, signal) {
   const request = new AbortController();
@@ -48,7 +48,7 @@ export function createPriceStore(onChange) {
           if (asOf && data.window?.to !== asOf) throw new Error('요청한 날짜의 가격 기록이 아닙니다.');
           if ((scope.currency && scope.currency !== 'KRW') || (scope.market_pool && scope.market_pool !== 'KR_C2C_USED')
             || (scope.condition && scope.condition !== 'USED_WORKING')) throw new Error('가격 집계 범위가 일치하지 않습니다.');
-          cache.set(key, { state: 'ready', data, loadedAt: Date.now() });
+          cache.set(key, { state: 'ready', data: coherentStats(data), loadedAt: Date.now() });
         } catch (error) {
           if (signal.aborted) { if (current === generation && cache.get(key)?.state === 'loading') cache.delete(key); break; }
           cache.set(key, { state: 'error', error: error.message });
