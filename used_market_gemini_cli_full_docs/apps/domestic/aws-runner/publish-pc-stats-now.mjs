@@ -10,6 +10,10 @@ import { SearchIndex } from "./search-index.mjs";
 const indexPath = path.resolve(String(process.env.RUNNER_INDEX_PATH || "").trim());
 const outputPath = path.resolve(String(process.env.PC_STATS_PUBLICATION_OUTPUT || "").trim());
 const asOf = String(process.env.PC_STATS_AS_OF || new Date().toISOString()).trim();
+const statsProductIds = [...new Set(String(process.env.PC_STATS_PRODUCT_IDS || "")
+  .split(",")
+  .map((value) => value.trim())
+  .filter(Boolean))].sort();
 
 if (!String(process.env.RUNNER_INDEX_PATH || "").trim()) {
   throw new Error("RUNNER_INDEX_PATH is required so an empty ledger cannot be published by mistake");
@@ -33,7 +37,7 @@ try {
     ruleVersion: activePipelineVersion?.rule_version || "pc-rules-v1",
     filterVersion: activePipelineVersion?.filter_version || "pc-filter-v1"
   };
-  const scopes = ledger.db.prepare(`SELECT DISTINCT n.canonical_product_id, n.market_pool,
+  const availableScopes = ledger.db.prepare(`SELECT DISTINCT n.canonical_product_id, n.market_pool,
       n.condition_code, s.currency
     FROM normalized_listings n
     JOIN listing_snapshots s ON s.id = n.snapshot_id
@@ -48,6 +52,16 @@ try {
       versionOptions.filterVersion,
       ...PC_DIRECTORY_PUBLICATION_SOURCE_KEYS
     );
+  const scopes = statsProductIds.length > 0
+    ? availableScopes.filter((scope) => statsProductIds.includes(String(scope.canonical_product_id || "")))
+    : availableScopes;
+  if (statsProductIds.length > 0) {
+    const foundProductIds = new Set(scopes.map((scope) => String(scope.canonical_product_id || "")));
+    const missingProductIds = statsProductIds.filter((productId) => !foundProductIds.has(productId));
+    if (missingProductIds.length > 0) {
+      throw new Error(`PC_STATS_PRODUCT_IDS_NOT_FOUND: ${missingProductIds.join(",")}`);
+    }
+  }
   if (scopes.length === 0) throw new Error("STATS_PUBLICATION_HAS_NO_SCOPES");
 
   const rows = [];
@@ -104,6 +118,7 @@ try {
     checksum,
     row_count: rows.length,
     non_empty_scope_count: nonEmptyScopeCount,
+    product_ids: statsProductIds,
     output_path: outputPath
   }));
 } finally {

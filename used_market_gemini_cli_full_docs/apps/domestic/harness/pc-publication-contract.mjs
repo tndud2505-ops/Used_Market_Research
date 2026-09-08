@@ -20,6 +20,12 @@ assert.doesNotMatch(statsRunnerSource, /for \(const product of products\)[\s\S]{
   "daily publication must not materialize the full product by cohort cross-product");
 assert.match(statsRunnerSource, /const publication = \{[\s\S]{0,240}merge_with_active: true/u,
   "daily publication must explicitly preserve same-version active scopes missing from a partial refresh");
+assert.match(statsRunnerSource, /PC_STATS_PRODUCT_IDS/u,
+  "daily publication must expose an explicit product-only rebuild selector");
+assert.match(statsRunnerSource, /availableScopes\.filter\(\(scope\) => statsProductIds\.includes/u,
+  "daily publication must limit a product-only rebuild before merging with active scopes");
+assert.match(statsRunnerSource, /PC_STATS_PRODUCT_IDS_NOT_FOUND/u,
+  "a product-only publication must fail when a requested product has no ledger scope");
 assert.match(statsRunnerSource, /const activated = payload\?\.publication;[\s\S]{0,1200}ledger\.recordPublicationSuccess\(\{[\s\S]{0,200}checksum: activated\.checksum,[\s\S]{0,120}rowCount: Number\(activated\.row_count\)/u,
   "publication child must record the Worker's activated union checksum and row count");
 assert.match(statsRunnerSource, /Number\(activated\.input_row_count\) !== rows\.length[\s\S]{0,180}Number\(activated\.scope_key_count\) !== Number\(activated\.row_count\)/u,

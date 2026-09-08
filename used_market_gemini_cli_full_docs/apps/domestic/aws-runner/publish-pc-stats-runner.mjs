@@ -25,6 +25,10 @@ const aliasPromotionEvidence = (() => {
   }
 })();
 const pipelineQualityReportsPath = String(process.env.PC_PIPELINE_QUALITY_REPORTS_PATH || "").trim();
+const statsProductIds = [...new Set(String(process.env.PC_STATS_PRODUCT_IDS || "")
+  .split(",")
+  .map((value) => value.trim())
+  .filter(Boolean))].sort();
 const sampleDropAcknowledgement = (() => {
   const raw = String(process.env.PC_STATS_SAMPLE_DROP_ACKNOWLEDGEMENT_JSON || "").trim();
   if (!raw) return null;
@@ -97,7 +101,7 @@ try {
     ruleVersion: activePipelineVersion.rule_version,
     filterVersion: activePipelineVersion.filter_version
   } : {};
-  const scopes = ledger.db.prepare(`SELECT DISTINCT n.canonical_product_id, n.market_pool,
+  const availableScopes = ledger.db.prepare(`SELECT DISTINCT n.canonical_product_id, n.market_pool,
       n.condition_code, s.currency
     FROM normalized_listings n
     JOIN listing_snapshots s ON s.id = n.snapshot_id
@@ -112,6 +116,16 @@ try {
       versionOptions.filterVersion || "pc-filter-v1",
       ...PC_DIRECTORY_PUBLICATION_SOURCE_KEYS
     );
+  const scopes = statsProductIds.length > 0
+    ? availableScopes.filter((scope) => statsProductIds.includes(String(scope.canonical_product_id || "")))
+    : availableScopes;
+  if (statsProductIds.length > 0) {
+    const foundProductIds = new Set(scopes.map((scope) => String(scope.canonical_product_id || "")));
+    const missingProductIds = statsProductIds.filter((productId) => !foundProductIds.has(productId));
+    if (missingProductIds.length > 0) {
+      throw new Error(`PC_STATS_PRODUCT_IDS_NOT_FOUND: ${missingProductIds.join(",")}`);
+    }
+  }
   const rows = [];
   for (const scope of scopes) {
     const options = {
@@ -162,6 +176,7 @@ try {
     publication_id: publication.publication_id,
     row_count: rows.length,
     non_empty_scope_count: nonEmptyScopeCount,
+    product_ids: statsProductIds,
     body_bytes: Buffer.byteLength(publicationBody)
   }));
   const response = await postJson(importUrl, publicationBody);

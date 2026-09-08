@@ -84,6 +84,7 @@ sudo bash /opt/used-market-runner/aws-runner/configure-ubuntu24.sh
 - `D1_IMPORT_URL`: 선택. 운영자 seed/recovery 또는 명시적으로 켠 background mirror가 `{ "items": [...] }`를 보내는 HTTPS import API
 - `D1_BACKGROUND_MIRROR_ENABLED`: 기본 `false`. `true`일 때만 수집·상태 확인 결과를 D1에 연속 복제
 - `D1_STATS_IMPORT_URL`: PC 전환 시 필수. checksum·row count가 포함된 완성 통계 publication을 받는 `/admin/import-product-stats`
+- `PC_STATS_PRODUCT_IDS`: 선택 사항. 쉼표로 구분한 canonical product ID만 다시 계산하고 같은 버전의 기존 활성 통계와 병합
 - `CLOUDFLARE_MANUAL_RUN_TOKEN`: 선택한 import API의 Bearer 토큰
 - `Cloudflare Tunnel token`: Dashboard에서 복사한 Tunnel 토큰
 
