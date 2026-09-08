@@ -1,17 +1,17 @@
-import { shiftDate } from './pc-tools-core.mjs?v=8';
+import { shiftDate } from './pc-tools-core.mjs?v=coverage-v3';
 
 // A small, keyboard-accessible calendar; the input also accepts a typed date.
-export function createDatePicker(root) {
+export function createDatePicker(root, { id, label }) {
   const make = (tag, text = '') => { const node = document.createElement(tag); node.textContent = text; return node; };
   const wrap = make('div'); wrap.className = 'tools-date-picker';
-  const input = make('input'); input.type = 'date'; input.id = 'chart-date'; input.setAttribute('aria-label', '가격 조회 날짜');
-  const toggle = make('button'); toggle.type = 'button'; toggle.setAttribute('aria-label', '달력 열기'); toggle.setAttribute('aria-haspopup', 'dialog'); toggle.setAttribute('aria-expanded', 'false');
+  const input = make('input'); input.type = 'date'; input.id = id; input.setAttribute('aria-label', label);
+  const toggle = make('button'); toggle.type = 'button'; toggle.setAttribute('aria-label', `${label} 달력 열기`); toggle.setAttribute('aria-haspopup', 'dialog'); toggle.setAttribute('aria-expanded', 'false');
   const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   icon.setAttribute('viewBox', '0 0 20 20'); icon.setAttribute('width', '18'); icon.setAttribute('height', '18'); icon.setAttribute('aria-hidden', 'true');
   const path = document.createElementNS(icon.namespaceURI, 'path');
   path.setAttribute('d', 'M4 4h12a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1ZM3 8h14M7 2v4M13 2v4');
   path.setAttribute('fill', 'none'); path.setAttribute('stroke', 'currentColor'); path.setAttribute('stroke-width', '1.5'); icon.append(path); toggle.append(icon);
-  const popup = make('div'); popup.className = 'tools-calendar'; popup.id = 'chart-calendar'; popup.hidden = true; popup.setAttribute('role', 'dialog'); popup.setAttribute('aria-label', '가격 조회 달력'); toggle.setAttribute('aria-controls', popup.id);
+  const popup = make('div'); popup.className = 'tools-calendar'; popup.id = `${id}-calendar`; popup.hidden = true; popup.setAttribute('role', 'dialog'); popup.setAttribute('aria-label', `${label} 달력`); toggle.setAttribute('aria-controls', popup.id);
   wrap.append(input, toggle, popup); root.append(wrap);
   let month = '';
   const close = () => { popup.hidden = true; toggle.setAttribute('aria-expanded', 'false'); };

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { metricValue, buildTotals, compatibility, groupProducts, validateBuild, dailySeries, percentChange, overviewIndex, historyWindow, shiftDate, sourceStats, coherentStats, modelPageItems, chartDateSelection } from '../web-backend/public/pc-tools-core.mjs';
+import { SERIES, metricValue, metricIsConsistent, buildTotals, compatibility, groupProducts, validateBuild, dailySeries, percentChange, overviewIndex, priceDateRange, shiftDate, sourceStats, coherentStats, modelPageItems } from '../web-backend/public/pc-tools-core.mjs';
 import { pcCatalogResponse } from '../cloudflare/pc-directory-http.mjs';
 const p = (id, category, name, specs = {}) => ({ canonical_product_id: id, category_code: category, canonical_display_name: name, key_specs: specs });
 const cpu = p('cpu', 'CPU', 'CPU 5600', { socket: 'AM4' });
@@ -11,6 +11,13 @@ const entries = validateBuild([{ id: 'cpu' }, { id: 'board', quantity: 2 }], pro
 assert.equal(metricValue({ sample_count: 0, mean: 100 }), null);
 assert.equal(metricValue({ sample_count: 5, mean: null }), null);
 assert.equal(metricValue({ sample_count: 5, mean: 100, max: 50 }), null);
+assert.equal(metricValue({ sample_count: 4, min: 100, max: 200, mean: null, median: 150 }), 150,
+  'three or four samples must expose their supported median instead of a blank mean');
+assert.equal(metricValue({ sample_count: 1, min: 100, max: 100, mean: null, median: null }), null,
+  'one asking price must not be relabelled as an aggregate representative price');
+assert.equal(metricIsConsistent({ sample_count: 1, min: 100, max: 100, mean: null, median: null }), true,
+  'a valid low-sample asking price must not be treated as an integrity failure');
+assert.equal(SERIES.find((series) => series.key === 'active').label, '판매중 가격');
 const totals = buildTotals(entries, e => ({ active: { mean: e.id === 'cpu' ? 100 : 50, sample_count: 5 }, sold: e.id === 'cpu' ? { mean: 80, sample_count: 5 } : null }));
 assert.equal(totals.active.amount, 200);
 assert.equal(totals.sold.amount, 80);
@@ -29,11 +36,18 @@ assert.equal(points[1].value, null, 'missing dates must be gaps, never zero or i
 assert.ok(Math.abs(percentChange(points) - 10) < 0.00001);
 assert.equal(overviewIndex([data], 'active', 3).points[1].value, null);
 assert.equal(overviewIndex([data], 'sold', 3).covered, 0);
-const window = historyWindow('2020-01-01', '2026-09-08');
-assert.equal((Date.parse(window.to) - Date.parse(window.from)) / 86400000, 29);
-assert.equal((Date.parse(window.latest) - Date.parse(window.from)) / 86400000, 729);
-assert.equal(window.previous, false);
-assert.equal(historyWindow('2030-01-01', '2026-09-08').next, false);
+const range = priceDateRange('2026-08-01', '2026-08-14', '2026-09-08');
+assert.equal(range.days, 14);
+assert.equal(range.from, '2026-08-01');
+assert.equal(range.to, '2026-08-14');
+assert.equal(priceDateRange('', '', '2026-09-08').from, '2026-08-10');
+assert.equal(priceDateRange('2026-09-08', '2026-09-08', '2026-09-08').days, 1);
+assert.equal(priceDateRange('2024-09-09', '2026-09-08', '2026-09-08').days, 730);
+assert.equal(priceDateRange('2025-02-28', '2025-03-01', '2026-09-08').days, 2);
+assert.throws(() => priceDateRange('2026-08-20', '2026-08-01', '2026-09-08'));
+assert.throws(() => priceDateRange('2024-09-08', '2026-09-08', '2026-09-08'));
+assert.throws(() => priceDateRange('2026-09-01', '2026-09-09', '2026-09-08'));
+assert.throws(() => priceDateRange('2026-02-30', '2026-03-01', '2026-09-08'));
 assert.equal(shiftDate('2026-03-31', -1, 'month'), '2026-02-28');
 assert.equal(shiftDate('2024-03-31', -1, 'month'), '2024-02-29');
 assert.equal(sourceStats({ active: { mean: 100, sample_count: 10 }, by_source: [] }, 'bunjang'), null, 'missing site must not fall back to overall averages');
@@ -47,14 +61,35 @@ assert.equal(scoped.by_source.length, 1);
 assert.equal(scoped.by_manufacturer.length, 0);
 assert.equal(scoped.daily.length, 2);
 assert.equal(scoped.integrity_filtered_source_count, 1);
+const lowSample = coherentStats({
+  active: { sample_count: 1, min: 50_000, max: 50_000, mean: null, median: null },
+  by_source: [{
+    source_id: 'bunjang',
+    active: { sample_count: 1, min: 50_000, max: 50_000, mean: null, median: null },
+    sold: { sample_count: 0, mean: null, median: null },
+  }],
+});
+assert.equal(lowSample.active.sample_count, 1);
+assert.equal(lowSample.by_source.length, 1);
+const mixedLowSamples = coherentStats({
+  active: { sample_count: 9, min: 1, max: 2, mean: 0 },
+  by_source: [
+    { source_id: 'good-a', active: { sample_count: 4, min: 40_000, max: 60_000, mean: null, median: 50_000 } },
+    { source_id: 'good-b', active: { sample_count: 3, min: 55_000, max: 70_000, mean: null, median: 60_000 } },
+    { source_id: 'broken', active: { sample_count: 2, min: 80_000, max: 90_000, mean: 10_000 } },
+  ],
+});
+assert.equal(mixedLowSamples.active.sample_count, 7);
+assert.equal(mixedLowSamples.active.mean, null,
+  'source medians must not be relabelled as a fabricated combined mean');
+assert.equal(mixedLowSamples.active.min, 40_000);
+assert.equal(mixedLowSamples.active.max, 70_000);
+assert.equal(mixedLowSamples.active.aggregate_incomplete, true);
+assert.equal(metricIsConsistent(mixedLowSamples.active), true,
+  'a combined low-sample range must stay usable after an invalid source is removed');
 assert.deepEqual(modelPageItems(1, 18), [1, 2, 3, 4, 5, 'ellipsis', 18]);
 assert.deepEqual(modelPageItems(18, 18), [1, 'ellipsis', 14, 15, 16, 17, 18]);
 assert.deepEqual(modelPageItems(3, 4), [1, 2, 3, 4]);
-assert.deepEqual(chartDateSelection('2026-09-03', '', '2026-09-08'), { date: '2026-09-03', anchor: '' });
-assert.deepEqual(chartDateSelection('2026-08-01', '', '2026-09-08'), { date: '2026-08-01', anchor: '2026-08-01' });
-assert.deepEqual(chartDateSelection('2024-09-09', '', '2026-09-08'), { date: '2024-09-09', anchor: '2024-10-08' });
-assert.throws(() => chartDateSelection('2026-02-30', '', '2026-09-08'));
-assert.throws(() => chartDateSelection('2026-09-09', '', '2026-09-08'));
 const catalog = pcCatalogResponse();
 assert.ok(catalog.tools_catalog.products.some(p => p.category_code === 'CASE'));
 assert.ok(catalog.tools_catalog.products.some(p => p.category_code === 'COOLING'));

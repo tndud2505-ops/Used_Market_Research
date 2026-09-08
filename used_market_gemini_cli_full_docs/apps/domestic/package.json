@@ -18,7 +18,7 @@
     "sites": "node dist/MCP/logic/index.js sites",
     "web": "node --env-file-if-exists=.env dist/web-backend/logic/index.js",
     "scheduler": "node --env-file-if-exists=.env dist/scheduler/logic/index.js",
-  "test:pc": "node harness/pc-domain-contract.mjs && node harness/pc-public-catalog-contract.mjs && node harness/pc-directory-contract.mjs && node harness/pc-browse-flow-contract.mjs && node harness/pc-collection-matrix-contract.mjs && node harness/pc-source-policy-contract.mjs && node harness/pc-publication-contract.mjs && node harness/pc-service-contract.mjs && node harness/aws-runner-deploy-contract.mjs && node harness/pc-ui-contract.mjs",
+    "test:pc": "node harness/pc-domain-contract.mjs && node harness/pc-public-catalog-contract.mjs && node harness/pc-directory-contract.mjs && node harness/pc-browse-flow-contract.mjs && node harness/pc-collection-matrix-contract.mjs && node harness/pc-source-coverage-contract.mjs && node harness/pc-source-policy-contract.mjs && node harness/pc-publication-contract.mjs && node harness/pc-service-contract.mjs && node harness/aws-runner-deploy-contract.mjs && node harness/pc-ui-contract.mjs",
     "test:pc:live-specialist": "node harness/pc-specialist-live.mjs",
     "pc:probe-source": "node aws-runner/probe-pc-source-coverage.mjs",
     "pc:collect-local": "node --env-file-if-exists=.env aws-runner/collect-pc-local.mjs",

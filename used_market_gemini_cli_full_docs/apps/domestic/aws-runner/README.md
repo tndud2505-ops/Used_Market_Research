@@ -144,6 +144,8 @@ PC 사전수집·공개 전환에 포함할 source는 registry의 운영자 승�
 
 collection target은 `HOURLY_CATEGORY`와 `DAILY_MASTER`로 나뉜다. 전자는 모든 11개 부품군을 매시간 확인하고, 후자는 GPU·CPU 정확 모델과 RAM 세대·용량·제조사, 저장장치 용량·제조사 등 versioned master 전체를 24시간 간격으로 순회한다. `PC_SOURCE_TARGETS_PER_RUN`은 한 사이트를 한 번에 과도하게 호출하지 않도록 순회 배치를 제한한다.
 
+가격 통계 publication은 D1에 여러 batch로 staging한 뒤 활성 포인터를 교체한다. 데이터가 커져도 일반 마켓 요청의 30초 제한에 끊기지 않도록 `PC_STATS_PUBLICATION_TIMEOUT_MS`를 별도 사용하며 기본값은 15분이다.
+
 다나와 11개 부품군의 실제 목록 수집 진단은 다음 명령으로만 실행한다. 결정적 테스트에는 포함하지 않는다.
 
 ```bash

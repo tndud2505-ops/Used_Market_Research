@@ -1,4 +1,4 @@
-import { idOf, coherentStats } from './pc-tools-core.mjs?v=8';
+import { idOf, coherentStats } from './pc-tools-core.mjs?v=coverage-v3';
 
 export async function readJson(url, signal) {
   const request = new AbortController();
@@ -7,7 +7,7 @@ export async function readJson(url, signal) {
   if (signal?.aborted) request.abort();
   const timeout = setTimeout(() => request.abort(), 20000);
   try {
-    const response = await fetch(url, { signal: request.signal, credentials: 'same-origin', headers: { accept: 'application/json' } });
+    const response = await fetch(url, { signal: request.signal, credentials: 'same-origin', cache: 'no-store', headers: { accept: 'application/json' } });
     if (!response.ok) throw new Error(`자료 요청 실패 (${response.status})`);
     const payload = await response.json();
     if (payload.status === 'error') throw new Error('자료를 불러오지 못했습니다.');

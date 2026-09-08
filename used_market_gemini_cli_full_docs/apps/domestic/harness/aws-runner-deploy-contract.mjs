@@ -117,6 +117,10 @@ assert.match(runnerScript, /D1_DAILY_ROW_WRITE_LIMIT/u,
   "D1 daily write exhaustion must be visible without failing the local crawl");
 assert.match(runnerScript, /const PC_SCHEDULER_CATCHUP_MS = 0;/u,
   "runner startup must not synchronously replay a multi-hour scheduler backlog");
+assert.match(runnerScript, /const PC_STATS_PUBLICATION_TIMEOUT_MS = Math\.min\(15 \* 60 \* 1000/u,
+  "large product-stat publications must have a dedicated bounded timeout");
+assert.match(runnerScript, /signal: boundedFetchSignal\(undefined, PC_STATS_PUBLICATION_TIMEOUT_MS\)/u,
+  "product-stat publication must not inherit the short marketplace fetch timeout");
 assert.match(runnerScript, /pcLedger\.getStoredDailyPriceStats/u,
   "public price-stat reads must use stored daily aggregates instead of rebuilding from raw ledger rows");
 assert.match(runnerScript, /const BACKGROUND_REFRESH_ENABLED = String\(process\.env\.RUNNER_BACKGROUND_REFRESH_ENABLED \?\? "false"\)/u,

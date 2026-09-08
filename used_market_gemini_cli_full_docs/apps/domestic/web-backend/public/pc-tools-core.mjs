@@ -1,6 +1,6 @@
 // Shared, DOM-independent rules for the builder and price analysis.
 export const SERIES = [
-  { key: 'active', label: '판매중 평균', color: '#bd422f' },
+  { key: 'active', label: '판매중 가격', color: '#bd422f' },
   { key: 'sold', label: '판매완료 표시가', color: '#357e58' },
   { key: 'confirmed_transactions', label: '확인 거래가', color: '#477dae' },
 ];
@@ -9,11 +9,33 @@ export const nameOf = p => String(p?.canonical_display_name || '모델 미확인
 export const naturalCompare = (a, b) => String(a).localeCompare(String(b), 'ko', { numeric: true, sensitivity: 'base' });
 export const money = value => value == null || !Number.isFinite(value) ? '자료 없음' : `${Math.round(value).toLocaleString('ko-KR')}원`;
 export function metricValue(metric) {
-  if (!(Number(metric?.sample_count) > 0) || typeof metric?.mean !== 'number'
-    || !Number.isFinite(metric.mean) || metric.mean <= 0) return null;
-  if (typeof metric.min === 'number' && metric.mean < metric.min) return null;
-  if (typeof metric.max === 'number' && metric.mean > metric.max) return null;
-  return metric.mean;
+  if (!(Number(metric?.sample_count) > 0)) return null;
+  for (const key of ['mean', 'median']) {
+    const value = metric?.[key];
+    if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) continue;
+    if (typeof metric.min === 'number' && value < metric.min) continue;
+    if (typeof metric.max === 'number' && value > metric.max) continue;
+    return value;
+  }
+  return null;
+}
+export function metricIsConsistent(metric) {
+  const count = Number(metric?.sample_count || 0);
+  if (count <= 0) return metric?.mean == null && metric?.median == null;
+  const minimum = metric?.min == null ? null : Number(metric.min);
+  const maximum = metric?.max == null ? null : Number(metric.max);
+  const mean = metric?.mean == null ? null : Number(metric.mean);
+  const median = metric?.median == null ? null : Number(metric.median);
+  if (count >= 5 && metric?.aggregate_incomplete !== true && (!Number.isFinite(mean) || mean <= 0)) return false;
+  if (mean !== null && (!Number.isFinite(mean) || mean <= 0)) return false;
+  if (count >= 3 && count < 5 && (!Number.isFinite(median) || median <= 0)) return false;
+  if (median !== null && (!Number.isFinite(median) || median <= 0)) return false;
+  if (Number.isFinite(minimum) && Number.isFinite(maximum) && minimum > maximum) return false;
+  if (Number.isFinite(mean) && Number.isFinite(minimum) && mean < minimum) return false;
+  if (Number.isFinite(mean) && Number.isFinite(maximum) && mean > maximum) return false;
+  if (Number.isFinite(median) && Number.isFinite(minimum) && median < minimum) return false;
+  if (Number.isFinite(median) && Number.isFinite(maximum) && median > maximum) return false;
+  return true;
 }
 export function normalizedName(value) {
   return String(value || '').normalize('NFKC').trim().replace(/\s+/g, ' ').toUpperCase();
@@ -55,12 +77,25 @@ export function coherentStats(data) {
   const sampled = row => ['active', 'sold'].filter(key => Number(row?.[key]?.sample_count) > 0);
   const rows = (data.by_source || []).filter(row => sampled(row).length || row.daily?.some(day => sampled(day).length));
   if (!rows.length) return data;
-  const valid = rows.filter(row => sampled(row).length && sampled(row).every(key => metricValue(row[key]) != null));
+  const valid = rows.filter(row => sampled(row).length && sampled(row).every(key => metricIsConsistent(row[key])));
   if (valid.length === rows.length) return data;
   const combine = (rows, key) => {
+    if (rows.length === 1 && metricIsConsistent(rows[0]?.[key])) return { ...rows[0][key] };
     const metrics = rows.map(row => row[key]).filter(metric => metricValue(metric) != null);
     const count = metrics.reduce((sum, metric) => sum + Number(metric.sample_count), 0);
-    return { sample_count: count, mean: count ? metrics.reduce((sum, metric) => sum + metric.mean * Number(metric.sample_count), 0) / count : null };
+    const minimums = metrics.map(metric => Number(metric.min)).filter(value => Number.isFinite(value) && value > 0);
+    const maximums = metrics.map(metric => Number(metric.max)).filter(value => Number.isFinite(value) && value > 0);
+    const allHaveMean = metrics.length > 0 && metrics.every(metric => Number.isFinite(Number(metric.mean)) && Number(metric.mean) > 0);
+    return {
+      sample_count: count,
+      min: minimums.length ? Math.min(...minimums) : null,
+      max: maximums.length ? Math.max(...maximums) : null,
+      mean: count && allHaveMean
+        ? metrics.reduce((sum, metric) => sum + Number(metric.mean) * Number(metric.sample_count), 0) / count
+        : null,
+      median: null,
+      aggregate_incomplete: count > 0 && !allHaveMean,
+    };
   };
   const days = new Map();
   valid.forEach(row => (row.daily || []).forEach(day => {
@@ -82,20 +117,16 @@ export function shiftDate(date, amount, unit = 'day') {
   } else value.setUTCDate(value.getUTCDate() + amount);
   return value.toISOString().slice(0, 10);
 }
-export function historyWindow(anchor = '', today = new Date().toISOString().slice(0, 10)) {
-  const earliest = shiftDate(today, -700);
-  const end = anchor ? anchor < earliest ? earliest : anchor > today ? today : anchor : today;
-  return { from: shiftDate(end, -29), to: end, earliest, latest: today, previous: end > earliest, next: end < today };
-}
-export function chartDateSelection(date, anchor = '', today = new Date().toISOString().slice(0, 10)) {
-  const window = historyWindow(anchor, today);
-  const timestamp = Date.parse(`${date}T00:00:00Z`);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(timestamp)
-    || new Date(timestamp).toISOString().slice(0, 10) !== date
-    || date < shiftDate(window.earliest, -29) || date > today) throw new Error('최근 2년 안의 날짜를 선택하세요.');
-  if (date >= window.from && date <= window.to) return { date, anchor };
-  const end = historyWindow(date, today).to;
-  return { date, anchor: end === today ? '' : end };
+export function priceDateRange(from = '', to = '', today = new Date().toISOString().slice(0, 10)) {
+  const end = to || today, start = from || shiftDate(end, -29), earliest = shiftDate(today, -729);
+  for (const date of [start, end]) {
+    const timestamp = Date.parse(`${date}T00:00:00Z`);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(timestamp)
+      || new Date(timestamp).toISOString().slice(0, 10) !== date) throw new Error('올바른 시작일과 종료일을 선택하세요.');
+    if (date < earliest || date > today) throw new Error('최근 2년 안의 기간을 선택하세요.');
+  }
+  if (start > end) throw new Error('종료일은 시작일보다 빠를 수 없습니다.');
+  return { from: start, to: end, days: (Date.parse(end) - Date.parse(start)) / 86400000 + 1, earliest, latest: today };
 }
 export function modelPageItems(page, count) {
   if (count <= 7) return Array.from({ length: count }, (_, i) => i + 1);

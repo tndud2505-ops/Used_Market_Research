@@ -124,6 +124,9 @@ const PC_SOURCE_TARGETS_PER_RUN = Math.min(128, Math.max(4,
 const PC_SOURCE_TARGET_CONCURRENCY = Math.min(8, Math.max(1,
   Number.parseInt(process.env.PC_SOURCE_TARGET_CONCURRENCY || "2", 10) || 2));
 const PC_EXTERNAL_FETCH_TIMEOUT_MS = 30_000;
+const PC_STATS_PUBLICATION_TIMEOUT_MS = Math.min(15 * 60 * 1000, Math.max(2 * 60 * 1000,
+  Number.parseInt(process.env.PC_STATS_PUBLICATION_TIMEOUT_MS || String(15 * 60 * 1000), 10)
+    || 15 * 60 * 1000));
 const PC_SCHEDULER_WATCHDOG_MS = Math.min(30 * 60 * 1000, Math.max(5 * 60 * 1000,
   Number.parseInt(process.env.PC_SCHEDULER_WATCHDOG_MS || String(20 * 60 * 1000), 10) || 20 * 60 * 1000));
 
@@ -717,7 +720,7 @@ async function publishPcProductStats() {
     method: "POST",
     headers: { authorization: `Bearer ${IMPORT_TOKEN}`, "content-type": "application/json" },
     body: publicationBody,
-    signal: boundedFetchSignal()
+    signal: boundedFetchSignal(undefined, PC_STATS_PUBLICATION_TIMEOUT_MS)
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(`D1_STATS_IMPORT_HTTP_${response.status}: ${JSON.stringify(payload)}`);

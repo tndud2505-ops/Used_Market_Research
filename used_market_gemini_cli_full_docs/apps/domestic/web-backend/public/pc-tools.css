@@ -66,6 +66,12 @@ body.pc-tools { display:flex; flex-direction:column; min-height:100dvh; }
 .tools-date-picker input[type=date] { width:124px; border:0; }
 .tools-date-picker input::-webkit-calendar-picker-indicator { display:none; }
 .tools-date-picker > button { width:30px; display:grid; place-items:center; }
+.tools-range-field { display:grid; gap:2px; }
+.tools-range-field > label { font-size:11px; color:var(--ink-soft); }
+.tools-range-field input[type=date] { width:106px; }
+.tools-range-field .tools-date-picker > button { width:26px; }
+#chart-navigation { align-items:end; }
+.tools-range-to .tools-calendar { left:auto; right:0; }
 .tools-calendar { position:absolute; left:0; top:calc(100% + 6px); z-index:20; width:286px; padding:12px; background:var(--surface); border:1px solid var(--line-strong); }
 .tools-calendar[hidden] { display:none; }
 .calendar-heading { display:flex; align-items:center; gap:4px; margin-bottom:8px; }
@@ -87,6 +93,22 @@ body.pc-tools { display:flex; flex-direction:column; min-height:100dvh; }
 .tools-change.up { color:var(--danger); }.tools-change.down { color:var(--confirmed); }
 .tools-footer { display:flex; justify-content:flex-end; gap:22px; padding:20px 32px; font-size:12px; }
 .tools-footer a { color:var(--muted); }
+/* Keep the builder readable and compact without stretching every empty column. */
+.pc-tools[data-page=builder] .tools-toolbar { padding-bottom:14px; border-bottom:1px solid var(--line); }
+.pc-tools[data-page=builder] .tools-summary-item strong { font-size:25px; }
+.pc-tools[data-page=builder] .tools-summary-item span { font-size:14px; }
+.pc-tools[data-page=builder] :is(button,select,input) { font-size:14px; }
+.pc-tools[data-page=builder] table { font-size:14px; }
+.pc-tools[data-page=builder] th { font-size:12px; padding:10px 8px; }
+.pc-tools[data-page=builder] td { padding:7px 8px; }
+.pc-tools[data-page=builder] .model-toggle { font-size:15px; }
+.pc-tools[data-page=builder] .tools-controls { gap:8px 14px; margin-bottom:8px; }
+.pc-tools[data-page=builder] .tools-builder-layout { margin-top:18px; gap:28px; }
+.pc-tools[data-page=builder] #model-table { max-height:max(400px,calc(100dvh - 258px)); }
+.pc-tools[data-page=builder] .tools-pages { margin-top:10px; }
+@media(min-width:1101px) {
+  .pc-tools[data-page=builder] .tools-builder-layout { grid-template-columns:minmax(560px,.8fr) minmax(0,1.2fr); }
+}
 @media(max-width:1100px) {
   .tools-builder-layout { grid-template-columns:minmax(0,1fr); gap:28px; }.tools-header { gap:24px; }
 }
@@ -104,4 +126,6 @@ body.pc-tools { display:flex; flex-direction:column; min-height:100dvh; }
   .tools-chart-controls { gap:6px 12px; }.tools-chart-toolbar .tools-tabs { max-width:100%; }
   .tools-chart-detail { gap:8px 16px; }.tools-footer { padding:18px 14px; gap:16px; justify-content:flex-start; }
   .main-navigation { gap:16px; }.main-navigation a { font-size:12px; }
+  .pc-tools[data-page=builder] .tools-summary-item strong { font-size:20px; }
+  .pc-tools[data-page=builder] #model-table { max-height:65dvh; }
 }

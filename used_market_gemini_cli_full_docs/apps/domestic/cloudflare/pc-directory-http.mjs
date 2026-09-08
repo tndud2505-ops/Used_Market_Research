@@ -188,7 +188,7 @@ export function pcCollectionTargetSetV2() {
   const categoryEndpointSources = ["danawa", "ebay"].filter((source) => operationalDirectorySources.has(source));
   const searchMarketplaceSources = ["joonggonara", "hellomarket", "bunjang", "rethinkmall", "coolenjoy"]
     .filter((source) => operationalDirectorySources.has(source));
-  const exactMasterSources = [...searchMarketplaceSources, "ebay"];
+  const overseasExactSources = operationalDirectorySources.has("ebay") ? ["ebay"] : [];
   const generalQueries = [
     ["GPU", "그래픽카드"],
     ["CPU", "CPU"],
@@ -242,10 +242,14 @@ export function pcCollectionTargetSetV2() {
     HBA_RAID: "HBA RAID", M2_CARRIER: "M.2 확장카드",
     DVD: "DVD ODD", "Blu-ray": "블루레이 ODD", BDXL: "BDXL ODD"
   });
-  const exactQueries = (product) => {
+  const domesticExactQueries = (product) => {
     const spec = product.spec || {};
     if (product.category === "GPU") return [spec.gpu_model || product.aliases?.[0] || product.name];
-    if (product.category === "CPU") return [spec.cpu_model || product.aliases?.at(-1) || product.name];
+    if (product.category === "CPU") {
+      const ryzen = String(product.name || "").match(/^AMD Ryzen\s+(\d+)\s+(.+)$/iu);
+      if (ryzen) return [`라이젠 ${ryzen[1]} ${ryzen[2]}`];
+      return [spec.cpu_model || product.aliases?.at(-1) || product.name];
+    }
     if (product.category === "RAM") {
       return [`${product.manufacturer} ${spec.memory_generation} ${spec.module_capacity_gb}GB 램`];
     }
@@ -269,14 +273,22 @@ export function pcCollectionTargetSetV2() {
   const exactTargets = [];
   let exactOrder = categoryTargets.length + generalTargets.length;
   for (const product of PC_PRODUCT_MASTER_V2) {
-    const queries = [...new Set(exactQueries(product).map((value) => String(value || "").trim()).filter(Boolean))];
-    for (let queryIndex = 0; queryIndex < queries.length; queryIndex += 1) {
+    const queryPlans = [
+      ...domesticExactQueries(product).map((queryText) => ({ scope: "domestic", queryText, sourceKeys: searchMarketplaceSources })),
+      { scope: "ebay", queryText: product.name, sourceKeys: overseasExactSources }
+    ].filter((plan) => plan.sourceKeys.length > 0 && String(plan.queryText || "").trim());
+    const uniquePlans = [...new Map(queryPlans.map((plan) => [
+      `${plan.scope}:${String(plan.queryText).trim()}`,
+      { ...plan, queryText: String(plan.queryText).trim() }
+    ])).values()];
+    for (let queryIndex = 0; queryIndex < uniquePlans.length; queryIndex += 1) {
+      const plan = uniquePlans[queryIndex];
       exactTargets.push({
-        targetId: `pc-target:${PC_PRODUCT_MASTER_V2_VERSION}:master-v6:${product.id}:${queryIndex}`,
+        targetId: `pc-target:${PC_PRODUCT_MASTER_V2_VERSION}:master-v7:${product.id}:${plan.scope}:${queryIndex}`,
         canonicalProductId: product.id,
         categoryCode: product.category,
-        queryText: queries[queryIndex],
-        sourceKeys: exactMasterSources,
+        queryText: plan.queryText,
+        sourceKeys: plan.sourceKeys,
         targetOrder: exactOrder,
         cadenceClass: "DAILY_MASTER",
         minimumIntervalMinutes: 24 * 60,
@@ -286,7 +298,7 @@ export function pcCollectionTargetSetV2() {
     }
   }
   return {
-    targetSetVersion: `pc-targets:${PC_PRODUCT_MASTER_V2_VERSION}:full-master-v6`,
+    targetSetVersion: `pc-targets:${PC_PRODUCT_MASTER_V2_VERSION}:full-master-v7`,
     directoryVersion: PC_PRODUCT_MASTER_V2_VERSION,
     targets: [...categoryTargets, ...generalTargets, ...exactTargets]
   };

@@ -33,7 +33,7 @@ export function parsePriceStatsRequest(url, now = Date.now()) {
   }
   if (!canonicalProductId || canonicalProductId.length > 200) throw new Error("canonicalProductId is invalid");
   const days = Number(url.searchParams.get("days") || "30");
-  if (days !== 30) throw new Error("days must be 30");
+  if (!Number.isInteger(days) || days < 1 || days > MAX_PRICE_HISTORY_DAYS) throw new Error("days must be an integer from 1 to 730");
   const today = utcDateKey(now);
   const requestedAsOf = String(url.searchParams.get("as_of") || today).trim();
   if (!DATE_ONLY.test(requestedAsOf) || utcDateKey(`${requestedAsOf}T00:00:00.000Z`) !== requestedAsOf) {
@@ -42,7 +42,7 @@ export function parsePriceStatsRequest(url, now = Date.now()) {
   const historyFrom = shiftUtcDate(today, -(MAX_PRICE_HISTORY_DAYS - 1));
   const earliestWindowEnd = shiftUtcDate(historyFrom, days - 1);
   if (requestedAsOf < earliestWindowEnd || requestedAsOf > today) {
-    throw new Error("as_of must keep the 30-day window within the last 2 years");
+    throw new Error("as_of must keep the selected window within the last 2 years");
   }
   return {
     canonicalProductId,
@@ -66,9 +66,9 @@ export function parsePriceStatsRequest(url, now = Date.now()) {
   };
 }
 
-function confidenceFor(sampleCount) {
-  if (sampleCount >= 10) return { level: "높음", reasons: ["최근 30일 판매완료 표본이 10건 이상입니다."] };
-  if (sampleCount >= 5) return { level: "높음", reasons: ["최근 30일 판매완료 표본이 5건 이상입니다."] };
+function confidenceFor(sampleCount, period) {
+  if (sampleCount >= 10) return { level: "높음", reasons: [`${period} 판매완료 표본이 10건 이상입니다.`] };
+  if (sampleCount >= 5) return { level: "높음", reasons: [`${period} 판매완료 표본이 5건 이상입니다.`] };
   if (sampleCount >= 3) return { level: "낮음", reasons: ["표본이 5건 미만이므로 중앙값만 참고할 수 있습니다."] };
   return { level: "자료 부족", reasons: ["대표가격을 계산하려면 표본이 3건 이상 필요합니다."] };
 }
@@ -77,6 +77,7 @@ export function priceStatsResponse(request, stats) {
   const sold = stats?.sold || { sample_count: 0, median: null, mean: null };
   const soldCount = Number(sold.sample_count || 0);
   const soldMedian = Number.isFinite(Number(sold.median)) ? Number(sold.median) : null;
+  const period = request.days === 30 && !request.isHistorical ? '최근 30일' : '선택 기간';
   return {
     canonical_product_id: request.canonicalProductId,
     active: stats?.active || { sample_count: 0, median: null, mean: null },
@@ -93,9 +94,9 @@ export function priceStatsResponse(request, stats) {
     reference_price: {
       amount: soldCount >= 3 ? soldMedian : null,
       currency: request.currency,
-      label: "최근 30일 판매완료 중앙값"
+      label: `${period} 판매완료 중앙값`
     },
-    confidence: confidenceFor(soldCount),
+    confidence: confidenceFor(soldCount, period),
     exclusions: stats?.exclusions || { total: 0, reasons: {} },
     methodology: {
       days: request.days,
@@ -109,6 +110,10 @@ export function priceStatsResponse(request, stats) {
     },
     versions: stats?.versions || { parser: null, rule: null, filter: null },
     traceability: stats?.traceability || { member_count: 0 },
+    ...(stats?.integrity_repaired_active ? { integrity_repaired_active: true } : {}),
+    ...(Array.isArray(stats?.integrity_repaired_source_ids) && stats.integrity_repaired_source_ids.length > 0
+      ? { integrity_repaired_source_ids: stats.integrity_repaired_source_ids }
+      : {}),
     as_of: stats?.as_of || new Date().toISOString()
   };
 }

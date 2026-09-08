@@ -16,6 +16,7 @@ import {
 import { SearchIndex } from "./search-index.mjs";
 import { PcPartsLedger } from "./pc-parts-ledger.mjs";
 import { PcShadowPipeline } from "./pc-shadow-pipeline.mjs";
+import { filterCollectionTargets } from "./pc-source-coverage-core.mjs";
 
 const sourceKey = String(process.env.PC_COLLECT_SOURCE || "").trim().toLowerCase();
 const operationalSourceKeys = PC_SOURCE_REGISTRY
@@ -41,6 +42,13 @@ if ((!importUrl || !importToken) && !sqlOutputPath) {
   throw new Error("D1 projection import or PC_D1_SQL_OUTPUT is required");
 }
 if ((importUrl && !importToken) || (!importUrl && importToken)) throw new Error("D1 import URL and token must be configured together");
+const splitList = (value) => [...new Set(String(value || "").split(",").map((entry) => entry.trim()).filter(Boolean))];
+const collectProductIds = splitList(process.env.PC_COLLECT_PRODUCT_IDS);
+const collectTargetIds = splitList(process.env.PC_COLLECT_TARGET_IDS);
+const collectTargetOffset = Math.max(0, Number.parseInt(process.env.PC_COLLECT_TARGET_OFFSET || "0", 10) || 0);
+const collectTargetLimit = process.env.PC_COLLECT_TARGET_LIMIT
+  ? Math.min(200, Math.max(1, Number.parseInt(process.env.PC_COLLECT_TARGET_LIMIT, 10) || 1))
+  : null;
 
 const DANAWA_REQUEST_MIN_INTERVAL_MS = 650;
 let lastDanawaRequestAt = 0;
@@ -215,9 +223,13 @@ try {
   ledger.activateCollectionTargets(pcCollectionTargetSetV2());
   const pipeline = new PcShadowPipeline({ ledger });
   await pipeline.initialize();
-  const targets = ledger.listActiveCollectionTargets(sourceKey).filter((target) => (
-    collectCadenceClass === "ALL" || String(target.cadence_class || "HOURLY_CATEGORY") === collectCadenceClass
-  ));
+  const targets = filterCollectionTargets(ledger.listActiveCollectionTargets(sourceKey), {
+    cadenceClass: collectCadenceClass,
+    productIds: collectProductIds,
+    targetIds: collectTargetIds,
+    offset: collectTargetOffset,
+    limit: collectTargetLimit
+  });
   if (targets.length === 0) throw new Error(`NO_COLLECTION_TARGETS:${sourceKey}:${collectCadenceClass}`);
   crawlRunId = ledger.startCrawlRun({ sourceId: sourceKey, startedAt, adapterVersion: "operator-source-refresh-v1" });
   const collectTarget = async (target) => ({ target, items: await collectTargetItems(target) });

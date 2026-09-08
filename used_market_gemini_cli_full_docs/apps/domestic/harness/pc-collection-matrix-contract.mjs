@@ -62,6 +62,16 @@ const coverage = Object.fromEntries(PC_PART_CATEGORY_CODES.map((categoryCode) =>
   ]))
 ]));
 
+const ryzen3100Targets = targets.filter((target) => target.canonicalProductId === "cpu:amd:ryzen-3-3100");
+assert.ok(ryzen3100Targets.some((target) => target.queryText === "라이젠 3 3100"
+  && target.sourceKeys.includes("bunjang") && !target.sourceKeys.includes("ebay")),
+"domestic Ryzen collection must use a family-qualified Korean query instead of a bare model number");
+assert.ok(ryzen3100Targets.some((target) => target.queryText === "AMD Ryzen 3 3100"
+  && target.sourceKeys.length === 1 && target.sourceKeys[0] === "ebay"),
+"eBay collection must retain a source-appropriate English exact-model query");
+assert.equal(ryzen3100Targets.some((target) => target.queryText === "3100"), false,
+"ambiguous bare Ryzen model numbers must not be exact collection queries");
+
 console.log(JSON.stringify({
   status: "passed",
   contract: "pc-collection-matrix",

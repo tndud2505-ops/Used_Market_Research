@@ -48,9 +48,20 @@ assert.equal(earliestPriceRequest.window.can_go_previous, false);
 assert.throws(() => parsePriceStatsRequest(new URL(
   "https://used-pick.test/api/products/cpu%3Aintel%3Ai5-7400/price-stats?days=30&as_of=2024-10-07"
 ), priceStatsNow), /last 2 years/u);
-assert.throws(() => parsePriceStatsRequest(new URL(
+const weeklyPriceRequest = parsePriceStatsRequest(new URL(
   "https://used-pick.test/api/products/cpu%3Aintel%3Ai5-7400/price-stats?days=7"
-), priceStatsNow), /days must be 30/u);
+), priceStatsNow);
+assert.equal(weeklyPriceRequest.days, 7);
+assert.equal(weeklyPriceRequest.window.from, '2026-09-02');
+for (const days of [0, -1, 1.5, 731]) assert.throws(() => parsePriceStatsRequest(new URL(
+  `https://used-pick.test/api/products/cpu%3Aintel%3Ai5-7400/price-stats?days=${days}`
+), priceStatsNow), /integer from 1 to 730/u);
+assert.equal(parsePriceStatsRequest(new URL(
+  'https://used-pick.test/api/products/cpu%3Aintel%3Ai5-7400/price-stats?days=1&as_of=2024-09-09'
+), priceStatsNow).window.from, '2024-09-09');
+assert.equal(parsePriceStatsRequest(new URL(
+  'https://used-pick.test/api/products/cpu%3Aintel%3Ai5-7400/price-stats?days=730&as_of=2026-09-08'
+), priceStatsNow).window.from, '2024-09-09');
 assert.throws(() => parsePriceStatsRequest(new URL(
   "https://used-pick.test/api/products/cpu%3Aintel%3Ai5-7400/price-stats?days=30&as_of=2026-09-09"
 ), priceStatsNow), /last 2 years/u);
@@ -1126,6 +1137,27 @@ d1.prepare(`INSERT INTO public_product_stats(publication_id, canonical_product_i
   'KR_DEALER_USED', 'USED_WORKING', 'KRW', 30, ?, ?)`)
   .run(ssdBucketId, JSON.stringify({ active: { sample_count: 0 }, sold: { sample_count: 0 }, daily: [], by_source: [] }),
     "2026-08-29T00:00:00.000Z");
+const inconsistentCpuId = "cpu:amd:ryzen-3-3200g";
+const inconsistentCpuStats = {
+  active: { sample_count: 20, min: 45_000, max: 110_000, mean: 44_400 },
+  sold: { sample_count: 0, min: null, max: null, mean: null },
+  daily: [],
+  by_source: [
+    { source_id: "bunjang", active: { sample_count: 1, min: 68_000, max: 68_000, mean: 0 }, daily: [] },
+    { source_id: "joonggonara", active: { sample_count: 19, min: 45_000, max: 110_000, mean: 32_368.42 }, daily: [] },
+  ],
+};
+d1.prepare(`INSERT INTO public_product_stats(publication_id, canonical_product_id, market_pool,
+  condition_code, currency, days, stats_json, as_of) VALUES ('fixture-products', ?,
+  'KR_C2C_USED', 'USED_WORKING', 'KRW', 30, ?, ?)`)
+  .run(inconsistentCpuId, JSON.stringify(inconsistentCpuStats), "2026-08-29T00:00:00.000Z");
+d1.prepare(`INSERT INTO listings(item_id, site, category_id, title, search_text, price_value, currency, url, updated_at, active,
+  canonical_product_id, canonical_display_name, canonical_manufacturer, listing_kind, pc_category_code, quantity, price_scope,
+  condition_code, lifecycle_status, market_pool, price_eligible, exclusion_reasons_json)
+  VALUES ('joonggonara:3200g-current', 'joonggonara', 'pc', 'AMD 라이젠3 3200G CPU', 'AMD 라이젠3 3200G CPU',
+    50000, 'KRW', 'https://web.joongna.com/product/3200', '2026-08-31T00:00:00.000Z', 1, ?,
+    'AMD Ryzen 3 3200G', 'AMD', 'SINGLE_COMPONENT', 'CPU', 1, 'TOTAL', 'USED_WORKING', 'ACTIVE',
+    'KR_C2C_USED', 1, '[]')`).run(inconsistentCpuId);
 for (const [index, price] of [90_000, 100_000, 110_000].entries()) {
   d1.prepare(`INSERT INTO listings(item_id, site, category_id, title, search_text, price_value, currency, url, updated_at, active,
     canonical_product_id, canonical_display_name, canonical_manufacturer, listing_kind, pc_category_code, quantity, price_scope,
@@ -1181,6 +1213,10 @@ const publishedStatsResponse = await worker.fetch(new Request(
   "https://used-pick.test/api/products/gpu%3Anvidia%3Artx-3080/price-stats?days=30&market_pool=KR_C2C_USED&condition=USED_WORKING&currency=KRW"
 ), importEnv);
 assert.equal(publishedStatsResponse.status, 200);
+const customRangeFallback = await worker.fetch(new Request(
+  "https://used-pick.test/api/products/gpu%3Anvidia%3Artx-3080/price-stats?days=14&market_pool=KR_C2C_USED&condition=USED_WORKING&currency=KRW"
+), importEnv);
+assert.equal(customRangeFallback.status, 503, 'custom ranges must never reuse the current 30-day D1 projection');
 const publishedStatsPayload = (await publishedStatsResponse.json()).data;
 assert.deepEqual(publishedStatsPayload.by_source.map((source) => source.source_id), ["bunjang", "danawa", "joonggonara"]);
 assert.equal(publishedStatsPayload.active.sample_count, 5,
@@ -1216,6 +1252,19 @@ assert.equal(currentOnlyStats.daily.at(-1).active.sample_count, 6);
 assert.deepEqual(currentOnlyStats.by_source.map((source) => source.source_id), ["bunjang", "joonggonara"]);
 assert.equal(currentOnlyStats.by_source.find((source) => source.source_id === "bunjang").active.median, 310_000);
 assert.equal(currentOnlyStats.by_source.find((source) => source.source_id === "joonggonara").active.median, 300_000);
+const repairedStatsResponse = await worker.fetch(new Request(
+  `https://used-pick.test/api/products/${encodeURIComponent(inconsistentCpuId)}/price-stats?days=30&market_pool=KR_C2C_USED&condition=USED_WORKING&currency=KRW`
+), importEnv);
+assert.equal(repairedStatsResponse.status, 200);
+const repairedStats = (await repairedStatsResponse.json()).data;
+assert.equal(repairedStats.active.sample_count, 1,
+  "an impossible published aggregate must be replaced by current eligible projections");
+assert.equal(repairedStats.active.mean, null,
+  "one current listing must remain a sample instead of becoming a fabricated average");
+assert.equal(repairedStats.active.min, 50_000);
+assert.deepEqual(repairedStats.by_source.map((source) => source.source_id), ["joonggonara"],
+  "invalid source summaries without current evidence must leave the visible source selector");
+assert.deepEqual(repairedStats.integrity_repaired_source_ids, ["bunjang", "joonggonara"]);
 const joongOnlyListings = await worker.fetch(new Request(
   "https://used-pick.test/api/pc/listings?canonical_product_id=gpu%3Anvidia%3Artx-3060&sites=joonggonara&currency=KRW"
 ), { ...importEnv, SEARCH_CURSOR_SECRET: "fixture-cursor-secret-that-is-long-enough" });

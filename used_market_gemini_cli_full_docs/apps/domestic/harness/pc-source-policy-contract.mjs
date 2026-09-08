@@ -631,6 +631,25 @@ const previousClientId = process.env.EBAY_CLIENT_ID;
 const previousClientSecret = process.env.EBAY_CLIENT_SECRET;
 const previousToken = process.env.EBAY_BROWSE_API_TOKEN;
 try {
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    list: [{
+      pid: "402071229",
+      name: "AMD 라이젠3 3100 CPU 중고 판매",
+      price: "50000",
+      product_image: "https://media.example.test/402071229.jpg",
+      uid: "fixture-user",
+      update_time: "2026-09-08T00:00:00.000Z",
+      status: "0",
+    }],
+  }), { status: 200 });
+  const bunjangItems = await collectOne("bunjang", "라이젠 3 3100", "pc", 20,
+    "라이젠 3 3100", "recent", { min: null, max: null });
+  assert.equal(bunjangItems.length, 1);
+  assert.equal(bunjangItems[0].source_listing_id, "402071229",
+    "Bunjang keyword rows must retain the stable source product id");
+  assert.equal(bunjangItems[0].item_id, "bunjang:402071229",
+    "Bunjang item identity must not depend on its full product URL");
+
   process.env.EBAY_CLIENT_ID = "fixture-client-id";
   process.env.EBAY_CLIENT_SECRET = "fixture-client-secret";
   delete process.env.EBAY_BROWSE_API_TOKEN;

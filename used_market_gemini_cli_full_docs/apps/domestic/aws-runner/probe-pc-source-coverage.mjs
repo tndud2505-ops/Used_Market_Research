@@ -1,101 +1,141 @@
 import { collectOne } from "../cloudflare/live-search.mjs";
 import { pcCollectionTargetSetV2 } from "../cloudflare/pc-directory-http.mjs";
-import { getPcSource } from "../collector/logic/pc-source-registry.mjs";
-import { SPECIALIST_FIXTURE_PARSERS } from "../collector/logic/pc-source-adapters.mjs";
-import { classifyPcPartListing } from "../market/logic/pc-parts-classifier.mjs";
+import { collectDanawaCategoryListings, SPECIALIST_FIXTURE_PARSERS } from "../collector/logic/pc-source-adapters.mjs";
+import { PC_SOURCE_REGISTRY, getPcSource } from "../collector/logic/pc-source-registry.mjs";
+import { PcPartsLedger } from "./pc-parts-ledger.mjs";
+import { PcShadowPipeline } from "./pc-shadow-pipeline.mjs";
+import { assessProbeRun, parseProbeConfig, selectProbeRuns, summarizeProbeRuns } from "./pc-source-coverage-core.mjs";
 
-const sourceKey = String(process.env.PC_PROBE_SOURCE || "joonggonara").trim().toLowerCase();
-const limit = Math.min(20, Math.max(1, Number(process.env.PC_PROBE_LIMIT || 8) || 8));
-const source = getPcSource(sourceKey);
-
-if (source.policy_status !== "APPROVED" || source.runtime_status !== "ENABLED") {
-  throw new Error(`PC_PROBE_SOURCE_NOT_OPERATIONAL:${sourceKey}:${source.policy_status}:${source.runtime_status}`);
-}
-if (source.directory_source !== true) throw new Error(`PC_PROBE_SOURCE_NOT_DIRECTORY:${sourceKey}`);
-
-const targets = pcCollectionTargetSetV2().targets.filter((target) => target.sourceKeys.includes(sourceKey));
-if (targets.length === 0) throw new Error(`PC_PROBE_TARGETS_MISSING:${sourceKey}`);
-if (targets.some((target) => /MONITOR|모니터/iu.test(`${target.categoryCode} ${target.queryText}`))) {
-  throw new Error(`PC_PROBE_MONITOR_TARGET_FORBIDDEN:${sourceKey}`);
+const operationalSources = PC_SOURCE_REGISTRY.filter((source) => source.directory_source === true
+  && source.policy_status === "APPROVED" && source.runtime_status === "ENABLED");
+const config = parseProbeConfig(process.env, operationalSources.map((source) => source.key));
+const targetSet = pcCollectionTargetSetV2();
+const selection = selectProbeRuns(targetSet.targets, config);
+if (selection.runs.length === 0) throw new Error("PC_PROBE_TARGETS_MISSING");
+if (selection.runs.some(({ target }) => /MONITOR|모니터/iu.test(`${target.categoryCode} ${target.queryText}`))) {
+  throw new Error("PC_PROBE_MONITOR_TARGET_FORBIDDEN");
 }
 
 const specialistSearchUrls = Object.freeze({
-  coolenjoy: "https://coolenjoy.net/bbs/mart2?sfl=wr_subject&stx={query}&sop=and"
+  coolenjoy: "https://coolenjoy.net/bbs/mart2?sfl=wr_subject&stx={query}&sop=and",
 });
 const specialistHosts = Object.freeze({
-  coolenjoy: new Set(["coolenjoy.net", "www.coolenjoy.net"])
+  coolenjoy: new Set(["coolenjoy.net", "www.coolenjoy.net"]),
 });
 
-async function collectTargetItems(target) {
+async function collectTargetItems(sourceKey, target) {
+  if (sourceKey === "danawa") {
+    return (await collectDanawaCategoryListings({ categoryCode: target.categoryCode })).items.slice(0, config.itemLimit);
+  }
   const parser = SPECIALIST_FIXTURE_PARSERS[sourceKey];
-  if (!parser || !specialistSearchUrls[sourceKey]) {
-    return collectOne(
-      sourceKey,
-      target.queryText,
-      sourceKey === "ebay" ? target.categoryCode : "pc",
-      limit,
-      target.queryText,
-      "recent",
-      { min: null, max: null }
-    );
+  if (parser && specialistSearchUrls[sourceKey]) {
+    const url = new URL(specialistSearchUrls[sourceKey].replace("{query}", encodeURIComponent(target.queryText)));
+    if (!specialistHosts[sourceKey].has(url.hostname.toLowerCase())) {
+      throw new Error(`PC_PROBE_SPECIALIST_HOST_NOT_ALLOWED:${sourceKey}`);
+    }
+    const response = await fetch(url, {
+      headers: {
+        accept: "text/html,application/xhtml+xml",
+        "accept-language": "ko-KR,ko;q=0.9,en;q=0.7",
+        referer: "https://used-pick.com/",
+        "user-agent": "USED-PICK-PC-Collector/2.0 (+https://used-pick.com/)",
+      },
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (!response.ok) throw new Error(`PC_PROBE_SPECIALIST_HTTP_${response.status}:${sourceKey}`);
+    return parser(await response.text()).slice(0, config.itemLimit).map((item) => ({ ...item, site: sourceKey }));
   }
-  const url = new URL(specialistSearchUrls[sourceKey].replace("{query}", encodeURIComponent(target.queryText)));
-  if (!specialistHosts[sourceKey].has(url.hostname.toLowerCase())) {
-    throw new Error(`PC_PROBE_SPECIALIST_HOST_NOT_ALLOWED:${sourceKey}`);
-  }
-  const response = await fetch(url, {
-    headers: {
-      accept: "text/html,application/xhtml+xml",
-      "accept-language": "ko-KR,ko;q=0.9,en;q=0.7",
-      referer: "https://used-pick.com/",
-      "user-agent": "USED-PICK-PC-Collector/2.0 (+https://used-pick.com/)"
-    },
-    signal: AbortSignal.timeout(20_000)
-  });
-  if (!response.ok) throw new Error(`PC_PROBE_SPECIALIST_HTTP_${response.status}:${sourceKey}`);
-  return parser(await response.text()).slice(0, limit);
+  return collectOne(sourceKey, target.queryText, sourceKey === "ebay" ? target.categoryCode : "pc",
+    config.itemLimit, target.queryText, "recent", { min: null, max: null });
 }
 
+async function publicListingEvidence(sourceKey, target) {
+  if (!config.comparePublic || !target.canonicalProductId) return { count: null, freshness: null };
+  const url = new URL("/api/pc/listings", config.publicBaseUrl);
+  url.searchParams.set("canonical_product_id", target.canonicalProductId);
+  url.searchParams.set("site", sourceKey);
+  url.searchParams.set("limit", "1");
+  url.searchParams.set("sort", "recent");
+  const response = await fetch(url, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(20_000) });
+  if (!response.ok) throw new Error(`PC_PROBE_PUBLIC_HTTP_${response.status}`);
+  const payload = await response.json();
+  const data = payload?.data || payload;
+  const explicitTotal = Number(data?.total);
+  const sourceTotal = Number(data?.source_counts?.[sourceKey]);
+  const itemCount = Array.isArray(data?.items) ? data.items.length : 0;
+  const count = data?.total !== null && data?.total !== undefined && Number.isFinite(explicitTotal)
+    ? explicitTotal
+    : Number.isFinite(sourceTotal) ? sourceTotal : itemCount;
+  return { count, freshness: data?.freshness?.state || null };
+}
+
+const ledger = new PcPartsLedger();
+ledger.migrate();
+const pipeline = new PcShadowPipeline({ ledger });
+await pipeline.initialize();
+const checkedAt = new Date().toISOString();
 const rows = [];
-for (const target of targets) {
+for (const { sourceKey, target } of selection.runs) {
   try {
-    const items = await collectTargetItems(target);
-    const classified = items.map((item) => classifyPcPartListing(item));
-    rows.push({
-      target_id: target.targetId,
-      category_code: target.categoryCode,
-      query_text: target.queryText,
-      received_count: items.length,
-      category_match_count: classified.filter((item) => item.category_code === target.categoryCode).length,
-      price_eligible_count: classified.filter((item) => item.category_code === target.categoryCode && item.price_eligible === true).length,
-      samples: items.slice(0, 2).map((item) => ({ title: item.title, url: item.url }))
+    getPcSource(sourceKey);
+    const items = await collectTargetItems(sourceKey, target);
+    const projections = items.map((item) => {
+      const normalized = pipeline.normalizeItem({ ...item, site: sourceKey }, checkedAt);
+      return {
+        canonical_product_id: normalized.normalized.canonicalProductId,
+        category_code: normalized.normalized.categoryCode,
+        pc_category_code: normalized.normalized.publicCategoryCode,
+        lifecycle_status: normalized.state.status,
+        price_eligible: normalized.priceEligible,
+        statistics_eligible: normalized.normalized.statisticsEligible,
+        exclusion_reasons: normalized.exclusionReasons,
+        statistics_exclusion_reasons: normalized.normalized.statisticsExclusionReasons,
+      };
     });
+    const publicEvidence = await publicListingEvidence(sourceKey, target);
+    rows.push(assessProbeRun({
+      sourceKey, target, items, projections,
+      publicListingCount: publicEvidence.count,
+      publicFreshness: publicEvidence.freshness,
+    }));
   } catch (error) {
     rows.push({
+      source_key: sourceKey,
       target_id: target.targetId,
+      canonical_product_id: target.canonicalProductId || null,
       category_code: target.categoryCode,
       query_text: target.queryText,
-      error: error instanceof Error ? error.message : String(error)
+      cadence_class: target.cadenceClass,
+      status: "SOURCE_ERROR",
+      error: error instanceof Error ? error.message : String(error),
     });
   }
-  await new Promise((resolve) => setTimeout(resolve, 200));
+  if (config.delayMs > 0) await new Promise((resolve) => setTimeout(resolve, config.delayMs));
 }
+ledger.close();
 
-const expectedCategories = [...new Set(targets.map((target) => target.categoryCode))].sort();
-const coveredCategories = [...new Set(rows
-  .filter((row) => Number(row.category_match_count || 0) > 0)
-  .map((row) => row.category_code))].sort();
-const missingCategories = expectedCategories.filter((category) => !coveredCategories.includes(category));
 const report = {
-  source_key: sourceKey,
-  checked_at: new Date().toISOString(),
-  target_count: targets.length,
-  expected_categories: expectedCategories,
-  covered_categories: coveredCategories,
-  missing_categories: missingCategories,
-  monitor_target_count: 0,
-  rows
+  report_version: "pc-source-coverage-v2",
+  target_set_version: targetSet.targetSetVersion,
+  checked_at: checkedAt,
+  source_keys: config.sourceKeys,
+  filters: {
+    product_ids: config.productIds,
+    categories: config.categories,
+    cadence_class: config.cadenceClass,
+  },
+  offset: config.offset,
+  target_limit: config.targetLimit,
+  item_limit: config.itemLimit,
+  total_target_runs: selection.totalRuns,
+  next_offset: selection.nextOffset,
+  summary: summarizeProbeRuns(rows, {
+    offset: config.offset,
+    targetLimit: config.targetLimit,
+    totalRuns: selection.totalRuns,
+  }),
+  rows,
 };
 
 console.log(JSON.stringify(report, null, 2));
-if (missingCategories.length > 0) process.exitCode = 2;
+if (rows.length > 0 && rows.every((row) => row.status === "SOURCE_ERROR")) process.exitCode = 2;

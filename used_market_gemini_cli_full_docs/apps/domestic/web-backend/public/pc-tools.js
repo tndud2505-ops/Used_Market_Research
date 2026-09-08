@@ -1,7 +1,7 @@
-import { SERIES, idOf, nameOf, naturalCompare, money, metricValue, groupProducts, scopedStats, sourceStats, sourceId, shiftDate, historyWindow, chartDateSelection, modelPageItems, buildTotals, compatibility, validateBuild, dailySeries, percentChange, overviewIndex } from './pc-tools-core.mjs?v=8';
-import { readJson, createPriceStore } from './pc-tools-data.mjs?v=8';
-import { drawChart } from './pc-tools-chart.mjs?v=8';
-import { createDatePicker } from './pc-tools-calendar.mjs?v=9';
+import { SERIES, idOf, nameOf, naturalCompare, money, metricValue, groupProducts, scopedStats, sourceStats, sourceId, priceDateRange, modelPageItems, buildTotals, compatibility, validateBuild, dailySeries, percentChange, overviewIndex } from './pc-tools-core.mjs?v=coverage-v3';
+import { readJson, createPriceStore } from './pc-tools-data.mjs?v=coverage-v3';
+import { drawChart } from './pc-tools-chart.mjs?v=coverage-v3';
+import { createDatePicker } from './pc-tools-calendar.mjs?v=coverage-v3';
 
 const builder = document.body.dataset.page === 'builder';
 const $ = selector => document.querySelector(selector);
@@ -11,15 +11,36 @@ const state = {
   products: [], byId: new Map(), categories: [], category: builder ? 'CPU' : 'GPU',
   manufacturer: '', generation: '', grouped: true, sort: 'name', page: 1,
   expanded: new Set(), entries: [], selectedId: '', selectedManufacturer: '',
-  days: 30, mode: 'amount', chartDate: '', anchor: '', source: '', overview: false, ready: false,
+  days: 30, range: priceDateRange(), mode: 'amount', chartDate: '', source: '', overview: false, ready: false,
 };
 let repaintTimer, statusTimer;
 const displayPrice = value => value == null ? '—' : money(value);
+function pricePresentation(metric, seriesKey = 'active') {
+  const value = metricValue(metric), count = Number(metric?.sample_count || 0);
+  if (value != null) return {
+    text: displayPrice(value),
+    label: typeof metric?.mean === 'number' && metric.mean === value ? '평균' : '중앙값',
+    empty: false,
+  };
+  const minimum = Number(metric?.min), maximum = Number(metric?.max);
+  if (count > 0 && Number.isFinite(minimum) && minimum > 0 && Number.isFinite(maximum) && maximum >= minimum) {
+    const wording = seriesKey === 'sold'
+      ? { single: '표시', label: '표시가' }
+      : seriesKey === 'confirmed_transactions'
+        ? { single: '확인', label: '거래가' }
+        : { single: '등록', label: '등록가' };
+    if (minimum === maximum) return { text: `${wording.single} ${money(minimum)}`, label: `${wording.label} 1건`, empty: false };
+    return {
+      text: `${Math.round(minimum).toLocaleString('ko-KR')}~${Math.round(maximum).toLocaleString('ko-KR')}원`,
+      label: `${wording.label} 범위`, empty: false,
+    };
+  }
+  return { text: '—', label: '가격 자료 없음', empty: true };
+}
 const prices = createPriceStore(() => {
   clearTimeout(repaintTimer);
   repaintTimer = setTimeout(() => { renderSummary(); renderModelTable(); if (builder) renderBuild(); else renderAnalysis(); }, 50);
 });
-const historyPrices = createPriceStore(() => { if (state.ready && !builder) renderAnalysis(); });
 const SOURCE_LABELS = { joonggonara: '중고나라', bunjang: '번개장터', hellomarket: '헬로마켓', danawa: '다나와', coolenjoy: '쿨엔조이', ebay: 'eBay', rethinkmall: '리씽크몰' };
 const el = (tag, className = '', text = '') => {
   const node = document.createElement(tag); if (className) node.className = className;
@@ -39,10 +60,10 @@ function labelOf(code) { return state.categories.find(c => c.code === code)?.lab
 function specOf(p) { return p.key_specs || {}; }
 function brandOf(p) { const s = specOf(p); return s.chip_manufacturer || s.platform_vendor || p.brand || ''; }
 function generationOf(p) { const s = specOf(p); return s.generation || s.memory_generation || s.chipset || s.protocol || ''; }
-function payload(id, days = builder ? 30 : state.days) { return prices.get(id, days)?.data; }
-function chartRecord(id) { return state.anchor ? historyPrices.get(id, 30, state.anchor) : prices.get(id, 30); }
+function chartRecord(id) { return prices.get(id, builder ? 30 : state.days, builder ? '' : state.range.to); }
+function payload(id) { return chartRecord(id)?.data; }
 function chartPayload(id) { return sourceStats(chartRecord(id)?.data, state.source); }
-function selectionData(entry) { return scopedStats(payload(entry.id, 30), entry.manufacturer); }
+function selectionData(entry) { return scopedStats(payload(entry.id), entry.manufacturer); }
 function currentProducts() {
   return state.products.filter(p => (!state.category || p.category_code === state.category)
     && (!state.manufacturer || brandOf(p) === state.manufacturer)
@@ -97,10 +118,10 @@ function makeTable(headings) {
 }
 function priceCell(data, key, record, { showChange = false } = {}) {
   const td = el('td', `price series-${key}`);
-  const metric = data?.[key], value = metricValue(metric);
-  td.append(document.createTextNode(record?.state === 'loading' ? '확인 중' : record?.state === 'error' ? '조회 실패' : displayPrice(value)));
-  td.classList.toggle('is-empty', value == null);
-  td.title = `${value == null ? '평균 자료 없음' : '최근 30일 평균'} · 표본 ${Number(metric?.sample_count || 0).toLocaleString('ko-KR')}건${data?.integrity_filtered_source_count ? ' · 불일치 사이트 제외' : ''}`;
+  const metric = data?.[key], presentation = pricePresentation(metric, key);
+  td.append(document.createTextNode(record?.state === 'loading' ? '확인 중' : record?.state === 'error' ? '조회 실패' : presentation.text));
+  td.classList.toggle('is-empty', presentation.empty);
+  td.title = `${presentation.label} · 표본 ${Number(metric?.sample_count || 0).toLocaleString('ko-KR')}건${builder ? ' · 최근 30일' : ` · ${state.range.from} ~ ${state.range.to}`}${data?.integrity_filtered_source_count || data?.integrity_repaired_source_ids?.length ? ' · 불일치 사이트 제외' : ''}`;
   if (data?.availability?.status === 'unavailable') td.title = '공개 통계 미제공';
   if (showChange) {
     const change = percentChange(dailySeries(data, key, state.days));
@@ -121,7 +142,7 @@ function renderModelTable() {
   const visibleSeries = SERIES.filter(s => s.key !== 'confirmed_transactions' || showConfirmed());
   const { table, body } = makeTable(['모델', ...visibleSeries.map(s => s.label), builder ? '조합' : '보기']);
   for (const group of pageGroups()) {
-    const product = group.products[0], id = idOf(product), record = prices.get(id, builder ? 30 : state.days), data = record?.data;
+    const product = group.products[0], id = idOf(product), record = chartRecord(id), data = record?.data;
     const open = state.expanded.has(group.key);
     const row = el('tr', state.selectedId === id ? 'is-selected' : '');
     const name = el('td', 'model-name');
@@ -178,7 +199,7 @@ function renderModelTable() {
   if (pageFocus) [...pages.querySelectorAll('button')].find(b => b.dataset.page === pageFocus)?.focus({ preventScroll: true });
 }
 function appendDetailRow(body, p, manufacturer, visibleSeries) {
-  const id = idOf(p), record = prices.get(id, builder ? 30 : state.days), data = scopedStats(record?.data, manufacturer);
+  const id = idOf(p), record = chartRecord(id), data = scopedStats(record?.data, manufacturer);
   const row = el('tr', `tools-subrow${state.selectedId === id && state.selectedManufacturer === manufacturer ? ' is-selected' : ''}`);
   const name = el('td', 'model-name', manufacturer || nameOf(p));
   if (manufacturer) name.title = '제조사별 평균 · 개별 제품 통계 아님';
@@ -199,8 +220,9 @@ function renderSummary() {
     });
   } else if (!state.overview && state.selectedId) {
     const data = scopedStats(sourceStats(payload(state.selectedId), state.source), state.selectedManufacturer);
-    SERIES.filter(s => s.key !== 'confirmed_transactions' || metricValue(data?.[s.key]) != null).forEach(s => {
-      summary.append(summaryItem(s.label, displayPrice(metricValue(data?.[s.key])), `표본 ${Number(data?.[s.key]?.sample_count || 0)}건 · 최근 30일${state.source ? ` · ${SOURCE_LABELS[state.source] || state.source}` : data?.integrity_filtered_source_count ? ' · 불일치 사이트 제외' : ''}`, `series-${s.key}`));
+    SERIES.filter(s => s.key !== 'confirmed_transactions' || Number(data?.[s.key]?.sample_count || 0) > 0).forEach(s => {
+      const presentation = pricePresentation(data?.[s.key], s.key);
+      summary.append(summaryItem(s.label, presentation.text, `${presentation.label} · 표본 ${Number(data?.[s.key]?.sample_count || 0)}건 · ${state.range.from} ~ ${state.range.to}${state.source ? ` · ${SOURCE_LABELS[state.source] || state.source}` : data?.integrity_filtered_source_count || data?.integrity_repaired_source_ids?.length ? ' · 불일치 사이트 제외' : ''}`, `series-${s.key}`));
     });
   } else {
     const scope = currentProducts(), datasets = scope.map(p => payload(idOf(p))).filter(Boolean);
@@ -215,7 +237,7 @@ function renderBuild() {
   const container = $('#build-table'), focus = document.activeElement;
   const quantityFocus = container.contains(focus) && focus.dataset.quantity;
   if (quantityFocus) return;
-  const { table, body } = makeTable(['부품 / 수량', '선택 모델', '판매중 평균', '판매완료 표시가', '']);
+  const { table, body } = makeTable(['부품 / 수량', '선택 모델', '판매중 가격', '판매완료 표시가', '']);
   state.categories.forEach(category => {
     const entry = state.entries.find(e => e.category === category.code), p = state.byId.get(entry?.id), data = entry ? selectionData(entry) : null;
     const row = el('tr', state.category === category.code ? 'is-selected' : ''), part = el('td', '', category.label);
@@ -239,20 +261,18 @@ function renderAnalysis() {
   const record = chartRecord(state.selectedId), base = record?.data;
   const data = scopedStats(sourceStats(base, state.source), state.selectedManufacturer);
   const scope = currentProducts();
-  const window = historyWindow(state.anchor);
+  const window = state.range;
   const controls = $('#chart-navigation');
-  if (!$('#chart-date')) {
-    createDatePicker(controls);
-    [['−1개월', -1, 'month', '한 달 이전'], ['−1일', -1, 'day', '하루 이전'], ['+1일', 1, 'day', '하루 다음'], ['+1개월', 1, 'month', '한 달 다음']].forEach(([label, amount, unit, aria]) => {
-      const button = action(label, 'chart-shift', { amount, unit }); button.setAttribute('aria-label', `${aria} 가격 보기`); controls.append(button);
+  if (!$('#chart-from')) {
+    [['from', '시작일'], ['to', '종료일']].forEach(([key, label]) => {
+      const field = el('div', `tools-range-field tools-range-${key}`), caption = el('label', '', label);
+      caption.htmlFor = `chart-${key}`; field.append(caption); controls.append(field);
+      const input = createDatePicker(field, { id: `chart-${key}`, label });
+      input.min = window.earliest; input.max = window.latest; input.value = window[key];
     });
-    controls.append(action('최신', 'chart-latest'));
+    const apply = action('적용', 'range-apply'); apply.setAttribute('aria-label', '선택 기간 적용'); controls.append(apply);
   }
-  const calendar = $('#chart-date'); calendar.min = shiftDate(window.earliest, -29); calendar.max = window.latest;
-  if (document.activeElement !== calendar) calendar.value = state.chartDate || window.to;
-  controls.title = `${window.from} ~ ${window.to} · 30일`;
-  controls.querySelectorAll('[data-action=chart-shift]').forEach(button => { button.disabled = Number(button.dataset.amount) < 0 ? !window.previous : !window.next; });
-  controls.querySelector('[data-action=chart-latest]').disabled = !state.anchor;
+  controls.title = `${window.from} ~ ${window.to} · ${window.days}일`;
   const sources = new Set([state.source, ...[base, payload(state.selectedId)].flatMap(d => (d?.by_source || []).map(sourceId))].filter(Boolean));
   const sourceControls = $('#chart-sources'), sourceFocus = sourceControls.contains(document.activeElement) ? document.activeElement.dataset.source : null; sourceControls.replaceChildren();
   sourceControls.hidden = state.overview || (!sources.size && !state.source);
@@ -291,11 +311,7 @@ function refreshPrices() {
   const selected = state.byId.get(state.selectedId);
   if (selected) targets.push(selected);
   if (builder) targets.push(...state.entries.map(e => state.byId.get(e.id)).filter(Boolean));
-  void prices.load(targets, builder ? 30 : state.days);
-  if (!builder) {
-    if (state.anchor) void historyPrices.load(state.overview ? targets : selected ? [selected] : [], 30, state.anchor);
-    else historyPrices.clear();
-  }
+  void prices.load(targets, builder ? 30 : state.days, builder ? '' : state.range.to);
 }
 function selectCategory(category) {
   state.category = category; state.manufacturer = ''; state.generation = ''; state.page = 1; state.expanded.clear(); state.selectedManufacturer = ''; state.chartDate = '';
@@ -315,13 +331,18 @@ document.addEventListener('click', event => {
   const button = event.target.closest('[data-action]'); if (!button || !state.ready) return;
   const { action: type, id, manufacturer = '', key, category } = button.dataset;
   if (type === 'category') { selectCategory(category); return; }
-  if (type === 'chart-shift' || type === 'chart-latest') {
-    const window = historyWindow(state.anchor);
-    const date = type === 'chart-latest' ? window.latest : historyWindow(shiftDate(window.to, Number(button.dataset.amount), button.dataset.unit)).to;
-    state.anchor = date === window.latest ? '' : date; state.chartDate = ''; renderAnalysis(); refreshPrices(); return;
+  if (type === 'range-apply') {
+    try {
+      const from = $('#chart-from').value, to = $('#chart-to').value;
+      if (!from || !to) throw new Error('시작일과 종료일을 선택하세요.');
+      const range = priceDateRange(from, to);
+      state.range = range; state.days = range.days; state.chartDate = '';
+      status(''); renderSummary(); renderModelTable(); renderAnalysis(); refreshPrices();
+    } catch (error) { status(error.message, true); }
+    return;
   }
   if (type === 'chart-source') { state.source = button.dataset.source; renderSummary(); renderAnalysis(); return; }
-  if (type === 'retry') { prices.clear(); historyPrices.clear(); status('새로고침'); refreshPrices(); return; }
+  if (type === 'retry') { prices.clear(); status('새로고침'); refreshPrices(); return; }
   if (type === 'page') {
     state.page = Math.max(1, Math.min(Math.ceil(groups().length / PAGE_SIZE) || 1, Number(button.dataset.page)));
     renderModelTable(); $('#model-table').scrollTop = 0; refreshPrices(); return;
@@ -344,15 +365,6 @@ document.addEventListener('click', event => {
 });
 document.addEventListener('change', event => {
   const target = event.target;
-  if (target.id === 'chart-date') {
-    try {
-      const selected = chartDateSelection(target.value, state.anchor);
-      const moved = selected.anchor !== state.anchor;
-      state.anchor = selected.anchor; state.chartDate = selected.date; status(''); renderAnalysis();
-      if (moved) refreshPrices();
-    } catch (error) { status(error.message, true); target.value = state.chartDate || historyWindow(state.anchor).to; }
-    return;
-  }
   if (target.dataset.quantity) {
     const entry = state.entries.find(e => e.id === target.dataset.quantity); const n = Number(target.value);
     if (!Number.isInteger(n) || n < 1 || n > 16) { target.value = entry.quantity; status('수량은 1~16개로 입력해 주세요.', true); return; }

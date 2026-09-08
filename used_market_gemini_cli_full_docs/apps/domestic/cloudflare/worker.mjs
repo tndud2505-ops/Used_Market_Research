@@ -183,6 +183,25 @@ function currentProjectionSummary(rows) {
   };
 }
 
+function projectionMetricIsConsistent(metric) {
+  const count = Number(metric?.sample_count || 0);
+  if (count <= 0) return metric?.mean == null && metric?.median == null;
+  const minimum = metric?.min == null ? null : Number(metric.min);
+  const maximum = metric?.max == null ? null : Number(metric.max);
+  const mean = metric?.mean == null ? null : Number(metric.mean);
+  const median = metric?.median == null ? null : Number(metric.median);
+  if (count >= 5 && (!Number.isFinite(mean) || mean <= 0)) return false;
+  if (mean !== null && (!Number.isFinite(mean) || mean <= 0)) return false;
+  if (count >= 3 && count < 5 && (!Number.isFinite(median) || median <= 0)) return false;
+  if (median !== null && (!Number.isFinite(median) || median <= 0)) return false;
+  if (Number.isFinite(minimum) && Number.isFinite(maximum) && minimum > maximum) return false;
+  if (Number.isFinite(mean) && Number.isFinite(minimum) && mean < minimum) return false;
+  if (Number.isFinite(mean) && Number.isFinite(maximum) && mean > maximum) return false;
+  if (Number.isFinite(median) && Number.isFinite(minimum) && median < minimum) return false;
+  if (Number.isFinite(median) && Number.isFinite(maximum) && median > maximum) return false;
+  return true;
+}
+
 async function currentProjectionRows(db, query, productIds = null) {
   const ids = Array.isArray(productIds) ? productIds.filter(Boolean) : [query.canonicalProductId];
   if (!ids.length) return [];
@@ -218,7 +237,8 @@ function overlayCurrentProjection(stats, rows, days = 30) {
       }))
     };
   }
-  const hasPublishedAggregate = Number(stats?.active?.sample_count || 0) > 0;
+  const publishedAggregateHasSamples = Number(stats?.active?.sample_count || 0) > 0;
+  const hasPublishedAggregate = publishedAggregateHasSamples && projectionMetricIsConsistent(stats.active);
   const active = hasPublishedAggregate ? stats.active : currentProjectionSummary(rows);
   const today = new Date(Date.now() + 9 * 60 * 60 * 1_000).toISOString().slice(0, 10);
   const daily = Array.isArray(stats.daily) ? stats.daily.map((row) => ({ ...row })) : [];
@@ -227,8 +247,13 @@ function overlayCurrentProjection(stats, rows, days = 30) {
     if (todayRow) todayRow.active = active;
     else daily.push({ date: today, active, reserved: currentProjectionSummary([]), sold: currentProjectionSummary([]), confirmed_transactions: currentProjectionSummary([]) });
   }
-  const existingSources = new Map((Array.isArray(stats.by_source) ? stats.by_source : [])
-    .filter((entry) => String(entry?.source_id || ""))
+  const publishedSources = (Array.isArray(stats.by_source) ? stats.by_source : [])
+    .filter((entry) => String(entry?.source_id || ""));
+  const integrityRepairedSourceIds = publishedSources
+    .filter((entry) => !projectionMetricIsConsistent(entry.active))
+    .map((entry) => String(entry.source_id)).sort();
+  const existingSources = new Map(publishedSources
+    .filter((entry) => projectionMetricIsConsistent(entry.active))
     .map((entry) => [String(entry.source_id), {
       ...entry,
       daily: (Array.isArray(entry.daily) ? entry.daily : []).slice(-days)
@@ -258,6 +283,8 @@ function overlayCurrentProjection(stats, rows, days = 30) {
     active,
     daily: daily.sort((left, right) => String(left.date || "").localeCompare(String(right.date || ""))).slice(-days),
     by_source: [...existingSources.values()].sort((left, right) => String(left.source_id).localeCompare(String(right.source_id))),
+    integrity_repaired_active: publishedAggregateHasSamples && !hasPublishedAggregate,
+    integrity_repaired_source_ids: integrityRepairedSourceIds,
     as_of: hasPublishedAggregate
       ? stats.as_of
       : rows.map((row) => String(row.updated_at || "")).sort().at(-1) || stats.as_of,
@@ -289,7 +316,7 @@ async function serveProductPriceStats(request, env) {
   } catch (error) {
     return json(400, { status: "error", error: error instanceof Error ? error.message : String(error) });
   }
-  if (query.isHistorical) {
+  if (query.isHistorical || query.days !== 30) {
     return json(503, { status: "error", error: "Historical price statistics require the AWS ledger" });
   }
   if (!hasD1(env)) return json(503, { status: "error", error: "Public price statistics are unavailable" });

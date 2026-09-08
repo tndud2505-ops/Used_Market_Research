@@ -671,6 +671,7 @@ async function collectBunjangCategory(sourceCategoryId, categoryId, limit, sortM
   return rows.map((row) => sourceItem({
     site: "bunjang",
     categoryId,
+    sourceListingId: row?.pid,
     title: row?.name,
     price: row?.price,
     url: row?.pid ? `https://m.bunjang.co.kr/products/${row.pid}` : "",
@@ -718,6 +719,7 @@ async function collectBunjangKeyword(keyword, categoryId, limit, queryKeyword = 
     const pageItems = rows.map((row) => sourceItem({
       site: "bunjang",
       categoryId,
+      sourceListingId: row?.pid,
       title: row?.name,
       price: row?.price,
       url: row?.pid ? `https://m.bunjang.co.kr/products/${row.pid}` : "",
@@ -749,6 +751,7 @@ async function collectBunjangKeyword(keyword, categoryId, limit, queryKeyword = 
       const recentItems = recentRows.map((row) => sourceItem({
         site: "bunjang",
         categoryId,
+        sourceListingId: row?.pid,
         title: row?.name,
         price: row?.price,
         url: row?.pid ? `https://m.bunjang.co.kr/products/${row.pid}` : "",

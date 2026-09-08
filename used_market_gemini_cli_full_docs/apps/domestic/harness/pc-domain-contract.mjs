@@ -476,6 +476,17 @@ assert.equal(storedKrStats.by_source.find((source) => source.source_id === "joon
   "stored price stats keep source-filterable daily rows");
 assert.equal(storedKrStats.by_manufacturer.length, 0,
   "stored public price stats avoid the heavy manufacturer regrouping path");
+for (const days of [1, 14, 730]) {
+  const rangeStats = ledger.getStoredDailyPriceStats({
+    canonicalProductId: "gpu:nvidia:rtx-3080", days, marketPool: "KR_C2C_USED",
+    condition: "USED_WORKING", currency: "KRW", asOf: new Date(now).toISOString(),
+    parserVersion: "pc-parser-v1", ruleVersion: "pc-rules-v1", filterVersion: "pc-filter-v1"
+  });
+  assert.equal(rangeStats.daily.length, Math.min(days, 30), 'return only the 30 days stored in this fixture, never manufacture older observations');
+  assert.equal(rangeStats.daily.at(-1).date, krStatsEndDate);
+  const rangeStart = new Date(Date.parse(`${krStatsEndDate}T00:00:00Z`) - (days - 1) * DAY_MS).toISOString().slice(0, 10);
+  assert.ok(rangeStats.daily.every(row => row.date >= rangeStart && row.date <= krStatsEndDate));
+}
 assert.ok(ledger.traceStatMembers({
   canonicalProductId: "gpu:nvidia:rtx-3080", marketPool: "KR_C2C_USED",
   condition: "USED_WORKING", currency: "KRW"
