@@ -177,6 +177,12 @@ export const PC_SOURCE_REGISTRY = Object.freeze([
   })
 ]);
 
+export const PC_DIRECTORY_PUBLICATION_SOURCE_KEYS = Object.freeze(PC_SOURCE_REGISTRY
+  .filter((entry) => entry.directory_source === true
+    && entry.policy_status === "APPROVED" && entry.runtime_status === "ENABLED")
+  .map((entry) => entry.key)
+  .sort());
+
 const SOURCE_BY_KEY = new Map(PC_SOURCE_REGISTRY.map((entry) => [entry.key, entry]));
 
 export function getPcSource(sourceKey) {

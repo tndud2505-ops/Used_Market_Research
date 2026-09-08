@@ -631,6 +631,16 @@ assert.ok(sourceStats.by_source.every((entry) => entry.sold.sample_count === 3))
 assert.ok(sourceStats.by_source.every((entry) => entry.confirmed_transactions.sample_count === 1));
 assert.ok(sourceStats.by_source.every((entry) => entry.daily.length === sourceStats.daily.length));
 assert.ok(sourceStats.by_source.every((entry) => entry.traceability.member_count > 0));
+const filteredSourceStats = ledger.rebuildAndGetPriceStats({
+  canonicalProductId: "gpu:nvidia:rtx-4070", days: 30, marketPool: "KR_C2C_USED",
+  condition: "USED_WORKING", currency: "KRW", asOf: new Date(now).toISOString(),
+  parserVersion: "pc-parser-v1", ruleVersion: "pc-rules-v1", filterVersion: "pc-filter-v1",
+  sourceIds: ["joonggonara"]
+});
+assert.deepEqual(filteredSourceStats.by_source.map((entry) => entry.source_id), ["joonggonara"],
+  "publication statistics can exclude sources that are not part of the PC directory");
+assert.equal(filteredSourceStats.sold.sample_count, 3,
+  "aggregate statistics must contain only samples from explicitly allowed publication sources");
 assert.equal(db.prepare("SELECT COUNT(*) AS count FROM daily_source_price_stats").get().count > 0, true);
 assert.equal(db.prepare("SELECT COUNT(*) AS count FROM daily_source_price_stat_members").get().count > 0, true);
 

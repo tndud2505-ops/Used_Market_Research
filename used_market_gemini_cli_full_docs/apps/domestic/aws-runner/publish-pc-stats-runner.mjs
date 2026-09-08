@@ -3,6 +3,7 @@ import { request as httpsRequest } from "node:https";
 import path from "node:path";
 
 import { compactStatsForPublication, statsChecksum, statsPublicationKey } from "../cloudflare/public-product-stats.mjs";
+import { PC_DIRECTORY_PUBLICATION_SOURCE_KEYS } from "../collector/logic/pc-source-registry.mjs";
 import { PcPartsLedger } from "./pc-parts-ledger.mjs";
 import { evaluatePipelineQualityReports, loadPipelineQualityReports } from "./pc-pipeline-governance.mjs";
 import { SearchIndex } from "./search-index.mjs";
@@ -24,6 +25,17 @@ const aliasPromotionEvidence = (() => {
   }
 })();
 const pipelineQualityReportsPath = String(process.env.PC_PIPELINE_QUALITY_REPORTS_PATH || "").trim();
+const sampleDropAcknowledgement = (() => {
+  const raw = String(process.env.PC_STATS_SAMPLE_DROP_ACKNOWLEDGEMENT_JSON || "").trim();
+  if (!raw) return null;
+  try {
+    const value = JSON.parse(raw);
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error();
+    return value;
+  } catch {
+    throw new Error("PC_STATS_SAMPLE_DROP_ACKNOWLEDGEMENT_JSON_INVALID");
+  }
+})();
 
 if (!indexValue) throw new Error("RUNNER_INDEX_PATH is required");
 if (!importUrlValue || !importToken) throw new Error("D1_STATS_PUBLICATION_NOT_CONFIGURED");
@@ -92,11 +104,13 @@ try {
     WHERE n.canonical_product_id IS NOT NULL
       AND n.normalization_version = ?
       AND n.parser_version = ? AND n.rule_version = ? AND n.filter_version = ?
+      AND s.source_id IN (${PC_DIRECTORY_PUBLICATION_SOURCE_KEYS.map(() => "?").join(", ")})
     ORDER BY n.canonical_product_id, n.market_pool, n.condition_code, s.currency`).all(
       Number(activePipelineVersion?.normalization_version || 1),
       versionOptions.parserVersion || "pc-parser-v1",
       versionOptions.ruleVersion || "pc-rules-v1",
-      versionOptions.filterVersion || "pc-filter-v1"
+      versionOptions.filterVersion || "pc-filter-v1",
+      ...PC_DIRECTORY_PUBLICATION_SOURCE_KEYS
     );
   const rows = [];
   for (const scope of scopes) {
@@ -107,6 +121,7 @@ try {
       condition: scope.condition_code,
       currency: scope.currency,
       asOf,
+      sourceIds: PC_DIRECTORY_PUBLICATION_SOURCE_KEYS,
       ...versionOptions
     };
     const stats = compactStatsForPublication(ledger.rebuildAndGetPriceStats(options));
@@ -138,7 +153,8 @@ try {
     created_at: asOf,
     expected_non_empty_scope_count: nonEmptyScopeCount,
     expected_keys: rows.map(statsPublicationKey).sort(),
-    rows
+    rows,
+    ...(sampleDropAcknowledgement ? { sample_drop_acknowledgement: sampleDropAcknowledgement } : {})
   };
   const publicationBody = JSON.stringify(publication);
   console.error(JSON.stringify({

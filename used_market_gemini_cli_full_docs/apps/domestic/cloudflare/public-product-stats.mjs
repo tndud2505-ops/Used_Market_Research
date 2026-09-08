@@ -176,8 +176,28 @@ export async function publishProductStats(db, input) {
     throw new Error("publication scope shrink requires an explicit schema migration");
   }
   const previousNonEmptyScopeCount = Number(previous?.expected_non_empty_scope_count || 0);
+  let sampleDropAcknowledged = false;
   if (previousNonEmptyScopeCount > 0 && actualNonEmptyScopeCount < Math.max(1, Math.floor(previousNonEmptyScopeCount * 0.5))) {
-    throw new Error("publication sampled scope count dropped by more than 50 percent");
+    const acknowledgement = input.sample_drop_acknowledgement;
+    const reviewedAt = String(acknowledgement?.reviewed_at || "");
+    const reason = String(acknowledgement?.reason || "").trim();
+    const expectedCount = Number(acknowledgement?.expected_non_empty_scope_count);
+    const minimumCount = Number(acknowledgement?.minimum_non_empty_scope_count);
+    const maximumCount = Number(acknowledgement?.maximum_non_empty_scope_count);
+    const reviewedRange = Number.isInteger(minimumCount) && minimumCount > 0
+      && Number.isInteger(maximumCount) && maximumCount >= minimumCount
+      && maximumCount - minimumCount <= Math.max(10, Math.floor(previousNonEmptyScopeCount * 0.05))
+      && actualNonEmptyScopeCount >= minimumCount && actualNonEmptyScopeCount <= maximumCount;
+    sampleDropAcknowledged = Boolean(previous?.publication_id)
+      && acknowledgement && typeof acknowledgement === "object" && !Array.isArray(acknowledgement)
+      && String(acknowledgement.previous_publication_id || "") === String(previous.publication_id)
+      && String(acknowledgement.previous_checksum || "") === String(previous.checksum)
+      && (expectedCount === actualNonEmptyScopeCount || reviewedRange)
+      && Number.isFinite(Date.parse(reviewedAt))
+      && reason.length >= 20 && reason.length <= 500;
+    if (!sampleDropAcknowledged) {
+      throw new Error("publication sampled scope count dropped by more than 50 percent");
+    }
   }
   if (previous?.publication_id) {
     const actualKeySet = new Set(actualKeys);
@@ -228,6 +248,7 @@ export async function publishProductStats(db, input) {
       preserved_row_count: preservedRowCount,
       overwritten_row_count: overwrittenRowCount,
       merged_with_active: mergeWithActive && Boolean(previous?.publication_id),
+      sample_drop_acknowledged: sampleDropAcknowledged,
       active: true
     };
   } catch (error) {

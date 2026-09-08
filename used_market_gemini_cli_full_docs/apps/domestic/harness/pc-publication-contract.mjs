@@ -372,6 +372,25 @@ await assert.rejects(() => publishProductStats(thresholdDb, {
   expected_keys: thresholdInputRows.map(statsPublicationKey)
 }), /sampled scope count dropped by more than 50 percent/u,
 "merge mode must retain the sampled-scope drop guard after constructing the union");
+const acknowledgedDrop = await publishProductStats(thresholdDb, {
+  ...mergeInput,
+  publication_id: "sample-drop-acknowledged",
+  rows: thresholdInputRows,
+  checksum: thresholdInputChecksum,
+  expected_row_count: 4,
+  expected_non_empty_scope_count: 1,
+  expected_keys: thresholdInputRows.map(statsPublicationKey),
+  sample_drop_acknowledgement: {
+    previous_publication_id: "previous",
+    previous_checksum: await statsChecksum(previousThresholdRows),
+    minimum_non_empty_scope_count: 1,
+    maximum_non_empty_scope_count: 2,
+    reviewed_at: "2026-08-31T00:00:00.000Z",
+    reason: "Operator-reviewed source retirement and stricter exact-product classification refresh"
+  }
+});
+assert.equal(acknowledgedDrop.sample_drop_acknowledged, true,
+  "an exact previous-manifest acknowledgement may authorize one reviewed sample correction");
 
 const manyRows = Array.from({ length: 125 }, (_, index) => ({
   ...row,

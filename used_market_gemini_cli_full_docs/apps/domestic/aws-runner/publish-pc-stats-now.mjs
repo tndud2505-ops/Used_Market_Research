@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { compactStatsForPublication, statsChecksum, statsPublicationKey } from "../cloudflare/public-product-stats.mjs";
+import { PC_DIRECTORY_PUBLICATION_SOURCE_KEYS } from "../collector/logic/pc-source-registry.mjs";
 import { PcPartsLedger } from "./pc-parts-ledger.mjs";
 import { pcStatsTraceability } from "./pc-stats-traceability.mjs";
 import { SearchIndex } from "./search-index.mjs";
@@ -39,11 +40,13 @@ try {
     WHERE n.canonical_product_id IS NOT NULL
       AND n.normalization_version = ?
       AND n.parser_version = ? AND n.rule_version = ? AND n.filter_version = ?
+      AND s.source_id IN (${PC_DIRECTORY_PUBLICATION_SOURCE_KEYS.map(() => "?").join(", ")})
     ORDER BY n.canonical_product_id, n.market_pool, n.condition_code, s.currency`).all(
       versionOptions.normalizationVersion,
       versionOptions.parserVersion,
       versionOptions.ruleVersion,
-      versionOptions.filterVersion
+      versionOptions.filterVersion,
+      ...PC_DIRECTORY_PUBLICATION_SOURCE_KEYS
     );
   if (scopes.length === 0) throw new Error("STATS_PUBLICATION_HAS_NO_SCOPES");
 
@@ -56,6 +59,7 @@ try {
       condition: scope.condition_code,
       currency: scope.currency,
       asOf,
+      sourceIds: PC_DIRECTORY_PUBLICATION_SOURCE_KEYS,
       ...versionOptions
     };
     const stats = compactStatsForPublication(ledger.rebuildAndGetPriceStats(options));

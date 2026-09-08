@@ -2053,7 +2053,12 @@ export class PcPartsLedger {
       .run(new Date(this.now()).toISOString(), requireValue(clusterKey, "clusterKey"));
   }
 
-  eligibleRows({ canonicalProductId, marketPool, condition, currency, from, asOf, normalizationVersion, parserVersion, ruleVersion, filterVersion }) {
+  eligibleRows({ canonicalProductId, marketPool, condition, currency, from, asOf, normalizationVersion, parserVersion, ruleVersion, filterVersion, sourceIds = [] }) {
+    const allowedSourceIds = [...new Set((Array.isArray(sourceIds) ? sourceIds : [])
+      .map((sourceId) => cleanText(sourceId, 100)).filter(Boolean))].sort();
+    const sourceFilter = allowedSourceIds.length > 0
+      ? ` AND s.source_id IN (${allowedSourceIds.map(() => "?").join(", ")})`
+      : "";
     return this.db.prepare(`
       SELECT s.*, n.id AS normalized_listing_id, n.canonical_product_id, n.market_pool, n.condition_code,
              n.quantity, n.price_scope, n.exact_product, n.price_eligible, n.statistics_eligible,
@@ -2075,13 +2080,17 @@ export class PcPartsLedger {
          AND n.parser_version = ? AND n.rule_version = ? AND n.filter_version = ?
          AND (s.observed_at >= ? OR (s.lifecycle_status IN ('ACTIVE', 'RESERVED') AND r.last_seen_at >= ?))
          AND s.observed_at <= ?
+         ${sourceFilter}
        ORDER BY s.observed_at, s.id
-    `).all(canonicalProductId, marketPool, condition, currency, normalizationVersion, parserVersion, ruleVersion, filterVersion, from, from, asOf);
+    `).all(canonicalProductId, marketPool, condition, currency, normalizationVersion, parserVersion, ruleVersion, filterVersion,
+      from, from, asOf, ...allowedSourceIds);
   }
 
-  latestIdentityStates(rows, { asOf, normalizationVersion, parserVersion, ruleVersion, filterVersion }) {
+  latestIdentityStates(rows, { asOf, normalizationVersion, parserVersion, ruleVersion, filterVersion, sourceIds = [] }) {
     const identities = [...new Set((Array.isArray(rows) ? rows : []).map(priceStatsListingIdentity))].sort();
     const candidates = new Set(identities);
+    const allowedSourceIds = [...new Set((Array.isArray(sourceIds) ? sourceIds : [])
+      .map((sourceId) => cleanText(sourceId, 100)).filter(Boolean))].sort();
     const latest = new Map();
     const clusterIdentitySql = "'cluster:' || dc.cluster_key";
     const keepLatest = (identity, row) => {
@@ -2121,8 +2130,10 @@ export class PcPartsLedger {
           LEFT JOIN duplicate_cluster_members dcm ON dcm.snapshot_id = s.id
           LEFT JOIN duplicate_clusters dc ON dc.id = dcm.cluster_id
          WHERE s.observed_at <= ? AND s.id IN (${identityConditions.join(" UNION ")})
+           ${allowedSourceIds.length > 0 ? `AND s.source_id IN (${allowedSourceIds.map(() => "?").join(", ")})` : ""}
          ORDER BY s.observed_at, s.id
-      `).all(normalizationVersion, parserVersion, ruleVersion, filterVersion, asOf, ...identityBindings);
+      `).all(normalizationVersion, parserVersion, ruleVersion, filterVersion, asOf,
+        ...identityBindings, ...allowedSourceIds);
       for (const row of stateRows) {
         keepLatest(canonicalSourceListingIdentity(row.source_id, row.source_listing_id), row);
         if (row.cluster_identity) keepLatest(row.cluster_identity, row);
@@ -2141,10 +2152,12 @@ export class PcPartsLedger {
     const parserVersion = cleanText(options.parserVersion || "pc-parser-v1", 100);
     const ruleVersion = cleanText(options.ruleVersion || "pc-rules-v1", 100);
     const filterVersion = cleanText(options.filterVersion || "pc-filter-v1", 100);
-    const rows = this.eligibleRows({ canonicalProductId, marketPool, condition, currency, from, asOf, normalizationVersion, parserVersion, ruleVersion, filterVersion });
+    const allowedSourceIds = Array.isArray(options.sourceIds) ? options.sourceIds : [];
+    const rows = this.eligibleRows({ canonicalProductId, marketPool, condition, currency, from, asOf,
+      normalizationVersion, parserVersion, ruleVersion, filterVersion, sourceIds: allowedSourceIds });
     const currentScope = { canonicalProductId, marketPool, condition, currency };
     const latestByListing = this.latestIdentityStates(rows, {
-      asOf, normalizationVersion, parserVersion, ruleVersion, filterVersion
+      asOf, normalizationVersion, parserVersion, ruleVersion, filterVersion, sourceIds: allowedSourceIds
     });
     const sourceIds = [...new Set(rows.filter(priceStatsRowEligible)
       .map((row) => cleanText(row.source_id, 100)).filter(Boolean))].sort();
@@ -2498,10 +2511,12 @@ export class PcPartsLedger {
     const parserVersion = cleanText(options.parserVersion || "pc-parser-v1", 100);
     const ruleVersion = cleanText(options.ruleVersion || "pc-rules-v1", 100);
     const filterVersion = cleanText(options.filterVersion || "pc-filter-v1", 100);
-    const rows = this.eligibleRows({ canonicalProductId, marketPool, condition, currency, from, asOf, normalizationVersion, parserVersion, ruleVersion, filterVersion });
+    const allowedSourceIds = Array.isArray(options.sourceIds) ? options.sourceIds : [];
+    const rows = this.eligibleRows({ canonicalProductId, marketPool, condition, currency, from, asOf,
+      normalizationVersion, parserVersion, ruleVersion, filterVersion, sourceIds: allowedSourceIds });
     const currentScope = { canonicalProductId, marketPool, condition, currency };
     const currentByListing = this.latestIdentityStates(rows, {
-      asOf, normalizationVersion, parserVersion, ruleVersion, filterVersion
+      asOf, normalizationVersion, parserVersion, ruleVersion, filterVersion, sourceIds: allowedSourceIds
     });
     const latestByListing = new Map();
     const firstSoldByListing = new Map();
