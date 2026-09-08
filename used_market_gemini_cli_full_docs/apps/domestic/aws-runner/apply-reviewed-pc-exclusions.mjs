@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 
 import { reviewedPcListingExclusion } from "../market/logic/pc-reviewed-listing-exclusions.mjs";
 import { fetchAllPublicPcListings, toPcProjectionImportItem } from "./republish-pc-projections.mjs";
+import { PcPartsLedger } from "./pc-parts-ledger.mjs";
 import { SearchIndex } from "./search-index.mjs";
 
 function text(value) {
@@ -170,6 +171,7 @@ async function main(argv) {
   let localUpdated = 0;
   let backup = null;
   try {
+    new PcPartsLedger({ db: index.db });
     backup = index.createBackup();
     if (!backup) throw new Error("A recovery backup is required before reviewed exclusion apply");
     index.db.exec("BEGIN IMMEDIATE");
