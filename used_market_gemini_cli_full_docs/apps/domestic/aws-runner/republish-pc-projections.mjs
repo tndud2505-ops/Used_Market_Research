@@ -199,7 +199,7 @@ export async function fetchAllPublicPcListings(apiBase, auditKey = Date.now().to
   const items = [];
   const seenCursors = new Set();
   let cursor = "";
-  let expectedTotal = null;
+  let expectedTotal;
   do {
     const url = new URL("/api/pc/listings", apiBase);
     url.searchParams.set("limit", "100");
@@ -213,10 +213,12 @@ export async function fetchAllPublicPcListings(apiBase, auditKey = Date.now().to
     }), "D1_PUBLIC_LISTINGS");
     const page = payload.data;
     if (!page || !Array.isArray(page.items) || !page.pagination) throw new Error("D1_PUBLIC_LISTINGS_SHAPE_INVALID");
-    const total = Number(page.total);
-    if (!Number.isInteger(total) || total < 0) throw new Error("D1_PUBLIC_LISTINGS_TOTAL_INVALID");
-    if (expectedTotal === null) expectedTotal = total;
-    else if (expectedTotal !== total) throw new Error("D1_PUBLIC_LISTINGS_TOTAL_CHANGED");
+    const total = page.total == null ? null : Number(page.total);
+    if (total !== null && (!Number.isInteger(total) || total < 0)) {
+      throw new Error("D1_PUBLIC_LISTINGS_TOTAL_INVALID");
+    }
+    if (total !== null && expectedTotal === undefined) expectedTotal = total;
+    else if (total !== null && expectedTotal !== total) throw new Error("D1_PUBLIC_LISTINGS_TOTAL_CHANGED");
     items.push(...page.items);
     const next = page.pagination.has_more ? String(page.pagination.next_cursor || "") : "";
     if (page.pagination.has_more && !next) throw new Error("D1_PUBLIC_LISTINGS_CURSOR_MISSING");
@@ -224,7 +226,7 @@ export async function fetchAllPublicPcListings(apiBase, auditKey = Date.now().to
     if (next) seenCursors.add(next);
     cursor = next;
   } while (cursor);
-  if (items.length !== expectedTotal) {
+  if (expectedTotal !== undefined && items.length !== expectedTotal) {
     throw new Error(`D1_PUBLIC_LISTINGS_PAGINATION_MISMATCH:${expectedTotal}:${items.length}`);
   }
   if (new Set(items.map((item) => item.item_id)).size !== items.length) throw new Error("D1_PUBLIC_LISTINGS_DUPLICATE_ITEM_ID");

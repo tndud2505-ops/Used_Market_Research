@@ -7,6 +7,7 @@ import { evaluatePipelineQualityReports } from "../aws-runner/pc-pipeline-govern
 import { PcShadowPipeline } from "../aws-runner/pc-shadow-pipeline.mjs";
 import { evaluatePcQualityDataset } from "../aws-runner/pc-quality-eval.mjs";
 import { reclassifyPcSnapshots } from "../aws-runner/reclassify-pc-snapshots.mjs";
+import { fetchAllPublicPcListings } from "../aws-runner/republish-pc-projections.mjs";
 import {
   isPublicDeactivationCandidate,
   mergedPublicExclusionReasons,
@@ -15,6 +16,28 @@ import {
 import { classifyPcPartListing } from "../market/logic/pc-parts-classifier.mjs";
 import { explicitSoldText, isPartialSaleText, structuredSoldEvidenceFromHtml } from "../market/logic/listing-lifecycle.mjs";
 import { reviewedPcListingExclusion } from "../market/logic/pc-reviewed-listing-exclusions.mjs";
+
+const originalFetch = globalThis.fetch;
+let nullableTotalPage = 0;
+try {
+  globalThis.fetch = async () => {
+    nullableTotalPage += 1;
+    return new Response(JSON.stringify({
+      data: {
+        items: [{ item_id: nullableTotalPage === 1 ? "page-a" : "page-b" }],
+        total: null,
+        pagination: nullableTotalPage === 1
+          ? { has_more: true, next_cursor: "next" }
+          : { has_more: false, next_cursor: null }
+      }
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  const nullableTotalItems = await fetchAllPublicPcListings(new URL("https://used-pick.test"));
+  assert.deepEqual(nullableTotalItems.map((item) => item.item_id), ["page-a", "page-b"],
+    "projection reconciliation must support cursor listings whose total is intentionally omitted");
+} finally {
+  globalThis.fetch = originalFetch;
+}
 
 for (const text of ["판매완료 아님", "아직 판매완료 아닙니다", "sold out 아님", "판매완료 표시 오류", "미판매완료"]) {
   assert.equal(explicitSoldText(text), null, `negative SOLD wording must not become terminal: ${text}`);
