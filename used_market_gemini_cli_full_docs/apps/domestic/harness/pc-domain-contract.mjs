@@ -828,6 +828,18 @@ assert.equal(unknown7500x3dProjection.canonical_product_id, null,
 assert.equal(unknown7500x3dProjection.price_eligible, false);
 assert.equal(unknown7500x3dProjection.statistics_eligible, false);
 assert.ok(unknown7500x3dProjection.exclusion_reasons.includes("MODEL_NOT_IN_MASTER"));
+const intel7400tProjection = pipeline.recordItem({
+  item_id: "ebay:intel-i5-7400t", site: "ebay",
+  title: "Intel Core i5-7400T 2.4 GHz Quad-Core Processor",
+  price: 42,
+  currency: "USD",
+  url: "https://www.ebay.com/itm/intel-i5-7400t",
+  status: "ACTIVE"
+}, new Date(now).toISOString());
+assert.equal(intel7400tProjection.canonical_product_id, null,
+  "an unlisted Intel T suffix must not collapse into the base desktop model");
+assert.equal(intel7400tProjection.price_eligible, false);
+assert.ok(intel7400tProjection.exclusion_reasons.includes("MODEL_NOT_IN_MASTER"));
 for (let index = 0; index < 5; index += 1) {
   pipeline.recordItem({
     item_id: `joonggonara:rtx5090-sold-${index}`, site: "joonggonara",

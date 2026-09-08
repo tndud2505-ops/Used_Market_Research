@@ -57,7 +57,7 @@ function comparablePrices(price, quantity, priceScope) {
 
 function cpuModelToken(value) {
   const matches = [...String(value || "").normalize("NFKC").toUpperCase()
-    .matchAll(/(\d{3,5}(?:X3D|KF|KS|XT|K|F|G|X)?)/gu)]
+    .matchAll(/(\d{3,5}(?:X3D|[A-Z]{1,3})?)/gu)]
     .map((match) => match[1]);
   return matches.at(-1) || "";
 }
