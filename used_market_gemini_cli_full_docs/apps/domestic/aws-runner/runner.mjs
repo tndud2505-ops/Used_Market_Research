@@ -685,6 +685,7 @@ async function publishPcProductStats() {
       stats_json: { ...stats, traceability: { member_count: memberCount } },
       as_of: asOf
     });
+    await yieldToEventLoop();
   }
   const nonEmptyScopeCount = rows.filter((row) => {
     const stats = row.stats_json || {};

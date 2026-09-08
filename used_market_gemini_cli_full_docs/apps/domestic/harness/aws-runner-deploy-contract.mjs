@@ -121,6 +121,8 @@ assert.match(runnerScript, /const PC_STATS_PUBLICATION_TIMEOUT_MS = Math\.min\(1
   "large product-stat publications must have a dedicated bounded timeout");
 assert.match(runnerScript, /signal: boundedFetchSignal\(undefined, PC_STATS_PUBLICATION_TIMEOUT_MS\)/u,
   "product-stat publication must not inherit the short marketplace fetch timeout");
+assert.match(runnerScript, /stats_json: \{ \.\.\.stats, traceability: \{ member_count: memberCount \} \},[\s\S]*?await yieldToEventLoop\(\);/u,
+  "product-stat generation must yield so health and public reads remain responsive");
 assert.match(runnerScript, /pcLedger\.getStoredDailyPriceStats/u,
   "public price-stat reads must use stored daily aggregates instead of rebuilding from raw ledger rows");
 assert.match(runnerScript, /const BACKGROUND_REFRESH_ENABLED = String\(process\.env\.RUNNER_BACKGROUND_REFRESH_ENABLED \?\? "false"\)/u,
