@@ -141,6 +141,29 @@ for (const title of [
   assert.equal(classifyPcPartListing({ title, price: 50_000 }).listing_kind, "SINGLE_COMPONENT",
     `component wording must not become a full system: ${title}`);
 }
+const validUsdListing = classifyPcPartListing({
+  title: "NVIDIA GeForce RTX 3080 10GB used graphics card",
+  price: 350,
+  currency: "USD",
+  lifecycle_status: "ACTIVE"
+});
+assert.equal(validUsdListing.exclusion_reasons.includes("ANOMALOUS_PRICE"), false,
+  "valid overseas USD prices must not be evaluated against the KRW low-price threshold");
+assert.equal(validUsdListing.price_eligible, true);
+assert.equal(classifyPcPartListing({
+  title: "NVIDIA GeForce RTX 3080 10GB used graphics card",
+  price: 1_000,
+  currency: "KRW",
+  lifecycle_status: "ACTIVE"
+}).exclusion_reasons.includes("ANOMALOUS_PRICE"), true,
+"the existing KRW placeholder-price guard must remain active");
+assert.equal(classifyPcPartListing({
+  title: "NVIDIA GeForce RTX 3080 10GB used graphics card",
+  price: 0,
+  currency: "USD",
+  lifecycle_status: "ACTIVE"
+}).exclusion_reasons.includes("ANOMALOUS_PRICE"), true,
+"zero prices remain invalid in every currency");
 
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;

@@ -709,8 +709,10 @@ export function classifyPcPartListing(input) {
   if (quantityResult.quantity_unknown) exclusionReasons.push('QUANTITY_UNKNOWN');
   if (quantityResult.no_available_quantity) exclusionReasons.push('NO_AVAILABLE_QUANTITY');
   const displayedAmount = Number(input?.price);
+  const displayedCurrency = String(input?.currency || 'KRW').trim().toUpperCase();
   if (exclusionReasons.length === 0 && Number.isFinite(displayedAmount)
-    && (displayedAmount <= 1_500 || /^([1-9])\1{3,}$/u.test(String(Math.trunc(displayedAmount))))) {
+    && (displayedAmount <= 0 || (displayedCurrency === 'KRW'
+      && (displayedAmount <= 1_500 || /^([1-9])\1{3,}$/u.test(String(Math.trunc(displayedAmount))))))) {
     exclusionReasons.push('ANOMALOUS_PRICE');
   }
   const bracketedWanPrice = title.match(/(?:^|[^\d])(\d+(?:\.\d+)?)\s*만원\s*[\])}]/u);
