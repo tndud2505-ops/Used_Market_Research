@@ -12,6 +12,7 @@ import {
   categoryQuery,
   collectLiveSite,
   collectOne,
+  enrichHelloMarketDetails,
   requestedPriceRange,
   requestedSiteWindow,
   requestedSites,
@@ -123,6 +124,8 @@ const PC_SOURCE_TARGETS_PER_RUN = Math.min(128, Math.max(4,
   Number.parseInt(process.env.PC_SOURCE_TARGETS_PER_RUN || "12", 10) || 12));
 const PC_SOURCE_TARGET_CONCURRENCY = Math.min(8, Math.max(1,
   Number.parseInt(process.env.PC_SOURCE_TARGET_CONCURRENCY || "2", 10) || 2));
+const PC_HELLOMARKET_DETAIL_LIMIT = Math.min(120, Math.max(0,
+  Number.parseInt(process.env.PC_HELLOMARKET_DETAIL_LIMIT || "40", 10) || 0));
 const PC_EXTERNAL_FETCH_TIMEOUT_MS = 30_000;
 const PC_SCHEDULER_WATCHDOG_MS = Math.min(30 * 60 * 1000, Math.max(5 * 60 * 1000,
   Number.parseInt(process.env.PC_SCHEDULER_WATCHDOG_MS || String(20 * 60 * 1000), 10) || 20 * 60 * 1000));
@@ -1503,6 +1506,9 @@ function pcSourceAdapter(sourceKey) {
               : { ...item, source_listing_id: sourceListingId }
           };
         });
+      if (sourceKey === "hellomarket" && PC_HELLOMARKET_DETAIL_LIMIT > 0) {
+        await enrichHelloMarketDetails(items, { maxItems: PC_HELLOMARKET_DETAIL_LIMIT });
+      }
       const incremental = filterIncrementalListings(items, input.cursor);
       collectionMetrics.parsed_count = items.length;
       return {

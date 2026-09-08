@@ -56,6 +56,8 @@ assert.match(healthScript, /instance_id" != "\$LOCAL_INSTANCE_ID/u,
   "public health must identify the newly started local runner process");
 assert.match(readme, /반복 배포/u);
 assert.match(readme, /process_instance\.id/u);
+assert.match(runnerScript, /enrichHelloMarketDetails\(items/u,
+  "the scheduled HelloMarket collector must classify public detail text, not search-card titles alone");
 
 for (const source of [publishStatsScript, completeStatsScript]) {
   assert.match(source, /normalization_version:\s*versionOptions\.normalizationVersion/u,
