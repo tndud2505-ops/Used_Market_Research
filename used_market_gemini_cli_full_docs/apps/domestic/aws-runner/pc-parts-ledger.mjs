@@ -1970,7 +1970,7 @@ export class PcPartsLedger {
     );
     if (!row) return null;
     const raw = parseJson(row.raw_json, {});
-    return {
+    const projection = {
       item_id: cleanText(raw.item_id || raw.id || (raw.url || raw.item_url
         ? `${row.source_id}:${raw.url || raw.item_url}`
         : `${row.source_id}:${row.source_listing_id}`), 700),
@@ -2005,6 +2005,24 @@ export class PcPartsLedger {
       parser_version: row.parser_version || null,
       rule_version: row.rule_version || null,
       filter_version: row.filter_version || null
+    };
+    const reviewedExclusion = reviewedPcListingExclusion(row.source_id, row.source_listing_id);
+    if (!reviewedExclusion) return projection;
+    return {
+      ...projection,
+      listing_kind: reviewedExclusion.reason === "FULL_SYSTEM" ? "FULL_SYSTEM" : projection.listing_kind,
+      price_eligible: false,
+      exclusion_reasons: [...new Set([
+        ...projection.exclusion_reasons,
+        "REVIEWED_" + reviewedExclusion.reason
+      ])],
+      evidence: [...projection.evidence, {
+        field: "reviewed_exclusion",
+        value: reviewedExclusion.reason,
+        source: reviewedExclusion.evidence,
+        matched_text: row.source_listing_id,
+        reviewed_at: reviewedExclusion.reviewed_at
+      }]
     };
   }
 

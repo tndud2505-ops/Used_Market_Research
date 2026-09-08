@@ -14,6 +14,55 @@ export const PC_REVIEWED_LISTING_EXCLUSIONS = Object.freeze([
     reason: "QUANTITY_UNKNOWN",
     reviewed_at: "2026-09-09",
     evidence: "PUBLIC_DETAIL_DESCRIPTION"
+  }),
+  Object.freeze({
+    source_id: "joonggonara",
+    source_listing_token: "232154630",
+    reason: "FULL_SYSTEM",
+    reviewed_at: "2026-09-09",
+    evidence: "PUBLIC_TITLE_MULTI_COMPONENT_CONFIGURATION"
+  }),
+  Object.freeze({
+    source_id: "joonggonara",
+    source_listing_token: "231821019",
+    reason: "FULL_SYSTEM",
+    reviewed_at: "2026-09-09",
+    evidence: "PUBLIC_TITLE_ASUS_VIVOBOOK"
+  }),
+  Object.freeze({
+    source_id: "joonggonara",
+    source_listing_token: "231873683",
+    reason: "FULL_SYSTEM",
+    reviewed_at: "2026-09-09",
+    evidence: "PUBLIC_TITLE_LENOVO_IDEAPAD"
+  }),
+  Object.freeze({
+    source_id: "ebay",
+    source_listing_token: "178468318702",
+    reason: "QUANTITY_UNNORMALIZED",
+    reviewed_at: "2026-09-09",
+    evidence: "PUBLIC_TITLE_LOT_OF_2"
+  }),
+  Object.freeze({
+    source_id: "ebay",
+    source_listing_token: "307163286429",
+    reason: "QUANTITY_UNNORMALIZED",
+    reviewed_at: "2026-09-09",
+    evidence: "PUBLIC_TITLE_LOT_OF_3"
+  }),
+  Object.freeze({
+    source_id: "ebay",
+    source_listing_token: "318229011395",
+    reason: "QUANTITY_UNNORMALIZED",
+    reviewed_at: "2026-09-09",
+    evidence: "PUBLIC_TITLE_LOT_OF_6"
+  }),
+  Object.freeze({
+    source_id: "ebay",
+    source_listing_token: "327343241050",
+    reason: "QUANTITY_UNNORMALIZED",
+    reviewed_at: "2026-09-09",
+    evidence: "PUBLIC_TITLE_LOT_OF_6"
   })
 ]);
 

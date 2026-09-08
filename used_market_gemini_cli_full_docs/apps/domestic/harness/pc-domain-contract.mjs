@@ -40,7 +40,19 @@ assert.equal(helloMarketFullPc.listing_kind, "FULL_SYSTEM",
 assert.equal(helloMarketFullPc.price_eligible, false);
 assert.equal(reviewedPcListingExclusion("hellomarket", "https://www.hellomarket.com/item/182653333")?.reason, "FULL_SYSTEM");
 assert.equal(reviewedPcListingExclusion("hellomarket", "hellomarket:https://www.hellomarket.com/item/183908019")?.reason, "QUANTITY_UNKNOWN");
+assert.equal(reviewedPcListingExclusion("joonggonara", "https://web.joongna.com/product/231873683")?.reason, "FULL_SYSTEM");
+assert.equal(reviewedPcListingExclusion("ebay", "v1|327343241050|0")?.reason, "QUANTITY_UNNORMALIZED");
 assert.equal(reviewedPcListingExclusion("hellomarket", "184798363"), null);
+for (const [title, quantity] of [
+  ["Lot of 2 Intel Core i5-7400 3.5GHz Quad Core CPU Processor SR32W", 2],
+  ["(Lot of 6) Intel Core i5-7400 SR32W processors", 6],
+  ["LOT OF 6 - MSI GeForce RTX 3060 VENTUS 2X OC Graphics Cards", 6]
+]) {
+  const lot = classifyPcPartListing({ title, price: 600, currency: "USD", lifecycle_status: "ACTIVE" });
+  assert.equal(lot.listing_kind, "SAME_PRODUCT_LOT", "English lot quantity must be modeled: " + title);
+  assert.equal(lot.quantity, quantity, "English lot count must be preserved: " + title);
+  assert.equal(lot.price_scope, "TOTAL", "English lot display price must be treated as the total: " + title);
+}
 const qualityProbe = evaluatePcQualityDataset([{ id: "quality-probe", input: { title: "RTX 3080" }, truth: {
   category_code: "GPU", canonical_model: "RTX 3080", quantity: 1, price_scope: "TOTAL",
   listing_kind: "SINGLE_COMPONENT", lifecycle_status: "ACTIVE", market_pool: "KR_C2C_USED", duplicate: false
@@ -100,6 +112,9 @@ const observedSystemAndBundleRegressions = [
   ["HP Z2 SFF G8 Small Form Factor Z840 i7-11700 동급 CPU", "FULL_SYSTEM"],
   ["삼성 슬림 PC i5 6500 ssd 128GB +HDD 500GB GT730", "FULL_SYSTEM"],
   ["HP 노트북 i7 6700HQ 16GB RAM SSD 256GB 판매", "FULL_SYSTEM"],
+  ["3600 16g*2 tuf b450m 3060 12g 아수스 웬디 240ssd 구성팝니다", "FULL_SYSTEM"],
+  ["아수스 비보북 15x 6900hx rtx 3060 16gb 512gb 2.5k oled 120hz", "FULL_SYSTEM"],
+  ["레노버 아이디어패드 게이밍3 5600H DDR4 16GB RTX3060 15ACH6 ideapad gaming 3", "FULL_SYSTEM"],
   ["인텔 I7-6700 + H170 메인보드 DDR4", "COMPONENT_BUNDLE"],
   ["인텔cpu i7 8700k 델 z370 메인보드 850w모듈러파워 델케이스", "COMPONENT_BUNDLE"],
   ["i5-7500 , ASROCK Z170M Pro4S 인텔 CPU 메인보드셋 쿨러까지 일괄", "COMPONENT_BUNDLE"],
@@ -998,6 +1013,20 @@ assert.equal(ledger.getPublicProjection("joonggonara", "stable-id").item_id, sta
 assert.equal(ledger.getPublicProjection("joonggonara", "stable-id").image_url, "https://img.example.test/stable-id.jpg",
   "lifecycle projections must preserve the public product image when source raw payload is nested");
 assert.equal(ledger.getPublicProjection("joonggonara", "stable-id").posted_at, "2026-08-29T00:00:00.000Z");
+pipeline.recordItem({
+  item_id: "joonggonara:232154630", source_listing_id: "232154630", site: "joonggonara",
+  title: "RTX 3080 정상 작동", description: "개인 사용", price: 480_000, currency: "KRW",
+  url: "https://web.joongna.com/product/232154630", status: "ACTIVE"
+}, new Date(now + 550).toISOString());
+db.prepare("UPDATE normalized_listings SET listing_kind = 'SINGLE_COMPONENT', price_eligible = 1, "
+  + "statistics_eligible = 1, exclusion_reasons_json = '[]' "
+  + "WHERE snapshot_id = (SELECT id FROM listing_snapshots WHERE source_id = 'joonggonara' "
+  + "AND source_listing_id = '232154630' ORDER BY id DESC LIMIT 1)").run();
+const reviewedLegacyProjection = ledger.getPublicProjection("joonggonara", "232154630");
+assert.equal(reviewedLegacyProjection.price_eligible, false,
+  "reviewed exclusions must override a stale eligible normalization during projection reconciliation");
+assert.equal(reviewedLegacyProjection.listing_kind, "FULL_SYSTEM");
+assert.ok(reviewedLegacyProjection.exclusion_reasons.includes("REVIEWED_FULL_SYSTEM"));
 const unchangedProjected = pipeline.recordItem({
   item_id: stableProjectionId, source_listing_id: "stable-id", site: "joonggonara",
   title: "RTX 3080 정상 작동", description: "개인 사용", price: 480_000, currency: "KRW",

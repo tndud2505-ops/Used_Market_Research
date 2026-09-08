@@ -137,7 +137,7 @@ function detectSpecialKind(text, evidence, title = text) {
   const withoutGpuModel = title.replace(gpuTokenPattern, ' ');
   const hasCpuConfigurationModel = /\b(?:[1-9]\d{3,4})(?:X3D2?|X|G|K[F]?|F|T)?\b|\b2\d{2}K\b|(?:CORE\s*)?ULTRA\s*[3579]?\s*\d{3}[A-Z]*|울트라\s*[3579]?\s*\d{3}[A-Z]*/iu.test(withoutGpuModel);
   const hasMemoryConfiguration = /(?:\b(?:RAM|DDR[345])\b|\b(?:8|16|24|32|48|64|96|128)\s*G(?:B)?\b)/iu.test(title);
-  const hasStorageConfiguration = /\b(?:128|240|250|256|480|500|512)\s*G(?:B)?\b|\b(?:1|2|4|8)\s*T(?:B)?\b/iu.test(title);
+  const hasStorageConfiguration = /\b(?:128|240|250|256|480|500|512)\s*(?:G(?:B)?|SSD|HDD)\b|\b(?:1|2|4|8)\s*T(?:B)?\b/iu.test(title);
   const compactSlashSystem = title.split('/').length >= 4
     && hasCpuConfigurationModel
     && ((hasGpuModel && /\b(?:A|B|H|X|Z)[3-8]\d{2}[A-Z0-9-]*\b/iu.test(title) && hasStorageConfiguration)
@@ -178,7 +178,7 @@ function detectSpecialKind(text, evidence, title = text) {
   const describedPortableSystem = componentGroups.size >= 1 && !portableComponentWording
     && /(?:노트북(?!\s*(?:용|램|RAM|메모리|하드|HDD|SSD|부품))|삼성\s*센스\s*R\d|아티브\s*북|갤럭시\s*북|랩탑(?!용)|NOTEBOOK(?!\s*(?:용|RAM|MEMORY|HDD|SSD|GPU|GRAPHICS))|LAPTOP(?!\s*(?:RAM|MEMORY|HDD|SSD|GPU|GRAPHICS)))/iu.test(title);
   const namedPortableSystem = (hasGpuModel || combinedHasGpuModel)
-    && /(?:노트북(?!\s*(?:용|램|RAM|메모리|하드|HDD|SSD|부품))|게이밍\s*북|랩탑(?!용)|NOTEBOOK(?!\s*(?:RAM|MEMORY|HDD|SSD|GPU|GRAPHICS))|LAPTOP(?!\s*(?:RAM|MEMORY|HDD|SSD|GPU|GRAPHICS))|RAZER\s*BLADE|레이저\s*블레이드|ROG\s*(?:STRIX\s*)?SCAR|로그\s*스카|ALIENWARE|에일리언웨어|LEGION\s*[A-Z]?\d|레노버\s*Y\d|리전\s*(?:프로|Y?\d)|MSI\s*GF\d{2}|HP\s*OMEN.{0,30}\d{2}[- ][A-Z0-9]|오멘.{0,30}(?:RTX|GTX)|제피러스|ZEPHYRUS)/iu.test(title);
+    && /(?:노트북(?!\s*(?:용|램|RAM|메모리|하드|HDD|SSD|부품))|게이밍\s*북|랩탑(?!용)|NOTEBOOK(?!\s*(?:RAM|MEMORY|HDD|SSD|GPU|GRAPHICS))|LAPTOP(?!\s*(?:RAM|MEMORY|HDD|SSD|GPU|GRAPHICS))|RAZER\s*BLADE|레이저\s*블레이드|ROG\s*(?:STRIX\s*)?SCAR|로그\s*스카|ALIENWARE|에일리언웨어|LEGION\s*[A-Z]?\d|레노버\s*Y\d|리전\s*(?:프로|Y?\d)|MSI\s*GF\d{2}|HP\s*OMEN.{0,30}\d{2}[- ][A-Z0-9]|오멘.{0,30}(?:RTX|GTX)|제피러스|ZEPHYRUS|(?:비보북|VIVOBOOK|아이디어패드|IDEAPAD)(?!\s*(?:용|GPU|그래픽\s*카드|그래픽카드)))/iu.test(title);
   const workstationSystem = componentGroups.size >= 1 && /(?:워크스테이션|WORKSTATION)/iu.test(title);
   const describedCompactSystem = componentGroups.size >= 2 && /(?:미니|슬림)\s*PC/i.test(title);
   const componentRichSystem = componentGroups.has('CPU') && componentGroups.has('RAM')
@@ -598,11 +598,15 @@ function detectQuantity(text, category, evidence) {
     matchedText = partial[0];
     partialSold = true;
   } else {
+    const englishLot = text.match(/(?:^|[\s(])LOT\s+OF\s+(\d+)\b/iu);
     const multiplied = text.match(/(?:RTX\s*\d{4}(?:\s*TI)?(?:\s*SUPER)?|GTX\s*\d{3,4}|RX\s*\d{4}(?:\s*XT[X]?)?|SSD\s*\d+\s*TB)\s*[x×*]\s*(\d+)\b/i);
     const koreanCount = text.match(/(두|세|네)\s*(?:개|장)(?=\s*(?:일괄|개당|장당|각각|보유|판매|중|모두|전부|$))/i);
     const numericCount = text.match(/(?:^|[\s,(/[\]])(\d+)\s*(?:개|장|EA)(?=\s*(?:일괄|세트|셋트|개당|장당|각각|보유|판매|중|모두|전부|$|[\]]))/i)
       || text.match(/총\s*(\d+)\s*(?:개|장|EA)/iu);
-    if (multiplied) {
+    if (englishLot) {
+      quantity = Number(englishLot[1]);
+      matchedText = englishLot[0].trim();
+    } else if (multiplied) {
       quantity = Number(multiplied[1]);
       matchedText = multiplied[0];
     } else if (koreanCount) {
@@ -630,6 +634,7 @@ function detectQuantity(text, category, evidence) {
     available_quantity: quantity,
     sold_quantity: partialSold ? 1 : 0,
     partialSold,
+    kit_price_total: /(?:^|[\s(])LOT\s+OF\s+\d+\b/iu.test(text),
     quantity_unknown: quantityUnknown
   };
 }
