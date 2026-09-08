@@ -694,6 +694,10 @@ const dedupedProjection = index.browsePcListings({
 });
 assert.equal(dedupedProjection.items.length, 1);
 assert.equal(dedupedProjection.items[0].item_id, "danawa:998877");
+assert.equal(dedupedProjection.total, 1,
+  "browse total must count reconciled source identities instead of stored duplicate rows");
+assert.equal(dedupedProjection.sourceTotals.danawa, 1,
+  "site totals must match the same reconciled identities shown in search results");
 assert.equal(dedupedProjection.items[0].canonical_manufacturer, null);
 assert.equal(dedupedProjection.items[0].board_manufacturer, "GIGABYTE");
 assert.equal(index.db.prepare("SELECT COUNT(*) AS count FROM listings WHERE url = ?")

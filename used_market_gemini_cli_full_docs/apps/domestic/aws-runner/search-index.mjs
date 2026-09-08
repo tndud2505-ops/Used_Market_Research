@@ -1121,6 +1121,8 @@ export class SearchIndex {
       where.push(`site IN (${sqlPlaceholders(sites)})`);
       params.push(...sites);
     }
+    const selectedCountWhere = [...where];
+    const selectedCountParams = [...params];
     const after = options.after && typeof options.after === "object" ? options.after : null;
     let cursorFound = true;
     if (after?.item_id) {
@@ -1142,14 +1144,25 @@ export class SearchIndex {
     const hasMore = page.length > 0 && (rows.length > limit || candidateRows.length >= fetchLimit);
     const last = page.at(-1);
     const latestObservedAt = candidateRows.reduce((latest, row) => String(row.last_checked_at) > latest ? String(row.last_checked_at) : latest, "");
-    const sourceRows = !after?.item_id ? this.db.prepare(`SELECT site, COUNT(*) AS count
-      FROM listings WHERE ${sourceCountWhere.join(" AND ")} GROUP BY site`).all(...sourceCountParams) : [];
+    const sourceIdentityRows = !after?.item_id
+      ? this.db.prepare(`SELECT item_id, site, url, last_checked_at
+        FROM listings WHERE ${sourceCountWhere.join(" AND ")}`).all(...sourceCountParams)
+      : [];
+    const dedupedSourceRows = dedupePcListingRows(sourceIdentityRows);
+    const selectedIdentityRows = !after?.item_id && sites.length > 0
+      ? this.db.prepare(`SELECT item_id, site, url, last_checked_at
+        FROM listings WHERE ${selectedCountWhere.join(" AND ")}`).all(...selectedCountParams)
+      : dedupedSourceRows;
+    const sourceTotals = {};
+    for (const row of dedupedSourceRows) {
+      sourceTotals[row.site] = Number(sourceTotals[row.site] || 0) + 1;
+    }
     return {
       items: page.map(publicItem),
-      total: !after?.item_id && candidateRows.length < fetchLimit ? rows.length : null,
+      total: !after?.item_id ? dedupePcListingRows(selectedIdentityRows).length : null,
       asOf,
       latestObservedAt: latestObservedAt || null,
-      sourceTotals: Object.fromEntries(sourceRows.map((row) => [row.site, Number(row.count || 0)])),
+      sourceTotals,
       cursorFound,
       nextAfter: hasMore && last ? { item_id: last.item_id } : null
     };
