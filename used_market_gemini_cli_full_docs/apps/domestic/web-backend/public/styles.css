@@ -4846,6 +4846,55 @@ body.has-selected-product .listing-section {
   }
 }
 
+.contextual-offer:not([hidden]) {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px 20px;
+  margin-top: 24px;
+  padding: 16px 0;
+  border-top: 1px solid var(--line-strong);
+}
+
+.affiliate-heading {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.affiliate-disclosure {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.affiliate-link {
+  grid-column: 1 / -1;
+  justify-self: start;
+  padding: 8px 0;
+  color: var(--accent-strong);
+  font-size: 14px;
+  font-weight: 750;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+.affiliate-link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.affiliate-note {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
 /* Compact listing results */
 .listing-row {
   grid-template-columns: 56px minmax(0, 1fr) minmax(82px, auto);

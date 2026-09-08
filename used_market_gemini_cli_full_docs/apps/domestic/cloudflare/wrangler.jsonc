@@ -36,9 +36,87 @@
     "D1_LISTING_FALLBACK_ENABLED": "false",
     "SEARCH_RUNNER_TIMEOUT_MS": "60000",
     "AWS_PC_SCHEDULER_AUTHORITY": "true",
-    "MONETIZATION_ENABLED": "false",
-    "AFFILIATE_ALLOWED_ORIGINS": "",
-    "AFFILIATE_OFFERS_JSON": "[]",
+    "MONETIZATION_ENABLED": "true",
+    "AFFILIATE_ALLOWED_ORIGINS": "https://link.coupang.com",
+    "AFFILIATE_OFFERS_JSON": [
+      {
+        "offer_id": "coupang-cpu-20260908",
+        "provider": "쿠팡 파트너스",
+        "title": "쿠팡 CPU 판매상품",
+        "cta_label": "CPU 상품 보기",
+        "destination_url": "https://link.coupang.com/a/gRLWcHAlnU",
+        "category_code": "CPU",
+        "approved": true,
+        "reviewed_at": "2026-09-08T00:00:00+09:00",
+        "expires_at": "2027-03-08T00:00:00+09:00"
+      },
+      {
+        "offer_id": "coupang-gpu-20260908",
+        "provider": "쿠팡 파트너스",
+        "title": "쿠팡 그래픽카드 판매상품",
+        "cta_label": "그래픽카드 상품 보기",
+        "destination_url": "https://link.coupang.com/a/gRL41MBdJs",
+        "category_code": "GPU",
+        "approved": true,
+        "reviewed_at": "2026-09-08T00:00:00+09:00",
+        "expires_at": "2027-03-08T00:00:00+09:00"
+      },
+      {
+        "offer_id": "coupang-ram-20260908",
+        "provider": "쿠팡 파트너스",
+        "title": "쿠팡 RAM 판매상품",
+        "cta_label": "RAM 상품 보기",
+        "destination_url": "https://link.coupang.com/a/gRMoJSyyA0",
+        "category_code": "RAM",
+        "approved": true,
+        "reviewed_at": "2026-09-08T00:00:00+09:00",
+        "expires_at": "2027-03-08T00:00:00+09:00"
+      },
+      {
+        "offer_id": "coupang-motherboard-20260908",
+        "provider": "쿠팡 파트너스",
+        "title": "쿠팡 메인보드 판매상품",
+        "cta_label": "메인보드 상품 보기",
+        "destination_url": "https://link.coupang.com/a/gRMsoSzPtk",
+        "category_code": "MOTHERBOARD",
+        "approved": true,
+        "reviewed_at": "2026-09-08T00:00:00+09:00",
+        "expires_at": "2027-03-08T00:00:00+09:00"
+      },
+      {
+        "offer_id": "coupang-ssd-20260908",
+        "provider": "쿠팡 파트너스",
+        "title": "쿠팡 SSD 판매상품",
+        "cta_label": "SSD 상품 보기",
+        "destination_url": "https://link.coupang.com/a/gRMcMGOljM",
+        "category_code": "SSD",
+        "approved": true,
+        "reviewed_at": "2026-09-08T00:00:00+09:00",
+        "expires_at": "2027-03-08T00:00:00+09:00"
+      },
+      {
+        "offer_id": "coupang-hdd-20260908",
+        "provider": "쿠팡 파트너스",
+        "title": "쿠팡 HDD 판매상품",
+        "cta_label": "HDD 상품 보기",
+        "destination_url": "https://link.coupang.com/a/gRMdFuwQh2",
+        "category_code": "HDD",
+        "approved": true,
+        "reviewed_at": "2026-09-08T00:00:00+09:00",
+        "expires_at": "2027-03-08T00:00:00+09:00"
+      },
+      {
+        "offer_id": "coupang-psu-20260908",
+        "provider": "쿠팡 파트너스",
+        "title": "쿠팡 파워서플라이 판매상품",
+        "cta_label": "파워서플라이 상품 보기",
+        "destination_url": "https://link.coupang.com/a/gRMeA9k2O4",
+        "category_code": "PSU",
+        "approved": true,
+        "reviewed_at": "2026-09-08T00:00:00+09:00",
+        "expires_at": "2027-03-08T00:00:00+09:00"
+      }
+    ],
     "RUNNER_URL": "https://runner.used-pick.com/api/runner/run",
     "SEARCH_RUNNER_URL": "https://runner.used-pick.com/api/search",
     "ORIGIN_URL": "https://runner.used-pick.com"

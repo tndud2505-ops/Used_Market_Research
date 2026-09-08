@@ -9,15 +9,18 @@ import {
   recordMonetizationEvent,
   selectContextualOffer
 } from "../cloudflare/affiliate-registry.mjs";
+import { COUPANG_COMMISSION_DISCLOSURE, createContextualAffiliate, validContextualOffer } from "../web-backend/public/affiliate.js";
 
 const html = await readFile(new URL("../web-backend/public/index.html", import.meta.url), "utf8");
 const app = await readFile(new URL("../web-backend/public/app.js", import.meta.url), "utf8");
 const privacy = await readFile(new URL("../web-backend/public/privacy.html", import.meta.url), "utf8");
 const terms = await readFile(new URL("../web-backend/public/terms.html", import.meta.url), "utf8");
 const migration = await readFile(new URL("../cloudflare/migrations/0004_monetization_metrics.sql", import.meta.url), "utf8");
+const affiliateUi = await readFile(new URL("../web-backend/public/affiliate.js", import.meta.url), "utf8");
+const productionConfig = JSON.parse(await readFile(new URL("../cloudflare/wrangler.jsonc", import.meta.url), "utf8"));
 
-const publicSurface = `${html}\n${app}`;
-assert.doesNotMatch(publicSurface, /link\.coupang\.com|COUPANG_|data-coupang|coupang-/u);
+const publicSurface = `${html}\n${app}\n${affiliateUi}`;
+assert.doesNotMatch(publicSurface, /ads-partners\.coupang\.com|<iframe|<script[^>]+src=["']https:\/\/[^"']*coupang/u);
 assert.doesNotMatch(publicSurface, /referrerpolicy=["']unsafe-url["']/u);
 assert.doesNotMatch(publicSurface, /생활필수품|검색 결과 없음[\s\S]{0,500}제휴/u);
 assert.match(privacy, /제3자 맞춤형 광고 쿠키를 사용하지 않습니다/u);
@@ -25,10 +28,12 @@ assert.match(privacy, /원문 검색어·상품명·전체 URL·영구 사용자
 assert.doesNotMatch(privacy, /카카오 애드핏/u);
 assert.match(terms, /제휴 여부는 검색 결과의 추천순이나 가격 통계에 영향을 주지 않습니다/u);
 
-assert.doesNotMatch(html, /contextual-offer|관련 광고|rel="sponsored/u,
-  "the PC search UI must not render advertising slots");
-assert.doesNotMatch(app, /\/api\/monetization\/|refreshContextualOffer/u,
-  "the PC search UI must not request internal monetization APIs");
+assert.equal([...html.matchAll(/id="contextual-offer"/gu)].length, 1);
+assert.match(html, /id="contextual-offer"[^>]+hidden/u, "the shell must not publish an unverified ad");
+assert.ok(html.indexOf('id="contextual-offer"') > html.indexOf('id="listing-pagination"'));
+assert.match(affiliateUi, /sponsored noopener noreferrer/u);
+assert.match(affiliateUi, /referrerPolicy: "no-referrer"/u);
+assert.match(affiliateUi, /credentials: "omit"/u);
 assert.doesNotMatch(migration, /query|title|url|ip|user|session/iu);
 
 const now = new Date("2026-08-29T00:00:00.000Z");
@@ -91,6 +96,39 @@ const categorySelected = selectContextualOffer({
 }, { category_code: "GPU", slot: "after-organic-results" }, { now });
 assert.equal(categorySelected.offer_id, categoryOffer.offer_id);
 assert.equal(categorySelected.context_type, "category");
+
+const reviewedAt = new Date("2026-09-08T01:00:00.000Z");
+const configuredEnv = { ...productionConfig.vars, MONETIZATION_EVENT_SECRET: validEnv.MONETIZATION_EVENT_SECRET };
+const configuredCategories = productionConfig.vars.AFFILIATE_OFFERS_JSON.map((offer) => offer.category_code).sort();
+assert.deepEqual(configuredCategories, ["CPU", "GPU", "HDD", "MOTHERBOARD", "PSU", "RAM", "SSD"]);
+for (const category of configuredCategories) {
+  const offerContext = { category_code: category, slot: "after-organic-results" };
+  const offer = selectContextualOffer(configuredEnv, offerContext, { now: reviewedAt });
+  assert.ok(offer);
+  assert.equal(offer.context_key, category);
+  assert.match(offer.destination_url, /^https:\/\/link\.coupang\.com\/a\/[A-Za-z0-9]+$/u);
+  assert.equal(offer.disclosure.commission, COUPANG_COMMISSION_DISCLOSURE);
+  assert.deepEqual(selectContextualOffer({ ...configuredEnv,
+    AFFILIATE_OFFERS_JSON: JSON.stringify(productionConfig.vars.AFFILIATE_OFFERS_JSON),
+  }, offerContext, { now: reviewedAt }), offer, "JSON bindings and env-file JSON must agree");
+}
+assert.equal(selectContextualOffer(configuredEnv, { category_code: "MOBILE", slot: "after-organic-results" }, { now: reviewedAt }), null);
+assert.equal(selectContextualOffer(configuredEnv, { category_code: "CPU", slot: "after-organic-results" },
+  { now: new Date("2027-03-09T00:00:00Z") }), null, "expired campaigns must fail closed");
+
+const uiContext = { category_code: "CPU", slot: "after-organic-results" };
+const uiOffer = {
+  ...selectContextualOffer(configuredEnv, uiContext, { now: reviewedAt }),
+  event_token: "fixture.signature", event_token_expires_at: "2026-09-08T01:05:00Z",
+};
+assert.equal(validContextualOffer(uiOffer, uiContext, reviewedAt.getTime()), true);
+for (const change of [
+  { destination_url: "https://evil.example/a/link" },
+  { destination_url: "https://link.coupang.com/" },
+  { context_key: "GPU" }, { context_type: "unknown" },
+  { disclosure: { ...uiOffer.disclosure, commission: "" } },
+  { expires_at: "2026-01-01" }, { event_token_expires_at: "2026-01-01" },
+]) assert.equal(validContextualOffer({ ...uiOffer, ...change }, uiContext, reviewedAt.getTime()), false);
 
 function d1Adapter(database, options = {}) {
   return {
@@ -229,5 +267,82 @@ assert.equal(await recordMonetizationEvent(d1Adapter(atomicDatabase), validEnv, 
 assert.equal(atomicDatabase.prepare("SELECT impressions FROM monetization_daily_metrics").get().impressions, 1);
 atomicDatabase.close();
 database.close();
+
+const originalFetch = globalThis.fetch;
+const originalDocument = globalThis.document;
+const originalObserver = globalThis.IntersectionObserver;
+const uiRequests = [];
+const observations = [];
+const pendingUi = [];
+class UiNode {
+  constructor(tag) { this.tag = tag; this.children = []; this.handlers = {}; this.attributes = {}; }
+  replaceChildren(...children) { this.children = children; }
+  setAttribute(key, value) { this.attributes[key] = value; }
+  addEventListener(event, handler) { this.handlers[event] = handler; }
+}
+try {
+  globalThis.document = { createElement: (tag) => new UiNode(tag) };
+  globalThis.IntersectionObserver = class {
+    constructor(callback) { this.callback = callback; observations.push(this); }
+    observe() {}
+    disconnect() { this.disconnected = true; }
+  };
+  globalThis.fetch = (url, options) => {
+    uiRequests.push({ url, options });
+    if (url.endsWith("/contextual-offer")) return new Promise((resolve) => pendingUi.push(resolve));
+    return Promise.resolve({ ok: true, status: 204 });
+  };
+  const root = new UiNode("section");
+  const client = createContextualAffiliate(root, { now: () => reviewedAt.getTime() });
+  await client.update({ hasResults: false, category_code: "CPU" });
+  assert.equal(uiRequests.length, 0, "empty organic results must not even request advertising");
+  const firstRender = client.update({ hasResults: true, category_code: "CPU", raw_query: "never-log-this" });
+  pendingUi[0]({ ok: true, json: async () => ({ ok: true, data: { offer: uiOffer } }) });
+  await firstRender;
+  assert.equal(root.hidden, false);
+  assert.equal(root.children[1].textContent, COUPANG_COMMISSION_DISCLOSURE, "disclosure must precede the ad link");
+  const adLink = root.children.find((child) => child.tag === "a");
+  assert.equal(adLink.rel, "sponsored noopener noreferrer");
+  assert.equal(adLink.referrerPolicy, "no-referrer");
+  assert.equal(adLink.href, uiOffer.destination_url);
+  assert.equal(uiRequests.length, 1, "an off-screen offer must not count as an impression");
+  observations[0].callback([{ isIntersecting: true, intersectionRatio: 0.3 }]);
+  assert.equal(uiRequests.length, 1);
+  observations[0].callback([{ isIntersecting: true, intersectionRatio: 0.6 }]);
+  observations[0].callback([{ isIntersecting: true, intersectionRatio: 1 }]);
+  adLink.handlers.click();
+  adLink.handlers.click();
+  assert.equal(uiRequests.length, 3, "one visible impression and one click must be sent per token");
+  for (const request of uiRequests) {
+    assert.doesNotMatch(request.options.body, /never-log-this|raw_query|destination_url|title|user_id/u);
+    assert.equal(request.options.referrerPolicy, "no-referrer");
+    assert.equal(request.options.credentials, "omit");
+  }
+  await client.update({ hasResults: true, category_code: "CPU" });
+  assert.equal(uiRequests.length, 3, "the same rendered context should reuse its offer");
+  client.clear();
+  const stale = client.update({ hasResults: true, category_code: "CPU" });
+  const current = client.update({ hasResults: true, category_code: "GPU" });
+  const gpuOffer = { ...uiOffer, context_key: "GPU", title: "GPU", cta_label: "GPU 상품 보기" };
+  pendingUi[2]({ ok: true, json: async () => ({ ok: true, data: { offer: gpuOffer } }) });
+  await current;
+  pendingUi[1]({ ok: true, json: async () => ({ ok: true, data: { offer: uiOffer } }) });
+  await stale;
+  assert.match(root.children.find((child) => child.tag === "a").textContent, /GPU/u,
+    "a late response must never put a CPU ad on GPU results");
+  observations[0].callback([{ isIntersecting: true, intersectionRatio: 1 }]);
+  assert.notEqual(observations.at(-1).disconnected, true, "stale observers must not disconnect the current offer");
+  const invalid = client.update({ hasResults: true, category_code: "RAM" });
+  pendingUi[3]({ ok: true, json: async () => ({ ok: true, data: { offer: { ...uiOffer, context_key: "RAM", disclosure: {} } } }) });
+  await invalid;
+  assert.equal(root.hidden, true, "a response missing its mandatory disclosure must remain invisible");
+  assert.equal(root.children.length, 0);
+} finally {
+  globalThis.fetch = originalFetch;
+  if (originalDocument === undefined) delete globalThis.document;
+  else globalThis.document = originalDocument;
+  if (originalObserver === undefined) delete globalThis.IntersectionObserver;
+  else globalThis.IntersectionObserver = originalObserver;
+}
 
 console.log("monetization trust contract: ok");

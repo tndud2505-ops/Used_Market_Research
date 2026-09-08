@@ -1,3 +1,5 @@
+import { createContextualAffiliate } from "./affiliate.js?v=pc-directory-v87";
+
 const PRODUCT_QUERY_KEYS = new Set([
   "manufacturer", "model", "gpu_model", "board_brand", "usage", "configuration", "socket", "chipset", "form_interface", "capacity", "purpose", "rated_wattage",
   "chip_manufacturer", "market_segment", "family", "generation", "vram_gb",
@@ -181,6 +183,7 @@ const dom = {
   listingPagePrev: document.querySelector("#listing-page-prev"),
   listingPageNext: document.querySelector("#listing-page-next"),
 };
+const contextualAffiliate = createContextualAffiliate(document.querySelector("#contextual-offer"));
 
 function createElement(tag, className, text) {
   const node = document.createElement(tag);
@@ -435,6 +438,7 @@ function setBusy(button, isBusy, busyText) {
 }
 
 function cancelListingRequest({ hidePagination = true } = {}) {
+  contextualAffiliate.clear();
   clearTimeout(browseListingTimer);
   browseListingTimer = null;
   state.listingRequest?.abort();
@@ -1343,7 +1347,6 @@ function showScopedListings(listingDelayMs = 0) {
   dom.statsSection.hidden = true;
   dom.priceChartDisclosure.hidden = true;
   dom.statsGroups.replaceChildren();
-  dom.listingSection.hidden = false;
   dom.backToModels.hidden = true;
   dom.modelDetailOpen.hidden = true;
   dom.listingTitle.textContent = currentListingScopeTitle();
@@ -1352,6 +1355,7 @@ function showScopedListings(listingDelayMs = 0) {
     : "선택한 조건에 맞는 모델이 없습니다.";
   dom.listingRows.replaceChildren();
   renderProducts();
+  dom.listingSection.hidden = false;
   if (!shouldAutoLoadScopedListings()) {
     dom.listingEmpty.hidden = false;
     renderListingPagination();
@@ -1697,6 +1701,11 @@ function renderListings() {
   });
   dom.listingEmpty.hidden = visibleListings.length > 0;
   renderListingPagination();
+  void contextualAffiliate.update({
+    hasResults: visibleListings.length > 0,
+    canonical_product_id: state.selectedProduct ? productId(state.selectedProduct) : "",
+    category_code: state.selectedProduct ? productCategory(state.selectedProduct) || state.categoryCode : state.categoryCode,
+  });
 }
 
 function renderListingPagination() {

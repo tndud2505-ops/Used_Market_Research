@@ -59,7 +59,8 @@ function allowedOrigins(env) {
 
 function configuredOffers(env) {
   try {
-    const parsed = JSON.parse(String(env?.AFFILIATE_OFFERS_JSON || "[]"));
+    const value = env?.AFFILIATE_OFFERS_JSON;
+    const parsed = Array.isArray(value) ? value : JSON.parse(String(value || "[]"));
     return Array.isArray(parsed) ? parsed : [];
   } catch {
     return [];
@@ -185,10 +186,13 @@ function publicOffer(offer, contextType, contextKey) {
     slot: OFFER_SLOT,
     context_type: contextType,
     context_key: contextKey,
+    expires_at: offer.expires_at,
     disclosure: {
       advertisement: "광고",
-      commission: "이 링크를 통해 구매하면 USED PICK이 수수료를 받을 수 있습니다.",
-      independence: "시세와 추천순에는 영향을 주지 않습니다."
+      commission: offer.provider === "쿠팡 파트너스"
+        ? "이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다."
+        : "이 링크를 통해 구매하면 USED PICK이 수수료를 받을 수 있습니다.",
+      independence: "광고는 중고 시세·거래가 통계와 추천순에 영향을 주지 않습니다."
     }
   };
 }

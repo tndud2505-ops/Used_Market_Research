@@ -117,8 +117,10 @@ requireText(script, "setListingOptionsCollapsed", "mobile sort/price controls mu
 
 assert.equal(html.includes('class="category-button"'), false, "all components must not return as a crowded tab rail");
 assert.equal(html.includes('id="product-count"'), false, "duplicate model-count copy must stay removed");
-assert.equal(html.includes("contextual-offer"), false, "the public flow must not include ads");
-assert.equal(script.includes("/api/monetization/"), false, "the public UI must not request monetization APIs");
+requireText(html, 'id="contextual-offer"', "approved PC affiliate offers need one isolated slot");
+assert.ok(html.indexOf('id="contextual-offer"') > html.indexOf('id="listing-pagination"'),
+  "the affiliate slot must follow organic listings and pagination");
+requireText(script, "hasResults: visibleListings.length > 0", "ads must never replace empty search results");
 assert.equal(/['"`]\/api\/search(?:-only)?(?:[?'"`])/u.test(script), false, "the public UI must not call generic used-market search APIs");
 assert.equal(html.includes("�") || script.includes("�") || styles.includes("�"), false, "public UI files contain replacement characters");
 
