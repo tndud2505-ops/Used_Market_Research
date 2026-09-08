@@ -98,7 +98,8 @@ assert.equal(reviewedPcListingExclusion("hellomarket", "184798363"), null);
 for (const [title, quantity] of [
   ["Lot of 2 Intel Core i5-7400 3.5GHz Quad Core CPU Processor SR32W", 2],
   ["(Lot of 6) Intel Core i5-7400 SR32W processors", 6],
-  ["LOT OF 6 - MSI GeForce RTX 3060 VENTUS 2X OC Graphics Cards", 6]
+  ["LOT OF 6 - MSI GeForce RTX 3060 VENTUS 2X OC Graphics Cards", 6],
+  ["Samsung 256GB Solid State Drive Tested 3x Units", 3]
 ]) {
   const lot = classifyPcPartListing({ title, price: 600, currency: "USD", lifecycle_status: "ACTIVE" });
   assert.equal(lot.listing_kind, "SAME_PRODUCT_LOT", "English lot quantity must be modeled: " + title);
@@ -173,6 +174,9 @@ const observedSystemAndBundleRegressions = [
   ["ASUS 비보북 Pro 15 OLED (i5-11세대/RTX 3050/16GB/1TB SSD)", "FULL_SYSTEM"],
   ["HP EliteDesk 800 G8 데스크탑 (i7-11세대 / RTX 3070 / 32GB / SSD+4TB)", "FULL_SYSTEM"],
   ["고급형 게이밍 및 서버용 XEON 32G RTX3060Ti 1TB", "FULL_SYSTEM"],
+  ["HP EliteDesk 400 G4 미니PC I5-8500T", "FULL_SYSTEM"],
+  ["26년형 LG 그램 프로 16인치 RTX 5050 흰색 최상위 모델 판매합니다", "FULL_SYSTEM"],
+  ["이그닉 데스크탑 RTX5060 1TB 16GB", "FULL_SYSTEM"],
   ["인텔 I7-6700 + H170 메인보드 DDR4", "COMPONENT_BUNDLE"],
   ["인텔cpu i7 8700k 델 z370 메인보드 850w모듈러파워 델케이스", "COMPONENT_BUNDLE"],
   ["i5-7500 , ASROCK Z170M Pro4S 인텔 CPU 메인보드셋 쿨러까지 일괄", "COMPONENT_BUNDLE"],

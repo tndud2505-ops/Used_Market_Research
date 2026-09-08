@@ -147,6 +147,69 @@ export const PC_REVIEWED_LISTING_EXCLUSIONS = Object.freeze([
     reason: "OPTION_AD",
     reviewed_at: "2026-09-09",
     evidence: "PUBLIC_TITLE_MULTIPLE_CPU_MODELS"
+  }),
+  Object.freeze({
+    source_id: "ebay",
+    source_listing_token: "307169179138",
+    reason: "QUANTITY_UNNORMALIZED",
+    reviewed_at: "2026-09-09",
+    evidence: "PUBLIC_TITLE_3X_UNITS"
+  }),
+  Object.freeze({
+    source_id: "joonggonara",
+    source_listing_token: "232254753",
+    reason: "FULL_SYSTEM",
+    reviewed_at: "2026-09-09",
+    evidence: "PUBLIC_TITLE_HP_ELITEDESK_MINI"
+  }),
+  Object.freeze({
+    source_id: "joonggonara",
+    source_listing_token: "232254789",
+    reason: "FULL_SYSTEM",
+    reviewed_at: "2026-09-09",
+    evidence: "PUBLIC_TITLE_HP_ELITEDESK_MINI"
+  }),
+  Object.freeze({
+    source_id: "joonggonara",
+    source_listing_token: "229173484",
+    reason: "FULL_SYSTEM",
+    reviewed_at: "2026-09-09",
+    evidence: "PUBLIC_TITLE_HP_ELITEDESK_MINI"
+  }),
+  Object.freeze({
+    source_id: "joonggonara",
+    source_listing_token: "229432509",
+    reason: "FULL_SYSTEM",
+    reviewed_at: "2026-09-09",
+    evidence: "PUBLIC_TITLE_HP_ELITEDESK_MINI"
+  }),
+  Object.freeze({
+    source_id: "joonggonara",
+    source_listing_token: "220268305",
+    reason: "FULL_SYSTEM",
+    reviewed_at: "2026-09-09",
+    evidence: "PUBLIC_TITLE_LG_GRAM"
+  }),
+  Object.freeze({
+    source_id: "joonggonara",
+    source_listing_token: "228508216",
+    reason: "FULL_SYSTEM",
+    reviewed_at: "2026-09-09",
+    evidence: "PUBLIC_TITLE_LG_GRAM"
+  }),
+  Object.freeze({
+    source_id: "joonggonara",
+    source_listing_token: "228717853",
+    reason: "FULL_SYSTEM",
+    reviewed_at: "2026-09-09",
+    evidence: "PUBLIC_TITLE_LG_GRAM"
+  }),
+  Object.freeze({
+    source_id: "joonggonara",
+    source_listing_token: "231024366",
+    reason: "FULL_SYSTEM",
+    reviewed_at: "2026-09-09",
+    evidence: "PUBLIC_TITLE_DESKTOP_CONFIGURATION"
   })
 ]);
 

@@ -599,13 +599,15 @@ function detectQuantity(text, category, evidence) {
     partialSold = true;
   } else {
     const englishLot = text.match(/(?:^|[\s(])LOT\s+OF\s+(\d+)\b/iu);
+    const englishUnits = text.match(/(?:^|[\s(])(\d+)\s*[x×]\s*(?:UNITS?|PCS?)\b/iu);
     const multiplied = text.match(/(?:RTX\s*\d{4}(?:\s*TI)?(?:\s*SUPER)?|GTX\s*\d{3,4}|RX\s*\d{4}(?:\s*XT[X]?)?|SSD\s*\d+\s*TB)\s*[x×*]\s*(\d+)\b/i);
     const koreanCount = text.match(/(두|세|네)\s*(?:개|장)(?=\s*(?:일괄|개당|장당|각각|보유|판매|중|모두|전부|$))/i);
     const numericCount = text.match(/(?:^|[\s,(/[\]])(\d+)\s*(?:개|장|EA)(?=\s*(?:일괄|세트|셋트|개당|장당|각각|보유|판매|중|모두|전부|$|[\]]))/i)
       || text.match(/총\s*(\d+)\s*(?:개|장|EA)/iu);
-    if (englishLot) {
-      quantity = Number(englishLot[1]);
-      matchedText = englishLot[0].trim();
+    if (englishLot || englishUnits) {
+      const englishQuantity = englishLot || englishUnits;
+      quantity = Number(englishQuantity[1]);
+      matchedText = englishQuantity[0].trim();
     } else if (multiplied) {
       quantity = Number(multiplied[1]);
       matchedText = multiplied[0];
@@ -634,7 +636,7 @@ function detectQuantity(text, category, evidence) {
     available_quantity: quantity,
     sold_quantity: partialSold ? 1 : 0,
     partialSold,
-    kit_price_total: /(?:^|[\s(])LOT\s+OF\s+\d+\b/iu.test(text),
+    kit_price_total: /(?:^|[\s(])(?:LOT\s+OF\s+\d+|\d+\s*[x×]\s*(?:UNITS?|PCS?))\b/iu.test(text),
     quantity_unknown: quantityUnknown
   };
 }
