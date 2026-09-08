@@ -4,6 +4,7 @@ import path from "node:path";
 
 import { compactStatsForPublication, statsChecksum, statsPublicationKey } from "../cloudflare/public-product-stats.mjs";
 import { PcPartsLedger } from "./pc-parts-ledger.mjs";
+import { evaluatePipelineQualityReports, loadPipelineQualityReports } from "./pc-pipeline-governance.mjs";
 import { SearchIndex } from "./search-index.mjs";
 
 const indexValue = String(process.env.RUNNER_INDEX_PATH || "").trim();
@@ -12,6 +13,17 @@ const importToken = String(process.env.CLOUDFLARE_MANUAL_RUN_TOKEN || process.en
 const publicationTimeoutMs = Math.min(15 * 60 * 1000, Math.max(2 * 60 * 1000,
   Number.parseInt(process.env.PC_STATS_PUBLICATION_TIMEOUT_MS || String(15 * 60 * 1000), 10)
     || 15 * 60 * 1000));
+const aliasPromotionEvidence = (() => {
+  const raw = String(process.env.PC_ALIAS_PROMOTION_EVIDENCE_JSON || "").trim();
+  if (!raw) return {};
+  try {
+    const value = JSON.parse(raw);
+    return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  } catch {
+    throw new Error("PC_ALIAS_PROMOTION_EVIDENCE_JSON_INVALID");
+  }
+})();
+const pipelineQualityReportsPath = String(process.env.PC_PIPELINE_QUALITY_REPORTS_PATH || "").trim();
 
 if (!indexValue) throw new Error("RUNNER_INDEX_PATH is required");
 if (!importUrlValue || !importToken) throw new Error("D1_STATS_PUBLICATION_NOT_CONFIGURED");
@@ -59,6 +71,13 @@ const ledger = new PcPartsLedger({ db: index.db });
 try {
   ledger.migrate();
   const asOf = new Date().toISOString();
+  const integrityAudit = ledger.runIntegrityAudit(asOf);
+  const aliasEvaluations = ledger.evaluateDueAliasShadows(asOf, aliasPromotionEvidence);
+  const pipelineDecisions = evaluatePipelineQualityReports({
+    ledger,
+    reports: loadPipelineQualityReports(pipelineQualityReportsPath),
+    evaluatedAt: asOf
+  });
   const activePipelineVersion = ledger.getActivePipelineVersion();
   const versionOptions = activePipelineVersion ? {
     normalizationVersion: activePipelineVersion.normalization_version,
@@ -159,7 +178,10 @@ try {
     overwritten_row_count: Number(activated.overwritten_row_count || 0),
     checksum: activated.checksum,
     publication_id: activated.publication_id,
-    published_at: publishedAt
+    published_at: publishedAt,
+    integrity_audit: integrityAudit,
+    alias_evaluations: aliasEvaluations,
+    pipeline_decisions: pipelineDecisions
   }));
 } finally {
   index.close();

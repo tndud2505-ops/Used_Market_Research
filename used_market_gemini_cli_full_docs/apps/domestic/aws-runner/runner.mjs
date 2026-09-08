@@ -25,7 +25,6 @@ import { PcPartsLedger } from "./pc-parts-ledger.mjs";
 import { stabilizeIncrementalPcProjections } from "./pc-projection-republish-policy.mjs";
 import { parsePriceStatsRequest, priceStatsResponse } from "./pc-price-stats-http.mjs";
 import { PcShadowPipeline } from "./pc-shadow-pipeline.mjs";
-import { evaluatePipelineQualityReports, loadPipelineQualityReports } from "./pc-pipeline-governance.mjs";
 import { explicitSoldText, structuredSoldEvidenceFromHtml } from "../market/logic/listing-lifecycle.mjs";
 import { pcCatalogResponse, pcCollectionTargetSetV2, pcProductsResponse } from "../cloudflare/pc-directory-http.mjs";
 import { publicPcModelsForApi } from "../market/logic/pc-public-catalog.mjs";
@@ -210,8 +209,6 @@ async function fetchDanawaPublicWithPacing(input, init = {}) {
   lastDanawaRequestAt = Date.now();
   return fetch(input, { ...init, signal: boundedFetchSignal(init.signal, 20_000) });
 }
-const PC_ALIAS_PROMOTION_EVIDENCE = jsonEnvironment("PC_ALIAS_PROMOTION_EVIDENCE_JSON");
-const PC_PIPELINE_QUALITY_REPORTS_PATH = String(process.env.PC_PIPELINE_QUALITY_REPORTS_PATH || "").trim();
 const SEARCH_ONLY_CATEGORY_IDS = Object.freeze([
   "all", "fashion", "fashion_women", "fashion_men", "fashion_women_outer", "fashion_women_tops",
   "fashion_women_bottoms", "fashion_women_skirts", "fashion_men_outer", "fashion_men_tops",
@@ -634,7 +631,11 @@ async function mirrorPcListingCollectionManifest({ sourceId, asOf, successfulTar
 function runPcStatsPublisher() {
   const scriptPath = fileURLToPath(new URL("./publish-pc-stats-runner.mjs", import.meta.url));
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [scriptPath], {
+    const childCommand = process.platform === "linux" ? "/usr/bin/ionice" : process.execPath;
+    const childArgs = process.platform === "linux"
+      ? ["-c", "3", "/usr/bin/nice", "-n", "10", process.execPath, scriptPath]
+      : [scriptPath];
+    const child = spawn(childCommand, childArgs, {
       cwd: path.dirname(scriptPath),
       env: process.env,
       stdio: ["ignore", "pipe", "pipe"],
@@ -674,20 +675,12 @@ function runPcStatsPublisher() {
 
 async function publishPcProductStats() {
   if (!pcLedger) return { published: false, skipped: true, warning: "PC parts ledger is unavailable" };
-  const evaluatedAt = new Date().toISOString();
-  const integrityAudit = pcLedger.runIntegrityAudit(evaluatedAt);
-  const aliasEvaluations = pcLedger.evaluateDueAliasShadows(evaluatedAt, PC_ALIAS_PROMOTION_EVIDENCE);
-  const pipelineDecisions = evaluatePipelineQualityReports({
-    ledger: pcLedger,
-    reports: loadPipelineQualityReports(PC_PIPELINE_QUALITY_REPORTS_PATH),
-    evaluatedAt
-  });
   const publication = await runPcStatsPublisher();
   if (publication?.published !== true || !publication?.publication_id || !publication?.published_at) {
     throw new Error("PC_STATS_PUBLISHER_RESULT_INVALID");
   }
   pcPublicationLastSucceededAt = publication.published_at;
-  return { ...publication, integrity_audit: integrityAudit, alias_evaluations: aliasEvaluations, pipeline_decisions: pipelineDecisions };
+  return publication;
 }
 
 async function collectJob(jobName) {

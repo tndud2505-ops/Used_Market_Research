@@ -124,11 +124,17 @@ assert.match(statsRunnerScript, /request as httpsRequest/u,
   "large product-stat imports must avoid the default fetch header timeout");
 assert.match(installScript, /node --check "\$APP_ROOT\/aws-runner\/publish-pc-stats-runner\.mjs"/u,
   "AWS deployment must syntax-check the isolated statistics publisher before restarting services");
-assert.match(runnerScript, /spawn\(process\.execPath, \[scriptPath\]/u,
+assert.match(runnerScript, /spawn\(childCommand, childArgs/u,
   "product-stat generation must run outside the public runner event loop");
+assert.match(runnerScript, /\["-c", "3", "\/usr\/bin\/nice", "-n", "10", process\.execPath, scriptPath\]/u,
+  "production statistics work must yield CPU and disk priority to public requests");
 assert.match(runnerScript, /const publication = await runPcStatsPublisher\(\);/u);
 assert.doesNotMatch(runnerScript, /compactStatsForPublication\(pcLedger\.rebuildAndGetPriceStats/u,
   "the public runner process must not build every product-stat scope synchronously");
+assert.doesNotMatch(runnerScript, /pcLedger\.runIntegrityAudit/u,
+  "the public runner process must not perform a full SQLite integrity scan during publication");
+assert.match(statsRunnerScript, /ledger\.runIntegrityAudit\(asOf\)/u,
+  "the isolated publisher must retain the ledger integrity guard");
 assert.match(runnerScript, /pcLedger\.getStoredDailyPriceStats/u,
   "public price-stat reads must use stored daily aggregates instead of rebuilding from raw ledger rows");
 assert.match(runnerScript, /const BACKGROUND_REFRESH_ENABLED = String\(process\.env\.RUNNER_BACKGROUND_REFRESH_ENABLED \?\? "false"\)/u,
