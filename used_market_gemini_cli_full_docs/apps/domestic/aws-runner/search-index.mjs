@@ -1099,10 +1099,6 @@ export class SearchIndex {
       where.push("pc_board_manufacturer = ?");
       params.push(boardManufacturer);
     }
-    if (sites.length > 0) {
-      where.push(`site IN (${sqlPlaceholders(sites)})`);
-      params.push(...sites);
-    }
     if (minPrice !== null) {
       where.push("price_value >= ?");
       params.push(minPrice);
@@ -1118,6 +1114,12 @@ export class SearchIndex {
     if (currency) {
       where.push("currency = ?");
       params.push(currency);
+    }
+    const sourceCountWhere = [...where];
+    const sourceCountParams = [...params];
+    if (sites.length > 0) {
+      where.push(`site IN (${sqlPlaceholders(sites)})`);
+      params.push(...sites);
     }
     const after = options.after && typeof options.after === "object" ? options.after : null;
     let cursorFound = true;
@@ -1140,11 +1142,14 @@ export class SearchIndex {
     const hasMore = page.length > 0 && (rows.length > limit || candidateRows.length >= fetchLimit);
     const last = page.at(-1);
     const latestObservedAt = candidateRows.reduce((latest, row) => String(row.last_checked_at) > latest ? String(row.last_checked_at) : latest, "");
+    const sourceRows = !after?.item_id ? this.db.prepare(`SELECT site, COUNT(*) AS count
+      FROM listings WHERE ${sourceCountWhere.join(" AND ")} GROUP BY site`).all(...sourceCountParams) : [];
     return {
       items: page.map(publicItem),
       total: !after?.item_id && candidateRows.length < fetchLimit ? rows.length : null,
       asOf,
       latestObservedAt: latestObservedAt || null,
+      sourceTotals: Object.fromEntries(sourceRows.map((row) => [row.site, Number(row.count || 0)])),
       cursorFound,
       nextAfter: hasMore && last ? { item_id: last.item_id } : null
     };

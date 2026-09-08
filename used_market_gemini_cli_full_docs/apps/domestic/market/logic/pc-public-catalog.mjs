@@ -215,6 +215,12 @@ function matchingProducts(category, filters, exceptKey = null) {
     && Object.entries(filters).every(([key, requested]) => key === exceptKey || filterMatches(product, key, requested)));
 }
 
+function productMatchesQuery(product, query) {
+  if (!query) return true;
+  return [product.id, product.name, ...(product.aliases || [])]
+    .some((value) => normalize(value).toLocaleUpperCase("ko-KR").includes(query));
+}
+
 function optionLabel(key, value) {
   if (key === "suffix" && value === "NONE") return "일반";
   if (key === "capacity") {
@@ -279,10 +285,13 @@ export function publicPcCatalogForApi() {
 export function publicPcFacetsForApi(options = {}) {
   const { category, filters } = normalizeFilters(options);
   if (!category) return { category: "", filters, facets: {}, available_facets: {} };
+  const input = options;
+  const queryValue = options instanceof URLSearchParams ? (options.get("q") || options.get("query")) : (input.q || input.query);
+  const query = normalize(queryValue).toLocaleUpperCase("ko-KR");
   const definitions = publicPcFacetDefinitions(category);
   const facets = Object.fromEntries(definitions.map(({ key, label, order }) => {
     const counts = new Map();
-    for (const product of matchingProducts(category, filters, key)) {
+    for (const product of matchingProducts(category, filters, key).filter((candidate) => productMatchesQuery(candidate, query))) {
       for (const value of publicFacetValues(product, key)) counts.set(value, (counts.get(value) || 0) + 1);
     }
     return [key, { key, label, order, values: [...counts.entries()].sort(([a], [b]) => compact(a).localeCompare(compact(b))).map(([value, count]) => ({ value, label: optionLabel(key, value), count })) }];
@@ -315,10 +324,7 @@ export function publicPcModelsForApi(options = {}) {
   const { category, filters } = normalizeFilters(input);
   const queryValue = options instanceof URLSearchParams ? (options.get("q") || options.get("query")) : (input.q || input.query);
   const query = normalize(queryValue).toLocaleUpperCase("ko-KR");
-  const products = matchingProducts(category, filters).filter((product) => {
-    if (!query) return true;
-    return [product.id, product.name, ...(product.aliases || [])].some((value) => normalize(value).toLocaleUpperCase("ko-KR").includes(query));
-  });
+  const products = matchingProducts(category, filters).filter((product) => productMatchesQuery(product, query));
   return {
     category,
     filters,

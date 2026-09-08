@@ -62,26 +62,36 @@ export function createContextualAffiliate(root, { now = Date.now } = {}) {
   }
 
   function render(offer, context) {
-    const heading = document.createElement("h3");
+    const main = document.createElement("div");
+    main.className = "affiliate-main";
+    const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    icon.setAttribute("class", "affiliate-icon");
+    icon.setAttribute("viewBox", "0 0 24 24");
+    icon.setAttribute("aria-hidden", "true");
+    const bag = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    bag.setAttribute("d", "M6 8.5h12l1 11H5l1-11Zm3 0V6a3 3 0 0 1 6 0v2.5");
+    icon.append(bag);
+    const copy = document.createElement("div");
+    copy.className = "affiliate-copy";
+    const heading = document.createElement("span");
     heading.className = "affiliate-heading";
     heading.textContent = `광고 · ${offer.provider}`;
-    const disclosure = document.createElement("p");
-    disclosure.className = "affiliate-disclosure";
-    disclosure.textContent = offer.disclosure.commission;
     const link = document.createElement("a");
     link.className = "affiliate-link";
     link.href = offer.destination_url;
     link.target = "_blank";
     link.rel = "sponsored noopener noreferrer";
     link.referrerPolicy = "no-referrer";
-    link.textContent = `${offer.cta_label} ↗`;
+    link.textContent = `${offer.cta_label} →`;
     link.setAttribute("aria-label", `${offer.title} 보기 · 새 창`);
     link.addEventListener("click", () => record("click", offer));
-    const note = document.createElement("p");
-    note.className = "affiliate-note";
-    note.textContent = `${offer.context_type === "category" && context.canonical_product_id
-      ? "부품군 전체 상품이며 선택 모델과 다를 수 있습니다. " : ""}${offer.disclosure.independence}`;
-    root.replaceChildren(heading, disclosure, link, note);
+    copy.append(heading, link);
+    main.append(icon, copy);
+    const disclosure = document.createElement("p");
+    disclosure.className = "affiliate-disclosure";
+    disclosure.textContent = `${offer.disclosure.commission} ${offer.context_type === "category" && context.canonical_product_id
+      ? "선택 모델과 다른 상품이 포함될 수 있습니다. " : ""}${offer.disclosure.independence}`;
+    root.replaceChildren(main, disclosure);
     root.hidden = false;
     displayedOffer = offer;
     if (typeof IntersectionObserver === "function") {

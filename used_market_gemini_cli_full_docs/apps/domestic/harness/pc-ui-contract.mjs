@@ -25,11 +25,10 @@ for (const id of [
   "model-filters", "model-filter-body", "model-filter-toggle", "facet-rows", "filter-context", "active-filter-summary",
   "active-filter-chips", "reset-filters", "show-matched-models", "model-detail-dialog", "model-detail-close",
   "price-panel-title", "detail-message", "price-summary", "price-chart-disclosure", "stats-section", "stats-groups",
-  "active-latest", "active-mean", "active-change", "active-count", "reserved-latest", "reserved-mean",
-  "reserved-change", "reserved-count", "sold-latest", "sold-mean", "sold-change", "sold-count",
-  "confirmed-latest", "confirmed-mean", "confirmed-change", "confirmed-count", "listing-section", "listing-rows",
+  "active-latest", "active-mean", "active-count", "sold-latest", "sold-mean", "sold-count",
+  "confirmed-latest", "confirmed-mean", "confirmed-count", "listing-section", "listing-rows",
   "listing-options", "listing-options-toggle", "listing-pagination", "listing-page-numbers", "listing-page-prev", "listing-page-next",
-  "model-detail-open", "price-summary-scope", "price-reset", "price-error",
+  "model-detail-open", "price-summary-scope", "price-reset", "price-error", "listing-count",
 ]) {
   requireText(html, `id="${id}"`, `missing required UI region #${id}`);
   requireText(script, `querySelector("#${id}")`, `app.js must bind #${id}`);
@@ -52,6 +51,8 @@ requireText(script, 'dom.modelDetailOpen.focus({ preventScroll: true })', "closi
 requireText(script, 'dom.modelSelect.addEventListener("change"', "the compact model selector must drive exact-model selection");
 requireText(script, 'createElement("option"', "matching models must populate native selector options");
 requireText(script, "productSpecText(product)", "model choices must retain useful distinguishing specifications");
+requireText(script, "availableFacets", "text search must replace whole-category facets with matching-model facets");
+requireText(script, "payload?.available_facets", "the model response must drive the visible facet choices");
 
 requireText(html, 'class="source-selector-label">사이트</span>', "site scope needs a short visible label");
 requireText(script, 'checkbox.type = "checkbox"', "site controls must use checkbox semantics");
@@ -63,6 +64,10 @@ requireText(script, "sourceMoreOpen", "additional sites must remain available be
 requireText(script, "marketPools", "sources with multiple market pools must preserve every supported pool");
 requireText(script, "DEFAULT_QUICK_SOURCE_IDS", "default all-sites listing search must avoid slow optional sources");
 requireText(script, 'params.set("sites", sourceIds.join(","))', "default listing searches must pass an explicit fast site scope");
+requireText(script, "availableSourceCounts", "site controls must follow actual whole-query listing coverage");
+requireText(script, "payload?.source_counts", "listing source counts must reach the site selector");
+requireText(script, "payload?.total", "listing result count must use the API total rather than the current page size");
+requireText(script, "Number(state.availableSourceCounts[source.id] || 0) > 0", "zero-result sites must stay hidden");
 
 requireText(script, "openSingleSearchResult", "a unique text result must still open directly");
 requireText(script, "showScopedListings", "category/facet search must return listings without choosing one model");
@@ -83,15 +88,26 @@ requireText(script, "function cancelListingRequest", "scope changes must cancel 
 
 requireText(html, "현재 등록 매물의 평균과 확인된 거래가", "the dialog must describe the two honest price concepts");
 requireText(html, "실제 체결가와 다를 수 있습니다", "sold last-ask disclosure is required");
-requireText(script, '"현재 등록 평균", "확인 거래가"', "site comparison headings must match the rendered metrics");
-const compactStats = script.slice(script.indexOf("function compactStatsRow("), script.indexOf("function combineSourceMetric("));
+requireText(script, "sourceEvidenceRow", "site comparison must stay compact without another wide table");
+const compactStats = script.slice(script.indexOf("function sourceEvidenceRow("), script.indexOf("function combineSourceMetric("));
 requireText(compactStats, "confirmed_transactions", "site transaction cells must use confirmed transaction evidence");
-assert.equal(compactStats.includes("soldMean"), false, "sold asking prices must not be labeled as confirmed transactions");
+requireText(compactStats, 'label: "판매완료"', "sold asking prices must stay visibly distinct from confirmed transactions");
 requireText(script, "sourceRows(data)", "site price rows and charts must use actual per-source evidence");
+requireText(script, "sourceRowsWithEvidence", "sites without price evidence must not render in analysis");
+requireText(script, "sourceRowsWithCoherentSummary", "contradictory source averages must stay out of the visible comparison");
+requireText(script, "statsWithCoherentSources", "invalid source summaries must be removed before chart and summary aggregation");
+requireText(script, "mean < minimum", "a source average below its minimum must be rejected");
 requireText(script, "renderPriceChart", "the dialog must retain the daily chart renderer");
-requireText(script, 'tabindex: 0', "chart points must be keyboard focusable");
+requireText(script, 'tabindex: -1', "chart points must use a roving keyboard focus target");
+requireText(script, 'focusNode.setAttribute("tabindex", isActiveTab ? "0" : "-1")',
+  "the selected chart date must remain keyboard reachable without creating dozens of tab stops");
+requireText(script, "event.stopPropagation()", "chart-point arrow keys must move only one evidence date");
 requireText(script, '"aria-label"', "chart points must expose exact values accessibly");
 requireText(script, "statsHasEvidence", "empty price data must not produce fake price values");
+requireText(script, "price-chart-scroll", "older dates need an intentional horizontal scroll region");
+requireText(script, "selectDate", "the chart must expose one selected date with all available price series");
+requireText(html, 'data-chart-days="7"', "the chart needs a compact seven-day view");
+requireText(html, 'data-chart-days="30"', "the chart needs the full published thirty-day view");
 
 requireText(script, 'scope === "UNIT" ? "개당가격"', "RAM quantity/price-scope labels are required");
 requireText(script, 'quantity > 1 ? "일괄가격"', "RAM lot pricing must stay separate from unit pricing");
@@ -100,6 +116,12 @@ requireText(script, 'listing?.price_eligible === false', "ineligible listings mu
 requireText(script, 'condition !== "USED_WORKING"', "broken or untested listings must be excluded");
 requireText(script, '["AMBIGUOUS", "UNKNOWN"]', "ambiguous price scope must not look valid");
 requireText(script, "listingIdentity", "same-site duplicate rows must collapse");
+requireText(script, "listingFavoriteStorageKey", "listing interest must use stable browser-local storage keys");
+requireText(script, "이 브라우저에 관심 저장", "browser-only interest must not imply account synchronization");
+requireText(script, "listing-sale-state", "current listings must expose their sale state beside the price");
+requireText(script, "listing-spec", "listing rows must retain concise model specifications");
+requireText(script, "const postedAtRaw = firstDefined(listing.posted_at, listing.created_at)",
+  "listing time must prefer the source posting time over a later observation time");
 requireText(script, "listing.image_url", "listing thumbnails must use collected images");
 requireText(script, '"이미지 없음"', "missing images need an honest empty state");
 
@@ -118,8 +140,9 @@ requireText(script, "setListingOptionsCollapsed", "mobile sort/price controls mu
 assert.equal(html.includes('class="category-button"'), false, "all components must not return as a crowded tab rail");
 assert.equal(html.includes('id="product-count"'), false, "duplicate model-count copy must stay removed");
 requireText(html, 'id="contextual-offer"', "approved PC affiliate offers need one isolated slot");
-assert.ok(html.indexOf('id="contextual-offer"') > html.indexOf('id="listing-pagination"'),
-  "the affiliate slot must follow organic listings and pagination");
+assert.ok(html.indexOf('id="contextual-offer"') > html.indexOf('class="listing-heading"')
+  && html.indexOf('id="contextual-offer"') < html.indexOf('id="listing-message"'),
+  "the affiliate slot must stay compact at the top of loaded listing results");
 requireText(script, "hasResults: visibleListings.length > 0", "ads must never replace empty search results");
 assert.equal(/['"`]\/api\/search(?:-only)?(?:[?'"`])/u.test(script), false, "the public UI must not call generic used-market search APIs");
 assert.equal(html.includes("�") || script.includes("�") || styles.includes("�"), false, "public UI files contain replacement characters");
@@ -140,12 +163,54 @@ assert.equal(context.metricValue({ mean: 150 }, ["mean"], "USD").currency, "USD"
   "a source metric without a nested currency must inherit its market currency");
 assert.equal(context.metricValue({ mean: null }, ["mean"], "USD"), null,
   "missing transaction evidence must not become a zero-priced transaction");
+const coherentStats = context.statsWithCoherentSources({
+  active: { sample_count: 2, min: 100, max: 200, mean: 125 },
+  by_source: [
+    {
+      source_id: "valid", active: { sample_count: 1, min: 100, max: 100, mean: 100 },
+      daily: [{ date: "2026-09-08", active: { sample_count: 1, min: 100, max: 100, mean: 100 } }],
+    },
+    {
+      source_id: "invalid", active: { sample_count: 1, min: 200, max: 200, mean: 50 },
+      daily: [{ date: "2026-09-08", active: { sample_count: 1, min: 200, max: 200, mean: 50 } }],
+    },
+  ],
+});
+assert.equal(coherentStats.active.sample_count, 1,
+  "invalid source summaries must not contribute samples to the visible average");
+assert.equal(coherentStats.active.mean, 100,
+  "invalid source summaries must not contribute prices to the visible average");
+assert.equal(coherentStats.by_source.length, 1,
+  "invalid sources must not remain in the visible source comparison");
+assert.equal(coherentStats.integrity_filtered_source_ids[0], "invalid",
+  "a removed source must remain identifiable as awaiting a statistics refresh");
+const pendingStats = context.statsWithCoherentSources({
+  by_source: [{ source_id: "invalid", active: { sample_count: 1, min: 200, max: 200, mean: 50 } }],
+});
+assert.equal(pendingStats.by_source.length, 0,
+  "an entirely invalid source set must not leak into visible price statistics");
+assert.equal(pendingStats.integrity_filtered_source_ids[0], "invalid",
+  "an entirely invalid source set must remain visible as awaiting a refresh");
+context.state = { selectedSites: new Set(["invalid"]) };
+assert.equal(context.statsForSelectedSites(pendingStats).selected_site_scope, "pending",
+  "selecting only a pending source must retain its honest refresh state");
 
 const node = () => ({ hidden: false, value: "", textContent: "", attributes: {},
   setAttribute(key, value) { this.attributes[key] = value; },
   removeAttribute(key) { delete this.attributes[key]; },
   replaceChildren() {}, append() {}, focus() {},
 });
+context.state = {
+  listings: [], listingPage: 1, listingCursor: "", listingPages: new Map(), listingPageCursors: new Map([[1, ""]]),
+  listingNextCursors: new Map(), availableSourceCounts: null, listingTotal: null, detailStats: [],
+};
+context.dom = { listingCount: node() };
+Object.assign(context, { renderSourceFilters() {}, renderListings() {}, renderStats() {} });
+context.applyListingPayload({ items: [{ id: "page-item" }], total: 42, source_counts: { a: 20, b: 22 } }, 1);
+assert.equal(context.state.listingTotal, 42,
+  "the displayed listing total must come from the API rather than the current page length");
+assert.equal(context.dom.listingCount.textContent, "42건");
+
 context.state = { priceMin: "100", priceMax: "200", listingSort: "price_asc", listingOptionsCollapsed: true };
 context.mobileFacetMedia = { matches: true };
 context.dom = Object.fromEntries(["priceMin", "priceMax", "priceError", "priceReset", "listingSort", "listingOptions", "listingOptionsToggle"]
@@ -192,7 +257,7 @@ Object.assign(statsContext, { clearSelectedPriceTable() {}, renderStatsGroup() {
 statsContext.renderStats();
 assert.equal(statsContext.dom.priceSummaryScope.textContent, "국내 개인 중고 · KRW · 최근 30일",
   "out-of-order HTTP responses must not select the overseas summary first");
-assert.deepEqual(summaryKeys, [["active", "KRW"], ["reserved", "KRW"], ["sold", "KRW"], ["confirmed", "KRW"]]);
+assert.deepEqual(summaryKeys, [["active", "KRW"], ["sold", "KRW"], ["confirmed", "KRW"]]);
 
 const requestContext = vm.createContext({ URLSearchParams, AbortController, clearTimeout });
 vm.runInContext(declarations, requestContext);

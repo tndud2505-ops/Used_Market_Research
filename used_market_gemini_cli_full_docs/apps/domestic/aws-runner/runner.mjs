@@ -1227,6 +1227,7 @@ function buildIndexedPayload(body, indexed, refreshJob = null, modeOverride = ""
   const collectionBody = { ...body, limit: SEARCH_COLLECTION_MAX_ITEMS, cursor: undefined };
   const data = buildLivePayload(collectionBody, liveResults, { items: [] });
   data.items = indexed.items;
+  data.source_counts = indexed.sourceTotals || {};
   data.pagination = {
     has_more: indexed.hasMore === true,
     next_cursor: indexed.hasMore && indexed.nextKey
@@ -2235,6 +2236,7 @@ const server = http.createServer(async (req, res) => {
         data: {
           items: result.items,
           total: result.total,
+          source_counts: result.sourceTotals || {},
           pagination: { has_more: Boolean(nextCursor), next_cursor: nextCursor },
           as_of: asOf,
           freshness: pcListingsFreshness(asOf, result.latestObservedAt),

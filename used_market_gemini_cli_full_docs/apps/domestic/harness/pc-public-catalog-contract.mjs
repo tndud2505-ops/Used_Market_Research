@@ -50,6 +50,12 @@ assert.ok(globalSearchModels.some((model) => model.canonical_product_id === "gpu
 assert.deepEqual(publicPcFacetsForApi({ q: "RX 460" }).available_facets, {},
   "global model search must not invent category-specific facets");
 
+const exactCpuFacets = publicPcFacetsForApi({ category: "CPU", q: "i5 7400" }).available_facets;
+assert.deepEqual(exactCpuFacets.manufacturer.map(({ value }) => value), ["Intel"]);
+assert.deepEqual(exactCpuFacets.generation.map(({ value }) => value), ["7th"]);
+assert.deepEqual(exactCpuFacets.socket.map(({ value }) => value), ["LGA1151"],
+  "text search facets must describe matching models instead of the whole category");
+
 const ramFacets = publicPcFacetsForApi({ category: "RAM", usage: "CONSUMER_DESKTOP", generation: "DDR5" });
 assert.deepEqual(ramFacets.category, "RAM");
 assert.deepEqual(ramFacets.filters, { usage: ["CONSUMER_DESKTOP"], generation: ["DDR5"] });

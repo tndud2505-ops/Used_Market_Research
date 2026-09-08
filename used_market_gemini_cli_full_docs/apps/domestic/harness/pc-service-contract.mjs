@@ -861,6 +861,8 @@ try {
   assert.equal(typeof listingsPayload.data.as_of, "string");
   assert.equal(typeof listingsPayload.data.freshness.state, "string");
   assert.equal(Object.hasOwn(listingsPayload.data.pagination, "next_cursor"), true);
+  assert.ok(Number(listingsPayload.data.source_counts?.danawa || 0) > 0,
+    "the AWS listing path must publish whole-query source counts");
   const authorized = await fetch(`${baseUrl}/api/search`, {
     method: "POST", headers, body: JSON.stringify(pcRequest)
   });
@@ -1292,6 +1294,8 @@ const publicPagination = await readAllPaginationFixtures(publicBase);
 assert.equal(publicPagination.pages.length, 4);
 assert.equal(publicPagination.pages.every((page) => page.payload.data.total === 8), true,
   "ordinary browse total is the reconciled stable-row count");
+assert.equal(publicPagination.pages[0].payload.data.source_counts?.danawa, 8,
+  "the first listing page must carry whole-query source counts so empty sites can stay hidden");
 const publicItems = publicPagination.items;
 assert.equal(new Set(publicItems.map((item) => item.item_id)).size, publicItems.length,
   "authoritatively reconciled stable item IDs must not repeat across page boundaries");

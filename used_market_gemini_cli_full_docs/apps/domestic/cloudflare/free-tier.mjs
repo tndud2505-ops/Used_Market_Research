@@ -241,6 +241,7 @@ export async function browsePcListingsD1(request, env) {
       data: {
         items: [],
         total: 0,
+        source_counts: {},
         pagination: { has_more: false, next_cursor: null },
         as_of: asOf,
         freshness: {
@@ -314,10 +315,6 @@ export async function browsePcListingsD1(request, env) {
     conditions.push("board_manufacturer = ?");
     bindings.push(query.boardManufacturer);
   }
-  if (query.sites.length > 0) {
-    conditions.push(`site IN (${query.sites.map(() => "?").join(", ")})`);
-    bindings.push(...query.sites);
-  }
   if (query.minPrice !== null) {
     conditions.push("price_value >= ?");
     bindings.push(query.minPrice);
@@ -334,7 +331,14 @@ export async function browsePcListingsD1(request, env) {
     conditions.push("currency = ?");
     bindings.push(query.currency);
   }
+  const sourceCountConditions = [...conditions];
+  const sourceCountBindings = [...bindings];
+  if (query.sites.length > 0) {
+    conditions.push(`site IN (${query.sites.map(() => "?").join(", ")})`);
+    bindings.push(...query.sites);
+  }
   const whereClause = conditions.join(" AND ");
+  const sourceCountWhereClause = sourceCountConditions.join(" AND ");
   const broadRecentBrowse = query.sort === "recent"
     && !query.canonicalProductId && !catalogScope && !query.manufacturer && !query.boardManufacturer
     && query.minPrice === null && query.maxPrice === null && !query.marketPool && !query.currency;
@@ -368,6 +372,7 @@ export async function browsePcListingsD1(request, env) {
   let total;
   let latestObservedAt;
   let hasMoreCandidates;
+  let sourceCounts = {};
   // Authoritative reconciliation and incremental imports publish one eligible row per stable item_id,
   // so normal and audit reads can share bounded raw keyset pagination without request-time deduplication.
   let anchor = null;
@@ -376,6 +381,12 @@ export async function browsePcListingsD1(request, env) {
       FROM listings WHERE item_id = ? AND ${whereClause} LIMIT 1`)
       .bind(cursorState.after.item_id, ...bindings).first();
     if (!anchor) return cursorExpired();
+  }
+  if (!cursorState) {
+    const sourceCountResult = await env.DB.prepare(`SELECT site, COUNT(*) AS count
+      FROM listings WHERE ${sourceCountWhereClause} GROUP BY site`).bind(...sourceCountBindings).all();
+    sourceCounts = Object.fromEntries(asArray(sourceCountResult.results)
+      .map((row) => [String(row.site || ""), Number(row.count || 0)]).filter(([site]) => site));
   }
   const pageConditions = [...conditions];
   const pageBindings = [...bindings];
@@ -446,6 +457,7 @@ export async function browsePcListingsD1(request, env) {
     data: {
       items: page.map(pcListingItem),
       total,
+      source_counts: sourceCounts,
       pagination: { has_more: Boolean(nextCursor), next_cursor: nextCursor },
       as_of: asOf,
       freshness: {

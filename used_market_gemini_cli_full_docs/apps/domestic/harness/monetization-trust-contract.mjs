@@ -30,10 +30,13 @@ assert.match(terms, /제휴 여부는 검색 결과의 추천순이나 가격 �
 
 assert.equal([...html.matchAll(/id="contextual-offer"/gu)].length, 1);
 assert.match(html, /id="contextual-offer"[^>]+hidden/u, "the shell must not publish an unverified ad");
-assert.ok(html.indexOf('id="contextual-offer"') > html.indexOf('id="listing-pagination"'));
+assert.ok(html.indexOf('id="contextual-offer"') > html.indexOf('class="listing-heading"'));
+assert.ok(html.indexOf('id="contextual-offer"') < html.indexOf('id="listing-message"'));
 assert.match(affiliateUi, /sponsored noopener noreferrer/u);
 assert.match(affiliateUi, /referrerPolicy: "no-referrer"/u);
 assert.match(affiliateUi, /credentials: "omit"/u);
+assert.match(affiliateUi, /affiliate-icon/u);
+assert.match(affiliateUi, /offer\.cta_label\} →/u);
 assert.doesNotMatch(migration, /query|title|url|ip|user|session/iu);
 
 const now = new Date("2026-08-29T00:00:00.000Z");
@@ -276,12 +279,16 @@ const observations = [];
 const pendingUi = [];
 class UiNode {
   constructor(tag) { this.tag = tag; this.children = []; this.handlers = {}; this.attributes = {}; }
+  append(...children) { this.children.push(...children); }
   replaceChildren(...children) { this.children = children; }
   setAttribute(key, value) { this.attributes[key] = value; }
   addEventListener(event, handler) { this.handlers[event] = handler; }
 }
 try {
-  globalThis.document = { createElement: (tag) => new UiNode(tag) };
+  globalThis.document = {
+    createElement: (tag) => new UiNode(tag),
+    createElementNS: (_namespace, tag) => new UiNode(tag),
+  };
   globalThis.IntersectionObserver = class {
     constructor(callback) { this.callback = callback; observations.push(this); }
     observe() {}
@@ -300,8 +307,9 @@ try {
   pendingUi[0]({ ok: true, json: async () => ({ ok: true, data: { offer: uiOffer } }) });
   await firstRender;
   assert.equal(root.hidden, false);
-  assert.equal(root.children[1].textContent, COUPANG_COMMISSION_DISCLOSURE, "disclosure must precede the ad link");
-  const adLink = root.children.find((child) => child.tag === "a");
+  assert.match(root.children[1].textContent, new RegExp(`^${COUPANG_COMMISSION_DISCLOSURE}`), "disclosure must stay next to the ad link");
+  const flatten = (node) => [node, ...node.children.flatMap(flatten)];
+  const adLink = flatten(root).find((child) => child.tag === "a");
   assert.equal(adLink.rel, "sponsored noopener noreferrer");
   assert.equal(adLink.referrerPolicy, "no-referrer");
   assert.equal(adLink.href, uiOffer.destination_url);
@@ -328,7 +336,7 @@ try {
   await current;
   pendingUi[1]({ ok: true, json: async () => ({ ok: true, data: { offer: uiOffer } }) });
   await stale;
-  assert.match(root.children.find((child) => child.tag === "a").textContent, /GPU/u,
+  assert.match(flatten(root).find((child) => child.tag === "a").textContent, /GPU/u,
     "a late response must never put a CPU ad on GPU results");
   observations[0].callback([{ isIntersecting: true, intersectionRatio: 1 }]);
   assert.notEqual(observations.at(-1).disconnected, true, "stale observers must not disconnect the current offer");
