@@ -65,7 +65,6 @@ const mobileFacetMedia = window.matchMedia("(max-width: 640px)");
 const stackedLayoutMedia = window.matchMedia("(max-width: 1120px)");
 const compactFilterMedia = window.matchMedia("(max-width: 1120px)");
 const stackedInsightMedia = window.matchMedia("(max-width: 1320px)");
-const DEFAULT_QUICK_SOURCE_IDS = Object.freeze(["joonggonara", "bunjang"]);
 const PRICE_CHART_DAYS = 30;
 const PRICE_HISTORY_DAYS = 730;
 const FILTER_COLUMN_DEFAULT = 208;
@@ -1118,8 +1117,11 @@ function renderSourceFilters() {
   });
   const visibleSources = orderedSources.filter((source) => {
     if (state.selectedSites.has(source.id)) return true;
-    if (state.availableSourceCounts) return Number(state.availableSourceCounts[source.id] || 0) > 0;
-    return DEFAULT_QUICK_SOURCE_IDS.includes(source.id);
+    if (state.availableSourceCounts) {
+      return Number(state.availableSourceCounts[source.id] || 0) > 0
+        || source.marketPools.includes("OVERSEAS_USED");
+    }
+    return source.currency === "KRW" || source.marketPools.includes("OVERSEAS_USED");
   });
   const appendChoice = (label, value, checked, onChange, extra = false) => {
     const choice = createElement("label", `source-choice${extra ? " is-extra" : ""}`);
@@ -1524,10 +1526,8 @@ function listingPriceControlsActive() {
 
 function listingSourceScope() {
   if (state.selectedSites.size) return state.sources.filter((source) => state.selectedSites.has(source.id));
-  const quickSources = DEFAULT_QUICK_SOURCE_IDS
-    .map((sourceId) => state.sources.find((source) => source.id === sourceId))
-    .filter(Boolean);
-  return quickSources.length ? quickSources : state.sources;
+  const domesticSources = state.sources.filter((source) => source.currency === "KRW");
+  return domesticSources.length ? domesticSources : state.sources;
 }
 
 function listingCurrencyScope() {

@@ -62,12 +62,13 @@ requireText(script, "state.selectedSites.delete(source.id)", "site filters must 
 requireText(script, "state.selectedSites.clear()", "the all-sites choice must clear individual scope");
 requireText(script, "sourceMoreOpen", "additional sites must remain available behind a compact toggle");
 requireText(script, "marketPools", "sources with multiple market pools must preserve every supported pool");
-requireText(script, "DEFAULT_QUICK_SOURCE_IDS", "default all-sites listing search must avoid slow optional sources");
+requireText(script, "source.currency === \"KRW\"", "default all-sites listing search must include every enabled domestic source");
+requireText(script, "source.marketPools.includes(\"OVERSEAS_USED\")", "overseas sources must remain directly selectable outside the domestic default scope");
 requireText(script, 'params.set("sites", sourceIds.join(","))', "default listing searches must pass an explicit fast site scope");
 requireText(script, "availableSourceCounts", "site controls must follow actual whole-query listing coverage");
 requireText(script, "payload?.source_counts", "listing source counts must reach the site selector");
 requireText(script, "payload?.total", "listing result count must use the API total rather than the current page size");
-requireText(script, "Number(state.availableSourceCounts[source.id] || 0) > 0", "zero-result sites must stay hidden");
+requireText(script, "Number(state.availableSourceCounts[source.id] || 0) > 0", "zero-result domestic sites must stay hidden");
 
 requireText(script, "openSingleSearchResult", "a unique text result must still open directly");
 requireText(script, "showScopedListings", "category/facet search must return listings without choosing one model");
