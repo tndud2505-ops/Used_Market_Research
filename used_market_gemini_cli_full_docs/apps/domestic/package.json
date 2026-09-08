@@ -27,6 +27,7 @@
     "pc:reclassify": "node aws-runner/reclassify-pc-snapshots.mjs",
     "pc:export-listings-now": "node aws-runner/export-pc-listings-now.mjs",
     "pc:publish-stats-now": "node aws-runner/publish-pc-stats-now.mjs",
+    "pc:apply-reviewed-exclusions": "node aws-runner/apply-reviewed-pc-exclusions.mjs",
     "cloudflare:harness": "node harness/pc-source-policy-contract.mjs && node harness/pc-publication-contract.mjs && node harness/pc-service-contract.mjs",
     "index:harness": "node harness/pc-service-contract.mjs",
     "cloudflare:dev": "npx wrangler dev --config cloudflare/wrangler.jsonc",

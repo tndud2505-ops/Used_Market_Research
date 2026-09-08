@@ -6,6 +6,11 @@ import { PcPartsLedger } from "../aws-runner/pc-parts-ledger.mjs";
 import { evaluatePipelineQualityReports } from "../aws-runner/pc-pipeline-governance.mjs";
 import { PcShadowPipeline } from "../aws-runner/pc-shadow-pipeline.mjs";
 import { evaluatePcQualityDataset } from "../aws-runner/pc-quality-eval.mjs";
+import {
+  parseReviewedExclusionArguments,
+  reviewedCandidateChecksum,
+  reviewedPublicCandidates
+} from "../aws-runner/apply-reviewed-pc-exclusions.mjs";
 import { reclassifyPcSnapshots } from "../aws-runner/reclassify-pc-snapshots.mjs";
 import { fetchAllPublicPcListings } from "../aws-runner/republish-pc-projections.mjs";
 import {
@@ -16,6 +21,28 @@ import {
 import { classifyPcPartListing } from "../market/logic/pc-parts-classifier.mjs";
 import { explicitSoldText, isPartialSaleText, structuredSoldEvidenceFromHtml } from "../market/logic/listing-lifecycle.mjs";
 import { reviewedPcListingExclusion } from "../market/logic/pc-reviewed-listing-exclusions.mjs";
+
+const reviewedCandidateFixture = reviewedPublicCandidates([
+  {
+    item_id: "joonggonara:https://web.joongna.com/product/231873683",
+    site: "joonggonara",
+    url: "https://web.joongna.com/product/231873683"
+  },
+  {
+    item_id: "joonggonara:184798363",
+    site: "joonggonara",
+    url: "https://web.joongna.com/product/184798363"
+  }
+]);
+assert.equal(reviewedCandidateFixture.length, 1,
+  "reviewed exclusion apply must select only exact source listing identities");
+assert.match(reviewedCandidateChecksum(reviewedCandidateFixture), /^[a-f0-9]{64}$/u);
+assert.throws(() => parseReviewedExclusionArguments(["--apply"]), /requires --confirm-checksum and --expect-count/u);
+assert.deepEqual(parseReviewedExclusionArguments([]), {
+  apply: false,
+  confirmChecksum: "",
+  expectedCount: null
+});
 
 const originalFetch = globalThis.fetch;
 let nullableTotalPage = 0;
