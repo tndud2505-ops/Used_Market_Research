@@ -673,6 +673,8 @@ try {
   assert.equal(items.length, 1);
   assert.equal(items[0].site, "ebay");
   assert.equal(items[0].currency, "USD");
+  assert.equal(items[0].lifecycle_status, "ACTIVE",
+    "eBay Browse search results are currently available listings");
   assert.match(requests[0].url, /\/identity\/v1\/oauth2\/token/u);
   assert.match(String(requests[0].init.headers.authorization), /^Basic /u);
   assert.equal(requests[1].init.headers.authorization, "Bearer fixture-oauth-token");
@@ -698,6 +700,7 @@ try {
   assert.equal(pcItems.length, 1);
   assert.equal(pcItems[0].source_listing_id, "v1|ram-valid|0");
   assert.equal(pcItems[0].item_id, "ebay:v1|ram-valid|0");
+  assert.equal(pcItems[0].lifecycle_status, "ACTIVE");
   assert.equal(pcItems[0].requested_category_code, "RAM");
   assert.equal(pcItems[0].source_category_code, "170083");
   assert.deepEqual(pcItems[0].source_leaf_category_ids, ["170084"]);

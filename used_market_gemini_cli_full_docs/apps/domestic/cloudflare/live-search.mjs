@@ -1419,7 +1419,10 @@ async function collectEbay(keyword, categoryId, limit, queryKeyword = "") {
         postedAt: summary?.itemOriginDate,
         searchText: `${clean(summary?.title, 500)} ${clean(summary?.condition, 120)}`,
         description: clean(summary?.condition, 120),
-        location
+        location,
+        // Browse search returns currently purchasable item summaries. Treat
+        // them as active until a later API observation says otherwise.
+        lifecycleStatus: "ACTIVE"
       });
       if (item) items.push({
         ...item,
