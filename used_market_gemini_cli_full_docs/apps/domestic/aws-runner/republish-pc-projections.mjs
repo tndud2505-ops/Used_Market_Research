@@ -84,9 +84,10 @@ function pipelineVersion(activeVersion) {
   };
 }
 
-function enrichedLedgerProjection(ledger, projection) {
+export function enrichLedgerProjection(ledger, projection) {
   if (!projection?.canonical_product_id) return projection;
   const product = ledger.getCanonicalProduct(projection.canonical_product_id);
+  const categoryCode = product?.category_code || projection.category_code || null;
   const boardEvidence = Array.isArray(projection.evidence)
     ? projection.evidence.find((entry) => entry && typeof entry === "object"
       && ["board_manufacturer", "gpu_board_manufacturer"].includes(String(entry.field || "")))
@@ -97,8 +98,9 @@ function enrichedLedgerProjection(ledger, projection) {
     || null;
   return {
     ...projection,
+    category_code: categoryCode,
     canonical_manufacturer: projection.canonical_manufacturer
-      || (projection.category_code === "GPU" ? boardManufacturer : product?.manufacturer)
+      || (categoryCode === "GPU" ? boardManufacturer : product?.manufacturer)
       || null,
     chip_manufacturer: projection.chip_manufacturer || product?.spec?.chip_manufacturer || null,
     board_manufacturer: boardManufacturer
@@ -176,7 +178,7 @@ function readLocalState(indexPath, requestedSources) {
       );
     const authority = collectAuthoritativePcProjections(
       identities,
-      (sourceId, sourceListingId) => enrichedLedgerProjection(
+      (sourceId, sourceListingId) => enrichLedgerProjection(
         ledger,
         ledger.getPublicProjection(sourceId, sourceListingId)
       ),

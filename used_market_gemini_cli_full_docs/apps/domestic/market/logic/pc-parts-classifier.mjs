@@ -905,8 +905,10 @@ function publicSpecificFields(category, model, text, base) {
   return fields;
 }
 
-export function classifyPcPartListingPublic(input) {
-  const base = classifyPcPartListing(input);
+export function classifyPcPartListingPublic(input, options = {}) {
+  const base = options.preclassified && typeof options.preclassified === 'object'
+    ? options.preclassified
+    : classifyPcPartListing(input);
   const text = normalizedText(input);
   const listingType = publicListingType(base.listing_kind);
   const category = publicCategoryCode(base.category_code, text, base.listing_kind);

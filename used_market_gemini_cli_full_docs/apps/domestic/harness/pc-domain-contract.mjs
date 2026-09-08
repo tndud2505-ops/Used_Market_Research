@@ -12,7 +12,7 @@ import {
   reviewedPublicCandidates
 } from "../aws-runner/apply-reviewed-pc-exclusions.mjs";
 import { reclassifyPcSnapshots } from "../aws-runner/reclassify-pc-snapshots.mjs";
-import { fetchAllPublicPcListings } from "../aws-runner/republish-pc-projections.mjs";
+import { enrichLedgerProjection, fetchAllPublicPcListings } from "../aws-runner/republish-pc-projections.mjs";
 import {
   isPublicDeactivationCandidate,
   mergedPublicExclusionReasons,
@@ -43,6 +43,15 @@ assert.deepEqual(parseReviewedExclusionArguments([]), {
   confirmChecksum: "",
   expectedCount: null
 });
+assert.equal(enrichLedgerProjection({
+  getCanonicalProduct: () => ({ category_code: "MOTHERBOARD", manufacturer: "ASRock", spec: {} })
+}, {
+  canonical_product_id: "motherboard:platform:amd:asrock",
+  category_code: "RAM",
+  canonical_manufacturer: "ASRock",
+  evidence: []
+}).category_code, "MOTHERBOARD",
+"republishing must repair a stale public category from the canonical product master");
 
 const originalFetch = globalThis.fetch;
 let nullableTotalPage = 0;
@@ -1053,6 +1062,17 @@ const structuredPsuProjection = pipeline.recordItem({
 }, new Date(now).toISOString());
 assert.equal(structuredPsuProjection.canonical_product_id, "psu:facet:atx:micronics");
 assert.equal(structuredPsuProjection.canonical_manufacturer, "Micronics");
+const structuredMotherboardProjection = pipeline.recordItem({
+  item_id: "danawa:structured-motherboard-1", source_listing_id: "structured-motherboard-1", site: "danawa",
+  requested_category_code: "MOTHERBOARD", source_category_code: "1:3",
+  title: "ASRock B550 PRO4 DDR4 support", seller_type: "DEALER",
+  price: 100_000, currency: "KRW", url: "https://dmall.danawa.com/v3/?controller=sale&methods=blog&seq=999994",
+  status: "ACTIVE"
+}, new Date(now).toISOString());
+assert.equal(structuredMotherboardProjection.canonical_product_id, "motherboard:platform:amd:asrock");
+assert.equal(structuredMotherboardProjection.category_code, "MOTHERBOARD");
+assert.equal(structuredMotherboardProjection.pc_category_code, "MOTHERBOARD",
+  "a trusted source category must also control the public listing category when title tokens conflict");
 const boardProjected = pipeline.recordItem({
   item_id: "joonggonara:board-filter-1", site: "joonggonara", title: "ASUS RTX 3080 정상 작동",
   description: "개인 사용", price: 485_000, currency: "KRW",

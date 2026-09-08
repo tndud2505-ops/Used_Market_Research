@@ -309,9 +309,8 @@ export class PcShadowPipeline {
     const reviewedExclusion = reviewedPcListingExclusion(source.key, sourceListingId(item));
     const publicClassified = classifyPcPartListingPublic({
       ...item,
-      title: sourceCategoryEligible ? `${sourceCategory} ${item.title || ""}` : item.title,
       description: item.description
-    });
+    }, { preclassified: classified });
     const publicSupportedCategory = ["CPU", "GPU", "RAM", "MOTHERBOARD", "SSD", "HDD", "PSU"].includes(publicClassified.category_code);
     const duplicate = duplicateIdentity(item);
     const exactAlias = classified.canonical_model
