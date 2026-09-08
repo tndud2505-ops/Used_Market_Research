@@ -19,6 +19,7 @@ import {
 import { OPERATIONAL_PC_DIRECTORY_SITES, OPERATIONAL_TARGET_SITES } from "../cloudflare/target-sites.mjs";
 import { decodeSearchCursor, encodeSearchCursor } from "../aws-runner/search-cursor.mjs";
 import { SearchIndex, collectionIdentity } from "../aws-runner/search-index.mjs";
+import { MAX_PRICE_HISTORY_DAYS, parsePriceStatsRequest } from "../aws-runner/pc-price-stats-http.mjs";
 import {
   assertPcProjectionApplyConfirmation,
   buildPcProjectionReconciliation,
@@ -29,6 +30,30 @@ import {
   repairAuthoritativePcProjection,
   stabilizeIncrementalPcProjections
 } from "../aws-runner/pc-projection-republish-policy.mjs";
+
+const priceStatsNow = new Date("2026-09-08T12:00:00.000Z");
+const historicalPriceRequest = parsePriceStatsRequest(new URL(
+  "https://used-pick.test/api/products/cpu%3Aintel%3Ai5-7400/price-stats?days=30&as_of=2026-08-08"
+), priceStatsNow);
+assert.equal(MAX_PRICE_HISTORY_DAYS, 730);
+assert.equal(historicalPriceRequest.asOfDate, "2026-08-08");
+assert.equal(historicalPriceRequest.window.from, "2026-07-10");
+assert.equal(historicalPriceRequest.window.to, "2026-08-08");
+assert.equal(historicalPriceRequest.window.can_go_next, true);
+const earliestPriceRequest = parsePriceStatsRequest(new URL(
+  "https://used-pick.test/api/products/cpu%3Aintel%3Ai5-7400/price-stats?days=30&as_of=2024-10-08"
+), priceStatsNow);
+assert.equal(earliestPriceRequest.window.from, "2024-09-09");
+assert.equal(earliestPriceRequest.window.can_go_previous, false);
+assert.throws(() => parsePriceStatsRequest(new URL(
+  "https://used-pick.test/api/products/cpu%3Aintel%3Ai5-7400/price-stats?days=30&as_of=2024-10-07"
+), priceStatsNow), /last 2 years/u);
+assert.throws(() => parsePriceStatsRequest(new URL(
+  "https://used-pick.test/api/products/cpu%3Aintel%3Ai5-7400/price-stats?days=7"
+), priceStatsNow), /days must be 30/u);
+assert.throws(() => parsePriceStatsRequest(new URL(
+  "https://used-pick.test/api/products/cpu%3Aintel%3Ai5-7400/price-stats?days=30&as_of=2026-09-09"
+), priceStatsNow), /last 2 years/u);
 import {
   buildTrustedPriceSummary,
   createWebSearchRunner,

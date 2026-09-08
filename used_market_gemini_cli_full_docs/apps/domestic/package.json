@@ -35,7 +35,8 @@
     "cloudflare:deploy:app": "node cloudflare/deploy.mjs --app-only",
     "cloudflare:release": "node cloudflare/release.mjs",
     "cloudflare:app-release": "node cloudflare/release.mjs --app-only",
-    "test": "npm run build && npm run test:pc"
+    "test:pc-tools": "node harness/pc-tools-contract.mjs",
+    "test": "npm run build && npm run test:pc && npm run test:pc-tools"
   },
   "dependencies": {
     "commander": "^14.0.0",

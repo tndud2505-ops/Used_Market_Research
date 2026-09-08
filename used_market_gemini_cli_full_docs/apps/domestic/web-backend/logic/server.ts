@@ -263,6 +263,7 @@ export function createServer(
       condition: string;
       currency: string;
       days: number;
+      asOf?: string;
     }) => Record<string, unknown> | null;
   } = {}
 ) {
@@ -567,7 +568,8 @@ export function createServer(
         const condition = urlObj.searchParams.get('condition') || 'USED_WORKING';
         const currency = urlObj.searchParams.get('currency') || 'KRW';
         const localStats = resolvedOptions.getPcPriceStats?.({
-          canonicalProductId, marketPool, condition, currency, days
+          canonicalProductId, marketPool, condition, currency, days,
+          asOf: urlObj.searchParams.get('as_of') || undefined
         });
         if (localStats) return sendJson(200, { status: 'success', data: localStats });
         const emptyStats = (reason: string) => ({

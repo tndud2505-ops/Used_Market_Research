@@ -392,7 +392,7 @@ function dayKey(value) {
 
 function priceStatsWindow(asOfValue, daysValue) {
   const asOf = iso(asOfValue);
-  const days = Math.min(365, Math.max(1, Number(daysValue) || 30));
+  const days = Math.min(730, Math.max(1, Number(daysValue) || 30));
   const asOfDay = Date.parse(`${dayKey(asOf)}T00:00:00.000Z`);
   const from = new Date(asOfDay - (days - 1) * DAY_MS).toISOString();
   return { asOf, days, from };

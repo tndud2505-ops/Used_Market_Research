@@ -2275,7 +2275,7 @@ const server = http.createServer(async (req, res) => {
       return json(res, 404, { status: "error", error: "Canonical product not found" });
     }
     try {
-      const asOf = new Date().toISOString();
+      const asOf = query.asOf;
       const activePipelineVersion = pcLedger.getActivePipelineVersion();
       const priceVersionOptions = activePipelineVersion ? {
         normalizationVersion: activePipelineVersion.normalization_version,

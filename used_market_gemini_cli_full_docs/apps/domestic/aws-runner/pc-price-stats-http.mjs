@@ -1,5 +1,8 @@
 const PRODUCT_STATS_PATH = /^\/api\/products\/([^/]+)\/price-stats$/u;
 const SINGLE_VALUE = /^[A-Z0-9_:-]+$/u;
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/u;
+const DAY_MS = 86_400_000;
+export const MAX_PRICE_HISTORY_DAYS = 730;
 
 function oneValue(searchParams, name, fallback) {
   const values = searchParams.getAll(name).map((value) => value.trim()).filter(Boolean);
@@ -9,7 +12,17 @@ function oneValue(searchParams, name, fallback) {
   return String(value);
 }
 
-export function parsePriceStatsRequest(url) {
+function utcDateKey(value) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) throw new Error("as_of is invalid");
+  return date.toISOString().slice(0, 10);
+}
+
+function shiftUtcDate(dateKey, days) {
+  return new Date(Date.parse(`${dateKey}T00:00:00.000Z`) + days * DAY_MS).toISOString().slice(0, 10);
+}
+
+export function parsePriceStatsRequest(url, now = Date.now()) {
   const match = url.pathname.match(PRODUCT_STATS_PATH);
   if (!match) throw new Error("price stats path is invalid");
   let canonicalProductId;
@@ -21,9 +34,32 @@ export function parsePriceStatsRequest(url) {
   if (!canonicalProductId || canonicalProductId.length > 200) throw new Error("canonicalProductId is invalid");
   const days = Number(url.searchParams.get("days") || "30");
   if (days !== 30) throw new Error("days must be 30");
+  const today = utcDateKey(now);
+  const requestedAsOf = String(url.searchParams.get("as_of") || today).trim();
+  if (!DATE_ONLY.test(requestedAsOf) || utcDateKey(`${requestedAsOf}T00:00:00.000Z`) !== requestedAsOf) {
+    throw new Error("as_of must be YYYY-MM-DD");
+  }
+  const historyFrom = shiftUtcDate(today, -(MAX_PRICE_HISTORY_DAYS - 1));
+  const earliestWindowEnd = shiftUtcDate(historyFrom, days - 1);
+  if (requestedAsOf < earliestWindowEnd || requestedAsOf > today) {
+    throw new Error("as_of must keep the 30-day window within the last 2 years");
+  }
   return {
     canonicalProductId,
     days,
+    asOf: `${requestedAsOf}T23:59:59.999Z`,
+    asOfDate: requestedAsOf,
+    isHistorical: requestedAsOf !== today,
+    window: {
+      days,
+      from: shiftUtcDate(requestedAsOf, -(days - 1)),
+      to: requestedAsOf,
+      history_from: historyFrom,
+      history_to: today,
+      max_history_days: MAX_PRICE_HISTORY_DAYS,
+      can_go_previous: requestedAsOf > earliestWindowEnd,
+      can_go_next: requestedAsOf < today
+    },
     marketPool: oneValue(url.searchParams, "market_pool", "KR_C2C_USED"),
     condition: oneValue(url.searchParams, "condition", "USED_WORKING"),
     currency: oneValue(url.searchParams, "currency", "KRW")
@@ -53,6 +89,7 @@ export function priceStatsResponse(request, stats) {
     by_source: Array.isArray(stats?.by_source) ? stats.by_source : [],
     by_manufacturer: Array.isArray(stats?.by_manufacturer) ? stats.by_manufacturer : [],
     daily: Array.isArray(stats?.daily) ? stats.daily : [],
+    window: request.window,
     reference_price: {
       amount: soldCount >= 3 ? soldMedian : null,
       currency: request.currency,

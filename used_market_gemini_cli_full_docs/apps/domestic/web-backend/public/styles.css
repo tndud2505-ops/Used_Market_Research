@@ -5731,3 +5731,255 @@ body.has-selected-product .results-flow {
   .affiliate-disclosure, .method-note { font-size: 11px; }
   .listing-heading { position: sticky; z-index: 5; top: 0; background: var(--surface); }
 }
+
+/* v90: resizable workspace, compact affiliate action, and navigable price history */
+.workspace-content {
+  --filter-column-width: 208px;
+  grid-template-columns: var(--filter-column-width) 10px minmax(0, 1fr);
+  gap: 0;
+}
+
+.model-filters,
+body.has-selected-product .model-filters {
+  grid-column: 1;
+  width: 100%;
+}
+
+.results-flow,
+body.has-selected-product .results-flow {
+  grid-column: 3;
+}
+
+.column-resizer {
+  position: relative;
+  z-index: 4;
+  display: block;
+  width: 10px;
+  min-width: 10px;
+  min-height: 120px;
+  padding: 0;
+  touch-action: none;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  cursor: col-resize;
+}
+
+.column-resizer::before {
+  position: absolute;
+  top: 12px;
+  bottom: 12px;
+  left: 4px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--line-strong);
+  content: "";
+  transition: background 160ms ease, width 160ms ease;
+}
+
+.column-resizer:hover::before,
+.column-resizer:focus-visible::before,
+body.is-resizing-columns .column-resizer::before {
+  width: 3px;
+  background: var(--accent);
+}
+
+.column-resizer:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.filter-column-resizer { grid-column: 2; grid-row: 1; }
+
+body.has-selected-product .results-flow {
+  --analysis-column-width: 500px;
+  grid-template-columns: minmax(480px, 1fr) 10px var(--analysis-column-width);
+  column-gap: 0;
+}
+
+body.has-selected-product .listing-section { grid-column: 1; }
+
+.analysis-column-resizer {
+  display: none;
+  grid-column: 2;
+  grid-row: 2;
+}
+
+body.has-selected-product .analysis-column-resizer { display: block; }
+
+.model-detail-dialog:not([hidden]) {
+  grid-column: 3;
+  grid-row: 2;
+}
+
+.listing-heading,
+.listing-heading:has(.model-detail-open:not([hidden])) {
+  display: grid;
+  grid-template-columns: minmax(150px, auto) minmax(280px, 1fr) auto;
+  gap: 10px 16px;
+  align-items: center;
+}
+
+.listing-heading-main {
+  display: flex;
+  grid-column: 1;
+  min-width: 0;
+  align-items: center;
+  gap: 9px;
+}
+
+.listing-heading .contextual-offer:not([hidden]) {
+  display: grid;
+  grid-column: 2;
+  min-width: 0;
+  max-width: 560px;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.listing-heading .model-detail-open { grid-column: 3; }
+
+.listing-heading .affiliate-main { gap: 8px; }
+
+.affiliate-part-icon {
+  width: 32px;
+  height: 32px;
+  padding: 4px;
+  border: 1px solid #f0b4a5;
+  border-radius: 7px;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  stroke: currentColor;
+}
+
+.listing-heading .affiliate-copy {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 7px;
+}
+
+.listing-heading .affiliate-heading { font-size: 9px; }
+.listing-heading .affiliate-link { min-height: 24px; padding: 2px 0; font-size: 12px; }
+
+.listing-heading .affiliate-disclosure {
+  max-width: 52ch;
+  padding-left: 40px;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.35;
+}
+
+.chart-source-filter {
+  min-width: 0;
+  margin: 0;
+  padding: 10px 0;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.chart-source-filter legend {
+  float: left;
+  margin-right: 10px;
+  color: var(--ink-soft);
+  font-size: 10px;
+  font-weight: 850;
+  line-height: 30px;
+}
+
+.chart-source-options {
+  display: flex;
+  min-width: 0;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.chart-source-choice {
+  position: relative;
+  flex: 0 0 auto;
+  cursor: pointer;
+}
+
+.chart-source-choice input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.chart-source-choice span {
+  display: inline-flex;
+  min-height: 30px;
+  align-items: center;
+  padding: 5px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--ink-soft);
+  font-size: 10px;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.chart-source-choice input:checked + span {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+.chart-source-choice input:focus-visible + span {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.chart-window-note { color: var(--ink-soft); font-size: 10px; font-weight: 750; }
+.chart-step-controls { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 5px; }
+.chart-step { min-width: 54px; }
+.chart-selected-values .is-empty { color: var(--muted); }
+.chart-empty-controls { display: flex; justify-content: flex-end; gap: 5px; padding: 10px 0; }
+.source-evidence-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+@media (max-width: 1320px) {
+  .workspace-content { display: block; }
+  .column-resizer { display: none !important; }
+  .model-filters,
+  body.has-selected-product .model-filters {
+    position: static;
+    width: auto;
+    max-height: none;
+    margin-bottom: 14px;
+  }
+  .results-flow,
+  body.has-selected-product .results-flow {
+    display: grid;
+    width: 100%;
+    grid-template-columns: minmax(0, 1fr);
+  }
+  body.has-selected-product .listing-section { grid-column: 1; grid-row: 2; }
+  .model-detail-dialog:not([hidden]) {
+    position: static;
+    grid-column: 1;
+    grid-row: 3;
+    width: 100%;
+    max-height: none;
+  }
+  .model-detail-dialog:not([hidden]) .model-detail-window { max-height: none; overflow: visible; }
+}
+
+@media (max-width: 760px) {
+  .listing-heading,
+  .listing-heading:has(.model-detail-open:not([hidden])) { grid-template-columns: minmax(0, 1fr) auto; }
+  .listing-heading-main { grid-column: 1; grid-row: 1; }
+  .listing-heading .model-detail-open { grid-column: 2; grid-row: 1; }
+  .listing-heading .contextual-offer:not([hidden]) { grid-column: 1 / -1; grid-row: 2; max-width: none; }
+  .listing-heading .affiliate-disclosure { max-width: none; font-size: 10px; }
+  .chart-source-filter legend { float: none; display: block; margin: 0 0 6px; line-height: 1.4; }
+  .chart-toolbar { align-items: stretch; flex-direction: column; }
+  .chart-step-controls { justify-content: flex-start; }
+  .chart-empty-controls { justify-content: flex-start; overflow-x: auto; }
+}

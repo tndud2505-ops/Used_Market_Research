@@ -24,9 +24,9 @@ for (const id of [
   "category-select", "model-select", "source-facet-row", "source-filters", "source-filter-summary", "source-more-toggle",
   "model-filters", "model-filter-body", "model-filter-toggle", "facet-rows", "filter-context", "active-filter-summary",
   "active-filter-chips", "reset-filters", "show-matched-models", "model-detail-dialog", "model-detail-close",
-  "price-panel-title", "detail-message", "price-summary", "price-chart-disclosure", "stats-section", "stats-groups",
+  "price-panel-title", "detail-message", "chart-source-filter", "chart-source-options", "price-summary", "price-chart-disclosure", "stats-section", "stats-groups",
   "active-latest", "active-mean", "active-count", "sold-latest", "sold-mean", "sold-count",
-  "confirmed-latest", "confirmed-mean", "confirmed-count", "listing-section", "listing-rows",
+  "filter-column-resizer", "analysis-column-resizer", "listing-section", "listing-rows",
   "listing-options", "listing-options-toggle", "listing-pagination", "listing-page-numbers", "listing-page-prev", "listing-page-next",
   "model-detail-open", "price-summary-scope", "price-reset", "price-error", "listing-count",
 ]) {
@@ -86,12 +86,13 @@ requireText(script, "listing-model-action", "broad listing rows must offer direc
 requireText(script, "state.listingRequest", "listing and stats requests need independent cancellation");
 requireText(script, "function cancelListingRequest", "scope changes must cancel stale listing requests");
 
-requireText(html, "현재 등록 매물의 평균과 확인된 거래가", "the dialog must describe the two honest price concepts");
+requireText(html, "등록 매물 평균과 판매완료 표시가", "the dialog must describe the two visible price concepts");
 requireText(html, "실제 체결가와 다를 수 있습니다", "sold last-ask disclosure is required");
 requireText(script, "sourceEvidenceRow", "site comparison must stay compact without another wide table");
 const compactStats = script.slice(script.indexOf("function sourceEvidenceRow("), script.indexOf("function combineSourceMetric("));
-requireText(compactStats, "confirmed_transactions", "site transaction cells must use confirmed transaction evidence");
 requireText(compactStats, 'label: "판매완료"', "sold asking prices must stay visibly distinct from confirmed transactions");
+assert.equal(compactStats.includes("confirmed_transactions"), false,
+  "site evidence must show only listed and sold-complete price series");
 requireText(script, "sourceRows(data)", "site price rows and charts must use actual per-source evidence");
 requireText(script, "sourceRowsWithEvidence", "sites without price evidence must not render in analysis");
 requireText(script, "sourceRowsWithCoherentSummary", "contradictory source averages must stay out of the visible comparison");
@@ -106,8 +107,29 @@ requireText(script, '"aria-label"', "chart points must expose exact values acces
 requireText(script, "statsHasEvidence", "empty price data must not produce fake price values");
 requireText(script, "price-chart-scroll", "older dates need an intentional horizontal scroll region");
 requireText(script, "selectDate", "the chart must expose one selected date with all available price series");
-requireText(html, 'data-chart-days="7"', "the chart needs a compact seven-day view");
-requireText(html, 'data-chart-days="30"', "the chart needs the full published thirty-day view");
+requireText(html, "30일 보기 · 최대 2년 기록", "the chart must explain its fixed window and maximum history");
+assert.equal(html.includes("data-chart-days"), false, "the fixed thirty-day window must not retain obsolete range toggles");
+const chartRenderer = script.slice(script.indexOf("function renderPriceChart("), script.indexOf("function renderChartSourceFilter("));
+requireText(chartRenderer, 'key: "active"', "the chart needs the listed-price series");
+requireText(chartRenderer, 'key: "sold"', "the chart needs the sold-complete series");
+assert.equal(chartRenderer.includes('key: "confirmed_transactions"'), false,
+  "confirmed transaction prices must not remain as a chart series");
+assert.equal(chartRenderer.includes('key: "reserved"'), false,
+  "reserved prices must not remain as a chart series");
+for (const label of ["−1개월", "−1일", "+1일", "+1개월"]) requireText(script, label, `missing chart navigation ${label}`);
+requireText(script, "PRICE_HISTORY_DAYS = 730", "chart history must be bounded to two years");
+requireText(script, 'params.set("as_of", state.chartAnchorDate)', "historical chart windows must request an explicit end date");
+requireText(script, "statsForChartSource", "chart site toggles must scope statistics independently from listing filters");
+requireText(script, 'input.name = "chart-source"', "chart sites must use single-selection radio semantics");
+
+for (const resizer of ["filter-column-resizer", "analysis-column-resizer"]) {
+  requireText(html, `id="${resizer}"`, `missing ${resizer}`);
+}
+requireText(html, 'role="separator"', "column resize handles need separator semantics");
+requireText(script, "setPointerCapture", "column resize handles must support pointer dragging");
+requireText(script, 'event.key === "Home"', "column resize handles must support keyboard reset");
+requireText(styles, "--filter-column-width", "the filter column width must be adjustable");
+requireText(styles, "--analysis-column-width", "the analysis column width must be adjustable");
 
 requireText(script, 'scope === "UNIT" ? "개당가격"', "RAM quantity/price-scope labels are required");
 requireText(script, 'quantity > 1 ? "일괄가격"', "RAM lot pricing must stay separate from unit pricing");
@@ -191,9 +213,13 @@ assert.equal(pendingStats.by_source.length, 0,
   "an entirely invalid source set must not leak into visible price statistics");
 assert.equal(pendingStats.integrity_filtered_source_ids[0], "invalid",
   "an entirely invalid source set must remain visible as awaiting a refresh");
-context.state = { selectedSites: new Set(["invalid"]) };
-assert.equal(context.statsForSelectedSites(pendingStats).selected_site_scope, "pending",
+context.state = { chartSourceId: "invalid" };
+assert.equal(context.statsForChartSource(pendingStats).selected_chart_source, "invalid",
   "selecting only a pending source must retain its honest refresh state");
+assert.equal(context.shiftMonthKey("2024-03-31", -1), "2024-02-29",
+  "month navigation must clamp to the leap-year month end");
+assert.equal(context.shiftDateKey("2026-09-08", -1), "2026-09-07",
+  "day navigation must move exactly one UTC calendar day");
 
 const node = () => ({ hidden: false, value: "", textContent: "", attributes: {},
   setAttribute(key, value) { this.attributes[key] = value; },
@@ -238,7 +264,7 @@ assert.equal(listingLoads, 1);
 assert.equal(statsRenders, 0, "sorting must keep the current chart intact");
 context.reloadListingsForControls("ebay");
 assert.equal(listingLoads, 2);
-assert.equal(statsRenders, 1, "changing sources must re-scope the already received statistics");
+assert.equal(statsRenders, 0, "listing source filters must not change the independently selected chart site");
 
 const statsContext = vm.createContext({ Intl });
 vm.runInContext(declarations, statsContext);
@@ -251,13 +277,13 @@ statsContext.state = { selectedProduct: {}, selectedSites: new Set(), detailStat
 statsContext.dom = Object.fromEntries(["statsGroups", "priceSummary", "priceSummaryScope", "statsSection", "priceChartDisclosure", "statsAsOf"]
   .map((key) => [key, node()]));
 const summaryKeys = [];
-Object.assign(statsContext, { clearSelectedPriceTable() {}, renderStatsGroup() {},
+Object.assign(statsContext, { clearSelectedPriceTable() {}, renderStatsGroup() {}, renderChartSourceFilter() {},
   renderPriceSummaryRow(key, block, data, currency) { summaryKeys.push([key, currency]); },
 });
 statsContext.renderStats();
 assert.equal(statsContext.dom.priceSummaryScope.textContent, "국내 개인 중고 · KRW · 최근 30일",
   "out-of-order HTTP responses must not select the overseas summary first");
-assert.deepEqual(summaryKeys, [["active", "KRW"], ["sold", "KRW"], ["confirmed", "KRW"]]);
+assert.deepEqual(summaryKeys, [["active", "KRW"], ["sold", "KRW"]]);
 
 const requestContext = vm.createContext({ URLSearchParams, AbortController, clearTimeout });
 vm.runInContext(declarations, requestContext);

@@ -1,6 +1,71 @@
 export const COUPANG_COMMISSION_DISCLOSURE = "이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.";
 const SLOT = "after-organic-results";
 
+function svgElement(tag, attributes = {}) {
+  const element = document.createElementNS("http://www.w3.org/2000/svg", tag);
+  Object.entries(attributes).forEach(([name, value]) => element.setAttribute(name, String(value)));
+  return element;
+}
+
+function categoryPartIcon(categoryCode) {
+  const code = String(categoryCode || "CPU").trim().toUpperCase();
+  const icon = svgElement("svg", {
+    class: "affiliate-icon affiliate-part-icon",
+    viewBox: "0 0 32 32",
+    "aria-hidden": "true",
+    "data-category": code,
+  });
+  const append = (...nodes) => icon.append(...nodes);
+  if (code === "GPU") {
+    append(
+      svgElement("rect", { x: 3, y: 8, width: 24, height: 16, rx: 2 }),
+      svgElement("circle", { cx: 11, cy: 16, r: 5 }),
+      svgElement("circle", { cx: 21, cy: 16, r: 3.5 }),
+      svgElement("path", { d: "M27 11h3v10h-3M7 24v3h15" }),
+    );
+  } else if (code === "RAM") {
+    append(
+      svgElement("rect", { x: 3, y: 9, width: 26, height: 14, rx: 2 }),
+      svgElement("path", { d: "M7 13h4v6H7zM14 13h4v6h-4zM21 13h4v6h-4zM7 23v3M11 23v3M15 23v3M19 23v3M23 23v3" }),
+    );
+  } else if (code === "MOTHERBOARD") {
+    append(
+      svgElement("rect", { x: 5, y: 3, width: 22, height: 26, rx: 2 }),
+      svgElement("rect", { x: 9, y: 7, width: 9, height: 9, rx: 1 }),
+      svgElement("path", { d: "M21 7h3M21 11h3M21 15h3M9 20h15M9 24h11" }),
+      svgElement("circle", { cx: 23, cy: 25, r: 1.5 }),
+    );
+  } else if (code === "SSD") {
+    append(
+      svgElement("rect", { x: 7, y: 3, width: 18, height: 26, rx: 3 }),
+      svgElement("path", { d: "M11 9h10M11 13h10M11 18h6" }),
+      svgElement("circle", { cx: 11, cy: 24, r: 1.5 }),
+      svgElement("circle", { cx: 21, cy: 24, r: 1.5 }),
+    );
+  } else if (code === "HDD") {
+    append(
+      svgElement("rect", { x: 6, y: 3, width: 20, height: 26, rx: 3 }),
+      svgElement("circle", { cx: 16, cy: 15, r: 7 }),
+      svgElement("circle", { cx: 16, cy: 15, r: 1.5 }),
+      svgElement("path", { d: "M17 16l5 5M10 25h12" }),
+    );
+  } else if (code === "PSU") {
+    append(
+      svgElement("rect", { x: 3, y: 6, width: 26, height: 20, rx: 2 }),
+      svgElement("circle", { cx: 13, cy: 16, r: 7 }),
+      svgElement("circle", { cx: 13, cy: 16, r: 3 }),
+      svgElement("path", { d: "M6 16h14M13 9v14M23 11h3v4h-3M23 19h3" }),
+    );
+  } else {
+    append(
+      svgElement("rect", { x: 8, y: 8, width: 16, height: 16, rx: 3 }),
+      svgElement("rect", { x: 12, y: 12, width: 8, height: 8, rx: 1 }),
+      svgElement("path", { d: "M11 3v5M16 3v5M21 3v5M11 24v5M16 24v5M21 24v5M3 11h5M3 16h5M3 21h5M24 11h5M24 16h5M24 21h5" }),
+    );
+  }
+  return icon;
+}
+
 export function validContextualOffer(offer, context, now = Date.now()) {
   if (!offer || offer.provider !== "쿠팡 파트너스" || offer.slot !== SLOT) return false;
   if (!/^[a-z0-9][a-z0-9._:-]{0,119}$/u.test(offer.offer_id || "")) return false;
@@ -64,13 +129,7 @@ export function createContextualAffiliate(root, { now = Date.now } = {}) {
   function render(offer, context) {
     const main = document.createElement("div");
     main.className = "affiliate-main";
-    const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-    icon.setAttribute("class", "affiliate-icon");
-    icon.setAttribute("viewBox", "0 0 24 24");
-    icon.setAttribute("aria-hidden", "true");
-    const bag = document.createElementNS("http://www.w3.org/2000/svg", "path");
-    bag.setAttribute("d", "M6 8.5h12l1 11H5l1-11Zm3 0V6a3 3 0 0 1 6 0v2.5");
-    icon.append(bag);
+    const icon = categoryPartIcon(context.category_code);
     const copy = document.createElement("div");
     copy.className = "affiliate-copy";
     const heading = document.createElement("span");
@@ -83,7 +142,7 @@ export function createContextualAffiliate(root, { now = Date.now } = {}) {
     link.rel = "sponsored noopener noreferrer";
     link.referrerPolicy = "no-referrer";
     link.textContent = `${offer.cta_label} →`;
-    link.setAttribute("aria-label", `${offer.title} 보기 · 새 창`);
+    link.setAttribute("aria-label", `광고 · ${offer.provider} · ${offer.title} 보기 · 새 창`);
     link.addEventListener("click", () => record("click", offer));
     copy.append(heading, link);
     main.append(icon, copy);

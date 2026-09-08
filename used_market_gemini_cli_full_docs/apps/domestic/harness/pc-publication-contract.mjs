@@ -54,11 +54,19 @@ assert.deepEqual(compactedTransportStats.by_source[0].daily.map((row) => row.dat
   "source charts must preserve every sampled SOLD day");
 
 const baseUrl = "https://used-pick.test/api/products/gpu%3Anvidia%3Artx-3080/price-stats";
-const parsed = parsePriceStatsRequest(new URL(`${baseUrl}?days=30&market_pool=KR_C2C_USED&condition=USED_WORKING&currency=KRW`));
-assert.deepEqual(parsed, {
-  canonicalProductId: "gpu:nvidia:rtx-3080", days: 30, marketPool: "KR_C2C_USED",
-  condition: "USED_WORKING", currency: "KRW"
-});
+const requestNow = new Date("2026-09-08T12:00:00.000Z");
+const parsed = parsePriceStatsRequest(
+  new URL(`${baseUrl}?days=30&market_pool=KR_C2C_USED&condition=USED_WORKING&currency=KRW`),
+  requestNow
+);
+assert.equal(parsed.canonicalProductId, "gpu:nvidia:rtx-3080");
+assert.equal(parsed.days, 30);
+assert.equal(parsed.marketPool, "KR_C2C_USED");
+assert.equal(parsed.condition, "USED_WORKING");
+assert.equal(parsed.currency, "KRW");
+assert.equal(parsed.window.from, "2026-08-10");
+assert.equal(parsed.window.to, "2026-09-08");
+assert.equal(parsed.window.max_history_days, 730);
 assert.throws(
   () => parsePriceStatsRequest(new URL(`${baseUrl}?days=30&market_pool=KR_C2C_USED,OVERSEAS_USED&condition=USED_WORKING&currency=KRW`)),
   /one market_pool/u

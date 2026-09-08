@@ -289,6 +289,9 @@ async function serveProductPriceStats(request, env) {
   } catch (error) {
     return json(400, { status: "error", error: error instanceof Error ? error.message : String(error) });
   }
+  if (query.isHistorical) {
+    return json(503, { status: "error", error: "Historical price statistics require the AWS ledger" });
+  }
   if (!hasD1(env)) return json(503, { status: "error", error: "Public price statistics are unavailable" });
   try {
     const stats = await readPublishedProductStats(env.DB, query);
@@ -587,6 +590,11 @@ async function readPriceStatsFromPreferredStore(request, env, runnerPath) {
   if (searchRunnerIsConfigured(env)) {
     const runnerResponse = await proxyToSearchRunner(request, env, runnerPath);
     if (runnerResponse.status < 500 || !hasD1(env)) return runnerResponse;
+    if (new URL(request.url).searchParams.has("as_of")) {
+      return responseAsPcD1Fallback(json(503, {
+        status: "error", error: "Historical price statistics are temporarily unavailable"
+      }));
+    }
     console.warn("AWS price stats read failed; using D1 fallback", runnerResponse.status);
     return responseAsPcD1Fallback(await serveProductPriceStats(request, env));
   }

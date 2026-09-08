@@ -64,6 +64,8 @@ export function pcCatalogResponse() {
     facet_schema: publicCatalog.facet_schema,
     browse_flow: publicCatalog.browse_flow,
     public_catalog: publicCatalog,
+    // The builder also needs case/cooling choices; keep the existing public search scope unchanged.
+    tools_catalog: pcToolsCatalog(publicCatalog),
     sources: operationalSources
       .map((source) => ({
         source_id: source.key,
@@ -93,6 +95,22 @@ export function pcCatalogResponse() {
         activation_url: source.partner_application_url || null,
         integration_docs_url: source.partner_api_docs_url || null
       }))
+  };
+}
+
+export function pcToolsCatalog(publicCatalog = publicPcCatalogForApi()) {
+  const extraCodes = ["CASE", "COOLING"];
+  const products = PC_PRODUCT_MASTER_V2.filter((p) => extraCodes.includes(p.category)).map((p) => ({
+    canonical_product_id: p.id,
+    canonical_display_name: p.name,
+    category_code: p.category,
+    brand: p.manufacturer || p.brand || null,
+    key_specs: { ...(p.spec || {}), ...(p.browse_facets || {}) },
+    aliases: p.aliases || []
+  }));
+  return {
+    categories: [...publicCatalog.categories, ...extraCodes.map((code) => ({ code, label: code === "CASE" ? "케이스" : "쿨러", model_count: products.filter((p) => p.category_code === code).length }))],
+    products: [...publicCatalog.products, ...products]
   };
 }
 
