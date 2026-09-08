@@ -160,7 +160,10 @@ export function comparePcListingRows(left, right, sort = "recent") {
     const rightPrice = Number(right?.price_value);
     if (leftPrice !== rightPrice) return sort === "price_desc" ? rightPrice - leftPrice : leftPrice - rightPrice;
   }
-  const updatedComparison = compareText(right?.updated_at, left?.updated_at);
+  const updatedComparison = compareText(
+    right?.updated_at ?? right?.last_checked_at,
+    left?.updated_at ?? left?.last_checked_at
+  );
   if (updatedComparison !== 0) return updatedComparison;
   return compareText(left?.item_id, right?.item_id);
 }

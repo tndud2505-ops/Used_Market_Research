@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { dedupePcListingRows } from "../cloudflare/pc-listings-contract.mjs";
+import { comparePcListingRows, dedupePcListingRows } from "../cloudflare/pc-listings-contract.mjs";
 
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
@@ -1121,27 +1121,18 @@ export class SearchIndex {
       where.push(`site IN (${sqlPlaceholders(sites)})`);
       params.push(...sites);
     }
-    const selectedCountWhere = [...where];
-    const selectedCountParams = [...params];
     const after = options.after && typeof options.after === "object" ? options.after : null;
-    let cursorFound = true;
-    if (after?.item_id) {
-      const afterRow = this.db.prepare("SELECT item_id, price_value, last_checked_at FROM listings WHERE item_id = ?").get(after.item_id);
-      if (!afterRow) {
-        cursorFound = false;
-      } else {
-        const keyset = pcListingKeysetPredicate(sort, afterRow);
-        where.push(keyset.clause);
-        params.push(...keyset.params);
-      }
-    }
-    const fetchLimit = Math.min(500, Math.max(limit + 1, (limit + 1) * 4));
-    const candidateRows = cursorFound
-      ? this.db.prepare(`SELECT * FROM listings WHERE ${where.join(" AND ")} ORDER BY ${pcListingOrderClause(sort)} LIMIT ?`).all(...params, fetchLimit)
-      : [];
-    const rows = dedupePcListingRows(candidateRows);
-    const page = rows.slice(0, limit);
-    const hasMore = page.length > 0 && (rows.length > limit || candidateRows.length >= fetchLimit);
+    const candidateRows = this.db.prepare(`SELECT * FROM listings
+      WHERE ${where.join(" AND ")}`).all(...params);
+    const rows = dedupePcListingRows(candidateRows)
+      .sort((left, right) => comparePcListingRows(left, right, sort));
+    const afterIndex = after?.item_id
+      ? rows.findIndex((row) => row.item_id === after.item_id)
+      : -1;
+    const cursorFound = !after?.item_id || afterIndex >= 0;
+    const pageStart = afterIndex >= 0 ? afterIndex + 1 : 0;
+    const page = cursorFound ? rows.slice(pageStart, pageStart + limit) : [];
+    const hasMore = cursorFound && pageStart + page.length < rows.length;
     const last = page.at(-1);
     const latestObservedAt = candidateRows.reduce((latest, row) => String(row.last_checked_at) > latest ? String(row.last_checked_at) : latest, "");
     const sourceIdentityRows = !after?.item_id
@@ -1149,17 +1140,13 @@ export class SearchIndex {
         FROM listings WHERE ${sourceCountWhere.join(" AND ")}`).all(...sourceCountParams)
       : [];
     const dedupedSourceRows = dedupePcListingRows(sourceIdentityRows);
-    const selectedIdentityRows = !after?.item_id && sites.length > 0
-      ? this.db.prepare(`SELECT item_id, site, url, last_checked_at
-        FROM listings WHERE ${selectedCountWhere.join(" AND ")}`).all(...selectedCountParams)
-      : dedupedSourceRows;
     const sourceTotals = {};
     for (const row of dedupedSourceRows) {
       sourceTotals[row.site] = Number(sourceTotals[row.site] || 0) + 1;
     }
     return {
       items: page.map(publicItem),
-      total: !after?.item_id ? dedupePcListingRows(selectedIdentityRows).length : null,
+      total: rows.length,
       asOf,
       latestObservedAt: latestObservedAt || null,
       sourceTotals,
