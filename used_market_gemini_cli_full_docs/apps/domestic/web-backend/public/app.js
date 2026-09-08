@@ -1988,7 +1988,8 @@ function metricHasCoherentSummary(block) {
   if (count <= 0) return false;
   const minimum = block?.min == null ? null : Number(block.min);
   const maximum = block?.max == null ? null : Number(block.max);
-  const mean = block?.mean == null ? null : Number(firstDefined(block.mean, block.average, block.avg, block.mean_price));
+  const meanValue = firstDefined(block?.mean, block?.average, block?.avg, block?.mean_price);
+  const mean = meanValue == null ? null : Number(meanValue);
   const median = block?.median == null ? null : Number(block.median);
   if (Number.isFinite(minimum) && Number.isFinite(maximum) && minimum > maximum) return false;
   if (mean !== null && (!Number.isFinite(mean) || mean <= 0)) return false;

@@ -210,6 +210,9 @@ assert.equal(coherentStats.integrity_filtered_source_ids[0], "invalid",
   "a removed source must remain identifiable as awaiting a statistics refresh");
 assert.equal(context.metricHasCoherentSummary({ sample_count: 1, min: 50000, max: 50000, mean: null, median: null }), true,
   "one exact asking price is valid site evidence even when no aggregate average is published");
+assert.equal(context.metricHasCoherentSummary({
+  sample_count: 71, min: 9000, max: 200000, mean: null, average: 41777.47, median: null
+}), true, "a valid published average must remain usable when the legacy mean field is null");
 assert.equal(context.metricDisplayValue({ sample_count: 1, min: 50000, max: 50000, mean: null, median: null }, "KRW").amount, 50000,
   "one exact asking price must be displayed as evidence without being promoted to an aggregate mean");
 const pendingStats = context.statsWithCoherentSources({
