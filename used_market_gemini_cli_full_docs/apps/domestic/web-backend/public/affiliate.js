@@ -132,9 +132,6 @@ export function createContextualAffiliate(root, { now = Date.now } = {}) {
     const icon = categoryPartIcon(context.category_code);
     const copy = document.createElement("div");
     copy.className = "affiliate-copy";
-    const heading = document.createElement("span");
-    heading.className = "affiliate-heading";
-    heading.textContent = `광고 · ${offer.provider}`;
     const link = document.createElement("a");
     link.className = "affiliate-link";
     link.href = offer.destination_url;
@@ -142,15 +139,28 @@ export function createContextualAffiliate(root, { now = Date.now } = {}) {
     link.rel = "sponsored noopener noreferrer";
     link.referrerPolicy = "no-referrer";
     link.textContent = `${offer.cta_label} →`;
+    link.title = offer.title;
     link.setAttribute("aria-label", `광고 · ${offer.provider} · ${offer.title} 보기 · 새 창`);
     link.addEventListener("click", () => record("click", offer));
-    copy.append(heading, link);
-    main.append(icon, copy);
+    const details = document.createElement("details");
+    details.className = "affiliate-details";
+    const summary = document.createElement("summary");
+    summary.textContent = "광고·구매 시 수수료";
+    summary.setAttribute("aria-label", "쿠팡 파트너스 광고·수수료 상세 안내");
     const disclosure = document.createElement("p");
     disclosure.className = "affiliate-disclosure";
     disclosure.textContent = `${offer.disclosure.commission} ${offer.context_type === "category" && context.canonical_product_id
       ? "선택 모델과 다른 상품이 포함될 수 있습니다. " : ""}${offer.disclosure.independence}`;
-    root.replaceChildren(main, disclosure);
+    details.append(summary, disclosure);
+    details.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") { details.open = false; summary.focus(); }
+    });
+    details.addEventListener("focusout", (event) => {
+      if (!details.contains(event.relatedTarget)) details.open = false;
+    });
+    copy.append(link, details);
+    main.append(icon, copy);
+    root.replaceChildren(main);
     root.hidden = false;
     displayedOffer = offer;
     if (typeof IntersectionObserver === "function") {

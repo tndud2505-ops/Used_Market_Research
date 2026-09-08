@@ -87,6 +87,22 @@ export function historyWindow(anchor = '', today = new Date().toISOString().slic
   const end = anchor ? anchor < earliest ? earliest : anchor > today ? today : anchor : today;
   return { from: shiftDate(end, -29), to: end, earliest, latest: today, previous: end > earliest, next: end < today };
 }
+export function chartDateSelection(date, anchor = '', today = new Date().toISOString().slice(0, 10)) {
+  const window = historyWindow(anchor, today);
+  const timestamp = Date.parse(`${date}T00:00:00Z`);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(timestamp)
+    || new Date(timestamp).toISOString().slice(0, 10) !== date
+    || date < shiftDate(window.earliest, -29) || date > today) throw new Error('최근 2년 안의 날짜를 선택하세요.');
+  if (date >= window.from && date <= window.to) return { date, anchor };
+  const end = historyWindow(date, today).to;
+  return { date, anchor: end === today ? '' : end };
+}
+export function modelPageItems(page, count) {
+  if (count <= 7) return Array.from({ length: count }, (_, i) => i + 1);
+  const start = Math.max(1, Math.min(count - 4, page - 2));
+  const pages = [...new Set([1, ...Array.from({ length: 5 }, (_, i) => start + i), count])].sort((a, b) => a - b);
+  return pages.flatMap((n, i) => i && n > pages[i - 1] + 1 ? ['ellipsis', n] : [n]);
+}
 export function buildTotals(entries, getStats) {
   return Object.fromEntries(SERIES.map(({ key }) => {
     let sum = 0, covered = 0;

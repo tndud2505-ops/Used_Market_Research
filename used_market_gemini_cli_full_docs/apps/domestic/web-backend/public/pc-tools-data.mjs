@@ -1,4 +1,4 @@
-import { idOf, coherentStats } from './pc-tools-core.mjs?v=7';
+import { idOf, coherentStats } from './pc-tools-core.mjs?v=8';
 
 export async function readJson(url, signal) {
   const request = new AbortController();

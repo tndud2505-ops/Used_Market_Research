@@ -5,7 +5,7 @@
   <title>PC 부품 가격 분석 | USED PICK</title>
   <meta name="description" content="PC 부품의 판매중 가격, 판매완료 표시가와 확인 거래가의 변화를 모델별로 비교하세요.">
   <link rel="icon" href="/assets/mark.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css?v=pc-tools-v1"><link rel="stylesheet" href="/pc-tools.css?v=6">
+  <link rel="stylesheet" href="/styles.css?v=pc-tools-v1"><link rel="stylesheet" href="/pc-tools.css?v=9">
 </head>
 <body class="pc-tools" data-page="analysis">
   <a class="skip-link" href="#main">본문으로 건너뛰기</a>
@@ -14,24 +14,24 @@
     <nav aria-label="주 메뉴"><a href="/">중고 시세</a><a href="/computer-builder.html">컴퓨터 맞추기</a><a href="/price-analysis.html" aria-current="page">가격 분석</a></nav>
   </header>
   <main id="main" class="tools-main">
-    <div class="tools-title"><h1>PC 부품 가격 분석</h1><span class="tools-scope">국내 개인 중고 · 정상 작동 · KRW</span></div>
-    <div id="tools-status" role="status" aria-live="polite">카탈로그를 불러오는 중입니다.</div>
+    <h1 class="sr-only">PC 부품 가격 분석</h1>
+    <div id="tools-status" role="status" aria-live="polite">불러오는 중</div>
     <nav id="analysis-categories" class="tools-tabs" aria-label="분석 부품"></nav>
     <div id="tools-summary" class="tools-summary"></div>
     <section aria-labelledby="chart-title">
       <div class="tools-chart-heading"><h2 id="chart-title">가격 변화</h2><div class="tools-chart-controls">
-        <button id="overview-button" type="button">전체 모델 추이</button>
-        <label>표시 <select id="chart-mode"><option value="amount">금액</option><option value="index">변동률</option></select></label>
-        <span>30일 화면 · 최대 2년</span>
+        <button id="overview-button" type="button">전체 추이</button>
+        <select id="chart-mode" aria-label="차트 표시"><option value="amount">금액</option><option value="index">변동률</option></select>
       </div></div>
-      <div id="chart-sources" class="tools-tabs" role="group" aria-label="차트 사이트"></div>
-      <div id="chart-navigation" class="tools-chart-controls" role="group" aria-label="차트 기간 이동"></div>
-      <div id="price-chart" class="tools-chart"></div><p id="chart-coverage" class="tools-caption"></p>
+      <div class="tools-chart-toolbar">
+        <div id="chart-navigation" class="tools-chart-controls" role="group" aria-label="차트 기간 이동"></div>
+        <div id="chart-sources" class="tools-tabs" role="group" aria-label="차트 사이트"></div>
+      </div>
+      <div id="price-chart" class="tools-chart"></div><p id="chart-coverage" class="tools-caption" hidden></p>
     </section>
-    <section aria-labelledby="models-title"><div class="tools-section-heading"><h2 id="models-title">모델별 가격</h2></div><div id="model-controls"></div><div id="model-table" class="tools-table-scroll"></div><nav id="model-pages" class="tools-pages" aria-label="모델 페이지"></nav></section>
-    <p class="tools-method">판매완료 표시가는 실제 체결가와 다를 수 있습니다. 확인 거래가는 거래 근거가 있는 자료만 표시합니다. 자료 없는 날짜는 연결하지 않습니다.</p>
+    <section class="tools-models" aria-labelledby="models-title"><h2 id="models-title" class="sr-only">모델별 가격</h2><div id="model-controls"></div><div id="model-table" class="tools-table-scroll" tabindex="0" aria-label="부품 모델 목록"></div><nav id="model-pages" class="tools-pages" aria-label="모델 페이지"></nav></section>
   </main>
   <footer class="tools-footer"><a href="/guide.html">이용 안내</a><a href="/privacy.html">개인정보처리방침</a><a href="/terms.html">이용약관</a></footer>
-  <script type="module" src="/pc-tools.js?v=7"></script>
+  <script type="module" src="/pc-tools.js?v=10"></script>
 </body>
 </html>

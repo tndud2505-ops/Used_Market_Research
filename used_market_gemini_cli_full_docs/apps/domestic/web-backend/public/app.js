@@ -1,4 +1,4 @@
-import { createContextualAffiliate } from "./affiliate.js?v=pc-directory-v90";
+import { createContextualAffiliate } from "./affiliate.js?v=compact-ad-v1";
 
 const PRODUCT_QUERY_KEYS = new Set([
   "manufacturer", "model", "gpu_model", "board_brand", "usage", "configuration", "socket", "chipset", "form_interface", "capacity", "purpose", "rated_wattage",

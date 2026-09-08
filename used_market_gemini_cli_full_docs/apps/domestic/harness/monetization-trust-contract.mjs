@@ -307,8 +307,10 @@ try {
   pendingUi[0]({ ok: true, json: async () => ({ ok: true, data: { offer: uiOffer } }) });
   await firstRender;
   assert.equal(root.hidden, false);
-  assert.match(root.children[1].textContent, new RegExp(`^${COUPANG_COMMISSION_DISCLOSURE}`), "disclosure must stay next to the ad link");
   const flatten = (node) => [node, ...node.children.flatMap(flatten)];
+  const disclosureDetails = flatten(root).find((child) => child.tag === "details");
+  assert.equal(disclosureDetails.children[0].textContent, "광고·구매 시 수수료", "commission relationship must remain visible in the compact row");
+  assert.match(disclosureDetails.children[1].textContent, new RegExp(`^${COUPANG_COMMISSION_DISCLOSURE}`), "full disclosure must remain available next to the ad link");
   const adLink = flatten(root).find((child) => child.tag === "a");
   assert.equal(adLink.rel, "sponsored noopener noreferrer");
   assert.equal(adLink.referrerPolicy, "no-referrer");

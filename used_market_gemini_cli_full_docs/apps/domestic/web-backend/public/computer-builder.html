@@ -5,7 +5,7 @@
   <title>컴퓨터 맞추기 | USED PICK</title>
   <meta name="description" content="PC 부품 모델을 직접 선택하고 판매중 가격과 판매완료 표시가격을 구분해 비교하세요.">
   <link rel="icon" href="/assets/mark.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css?v=pc-tools-v1"><link rel="stylesheet" href="/pc-tools.css?v=6">
+  <link rel="stylesheet" href="/styles.css?v=pc-tools-v1"><link rel="stylesheet" href="/pc-tools.css?v=9">
 </head>
 <body class="pc-tools" data-page="builder">
   <a class="skip-link" href="#main">본문으로 건너뛰기</a>
@@ -14,20 +14,20 @@
     <nav aria-label="주 메뉴"><a href="/">중고 시세</a><a href="/computer-builder.html" aria-current="page">컴퓨터 맞추기</a><a href="/price-analysis.html">가격 분석</a></nav>
   </header>
   <main id="main" class="tools-main">
-    <div class="tools-title"><h1>컴퓨터 맞추기</h1><span class="tools-scope">국내 개인 중고 · 정상 작동 · KRW</span></div>
-    <div id="tools-status" role="status" aria-live="polite">카탈로그를 불러오는 중입니다.</div>
-    <div id="tools-summary" class="tools-summary"></div>
-    <div class="tools-builder-layout">
-      <section aria-labelledby="build-title"><h2 id="build-title">선택 부품</h2><div id="build-table" class="tools-table-scroll"></div>
-        <div class="tools-actions"><button id="save-build" type="button">조합 저장</button><button id="share-build" type="button">공유</button><button id="clear-build" type="button">조합 비우기</button></div>
-        <div id="share-output" hidden><label for="share-url">조합 공유 주소</label><textarea id="share-url" readonly rows="3"></textarea></div>
-        <div id="build-compatibility" class="tools-compatibility"></div>
-      </section>
-      <section aria-labelledby="picker-title"><div class="tools-section-heading"><h2 id="picker-title">모델 선택</h2></div><div id="model-controls"></div><div id="model-table" class="tools-table-scroll"></div><nav id="model-pages" class="tools-pages" aria-label="모델 페이지"></nav></section>
+    <h1 class="sr-only">컴퓨터 맞추기</h1>
+    <div class="tools-toolbar">
+      <div id="tools-summary" class="tools-summary"></div>
+      <div class="tools-actions"><button id="save-build" type="button" disabled>조합 저장</button><button id="share-build" type="button" disabled>공유</button><button id="clear-build" type="button" disabled>비우기</button></div>
     </div>
-    <p class="tools-method">판매완료 표시가는 실제 체결가와 다를 수 있습니다. 자료가 없는 부품은 합계에서 제외합니다.</p>
+    <div id="build-compatibility" class="tools-compatibility" hidden></div>
+    <div id="share-output" hidden><label for="share-url">공유 주소</label><textarea id="share-url" readonly rows="2"></textarea></div>
+    <div id="tools-status" role="status" aria-live="polite">불러오는 중</div>
+    <div class="tools-builder-layout">
+      <section aria-labelledby="build-title"><h2 id="build-title" class="sr-only">선택 부품</h2><div id="build-table" class="tools-table-scroll" tabindex="0" aria-label="선택 부품 표"></div></section>
+      <section aria-labelledby="picker-title"><h2 id="picker-title" class="sr-only">모델 선택</h2><div id="model-controls"></div><div id="model-table" class="tools-table-scroll" tabindex="0" aria-label="부품 모델 목록"></div><nav id="model-pages" class="tools-pages" aria-label="모델 페이지"></nav></section>
+    </div>
   </main>
   <footer class="tools-footer"><a href="/guide.html">이용 안내</a><a href="/privacy.html">개인정보처리방침</a><a href="/terms.html">이용약관</a></footer>
-  <script type="module" src="/pc-tools.js?v=7"></script>
+  <script type="module" src="/pc-tools.js?v=10"></script>
 </body>
 </html>
