@@ -135,7 +135,7 @@ function detectSpecialKind(text, evidence, title = text) {
   const hasGpuModel = /\b(?:RTX|GTX|GT)\s*\d{3,4}(?:\s*(?:TI|SUPER))?|\bRX\s*\d{3,4}(?:\s*XT[X]?)?|\b(?:30[5-9]0|40[5-9]0|50[5-9]0)(?:\s*(?:TI|SUPER))?\b|\b[5-9]\d{3}\s*XT[X]?\b/iu.test(title);
   const combinedHasGpuModel = /\b(?:RTX|GTX|GT)\s*\d{3,4}(?:\s*(?:TI|SUPER))?|\bRX\s*\d{3,4}(?:\s*XT[X]?)?|\b(?:30[5-9]0|40[5-9]0|50[5-9]0)(?:\s*(?:TI|SUPER))?\b|\b[5-9]\d{3}\s*XT[X]?\b/iu.test(text);
   const withoutGpuModel = title.replace(gpuTokenPattern, ' ');
-  const hasCpuConfigurationModel = /\b(?:[1-9]\d{3,4})(?:X3D2?|X|G|K[F]?|F|T)?\b|\b2\d{2}K\b|(?:CORE\s*)?ULTRA\s*[3579]?\s*\d{3}[A-Z]*|울트라\s*[3579]?\s*\d{3}[A-Z]*/iu.test(withoutGpuModel);
+  const hasCpuConfigurationModel = /\b(?:[1-9]\d{3,4})(?:X3D2?|X|G|K[F]?|F|T)?\b|\b2\d{2}K\b|(?:CORE\s*)?ULTRA\s*[3579]?\s*\d{3}[A-Z]*|울트라\s*[3579]?\s*\d{3}[A-Z]*|\bXEON\b|제온/iu.test(withoutGpuModel);
   const hasMemoryConfiguration = /(?:\b(?:RAM|DDR[345])\b|\b(?:8|16|24|32|48|64|96|128)\s*G(?:B)?\b)/iu.test(title);
   const hasStorageConfiguration = /\b(?:128|240|250|256|480|500|512)\s*(?:G(?:B)?|SSD|HDD)\b|\b(?:1|2|4|8)\s*T(?:B)?\b/iu.test(title);
   const compactSlashSystem = title.split('/').length >= 4
@@ -178,7 +178,7 @@ function detectSpecialKind(text, evidence, title = text) {
   const describedPortableSystem = componentGroups.size >= 1 && !portableComponentWording
     && /(?:노트북(?!\s*(?:용|램|RAM|메모리|하드|HDD|SSD|부품))|삼성\s*센스\s*R\d|아티브\s*북|갤럭시\s*북|랩탑(?!용)|NOTEBOOK(?!\s*(?:용|RAM|MEMORY|HDD|SSD|GPU|GRAPHICS))|LAPTOP(?!\s*(?:RAM|MEMORY|HDD|SSD|GPU|GRAPHICS)))/iu.test(title);
   const namedPortableSystem = (hasGpuModel || combinedHasGpuModel)
-    && /(?:노트북(?!\s*(?:용|램|RAM|메모리|하드|HDD|SSD|부품))|게이밍\s*북|랩탑(?!용)|NOTEBOOK(?!\s*(?:RAM|MEMORY|HDD|SSD|GPU|GRAPHICS))|LAPTOP(?!\s*(?:RAM|MEMORY|HDD|SSD|GPU|GRAPHICS))|RAZER\s*BLADE|레이저\s*블레이드|ROG\s*(?:STRIX\s*)?SCAR|로그\s*스카|ALIENWARE|에일리언웨어|LEGION\s*[A-Z]?\d|레노버\s*Y\d|리전\s*(?:프로|Y?\d)|MSI\s*GF\d{2}|HP\s*OMEN.{0,30}\d{2}[- ][A-Z0-9]|오멘.{0,30}(?:RTX|GTX)|제피러스|ZEPHYRUS|(?:비보북|VIVOBOOK|아이디어패드|IDEAPAD)(?!\s*(?:용|GPU|그래픽\s*카드|그래픽카드)))/iu.test(title);
+    && /(?:노트북(?!\s*(?:용|램|RAM|메모리|하드|HDD|SSD|부품))|게이밍\s*북|랩탑(?!용)|NOTEBOOK(?!\s*(?:RAM|MEMORY|HDD|SSD|GPU|GRAPHICS))|LAPTOP(?!\s*(?:RAM|MEMORY|HDD|SSD|GPU|GRAPHICS))|RAZER\s*BLADE|레이저\s*블레이드|ROG\s*(?:STRIX\s*)?SCAR|로그\s*스카|ALIENWARE|에일리언웨어|LEGION\s*[A-Z]?\d|레노버\s*Y\d|리전\s*(?:프로|Y?\d)|MSI\s*GF\d{2}|HP\s*OMEN.{0,30}\d{2}[- ][A-Z0-9]|오멘.{0,30}(?:RTX|GTX)|제피러스|ZEPHYRUS|(?:비보북|VIVOBOOK|아이디어패드|IDEAPAD|젠북|ZENBOOK|서피스\s*북|SURFACE\s*BOOK)(?!\s*(?:용|GPU|그래픽\s*카드|그래픽카드))|LG\s*(?:그램|GRAM)(?![A-Z가-힣])|(?:ASUS|아수스)\s*TUF\s*A\d{2})/iu.test(title);
   const workstationSystem = componentGroups.size >= 1 && /(?:워크스테이션|WORKSTATION)/iu.test(title);
   const describedCompactSystem = componentGroups.size >= 2 && /(?:미니|슬림)\s*PC/i.test(title);
   const componentRichSystem = componentGroups.has('CPU') && componentGroups.has('RAM')
@@ -187,7 +187,7 @@ function detectSpecialKind(text, evidence, title = text) {
   const componentRemovalWording = componentGroups.size === 1
     && /(?:분리|탈거|적출|장착\s*테스트|테스트\s*후|컴퓨터\s*부품|데스크탑\s*부품)/iu.test(title);
   const clearDesktopSystem = !cpuComponentWording && !componentRemovalWording
-    && /(?:중고|게임용|사무용|업무용|브랜드)\s*컴퓨터|(?:게임용|사무용|업무용)\s*(?:PC|데스크탑)|미니\s*컴퓨터|HP\s*(?:PRODESK|프로\s*데스크|PAVILION|파빌리온|일체형)|컴퓨터.{0,30}(?:RYZEN|라이젠|\d{4,5}X(?:3D)?|울트라\s*[3579]?[- ]?\d{3}[A-Z]*|I[3579][ -]?\d{4,5}[A-Z]*)|(?:RYZEN|라이젠|\d{4,5}X(?:3D)?|울트라\s*[3579]?[- ]?\d{3}[A-Z]*|I[3579][ -]?\d{4,5}[A-Z]*).{0,30}(?:데스크탑(?:\s*PC)?|컴퓨터\s*(?:팝니다|판매|급처)?)/iu.test(title);
+    && /(?:중고|게임용|사무용|업무용|브랜드)\s*컴퓨터|(?:게임용|사무용|업무용)\s*(?:PC|데스크탑)|미니\s*컴퓨터|HP\s*(?:PRODESK|프로\s*데스크|ELITEDESK|엘리트\s*데스크|PAVILION|파빌리온|일체형)|컴퓨터.{0,30}(?:RYZEN|라이젠|\d{4,5}X(?:3D)?|울트라\s*[3579]?[- ]?\d{3}[A-Z]*|I[3579][ -]?\d{4,5}[A-Z]*)|(?:RYZEN|라이젠|\d{4,5}X(?:3D)?|울트라\s*[3579]?[- ]?\d{3}[A-Z]*|I[3579][ -]?\d{4,5}[A-Z]*).{0,30}(?:데스크탑(?:\s*PC)?|컴퓨터\s*(?:팝니다|판매|급처)?)/iu.test(title);
   const fullSystem = explicitSystem || describedSystem || describedPortableSystem || namedPortableSystem
     || workstationSystem || describedCompactSystem || componentRichSystem || clearDesktopSystem;
   if (fullSystem) {

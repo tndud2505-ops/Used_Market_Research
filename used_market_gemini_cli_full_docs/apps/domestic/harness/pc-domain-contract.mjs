@@ -92,6 +92,8 @@ assert.equal(reviewedPcListingExclusion("hellomarket", "https://www.hellomarket.
 assert.equal(reviewedPcListingExclusion("hellomarket", "hellomarket:https://www.hellomarket.com/item/183908019")?.reason, "QUANTITY_UNKNOWN");
 assert.equal(reviewedPcListingExclusion("joonggonara", "https://web.joongna.com/product/231873683")?.reason, "FULL_SYSTEM");
 assert.equal(reviewedPcListingExclusion("ebay", "v1|327343241050|0")?.reason, "QUANTITY_UNNORMALIZED");
+assert.equal(reviewedPcListingExclusion("hellomarket", "https://www.hellomarket.com/item/183525555")?.reason, "FULL_SYSTEM");
+assert.equal(reviewedPcListingExclusion("ebay", "https://www.ebay.com/itm/366656620371")?.reason, "QUANTITY_UNNORMALIZED");
 assert.equal(reviewedPcListingExclusion("hellomarket", "184798363"), null);
 for (const [title, quantity] of [
   ["Lot of 2 Intel Core i5-7400 3.5GHz Quad Core CPU Processor SR32W", 2],
@@ -165,6 +167,12 @@ const observedSystemAndBundleRegressions = [
   ["3600 16g*2 tuf b450m 3060 12g 아수스 웬디 240ssd 구성팝니다", "FULL_SYSTEM"],
   ["아수스 비보북 15x 6900hx rtx 3060 16gb 512gb 2.5k oled 120hz", "FULL_SYSTEM"],
   ["레노버 아이디어패드 게이밍3 5600H DDR4 16GB RTX3060 15ACH6 ideapad gaming 3", "FULL_SYSTEM"],
+  ["서피스북2 13.5인치 (i7 / 16GB / 1TB / GTX 1050)", "FULL_SYSTEM"],
+  ["LG 그램 Ultra7 RTX 5050 32GB SSD 1TB", "FULL_SYSTEM"],
+  ["아수스 tuf a14 8845hs rtx 4060 32g 512g", "FULL_SYSTEM"],
+  ["ASUS 비보북 Pro 15 OLED (i5-11세대/RTX 3050/16GB/1TB SSD)", "FULL_SYSTEM"],
+  ["HP EliteDesk 800 G8 데스크탑 (i7-11세대 / RTX 3070 / 32GB / SSD+4TB)", "FULL_SYSTEM"],
+  ["고급형 게이밍 및 서버용 XEON 32G RTX3060Ti 1TB", "FULL_SYSTEM"],
   ["인텔 I7-6700 + H170 메인보드 DDR4", "COMPONENT_BUNDLE"],
   ["인텔cpu i7 8700k 델 z370 메인보드 850w모듈러파워 델케이스", "COMPONENT_BUNDLE"],
   ["i5-7500 , ASROCK Z170M Pro4S 인텔 CPU 메인보드셋 쿨러까지 일괄", "COMPONENT_BUNDLE"],
@@ -192,6 +200,15 @@ for (const [title, listingKind] of observedSystemAndBundleRegressions) {
   assert.equal(actual.price_eligible, false, `system or cross-component bundle cannot enter price statistics: ${title}`);
   assert.ok(actual.exclusion_reasons.includes(listingKind), `exclusion reason must explain ${listingKind}: ${title}`);
 }
+const helloZenbookSystem = classifyPcPartListing({
+  title: "ASUS 젠북 프로 UM535QE-KY009W SSD 512GB",
+  description: "Ryzen 9 5900HX 16GB RTX 3050 Ti 노트북",
+  price: 700_000,
+  currency: "KRW"
+});
+assert.equal(helloZenbookSystem.listing_kind, "FULL_SYSTEM",
+  "portable product names in enriched detail must not enter GPU statistics");
+assert.equal(helloZenbookSystem.price_eligible, false);
 for (const [title, listingKind] of [
   ["RX 9070 xt그래픽카드 구매합니다.", "WANTED"],
   ["기가바이트 RX 9070 XT 게이밍 OC 16GB 사기꾼", "REPORT"],
