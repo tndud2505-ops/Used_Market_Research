@@ -58,6 +58,9 @@ assert.match(readme, /반복 배포/u);
 assert.match(readme, /process_instance\.id/u);
 assert.match(runnerScript, /enrichHelloMarketDetails\(items/u,
   "the scheduled HelloMarket collector must classify public detail text, not search-card titles alone");
+const ledgerScript = await read("aws-runner/pc-parts-ledger.mjs");
+assert.match(ledgerScript, /rows\.filter\(\(row\) => !reviewedPcListingExclusion/u,
+  "reviewed source-listing exclusions must also remove historical statistics members");
 
 for (const source of [publishStatsScript, completeStatsScript]) {
   assert.match(source, /normalization_version:\s*versionOptions\.normalizationVersion/u,

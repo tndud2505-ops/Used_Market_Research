@@ -3,6 +3,7 @@ import path from "node:path";
 import { mkdirSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { canonicalSourceListingIdentity } from "./pc-source-listing-identity.mjs";
+import { reviewedPcListingExclusion } from "../market/logic/pc-reviewed-listing-exclusions.mjs";
 
 const HOUR_MS = 60 * 60 * 1000;
 const HOURLY_COLLECTION_GUARD_MS = 55 * 60 * 1000;
@@ -2060,7 +2061,7 @@ export class PcPartsLedger {
     const sourceFilter = allowedSourceIds.length > 0
       ? ` AND s.source_id IN (${allowedSourceIds.map(() => "?").join(", ")})`
       : "";
-    return this.db.prepare(`
+    const rows = this.db.prepare(`
       SELECT s.*, n.id AS normalized_listing_id, n.canonical_product_id, n.market_pool, n.condition_code,
              n.quantity, n.price_scope, n.exact_product, n.price_eligible, n.statistics_eligible,
              n.parser_version, n.rule_version, n.filter_version,
@@ -2085,6 +2086,7 @@ export class PcPartsLedger {
        ORDER BY s.observed_at, s.id
     `).all(canonicalProductId, marketPool, condition, currency, normalizationVersion, parserVersion, ruleVersion, filterVersion,
       from, from, asOf, ...allowedSourceIds);
+    return rows.filter((row) => !reviewedPcListingExclusion(row.source_id, row.source_listing_id));
   }
 
   latestIdentityStates(rows, { asOf, normalizationVersion, parserVersion, ruleVersion, filterVersion, sourceIds = [] }) {

@@ -4,6 +4,7 @@ import { explicitSoldText } from "../market/logic/listing-lifecycle.mjs";
 import { PC_PRODUCT_MASTER_V2, PC_PRODUCT_MASTER_V2_VERSION } from "../market/data/pc-product-master-v2.mjs";
 import { PC_SOURCE_REGISTRY, getPcSource } from "../collector/logic/pc-source-registry.mjs";
 import { trustedSpecialistCategory } from "../collector/logic/pc-specialist-targets.mjs";
+import { reviewedPcListingExclusion } from "../market/logic/pc-reviewed-listing-exclusions.mjs";
 
 const VERSIONS = Object.freeze({ parserVersion: "pc-parser-v1", ruleVersion: "pc-rules-v1", filterVersion: "pc-filter-v1" });
 
@@ -305,6 +306,7 @@ export class PcShadowPipeline {
           : [])
       ]
     } : textClassified;
+    const reviewedExclusion = reviewedPcListingExclusion(source.key, sourceListingId(item));
     const publicClassified = classifyPcPartListingPublic({
       ...item,
       title: sourceCategoryEligible ? `${sourceCategory} ${item.title || ""}` : item.title,
@@ -334,6 +336,7 @@ export class PcShadowPipeline {
     if (!cpuProductMatchesClassification(classified, product)) product = null;
     const matched = Boolean(product);
     const exclusionReasons = [...classified.exclusion_reasons];
+    if (reviewedExclusion) exclusionReasons.push(`REVIEWED_${reviewedExclusion.reason}`);
     if (!matched) exclusionReasons.push("MODEL_NOT_IN_MASTER");
     const quantityValid = Number.isInteger(classified.quantity) && classified.quantity > 0;
     const priceScopeValid = ["TOTAL", "UNIT"].includes(classified.price_scope);
@@ -435,6 +438,12 @@ export class PcShadowPipeline {
       },
       evidence: [
         ...classified.evidence,
+        ...(reviewedExclusion ? [{
+          field: "statistics_eligibility",
+          value: reviewedExclusion.reason,
+          source: "REVIEWED_SOURCE_LISTING",
+          reviewed_at: reviewedExclusion.reviewed_at
+        }] : []),
         ...(facetProduct ? [{ field: "canonical_product_id", value: facetProduct.id, source: "MANUFACTURER_FACET_MATCH" }] : []),
         { field: "lifecycle_status", value: state.status, source: state.evidence.type },
         ...(duplicate ? [{ field: "dedupe", value: duplicate.clusterKey, source: "MULTI_SIGNAL_FINGERPRINT" }] : [])

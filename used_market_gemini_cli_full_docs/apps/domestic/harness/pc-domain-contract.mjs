@@ -14,6 +14,7 @@ import {
 } from "../aws-runner/reclassify-public-pc-listings.mjs";
 import { classifyPcPartListing } from "../market/logic/pc-parts-classifier.mjs";
 import { explicitSoldText, isPartialSaleText, structuredSoldEvidenceFromHtml } from "../market/logic/listing-lifecycle.mjs";
+import { reviewedPcListingExclusion } from "../market/logic/pc-reviewed-listing-exclusions.mjs";
 
 for (const text of ["판매완료 아님", "아직 판매완료 아닙니다", "sold out 아님", "판매완료 표시 오류", "미판매완료"]) {
   assert.equal(explicitSoldText(text), null, `negative SOLD wording must not become terminal: ${text}`);
@@ -37,6 +38,9 @@ const helloMarketFullPc = classifyPcPartListing({
 assert.equal(helloMarketFullPc.listing_kind, "FULL_SYSTEM",
   "a model-only HelloMarket title must use public detail specifications to reject a complete PC");
 assert.equal(helloMarketFullPc.price_eligible, false);
+assert.equal(reviewedPcListingExclusion("hellomarket", "https://www.hellomarket.com/item/182653333")?.reason, "FULL_SYSTEM");
+assert.equal(reviewedPcListingExclusion("hellomarket", "hellomarket:https://www.hellomarket.com/item/183908019")?.reason, "QUANTITY_UNKNOWN");
+assert.equal(reviewedPcListingExclusion("hellomarket", "184798363"), null);
 const qualityProbe = evaluatePcQualityDataset([{ id: "quality-probe", input: { title: "RTX 3080" }, truth: {
   category_code: "GPU", canonical_model: "RTX 3080", quantity: 1, price_scope: "TOTAL",
   listing_kind: "SINGLE_COMPONENT", lifecycle_status: "ACTIVE", market_pool: "KR_C2C_USED", duplicate: false
