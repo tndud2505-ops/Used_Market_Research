@@ -21,7 +21,7 @@ assert.ok(filterIndex > sourceIndex && listingIndex > filterIndex,
   "filters must precede the current listing results");
 
 for (const id of [
-  "category-select", "model-select", "source-facet-row", "source-filters", "source-filter-summary", "source-more-toggle",
+  "category-select", "model-select", "source-facet-row", "source-filters", "source-filter-summary",
   "model-filters", "model-filter-body", "model-filter-toggle", "facet-rows", "filter-context", "active-filter-summary",
   "active-filter-chips", "reset-filters", "show-matched-models", "model-detail-dialog", "model-detail-close",
   "price-panel-title", "detail-message", "chart-source-filter", "chart-source-options", "price-summary", "price-chart-disclosure", "stats-section", "stats-groups",
@@ -55,20 +55,23 @@ requireText(script, "availableFacets", "text search must replace whole-category 
 requireText(script, "payload?.available_facets", "the model response must drive the visible facet choices");
 
 requireText(html, 'class="source-selector-label">사이트</span>', "site scope needs a short visible label");
-requireText(script, 'checkbox.type = "checkbox"', "site controls must use checkbox semantics");
-requireText(script, '["joonggonara", "bunjang", "danawa"]', "primary Korean marketplaces must appear before extra sites");
-requireText(script, "state.selectedSites.add(source.id)", "site filters must support combining sources");
-requireText(script, "state.selectedSites.delete(source.id)", "site filters must support disabling one source");
+requireText(script, 'input.type = "radio"', "site controls must use the same single-selection semantics as price analysis");
+requireText(script, 'input.name = "listing-source"', "main listing site tabs must form one radio group");
+requireText(script, '["ebay", "joonggonara", "bunjang", "hellomarket", "coolenjoy", "danawa"]',
+  "eBay must stay visible before the individual domestic marketplaces");
+requireText(script, 'source.id === "ebay" ? "eBay (USD)"', "the overseas tab must state its separate currency");
+requireText(script, "state.selectedSites.add(source.id)", "a site tab must apply one exact source");
 requireText(script, "state.selectedSites.clear()", "the all-sites choice must clear individual scope");
-requireText(script, "sourceMoreOpen", "additional sites must remain available behind a compact toggle");
+assert.equal(script.includes("sourceMoreOpen"), false, "site tabs must not hide eBay behind a more toggle");
 requireText(script, "marketPools", "sources with multiple market pools must preserve every supported pool");
 requireText(script, "source.currency === \"KRW\"", "default all-sites listing search must include every enabled domestic source");
-requireText(script, "source.marketPools.includes(\"OVERSEAS_USED\")", "overseas sources must remain directly selectable outside the domestic default scope");
+requireText(script, 'source.id === "ebay"', "eBay must remain directly selectable outside the domestic default scope");
 requireText(script, 'params.set("sites", sourceIds.join(","))', "default listing searches must pass an explicit fast site scope");
 requireText(script, "availableSourceCounts", "site controls must follow actual whole-query listing coverage");
 requireText(script, "payload?.source_counts", "listing source counts must reach the site selector");
 requireText(script, "payload?.total", "listing result count must use the API total rather than the current page size");
-requireText(script, "Number(state.availableSourceCounts[source.id] || 0) > 0", "zero-result domestic sites must stay hidden");
+requireText(script, 'source.id === "ebay" || source.currency === "KRW"',
+  "switching market scope must not make the other site tabs disappear");
 
 requireText(script, "openSingleSearchResult", "a unique text result must still open directly");
 requireText(script, "showScopedListings", "category/facet search must return listings without choosing one model");
@@ -150,7 +153,8 @@ requireText(script, "listing.image_url", "listing thumbnails must use collected 
 requireText(script, '"이미지 없음"', "missing images need an honest empty state");
 
 requireText(styles, ".model-selector", "the model selector needs a dedicated compact layout");
-requireText(styles, ".source-choice", "site checkboxes need a readable inline layout");
+requireText(styles, ".source-choice", "site tabs need a readable inline layout");
+requireText(styles, '.source-choice input:checked + span', "the selected site tab needs the same active underline treatment as analysis");
 requireText(styles, "grid-column: 1 / -1", "site filters must wrap below model controls instead of clipping at zoomed widths");
 requireText(styles, "body.has-selected-product .results-flow", "selected listings and analysis need a shared layout");
 requireText(styles, ".model-detail-dialog:not([hidden])", "the inline analysis panel needs explicit visible-state styling");

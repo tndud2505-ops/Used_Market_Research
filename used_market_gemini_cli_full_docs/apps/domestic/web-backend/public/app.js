@@ -115,7 +115,6 @@ const state = {
   productRequest: null,
   listingRequest: null,
   detailRequest: null,
-  sourceMoreOpen: false,
   modelFiltersCollapsed: false,
   listingOptionsCollapsed: false,
   returnFocusProductId: "",
@@ -141,7 +140,6 @@ const dom = {
   sourceFacetRow: document.querySelector("#source-facet-row"),
   sourceFilters: document.querySelector("#source-filters"),
   sourceFilterSummary: document.querySelector("#source-filter-summary"),
-  sourceMoreToggle: document.querySelector("#source-more-toggle"),
   resetFilters: document.querySelector("#reset-filters"),
   showMatchedModels: document.querySelector("#show-matched-models"),
   catalogMessage: document.querySelector("#catalog-message"),
@@ -1074,14 +1072,11 @@ function syncListingSortTabs() {
 function syncSourceFilterSummary() {
   if (!dom.sourceFilterSummary) return;
   if (state.selectedSites.size === 0) {
-    dom.sourceFilterSummary.textContent = listingPriceControlsActive() && listingCurrencyScope() === "KRW"
-      ? "원화 사이트 전체"
-      : "사이트 전체";
+    dom.sourceFilterSummary.textContent = "국내 전체";
     return;
   }
-  dom.sourceFilterSummary.textContent = state.selectedSites.size === 1
-    ? sourceLabel([...state.selectedSites][0])
-    : `사이트 ${state.selectedSites.size}개`;
+  const sourceId = [...state.selectedSites][0];
+  dom.sourceFilterSummary.textContent = sourceId === "ebay" ? "eBay (USD)" : sourceLabel(sourceId);
 }
 
 function reloadListingsForControls(focusSourceValue) {
@@ -1107,50 +1102,45 @@ function renderSourceFilters() {
   dom.sourceFacetRow.hidden = state.sources.length === 0;
   syncSourceFilterSummary();
   if (!state.sources.length) return;
-  const allSourcesLabel = listingPriceControlsActive() && listingCurrencyScope() === "KRW" ? "원화 전체" : "전체";
-  const priority = ["joonggonara", "bunjang", "danawa"];
-  const compactLabels = { joonggonara: "중고나라", bunjang: "번개", danawa: "다나와" };
+  const priority = ["ebay", "joonggonara", "bunjang", "hellomarket", "coolenjoy", "danawa"];
+  const compactLabels = {
+    joonggonara: "중고나라",
+    bunjang: "번개장터",
+    hellomarket: "헬로마켓",
+    coolenjoy: "쿨엔조이",
+    danawa: "다나와 장터",
+  };
   const orderedSources = [...state.sources].sort((left, right) => {
     const leftIndex = priority.indexOf(left.id);
     const rightIndex = priority.indexOf(right.id);
     return (leftIndex < 0 ? priority.length : leftIndex) - (rightIndex < 0 ? priority.length : rightIndex);
   });
-  const visibleSources = orderedSources.filter((source) => {
-    if (state.selectedSites.has(source.id)) return true;
-    if (state.availableSourceCounts) {
-      return Number(state.availableSourceCounts[source.id] || 0) > 0
-        || source.marketPools.includes("OVERSEAS_USED");
-    }
-    return source.currency === "KRW" || source.marketPools.includes("OVERSEAS_USED");
-  });
-  const appendChoice = (label, value, checked, onChange, extra = false) => {
-    const choice = createElement("label", `source-choice${extra ? " is-extra" : ""}`);
-    if (extra && !state.sourceMoreOpen) choice.hidden = true;
-    const checkbox = document.createElement("input");
-    checkbox.type = "checkbox";
-    checkbox.checked = checked;
-    checkbox.dataset.value = value;
-    checkbox.addEventListener("change", onChange);
-    choice.append(checkbox, createElement("span", "", label));
+  const visibleSources = orderedSources.filter((source) => source.id === "ebay" || source.currency === "KRW");
+  const appendChoice = (label, value, checked, onChange, count = null) => {
+    const choice = createElement("label", "source-choice");
+    const input = document.createElement("input");
+    input.type = "radio";
+    input.name = "listing-source";
+    input.checked = checked;
+    input.dataset.value = value;
+    input.setAttribute("aria-label", Number.isFinite(count) && count > 0 ? `${label} ${count.toLocaleString("ko-KR")}건` : label);
+    input.addEventListener("change", onChange);
+    choice.append(input, createElement("span", "", label));
     dom.sourceFilters.append(choice);
   };
-  appendChoice(allSourcesLabel, "", state.selectedSites.size === 0, () => {
+  appendChoice("국내 전체", "", state.selectedSites.size === 0, () => {
     state.selectedSites.clear();
     reloadListingsForControls("");
   });
-  visibleSources.forEach((source, index) => {
+  visibleSources.forEach((source) => {
     const count = state.availableSourceCounts ? Number(state.availableSourceCounts[source.id] || 0) : null;
-    const label = `${compactLabels[source.id] || source.label}${Number.isFinite(count) && count > 0 ? ` ${count.toLocaleString("ko-KR")}건` : ""}`;
+    const label = source.id === "ebay" ? "eBay (USD)" : compactLabels[source.id] || source.label;
     appendChoice(label, source.id, state.selectedSites.has(source.id), () => {
-      if (state.selectedSites.has(source.id)) state.selectedSites.delete(source.id);
-      else state.selectedSites.add(source.id);
+      state.selectedSites.clear();
+      state.selectedSites.add(source.id);
       reloadListingsForControls(source.id);
-    }, index >= 3);
+    }, count);
   });
-  const extraCount = Math.max(0, visibleSources.length - 3);
-  dom.sourceMoreToggle.hidden = extraCount === 0;
-  dom.sourceMoreToggle.textContent = state.sourceMoreOpen ? "접기" : "더보기";
-  dom.sourceMoreToggle.setAttribute("aria-expanded", String(state.sourceMoreOpen));
 }
 
 function updateFacet(key, value, rowKey = key) {
@@ -1174,7 +1164,6 @@ function selectCategory(code) {
   state.openFacetRows.clear();
   state.expandedFacetOptions.clear();
   resetListingControls();
-  state.sourceMoreOpen = false;
   const firstFacet = state.categoryCode ? browseFlowForCategory(state.categoryCode)[0]?.key : "";
   if (firstFacet) state.openFacetRows.add(firstFacet);
   clearTimeout(catalogSearchTimer);
@@ -2897,11 +2886,6 @@ dom.modelSelect.addEventListener("change", () => {
   }
   const product = state.products.find((item) => productId(item) === dom.modelSelect.value);
   if (product) selectProduct(product);
-});
-dom.sourceMoreToggle.addEventListener("click", () => {
-  state.sourceMoreOpen = !state.sourceMoreOpen;
-  renderSourceFilters();
-  dom.sourceMoreToggle.focus({ preventScroll: true });
 });
 mobileFacetMedia.addEventListener("change", (event) => {
   renderFacets();

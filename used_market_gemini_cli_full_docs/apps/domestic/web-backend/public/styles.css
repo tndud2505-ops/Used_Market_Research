@@ -5733,6 +5733,66 @@ body.has-selected-product .results-flow {
 }
 
 /* v90: resizable workspace, compact affiliate action, and navigable price history */
+
+/* v91: price-analysis style source tabs on the main listings page */
+.source-selector-panel {
+  width: 100%;
+  overflow: hidden;
+}
+
+.workspace-source-facet .facet-values {
+  flex-wrap: nowrap;
+  gap: 18px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.source-choice {
+  position: relative;
+  flex: 0 0 auto;
+  min-height: 36px;
+  cursor: pointer;
+}
+
+.source-choice input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.source-choice span {
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+  padding: 8px 1px 7px;
+  border-bottom: 2px solid transparent;
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.source-choice input:checked + span {
+  border-color: var(--accent-strong);
+  color: var(--accent-strong);
+}
+
+.source-choice input:focus-visible + span {
+  outline: 2px solid var(--accent-strong);
+  outline-offset: 2px;
+}
+
+@media (max-width: 640px) {
+  .workspace-source-facet {
+    align-items: center;
+  }
+
+  .source-selector-panel,
+  .workspace-source-facet .facet-values {
+    flex-wrap: nowrap;
+  }
+}
 .workspace-content {
   --filter-column-width: 208px;
   grid-template-columns: var(--filter-column-width) 10px minmax(0, 1fr);
