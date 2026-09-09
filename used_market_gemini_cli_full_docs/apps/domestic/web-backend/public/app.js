@@ -1,4 +1,5 @@
 import { createContextualAffiliate } from "./affiliate.js?v=compact-ad-v1";
+import { createAdfitSlot } from "./adfit.js?v=adfit-v1";
 
 const PRODUCT_QUERY_KEYS = new Set([
   "manufacturer", "model", "gpu_model", "board_brand", "usage", "configuration", "socket", "chipset", "form_interface", "capacity", "purpose", "rated_wattage",
@@ -184,6 +185,7 @@ const dom = {
   listingPageNumbers: document.querySelector("#listing-page-numbers"),
   listingPagePrev: document.querySelector("#listing-page-prev"),
   listingPageNext: document.querySelector("#listing-page-next"),
+  adfitBanner: document.querySelector("#adfit-banner"),
 };
 
 function clampNumber(value, minimum, maximum) {
@@ -263,6 +265,7 @@ function setupColumnResizers() {
   });
 }
 const contextualAffiliate = createContextualAffiliate(document.querySelector("#contextual-offer"));
+const adfit = createAdfitSlot(dom.adfitBanner);
 
 function createElement(tag, className, text) {
   const node = document.createElement(tag);
@@ -518,6 +521,7 @@ function setBusy(button, isBusy, busyText) {
 
 function cancelListingRequest({ hidePagination = true } = {}) {
   contextualAffiliate.clear();
+  adfit.setEligible(false);
   clearTimeout(browseListingTimer);
   browseListingTimer = null;
   state.listingRequest?.abort();
@@ -1881,6 +1885,7 @@ function renderListings() {
   });
   dom.listingEmpty.hidden = visibleListings.length > 0;
   renderListingPagination();
+  adfit.setEligible(visibleListings.length > 0);
   void contextualAffiliate.update({
     hasResults: visibleListings.length > 0,
     canonical_product_id: state.selectedProduct ? productId(state.selectedProduct) : "",

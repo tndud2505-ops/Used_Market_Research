@@ -1787,7 +1787,7 @@ async function serveStaticAsset(
   const defaultPublic = resolve(process.cwd(), 'web-backend/public');
   const domesticPublic = resolve(process.cwd(), 'used_market_gemini_cli_full_docs/apps/domestic/web-backend/public');
   const publicRoot = existsSync(defaultPublic) ? defaultPublic : domesticPublic;
-  const requestedPath = pathname === '/' ? '/index.html' : pathname;
+  const requestedPath = pathname === '/' ? '/price-analysis.html' : pathname;
   const filePath = resolve(publicRoot, `.${requestedPath}`);
   if (filePath !== publicRoot && !filePath.startsWith(`${publicRoot}\\`) && !filePath.startsWith(`${publicRoot}/`)) {
     throw new ApiError(403, 'Forbidden');

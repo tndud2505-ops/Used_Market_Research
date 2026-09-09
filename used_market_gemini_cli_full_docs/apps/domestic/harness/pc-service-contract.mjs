@@ -2320,6 +2320,9 @@ assert.equal(assetPaths.at(-1), "/used-market-categories", "category landing mus
 const categoryApp = await worker.fetch(new Request("https://used-pick.test/categories/ram"), routeAssets);
 assert.equal(categoryApp.status, 200);
 assert.equal(assetPaths.at(-1), "/", "category routes must serve the app shell without redirecting away from the category URL");
+const defaultHome = await worker.fetch(new Request("https://used-pick.test/"), routeAssets);
+assert.equal(defaultHome.status, 200);
+assert.equal(assetPaths.at(-1), "/price-analysis.html", "the default home must serve the owned price-analysis experience");
 
 const internalSecret = "database-password=must-not-leak";
 let localSearchCalls = 0;
@@ -2341,6 +2344,10 @@ try {
   if (!server.listening) await once(server, "listening");
   const address = server.address();
   const baseUrl = `http://127.0.0.1:${address.port}`;
+  const localHome = await fetch(`${baseUrl}/`);
+  assert.equal(localHome.status, 200);
+  assert.match(await localHome.text(), /<title>PC 부품 가격 분석 \| USED PICK<\/title>/u,
+    "the local server must use price analysis as its default home too");
   const deniedCors = await fetch(`${baseUrl}/health`, { headers: { origin: "https://evil.example" } });
   assert.equal(deniedCors.headers.get("access-control-allow-origin"), null);
   const hidden = await fetch(`${baseUrl}/api/search`, {

@@ -6,9 +6,18 @@ import vm from "node:vm";
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const html = readFileSync(path.join(appRoot, "web-backend/public/index.html"), "utf8");
+const analysisHtml = readFileSync(path.join(appRoot, "web-backend/public/price-analysis.html"), "utf8");
+const builderHtml = readFileSync(path.join(appRoot, "web-backend/public/computer-builder.html"), "utf8");
 const script = readFileSync(path.join(appRoot, "web-backend/public/app.js"), "utf8");
 const styles = readFileSync(path.join(appRoot, "web-backend/public/styles.css"), "utf8");
 const requireText = (source, value, message) => assert.ok(source.includes(value), message);
+
+requireText(html, '<a href="/index.html" aria-current="page">중고 시세</a>',
+  "the listing page must remain directly reachable after analysis becomes home");
+requireText(analysisHtml, '<a href="/" aria-current="page">가격 분석</a>',
+  "price analysis must be the default home navigation target");
+requireText(builderHtml, '<a href="/">가격 분석</a>',
+  "the builder must link back to the default analysis home");
 
 const categoryIndex = html.indexOf('id="category-select"');
 const modelIndex = html.indexOf('id="model-select"');
@@ -28,7 +37,7 @@ for (const id of [
   "active-latest", "active-mean", "active-count", "sold-latest", "sold-mean", "sold-count",
   "filter-column-resizer", "analysis-column-resizer", "listing-section", "listing-rows",
   "listing-options", "listing-options-toggle", "listing-pagination", "listing-page-numbers", "listing-page-prev", "listing-page-next",
-  "model-detail-open", "price-summary-scope", "price-reset", "price-error", "listing-count",
+  "model-detail-open", "price-summary-scope", "price-reset", "price-error", "listing-count", "adfit-banner",
 ]) {
   requireText(html, `id="${id}"`, `missing required UI region #${id}`);
   requireText(script, `querySelector("#${id}")`, `app.js must bind #${id}`);
@@ -172,6 +181,7 @@ assert.ok(html.indexOf('id="contextual-offer"') > html.indexOf('class="listing-h
   && html.indexOf('id="contextual-offer"') < html.indexOf('id="listing-message"'),
   "the affiliate slot must stay compact at the top of loaded listing results");
 requireText(script, "hasResults: visibleListings.length > 0", "ads must never replace empty search results");
+requireText(script, "adfit.setEligible(visibleListings.length > 0)", "AdFit must follow the same organic-result visibility boundary");
 assert.equal(/['"`]\/api\/search(?:-only)?(?:[?'"`])/u.test(script), false, "the public UI must not call generic used-market search APIs");
 assert.equal(html.includes("�") || script.includes("�") || styles.includes("�"), false, "public UI files contain replacement characters");
 

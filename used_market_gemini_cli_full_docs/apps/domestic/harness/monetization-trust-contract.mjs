@@ -12,26 +12,48 @@ import {
 import { COUPANG_COMMISSION_DISCLOSURE, createContextualAffiliate, validContextualOffer } from "../web-backend/public/affiliate.js";
 
 const html = await readFile(new URL("../web-backend/public/index.html", import.meta.url), "utf8");
+const analysisHtml = await readFile(new URL("../web-backend/public/price-analysis.html", import.meta.url), "utf8");
 const app = await readFile(new URL("../web-backend/public/app.js", import.meta.url), "utf8");
 const privacy = await readFile(new URL("../web-backend/public/privacy.html", import.meta.url), "utf8");
 const terms = await readFile(new URL("../web-backend/public/terms.html", import.meta.url), "utf8");
+const staticHeaders = await readFile(new URL("../web-backend/public/_headers", import.meta.url), "utf8");
 const migration = await readFile(new URL("../cloudflare/migrations/0004_monetization_metrics.sql", import.meta.url), "utf8");
 const affiliateUi = await readFile(new URL("../web-backend/public/affiliate.js", import.meta.url), "utf8");
+const adfitUi = await readFile(new URL("../web-backend/public/adfit.js", import.meta.url), "utf8");
 const productionConfig = JSON.parse(await readFile(new URL("../cloudflare/wrangler.jsonc", import.meta.url), "utf8"));
 
 const publicSurface = `${html}\n${app}\n${affiliateUi}`;
 assert.doesNotMatch(publicSurface, /ads-partners\.coupang\.com|<iframe|<script[^>]+src=["']https:\/\/[^"']*coupang/u);
 assert.doesNotMatch(publicSurface, /referrerpolicy=["']unsafe-url["']/u);
 assert.doesNotMatch(publicSurface, /생활필수품|검색 결과 없음[\s\S]{0,500}제휴/u);
-assert.match(privacy, /제3자 맞춤형 광고 쿠키를 사용하지 않습니다/u);
 assert.match(privacy, /원문 검색어·상품명·전체 URL·영구 사용자 식별자는 광고 측정 정보로 저장하지 않습니다/u);
-assert.doesNotMatch(privacy, /카카오 애드핏/u);
-assert.match(terms, /제휴 여부는 검색 결과의 추천순이나 가격 통계에 영향을 주지 않습니다/u);
+assert.match(privacy, /카카오 AdFit/u);
+assert.match(privacy, /쿠키·기기·브라우저·접속 정보/u);
+assert.match(terms, /카카오 AdFit/u);
+assert.match(terms, /광고 여부는 검색 결과의 추천순이나 가격 통계에 영향을 주지 않습니다/u);
+assert.match(staticHeaders, /script-src[^\n]+https:\/\/t1\.kakaocdn\.net/u);
+assert.match(staticHeaders, /frame-src[^\n]+https:\/\/display\.ad\.daum\.net[^\n]+https:\/\/serv\.ds\.kakao\.com/u);
 
 assert.equal([...html.matchAll(/id="contextual-offer"/gu)].length, 1);
 assert.match(html, /id="contextual-offer"[^>]+hidden/u, "the shell must not publish an unverified ad");
 assert.ok(html.indexOf('id="contextual-offer"') > html.indexOf('class="listing-heading"'));
 assert.ok(html.indexOf('id="contextual-offer"') < html.indexOf('id="listing-message"'));
+assert.equal([...html.matchAll(/id="adfit-banner"/gu)].length, 1);
+assert.match(html, /id="adfit-banner"[^>]+hidden/u, "AdFit must stay hidden until organic listings exist");
+assert.match(html, /data-ad-unit\s*=\s*"DAN-gvTVDnxVn9S3leR5"/u);
+assert.match(html, /data-ad-width\s*=\s*"320"[\s\S]{0,120}data-ad-height\s*=\s*"100"/u);
+assert.match(html, /https:\/\/t1\.kakaocdn\.net\/kas\/static\/ba\.min\.js/u);
+assert.ok(html.indexOf('id="adfit-banner"') > html.indexOf('id="listing-pagination"'),
+  "AdFit must follow the organic listing rows and pagination");
+assert.match(app, /adfit\.setEligible\(visibleListings\.length > 0\)/u,
+  "AdFit must be visible only after organic results render");
+assert.equal([...analysisHtml.matchAll(/id="adfit-banner"/gu)].length, 1,
+  "the default analysis page must contain one AdFit slot");
+assert.match(analysisHtml, /data-ad-unit\s*=\s*"DAN-gvTVDnxVn9S3leR5"/u);
+assert.match(analysisHtml, /https:\/\/t1\.kakaocdn\.net\/kas\/static\/ba\.min\.js/u);
+assert.match(adfitUi, /MutationObserver/u, "AdFit must react when the SDK inserts a creative");
+assert.match(adfitUi, /querySelector\("iframe, \.kakao_ad_area > \*"\)/u,
+  "an empty or blocked AdFit response must not reserve blank page space");
 assert.match(affiliateUi, /sponsored noopener noreferrer/u);
 assert.match(affiliateUi, /referrerPolicy: "no-referrer"/u);
 assert.match(affiliateUi, /credentials: "omit"/u);

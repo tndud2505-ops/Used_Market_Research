@@ -3099,6 +3099,26 @@ body {
   }
 }
 
+.adfit-banner {
+  display: flex;
+  width: 100%;
+  min-height: 116px;
+  justify-content: center;
+  margin-top: 16px;
+  padding-top: 16px;
+  overflow-x: auto;
+  border-top: 1px solid var(--line);
+  scrollbar-width: thin;
+}
+
+.adfit-banner[hidden] {
+  display: none;
+}
+
+.adfit-banner .kakao_ad_area {
+  flex: 0 0 320px;
+}
+
 /* v66: direct model chooser and on-demand price detail */
 .workspace-heading,
 body.has-selected-product .workspace-heading {

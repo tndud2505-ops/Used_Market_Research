@@ -2,9 +2,11 @@ import { SERIES, idOf, nameOf, naturalCompare, money, metricValue, groupProducts
 import { readJson, createPriceStore } from './pc-tools-data.mjs?v=coverage-v4';
 import { drawChart } from './pc-tools-chart.mjs?v=coverage-v4';
 import { createDatePicker } from './pc-tools-calendar.mjs?v=coverage-v4';
+import { createAdfitSlot } from './adfit.js?v=adfit-v1';
 
 const builder = document.body.dataset.page === 'builder';
 const $ = selector => document.querySelector(selector);
+const adfit = createAdfitSlot($('#adfit-banner'));
 const STORAGE_KEY = 'used-pick:pc-build:v1';
 const PAGE_SIZE = 12;
 const state = {
@@ -452,6 +454,7 @@ async function start() {
     }
     if (state.selectedId) revealModel(state.selectedId);
     render(); refreshPrices();
+    if (!builder) adfit.setEligible(true);
   } catch (error) {
     status(`${error.message} `, true);
     const button = el('button', '', '다시 시도'); button.type = 'button'; button.addEventListener('click', start); $('#tools-status').append(button);
