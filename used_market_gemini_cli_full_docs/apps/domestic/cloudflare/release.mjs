@@ -103,7 +103,6 @@ async function checkPublicSite(baseUrl) {
   const home = await homeResponse.text();
   if (!home.includes('<title>PC 부품 가격 분석 | USED PICK</title>')
     || !home.includes('DAN-gvTVDnxVn9S3leR5')
-    || !home.includes('https://t1.kakaocdn.net/kas/static/ba.min.js')
     || /link\.coupang\.com|ads-partners\.coupang\.com|data-coupang/u.test(home)) {
     throw new Error(`${baseUrl}/ did not return the price-analysis home shell`);
   }
@@ -121,6 +120,11 @@ async function checkPublicSite(baseUrl) {
   if (!listing.includes('<title>중고 PC·컴퓨터 부품 검색 | 중고 시세 비교 | USED PICK</title>')
     || !listing.includes('DAN-gvTVDnxVn9S3leR5')) {
     throw new Error(`${baseUrl}/index.html did not return the listing shell`);
+  }
+  const adfitResponse = await fetch(`${baseUrl}/adfit.js?release_check=${Date.now()}`);
+  const adfit = adfitResponse.ok ? await adfitResponse.text() : '';
+  if (!adfit.includes('https://t1.kakaocdn.net/kas/static/ba.min.js')) {
+    throw new Error(`${baseUrl}/adfit.js did not return the approved Kakao SDK loader`);
   }
 
   const categoriesResponse = await fetch(`${baseUrl}/api/categories`, {

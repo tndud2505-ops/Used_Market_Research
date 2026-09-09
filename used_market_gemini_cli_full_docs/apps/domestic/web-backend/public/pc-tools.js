@@ -2,7 +2,7 @@ import { SERIES, idOf, nameOf, naturalCompare, money, metricValue, groupProducts
 import { readJson, createPriceStore } from './pc-tools-data.mjs?v=coverage-v4';
 import { drawChart } from './pc-tools-chart.mjs?v=coverage-v4';
 import { createDatePicker } from './pc-tools-calendar.mjs?v=coverage-v4';
-import { createAdfitSlot } from './adfit.js?v=adfit-v1';
+import { createAdfitSlot } from './adfit.js?v=adfit-v2';
 
 const builder = document.body.dataset.page === 'builder';
 const $ = selector => document.querySelector(selector);

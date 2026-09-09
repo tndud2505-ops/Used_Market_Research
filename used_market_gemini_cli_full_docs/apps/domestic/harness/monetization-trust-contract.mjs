@@ -44,7 +44,6 @@ assert.equal([...html.matchAll(/id="adfit-banner"/gu)].length, 1);
 assert.match(html, /id="adfit-banner"[^>]+hidden/u, "AdFit must stay hidden until organic listings exist");
 assert.match(html, /data-ad-unit\s*=\s*"DAN-gvTVDnxVn9S3leR5"/u);
 assert.match(html, /data-ad-width\s*=\s*"320"[\s\S]{0,120}data-ad-height\s*=\s*"100"/u);
-assert.match(html, /https:\/\/t1\.kakaocdn\.net\/kas\/static\/ba\.min\.js/u);
 assert.ok(html.indexOf('id="adfit-banner"') > html.indexOf('id="listing-pagination"'),
   "AdFit must follow the organic listing rows and pagination");
 assert.match(app, /adfit\.setEligible\(visibleListings\.length > 0\)/u,
@@ -52,10 +51,16 @@ assert.match(app, /adfit\.setEligible\(visibleListings\.length > 0\)/u,
 assert.equal([...analysisHtml.matchAll(/id="adfit-banner"/gu)].length, 1,
   "the default analysis page must contain one AdFit slot");
 assert.match(analysisHtml, /data-ad-unit\s*=\s*"DAN-gvTVDnxVn9S3leR5"/u);
-assert.match(analysisHtml, /https:\/\/t1\.kakaocdn\.net\/kas\/static\/ba\.min\.js/u);
 assert.match(adfitUi, /MutationObserver/u, "AdFit must react when the SDK inserts a creative");
 assert.match(adfitUi, /querySelector\("iframe, \.kakao_ad_area > \*"\)/u,
   "an empty or blocked AdFit response must not reserve blank page space");
+assert.match(adfitUi, /https:\/\/t1\.kakaocdn\.net\/kas\/static\/ba\.min\.js/u,
+  "the approved Kakao SDK must load only when an organic content surface is eligible");
+assert.match(adfitUi, /root\.hidden = false;[\s\S]{0,160}loadSdk/u,
+  "the AdFit area must be visible before the SDK inspects it");
+assert.match(adfitUi, /5_000/u, "an unfilled AdFit area must collapse after a bounded wait");
+assert.doesNotMatch(`${html}\n${analysisHtml}`, /<script[^>]+t1\.kakaocdn\.net/u,
+  "the SDK must not run before the page has eligible first-party content");
 assert.match(affiliateUi, /sponsored noopener noreferrer/u);
 assert.match(affiliateUi, /referrerPolicy: "no-referrer"/u);
 assert.match(affiliateUi, /credentials: "omit"/u);

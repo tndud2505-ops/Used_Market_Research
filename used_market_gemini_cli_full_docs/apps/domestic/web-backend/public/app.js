@@ -1,5 +1,5 @@
 import { createContextualAffiliate } from "./affiliate.js?v=compact-ad-v1";
-import { createAdfitSlot } from "./adfit.js?v=adfit-v1";
+import { createAdfitSlot } from "./adfit.js?v=adfit-v2";
 
 const PRODUCT_QUERY_KEYS = new Set([
   "manufacturer", "model", "gpu_model", "board_brand", "usage", "configuration", "socket", "chipset", "form_interface", "capacity", "purpose", "rated_wattage",
