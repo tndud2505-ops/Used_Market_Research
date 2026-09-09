@@ -206,7 +206,7 @@ try {
       if (!previousWorkerVersion) throw new Error('Exact pre-deploy Worker version is unavailable');
       await run('Rollback Worker after failed public smoke', 'npx', [
         'wrangler', 'rollback', previousWorkerVersion, '--yes', '--config', 'cloudflare/wrangler.jsonc',
-        '--message', 'Automatic rollback: USED PICK public smoke failed'
+        '--message', 'automatic-rollback-used-pick-public-smoke-failed'
       ]);
       await verifyRollbackRestored(previousWorkerVersion);
       console.log(`[release] Rollback verified at Worker version ${previousWorkerVersion}`);

@@ -2316,10 +2316,10 @@ const routeAssets = {
 };
 const categoryLanding = await worker.fetch(new Request("https://used-pick.test/categories"), routeAssets);
 assert.equal(categoryLanding.status, 200);
-assert.equal(assetPaths.at(-1), "/used-market-categories", "category landing must serve its own document without redirecting home");
+assert.equal(assetPaths.at(-1), "/used-market-categories.html", "category landing must serve its own document without redirecting home");
 const categoryApp = await worker.fetch(new Request("https://used-pick.test/categories/ram"), routeAssets);
 assert.equal(categoryApp.status, 200);
-assert.equal(assetPaths.at(-1), "/", "category routes must serve the app shell without redirecting away from the category URL");
+assert.equal(assetPaths.at(-1), "/index.html", "category routes must serve the app shell without redirecting away from the category URL");
 const defaultHome = await worker.fetch(new Request("https://used-pick.test/"), routeAssets);
 assert.equal(defaultHome.status, 200);
 assert.equal(assetPaths.at(-1), "/price-analysis.html", "the default home must serve the owned price-analysis experience");

@@ -1531,11 +1531,11 @@ export default {
         if (!["cpu", "gpu", "ram", "motherboard", "ssd", "hdd", "psu"].includes(categoryRoute[1])) {
           return json(410, { status: "error", error: "Unsupported category route" });
         }
-        const assetResponse = await serveAssets(new Request(new URL("/", request.url), request), env);
+        const assetResponse = await serveAssets(new Request(new URL("/index.html", request.url), request), env);
         if (assetResponse) return assetResponse;
       }
       if (url.pathname === "/categories") {
-        const assetResponse = await serveAssets(new Request(new URL("/used-market-categories", request.url), request), env);
+        const assetResponse = await serveAssets(new Request(new URL("/used-market-categories.html", request.url), request), env);
         if (assetResponse) return assetResponse;
       }
     }

@@ -33,6 +33,8 @@ assert.match(terms, /카카오 AdFit/u);
 assert.match(terms, /광고 여부는 검색 결과의 추천순이나 가격 통계에 영향을 주지 않습니다/u);
 assert.match(staticHeaders, /script-src[^\n]+https:\/\/t1\.kakaocdn\.net/u);
 assert.match(staticHeaders, /frame-src[^\n]+https:\/\/display\.ad\.daum\.net[^\n]+https:\/\/serv\.ds\.kakao\.com/u);
+assert.equal(productionConfig.assets.html_handling, "none",
+  "Cloudflare must preserve the separate analysis home and listing index paths");
 
 assert.equal([...html.matchAll(/id="contextual-offer"/gu)].length, 1);
 assert.match(html, /id="contextual-offer"[^>]+hidden/u, "the shell must not publish an unverified ad");
