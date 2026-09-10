@@ -212,7 +212,7 @@ export function pcCollectionTargetSetV2() {
     ["ODD", "블루레이 ODD"]
   ];
   const categoryTargets = PC_PART_CATEGORY_SEEDS_V2.map((category, index) => ({
-    targetId: `pc-target:${PC_PRODUCT_MASTER_V2_VERSION}:category-v7:${category.code}`,
+    targetId: `pc-target:${PC_PRODUCT_MASTER_V2_VERSION}:category-v8:${category.code}`,
     canonicalProductId: null,
     categoryCode: category.code,
     queryText: category.label,
@@ -223,7 +223,7 @@ export function pcCollectionTargetSetV2() {
     enabled: true
   }));
   const generalTargets = generalQueries.map(([categoryCode, queryText], index) => ({
-    targetId: `pc-target:${PC_PRODUCT_MASTER_V2_VERSION}:market-v7:${categoryCode}:${index}`,
+    targetId: `pc-target:${PC_PRODUCT_MASTER_V2_VERSION}:market-v8:${categoryCode}:${index}`,
     canonicalProductId: null,
     categoryCode,
     queryText,
@@ -284,7 +284,7 @@ export function pcCollectionTargetSetV2() {
     for (let queryIndex = 0; queryIndex < uniquePlans.length; queryIndex += 1) {
       const plan = uniquePlans[queryIndex];
       exactTargets.push({
-        targetId: `pc-target:${PC_PRODUCT_MASTER_V2_VERSION}:master-v7:${product.id}:${plan.scope}:${queryIndex}`,
+        targetId: `pc-target:${PC_PRODUCT_MASTER_V2_VERSION}:master-v8:${product.id}:${plan.scope}:${queryIndex}`,
         canonicalProductId: product.id,
         categoryCode: product.category,
         queryText: plan.queryText,

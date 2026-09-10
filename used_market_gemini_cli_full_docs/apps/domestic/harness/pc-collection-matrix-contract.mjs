@@ -19,6 +19,8 @@ assert.equal(new Set(targets.map((target) => target.categoryCode)).size, categor
   "every PC part category must have an active collection target");
 assert.doesNotMatch(JSON.stringify(targetSet), /quasarzone/iu, "retired Quasarzone must not be an active collection target");
 assert.equal(targetSet.targetSetVersion, "pc-targets:2:full-master-v8");
+assert.ok(targetSet.targets.every((target) => /:(?:category|market|master)-v8:/u.test(target.targetId)),
+  "a new collection target set must own new target ids instead of reusing prior-set ids");
 for (const product of publicProducts) {
   assert.ok(targets.some((target) => target.canonicalProductId === product.id),
     `${product.id} must have an exact collection target`);
