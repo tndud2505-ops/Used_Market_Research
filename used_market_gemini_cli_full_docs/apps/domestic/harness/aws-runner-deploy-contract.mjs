@@ -123,8 +123,40 @@ assert.match(runnerScript, /function isD1DailyRowWriteLimitError\(error\)/u,
   "a D1 free-tier write limit must be recognized as a deferred public sync");
 assert.match(runnerScript, /D1_DAILY_ROW_WRITE_LIMIT/u,
   "D1 daily write exhaustion must be visible without failing the local crawl");
+const runnerD1Serializer = runnerScript.match(/function toImportItem\(item\) \{[\s\S]*?\n\}/u)?.[0] || "";
+assert.ok(runnerD1Serializer, "runner D1 serializer must remain inspectable");
+for (const field of [
+  "market_segment", "listing_type", "condition_group", "spec_group_id",
+  "classification_confidence", "model_confidence", "quantity_confidence",
+  "price_scope_confidence", "statistics_eligible", "statistics_exclusion_reasons"
+]) {
+  assert.match(runnerD1Serializer, new RegExp(`\\b${field}:`, "u"),
+    `background D1 publication must preserve ${field}`);
+}
 assert.match(runnerScript, /const PC_SCHEDULER_CATCHUP_MS = 0;/u,
   "runner startup must not synchronously replay a multi-hour scheduler backlog");
+assert.match(runnerScript, /process\.env\.PC_SOURCE_TARGETS_PER_RUN \|\| "80"/u,
+  "the runtime default must cover the largest hourly plus daily source target budget");
+assert.match(runnerScript, /process\.env\.PC_SOURCE_TARGET_CONCURRENCY \|\| "6"/u,
+  "the runtime default must process the expanded target budget within the scheduler window");
+assert.match(installScript, /^PC_SOURCE_TARGETS_PER_RUN=80$/mu,
+  "new AWS environments must persist the target throughput required for full daily master coverage");
+assert.match(installScript, /^PC_SOURCE_TARGET_CONCURRENCY=6$/mu,
+  "new AWS environments must persist bounded source concurrency");
+assert.match(installScript,
+  /\[\[ -z "\$current_pc_source_targets_per_run" \|\| "\$current_pc_source_targets_per_run" == "12" \]\]/u,
+  "repeat installs must migrate only missing or legacy-default target throughput");
+assert.match(installScript,
+  /\[\[ -z "\$current_pc_source_target_concurrency" \|\| "\$current_pc_source_target_concurrency" == "2" \]\]/u,
+  "repeat installs must migrate only missing or legacy-default concurrency");
+assert.match(configureScript, /pc_source_targets_per_run < 4 \|\| pc_source_targets_per_run > 128/u,
+  "interactive reconfiguration must preserve valid operator target limits");
+assert.match(configureScript, /pc_source_target_concurrency < 1 \|\| pc_source_target_concurrency > 8/u,
+  "interactive reconfiguration must preserve valid operator concurrency");
+assert.match(configureScript, /^PC_SOURCE_TARGETS_PER_RUN=\$\{pc_source_targets_per_run\}$/mu,
+  "runner reconfiguration must retain the repaired target throughput");
+assert.match(configureScript, /^PC_SOURCE_TARGET_CONCURRENCY=\$\{pc_source_target_concurrency\}$/mu,
+  "runner reconfiguration must retain the repaired source concurrency");
 assert.match(statsRunnerScript, /const publicationTimeoutMs = Math\.min\(15 \* 60 \* 1000/u,
   "large product-stat publications must have a dedicated bounded timeout");
 assert.match(statsRunnerScript, /request as httpsRequest/u,
@@ -150,8 +182,12 @@ assert.match(runnerScript, /const INDEX_STARTUP_BACKUP_ENABLED = String\(process
   "large startup index backups must be opt-in outside schema migrations");
 assert.match(runnerScript, /const INDEX_BACKGROUND_MAINTENANCE_ENABLED = String\(process\.env\.RUNNER_INDEX_BACKGROUND_MAINTENANCE_ENABLED \?\? "false"\)/u,
   "large background index maintenance must be opt-in on the public runner");
-assert.match(runnerScript, /if \(pcPublicReadsRecentlyActive\(\)\) return;/u,
-  "the PC scheduler must yield to active public listing and price-stat reads");
+assert.match(runnerScript, /schedulerReadDeferral\(\{/u,
+  "the PC scheduler must yield briefly to active public reads");
+assert.match(runnerScript, /const PC_READ_SCHEDULER_MAX_DEFERRAL_MS = 10 \* 60 \* 1_000;/u,
+  "continuous public reads must have a bounded scheduler deferral");
+assert.doesNotMatch(runnerScript, /if \(pcPublicReadsRecentlyActive\(\)\) return;/u,
+  "public traffic must not starve PC collection indefinitely");
 assert.doesNotMatch(runnerScript, /try\s*\{\s*searchIndex\.createBackup\(\);\s*pcLedger = new PcPartsLedger/u,
   "runner startup must not unconditionally VACUUM a multi-GB index before serving public reads");
 assert.match(runnerScript, /const categoryOnlyCatalogScope = Boolean/u,

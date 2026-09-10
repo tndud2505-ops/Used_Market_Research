@@ -193,6 +193,9 @@ RUNNER_INDEX_DIR=/var/lib/used-market-runner
 RUNNER_INDEX_PATH=/var/lib/used-market-runner/search-index.sqlite
 PC_PARTS_SHADOW_WRITE_ENABLED=true
 PC_PARTS_SCHEDULER_ENABLED=false
+PC_SOURCE_TARGETS_PER_RUN=80
+PC_SOURCE_TARGET_CONCURRENCY=6
+PC_HELLOMARKET_DETAIL_LIMIT=40
 PC_SOURCE_GOVERNANCE_JSON={}
 PC_SPECIALIST_SEARCH_URLS_JSON={}
 RUNNER_PUBLIC_URL=
@@ -204,6 +207,14 @@ CHROMIUM_PATH=${CHROMIUM_PATH}
 NODE_OPTIONS=--max-old-space-size=2048
 EOF
 fi
+
+read_env_value() {
+  local key="$1"
+  awk -F= -v wanted="$key" '
+    { sub(/\r$/, "") }
+    $1 == wanted { sub(/^[^=]*=/, ""); print; exit }
+  ' "$RUNNER_ENV_FILE"
+}
 
 set_env_value() {
   local key="$1"
@@ -232,6 +243,17 @@ set_env_value RUNNER_INDEX_PATH /var/lib/used-market-runner/search-index.sqlite
 set_env_value PC_PARTS_SHADOW_WRITE_ENABLED true
 if ! grep -q '^PC_PARTS_SCHEDULER_ENABLED=' "$RUNNER_ENV_FILE"; then
   set_env_value PC_PARTS_SCHEDULER_ENABLED false
+fi
+current_pc_source_targets_per_run="$(read_env_value PC_SOURCE_TARGETS_PER_RUN)"
+if [[ -z "$current_pc_source_targets_per_run" || "$current_pc_source_targets_per_run" == "12" ]]; then
+  set_env_value PC_SOURCE_TARGETS_PER_RUN 80
+fi
+current_pc_source_target_concurrency="$(read_env_value PC_SOURCE_TARGET_CONCURRENCY)"
+if [[ -z "$current_pc_source_target_concurrency" || "$current_pc_source_target_concurrency" == "2" ]]; then
+  set_env_value PC_SOURCE_TARGET_CONCURRENCY 6
+fi
+if ! grep -q '^PC_HELLOMARKET_DETAIL_LIMIT=' "$RUNNER_ENV_FILE"; then
+  set_env_value PC_HELLOMARKET_DETAIL_LIMIT 40
 fi
 if ! grep -q '^PC_SOURCE_GOVERNANCE_JSON=' "$RUNNER_ENV_FILE"; then
   set_env_value PC_SOURCE_GOVERNANCE_JSON '{}'

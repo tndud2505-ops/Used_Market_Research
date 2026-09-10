@@ -4,18 +4,25 @@ import { pcCollectionTargetSetV2 } from "../cloudflare/pc-directory-http.mjs";
 import { OPERATIONAL_PC_DIRECTORY_SITES } from "../cloudflare/target-sites.mjs";
 import { PC_PART_CATEGORY_CODES } from "../collector/logic/pc-specialist-targets.mjs";
 import { PC_SOURCE_REGISTRY, listSourceCadenceEvents } from "../collector/logic/pc-source-registry.mjs";
+import { publicPcProducts } from "../market/logic/pc-public-catalog.mjs";
 
 const targetSet = pcCollectionTargetSetV2();
 const targets = targetSet.targets.filter((target) => target.enabled !== false);
 const targetIds = targets.map((target) => target.targetId);
 const categorySet = new Set(PC_PART_CATEGORY_CODES);
 const operationalSites = new Set(OPERATIONAL_PC_DIRECTORY_SITES);
+const publicProducts = publicPcProducts();
 
 assert.equal(new Set(targetIds).size, targetIds.length, "collection target ids must be unique");
 assert.ok(targets.length > PC_PART_CATEGORY_CODES.length, "the active target set must include category and model batches");
 assert.equal(new Set(targets.map((target) => target.categoryCode)).size, categorySet.size,
   "every PC part category must have an active collection target");
 assert.doesNotMatch(JSON.stringify(targetSet), /quasarzone/iu, "retired Quasarzone must not be an active collection target");
+assert.equal(targetSet.targetSetVersion, "pc-targets:2:full-master-v8");
+for (const product of publicProducts) {
+  assert.ok(targets.some((target) => target.canonicalProductId === product.id),
+    `${product.id} must have an exact collection target`);
+}
 
 const directorySources = PC_SOURCE_REGISTRY
   .filter((source) => source.directory_source === true && source.policy_status === "APPROVED" && source.runtime_status === "ENABLED")
@@ -66,11 +73,22 @@ const ryzen3100Targets = targets.filter((target) => target.canonicalProductId ==
 assert.ok(ryzen3100Targets.some((target) => target.queryText === "라이젠 3 3100"
   && target.sourceKeys.includes("bunjang") && !target.sourceKeys.includes("ebay")),
 "domestic Ryzen collection must use a family-qualified Korean query instead of a bare model number");
+assert.ok(ryzen3100Targets.some((target) => target.queryText === "Ryzen 3 3100"
+  && target.sourceKeys.includes("bunjang") && !target.sourceKeys.includes("ebay")),
+"domestic Ryzen collection must include a source spelling variant");
 assert.ok(ryzen3100Targets.some((target) => target.queryText === "AMD Ryzen 3 3100"
   && target.sourceKeys.length === 1 && target.sourceKeys[0] === "ebay"),
 "eBay collection must retain a source-appropriate English exact-model query");
 assert.equal(ryzen3100Targets.some((target) => target.queryText === "3100"), false,
 "ambiguous bare Ryzen model numbers must not be exact collection queries");
+const intel12400Targets = targets.filter((target) => target.canonicalProductId === "cpu:intel:i5-12400f");
+assert.ok(intel12400Targets.some((target) => target.queryText === "i5 12400F"
+  && target.sourceKeys.includes("bunjang")), "Intel collection must include a space-separated variant");
+const gtx1070TiTargets = targets.filter((target) => target.canonicalProductId === "gpu:nvidia:gtx-1070-ti");
+assert.ok(gtx1070TiTargets.some((target) => target.queryText === "GTX1070Ti"
+  && target.sourceKeys.includes("bunjang")), "GPU collection must include a compact model variant");
+assert.ok(targets.some((target) => target.canonicalProductId === "ssd:samsung:990-pro-1tb"
+  && target.sourceKeys.includes("bunjang")), "supplemental public products must be collected");
 
 console.log(JSON.stringify({
   status: "passed",

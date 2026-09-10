@@ -1222,15 +1222,25 @@ export class PcPartsLedger {
       LEFT JOIN pc_source_target_runtime r ON r.source_id = ? AND r.target_id = t.target_id
       WHERE s.set_status = 'ACTIVE' AND t.enabled = 1
       ORDER BY t.target_order, t.target_id`).all(source);
-    const due = rows.filter((row) => {
+    const due = rows.map((row) => {
       const sourceKeys = parseJson(row.source_keys_json, []);
-      if (Array.isArray(sourceKeys) && sourceKeys.length > 0 && !sourceKeys.includes(source.toLowerCase())) return false;
-      if (!row.last_started_at) return true;
-      const lastStartedMs = Date.parse(row.last_started_at);
-      if (!Number.isFinite(lastStartedMs)) return true;
+      if (Array.isArray(sourceKeys) && sourceKeys.length > 0 && !sourceKeys.includes(source.toLowerCase())) return null;
       const targetIntervalMs = Math.max(55, Number(row.minimum_interval_minutes) || 55) * 60 * 1_000;
-      return asOfMs - lastStartedMs >= Math.max(globalIntervalMs, targetIntervalMs);
-    });
+      const effectiveIntervalMs = Math.max(globalIntervalMs, targetIntervalMs);
+      if (!row.last_started_at) return { row, effectiveIntervalMs, neverStarted: true, dueAtMs: Number.NEGATIVE_INFINITY };
+      const lastStartedMs = Date.parse(row.last_started_at);
+      if (!Number.isFinite(lastStartedMs)) {
+        return { row, effectiveIntervalMs, neverStarted: true, dueAtMs: Number.NEGATIVE_INFINITY };
+      }
+      const dueAtMs = lastStartedMs + effectiveIntervalMs;
+      return asOfMs >= dueAtMs ? { row, effectiveIntervalMs, neverStarted: false, dueAtMs } : null;
+    }).filter(Boolean).sort((left, right) => (
+      left.effectiveIntervalMs - right.effectiveIntervalMs
+      || Number(right.neverStarted) - Number(left.neverStarted)
+      || left.dueAtMs - right.dueAtMs
+      || Number(left.row.target_order || 0) - Number(right.row.target_order || 0)
+      || String(left.row.target_id).localeCompare(String(right.row.target_id))
+    )).map((entry) => entry.row);
     const maximum = Number.isInteger(Number(limit)) && Number(limit) > 0 ? Number(limit) : null;
     return maximum ? due.slice(0, maximum) : due;
   }

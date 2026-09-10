@@ -33,6 +33,7 @@ import {
 } from "../collector/logic/pc-specialist-targets.mjs";
 import { explicitSoldText } from "../market/logic/listing-lifecycle.mjs";
 import { PC_PRODUCT_MASTER_V2 } from "../market/data/pc-product-master-v2.mjs";
+import { publicPcProducts } from "../market/logic/pc-public-catalog.mjs";
 import { pcCollectionTargetSetV2 } from "../cloudflare/pc-directory-http.mjs";
 
 const liveCanary = Object.freeze({
@@ -155,8 +156,8 @@ assert.ok(dailyMarketplaceTargets.length >= PC_PRODUCT_MASTER_V2.length,
   "every master node must receive at least one daily marketplace query");
 assert.deepEqual(
   [...new Set(dailyMarketplaceTargets.map((target) => target.canonicalProductId))].sort(),
-  PC_PRODUCT_MASTER_V2.map((product) => product.id).sort(),
-  "daily target generation must cover the complete versioned product master"
+  [...new Set([...PC_PRODUCT_MASTER_V2, ...publicPcProducts()].map((product) => product.id))].sort(),
+  "daily target generation must cover the complete master and every public PC product"
 );
 assert.ok(dailyMarketplaceTargets.every((target) => target.minimumIntervalMinutes === 24 * 60));
 assert.deepEqual([...new Set(specialistTargets.map((target) => target.categoryCode))].sort(), [...PC_PART_CATEGORY_CODES].sort());

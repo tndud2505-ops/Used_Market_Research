@@ -4,6 +4,7 @@ import {
   PC_PRODUCT_MASTER_V2_VERSION
 } from "../market/data/pc-product-master-v2.mjs";
 import { pcPartsDirectoryForApiV2 } from "../market/logic/pc-parts-directory.mjs";
+import { pcProductQueryVariants } from "../market/logic/pc-search-query-variants.mjs";
 import {
   PUBLIC_PC_CATEGORY_CODES,
   publicPcCatalogForApi,
@@ -244,11 +245,8 @@ export function pcCollectionTargetSetV2() {
   });
   const domesticExactQueries = (product) => {
     const spec = product.spec || {};
-    if (product.category === "GPU") return [spec.gpu_model || product.aliases?.[0] || product.name];
-    if (product.category === "CPU") {
-      const ryzen = String(product.name || "").match(/^AMD Ryzen\s+(\d+)\s+(.+)$/iu);
-      if (ryzen) return [`라이젠 ${ryzen[1]} ${ryzen[2]}`];
-      return [spec.cpu_model || product.aliases?.at(-1) || product.name];
+    if (["CPU", "GPU"].includes(product.category) || spec.exact_model) {
+      return pcProductQueryVariants(product, { maximum: 2 });
     }
     if (product.category === "RAM") {
       return [`${product.manufacturer} ${spec.memory_generation} ${spec.module_capacity_gb}GB 램`];
@@ -270,15 +268,17 @@ export function pcCollectionTargetSetV2() {
     }
     return [product.aliases?.[0] || product.name];
   };
+  const collectionProducts = [...new Map([...PC_PRODUCT_MASTER_V2, ...publicPcProducts()]
+    .map((product) => [product.id, product])).values()];
   const exactTargets = [];
   let exactOrder = categoryTargets.length + generalTargets.length;
-  for (const product of PC_PRODUCT_MASTER_V2) {
+  for (const product of collectionProducts) {
     const queryPlans = [
       ...domesticExactQueries(product).map((queryText) => ({ scope: "domestic", queryText, sourceKeys: searchMarketplaceSources })),
       { scope: "ebay", queryText: product.name, sourceKeys: overseasExactSources }
     ].filter((plan) => plan.sourceKeys.length > 0 && String(plan.queryText || "").trim());
     const uniquePlans = [...new Map(queryPlans.map((plan) => [
-      `${plan.scope}:${String(plan.queryText).trim()}`,
+      `${plan.scope}:${String(plan.queryText).normalize("NFKC").replace(/\s+/gu, " ").trim().toLocaleLowerCase("en-US")}`,
       { ...plan, queryText: String(plan.queryText).trim() }
     ])).values()];
     for (let queryIndex = 0; queryIndex < uniquePlans.length; queryIndex += 1) {
@@ -298,7 +298,7 @@ export function pcCollectionTargetSetV2() {
     }
   }
   return {
-    targetSetVersion: `pc-targets:${PC_PRODUCT_MASTER_V2_VERSION}:full-master-v7`,
+    targetSetVersion: `pc-targets:${PC_PRODUCT_MASTER_V2_VERSION}:full-master-v8`,
     directoryVersion: PC_PRODUCT_MASTER_V2_VERSION,
     targets: [...categoryTargets, ...generalTargets, ...exactTargets]
   };

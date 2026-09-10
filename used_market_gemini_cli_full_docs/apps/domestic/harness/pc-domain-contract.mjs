@@ -13,6 +13,7 @@ import {
 } from "../aws-runner/apply-reviewed-pc-exclusions.mjs";
 import { reclassifyPcSnapshots } from "../aws-runner/reclassify-pc-snapshots.mjs";
 import { enrichLedgerProjection, fetchAllPublicPcListings } from "../aws-runner/republish-pc-projections.mjs";
+import { schedulerReadDeferral } from "../aws-runner/pc-scheduler-admission.mjs";
 import {
   isPublicDeactivationCandidate,
   mergedPublicExclusionReasons,
@@ -97,6 +98,61 @@ const helloMarketFullPc = classifyPcPartListing({
 assert.equal(helloMarketFullPc.listing_kind, "FULL_SYSTEM",
   "a model-only HelloMarket title must use public detail specifications to reject a complete PC");
 assert.equal(helloMarketFullPc.price_eligible, false);
+const firstReadDeferral = schedulerReadDeferral({
+  nowMs: 10_000,
+  lastPublicReadAtMs: 9_000,
+  deferralStartedAtMs: 0,
+  recentReadWindowMs: 5_000,
+  maximumDeferralMs: 10 * 60 * 1_000
+});
+assert.equal(firstReadDeferral.defer, true);
+assert.equal(firstReadDeferral.nextDeferralStartedAtMs, 10_000);
+const boundedReadDeferral = schedulerReadDeferral({
+  nowMs: 611_000,
+  lastPublicReadAtMs: 610_500,
+  deferralStartedAtMs: firstReadDeferral.nextDeferralStartedAtMs,
+  recentReadWindowMs: 5_000,
+  maximumDeferralMs: 10 * 60 * 1_000
+});
+assert.equal(boundedReadDeferral.defer, false, "continuous reads must not starve collection indefinitely");
+assert.equal(boundedReadDeferral.nextDeferralStartedAtMs, 0);
+const intelArcA380 = classifyPcPartListing({
+  title: "스파클 인텔 ARC A380",
+  price: 100000,
+  currency: "KRW",
+  lifecycle_status: "ACTIVE"
+});
+assert.equal(intelArcA380.category_code, "GPU", "Intel Arc cards must not be classified as Intel CPUs");
+assert.equal(intelArcA380.canonical_model, "ARC A380");
+assert.equal(intelArcA380.price_eligible, true);
+const spacedIntelCpu = classifyPcPartListing({
+  title: "인텔 코어 i3 - 10100 (내장 그래픽 포함)",
+  price: 100000,
+  currency: "KRW",
+  lifecycle_status: "ACTIVE"
+});
+assert.equal(spacedIntelCpu.category_code, "CPU");
+assert.equal(spacedIntelCpu.canonical_model, "I3-10100", "spaced Intel hyphens must normalize to the canonical model");
+assert.equal(spacedIntelCpu.price_eligible, true);
+for (const [title, expected] of [
+  ["i5 - 6600K 단품 1개", { category_code: "CPU", canonical_model: "I5-6600K", listing_kind: "SINGLE_COMPONENT", price_eligible: true }],
+  ["i56400 CPU 단품", { category_code: "CPU", canonical_model: "I5-6400", listing_kind: "SINGLE_COMPONENT", price_eligible: true }],
+  ["i5 12400 F CPU 단품", { category_code: "CPU", canonical_model: "I5 12400 F", listing_kind: "SINGLE_COMPONENT", price_eligible: true }],
+  ["i5-8500cpu단품", { category_code: "CPU", canonical_model: "I5-8500", listing_kind: "SINGLE_COMPONENT", price_eligible: true }],
+  ["AMD 라이젠 5 1600 CPU 쿨러별도", { category_code: "CPU", canonical_model: "1600", listing_kind: "SINGLE_COMPONENT", price_eligible: true }],
+  ["인텔 코어 i5-9400F CPU 쿨러별도", { category_code: "CPU", canonical_model: "I5-9400F", listing_kind: "SINGLE_COMPONENT", price_eligible: true }],
+  ["AMD 라이젠5 3600XT CPU 쿨러 개봉상품", { category_code: "CPU", canonical_model: "3600XT", listing_kind: "SINGLE_COMPONENT", price_eligible: true }],
+  ["RX580 / RX570 4G 8G ( GTX1060 동급) RX460 그래픽카드 싸게 팝니다", { listing_kind: "COMPONENT_BUNDLE", price_eligible: false }],
+  ["PC 본체 GTX 1660 SUPER", { category_code: "SYSTEM", listing_kind: "FULL_SYSTEM", price_eligible: false }],
+  ["I5-12400fRTX3060램16기가Ssd 500입니다", { category_code: "SYSTEM", listing_kind: "FULL_SYSTEM", price_eligible: false }],
+  ["RX 6950 XT에 추가금 20만원 얹어서4070super 원합니다", { listing_kind: "WANTED", price_eligible: false }],
+  ["RX 9070 XT 5070ti+추금 교환", { listing_kind: "TRADE_ONLY", price_eligible: false }],
+  ["i5-9400F + GTX 1060 + DDR4", { listing_kind: "COMPONENT_BUNDLE", price_eligible: false }],
+  ["i7-12700F + 쿨러 + DDR5", { listing_kind: "COMPONENT_BUNDLE", price_eligible: false }]
+]) {
+  const actual = classifyPcPartListing({ title, price: 100000, currency: "KRW", lifecycle_status: "ACTIVE" });
+  for (const [key, value] of Object.entries(expected)) assert.equal(actual[key], value, `${title}: ${key}`);
+}
 assert.equal(reviewedPcListingExclusion("hellomarket", "https://www.hellomarket.com/item/182653333")?.reason, "FULL_SYSTEM");
 assert.equal(reviewedPcListingExclusion("hellomarket", "hellomarket:https://www.hellomarket.com/item/183908019")?.reason, "QUANTITY_UNKNOWN");
 assert.equal(reviewedPcListingExclusion("joonggonara", "https://web.joongna.com/product/231873683")?.reason, "FULL_SYSTEM");
@@ -409,6 +465,42 @@ assert.deepEqual(
   ["fixture:gpu", "fixture:cpu"],
   "the daily master target becomes due only after its own 24-hour interval"
 );
+const fairTargetDb = new DatabaseSync(":memory:");
+const fairTargetLedger = new PcPartsLedger({ db: fairTargetDb, now: () => new Date("2026-09-10T12:00:00.000Z") });
+fairTargetLedger.migrate();
+fairTargetLedger.upsertSource({
+  sourceId: "bunjang", displayName: "번개장터", marketPool: "KR_C2C_USED",
+  policyStatus: "APPROVED", runtimeStatus: "ENABLED"
+});
+fairTargetLedger.activateCollectionTargets({
+  targetSetVersion: "fixture-fair-targets-v1",
+  directoryVersion: "fixture-master-v1",
+  targets: [
+    { targetId: "fair:hourly", categoryCode: "CPU", queryText: "CPU", sourceKeys: ["bunjang"],
+      targetOrder: 0, cadenceClass: "HOURLY_CATEGORY", minimumIntervalMinutes: 55 },
+    { targetId: "fair:daily-old", categoryCode: "CPU", queryText: "old", sourceKeys: ["bunjang"],
+      targetOrder: 1, cadenceClass: "DAILY_MASTER", minimumIntervalMinutes: 24 * 60 },
+    { targetId: "fair:daily-never-a", categoryCode: "GPU", queryText: "new-a", sourceKeys: ["bunjang"],
+      targetOrder: 2, cadenceClass: "DAILY_MASTER", minimumIntervalMinutes: 24 * 60 },
+    { targetId: "fair:daily-never-b", categoryCode: "RAM", queryText: "new-b", sourceKeys: ["bunjang"],
+      targetOrder: 3, cadenceClass: "DAILY_MASTER", minimumIntervalMinutes: 24 * 60 }
+  ]
+});
+fairTargetLedger.updateSourceTargetRuntime({
+  sourceId: "bunjang", targetId: "fair:hourly",
+  startedAt: "2026-09-10T11:00:00.000Z", succeededAt: "2026-09-10T11:00:00.000Z"
+});
+fairTargetLedger.updateSourceTargetRuntime({
+  sourceId: "bunjang", targetId: "fair:daily-old",
+  startedAt: "2026-09-09T11:00:00.000Z", succeededAt: "2026-09-09T11:00:00.000Z"
+});
+assert.deepEqual(
+  fairTargetLedger.listDueCollectionTargets("bunjang", "2026-09-10T12:00:00.000Z", undefined, 3)
+    .map((target) => target.target_id),
+  ["fair:hourly", "fair:daily-never-a", "fair:daily-never-b"],
+  "short-cadence targets must keep their slots while never-run daily targets advance fairly"
+);
+fairTargetDb.close();
 const coverageAsOf = new Date("2026-08-29T12:00:00.000Z");
 for (let offset = 0; offset <= 30; offset += 1) {
   if ([5, 10, 20].includes(offset)) continue;

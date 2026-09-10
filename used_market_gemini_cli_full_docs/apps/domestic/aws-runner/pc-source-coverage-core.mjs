@@ -1,3 +1,10 @@
+import {
+  pcProductQueryVariants,
+  strongProductTitleMatch,
+} from "../market/logic/pc-search-query-variants.mjs";
+
+export { pcProductQueryVariants, strongProductTitleMatch };
+
 const STATUS_PRIORITY = Object.freeze([
   "SOURCE_ERROR", "PUBLIC_MISSING", "CLASSIFIER_UNRESOLVED", "SOURCE_MATCH_EXCLUDED",
   "PUBLIC_ONLY", "SOURCE_NO_EXACT_MATCH", "CATEGORY_MISMATCH", "SOURCE_EMPTY",
@@ -40,6 +47,8 @@ export function parseProbeConfig(env, operationalSourceKeys) {
     itemLimit: boundedInteger(env.PC_PROBE_ITEM_LIMIT ?? env.PC_PROBE_LIMIT, 20, 1, 80, "PC_PROBE_ITEM_LIMIT"),
     delayMs: boundedInteger(env.PC_PROBE_DELAY_MS, 250, 0, 5_000, "PC_PROBE_DELAY_MS"),
     comparePublic: String(env.PC_PROBE_COMPARE_PUBLIC ?? "1").trim() !== "0",
+    queryVariants: String(env.PC_PROBE_QUERY_VARIANTS ?? "0").trim() === "1",
+    maxQueryVariants: boundedInteger(env.PC_PROBE_MAX_QUERY_VARIANTS, 4, 1, 6, "PC_PROBE_MAX_QUERY_VARIANTS"),
     publicBaseUrl: publicBaseUrl.toString().replace(/\/$/u, ""),
   };
 }
@@ -49,13 +58,20 @@ export function selectProbeRuns(targets, config) {
   const categories = new Set(config.categories || []);
   const runs = [];
   for (const sourceKey of config.sourceKeys) {
-    const assigned = targets.filter((target) => target.enabled !== false
+    const assignedTargets = targets.filter((target) => target.enabled !== false
       && target.sourceKeys.includes(sourceKey)
       && (config.cadenceClass === "ALL" || target.cadenceClass === config.cadenceClass)
       && (productIds.size === 0 || productIds.has(target.canonicalProductId))
       && (categories.size === 0 || categories.has(target.categoryCode)))
       .sort((left, right) => Number(left.targetOrder || 0) - Number(right.targetOrder || 0)
         || String(left.targetId).localeCompare(String(right.targetId)));
+    const seenProducts = new Set();
+    const assigned = config.queryVariants ? assignedTargets.filter((target) => {
+      const key = target.canonicalProductId || target.targetId;
+      if (seenProducts.has(key)) return false;
+      seenProducts.add(key);
+      return true;
+    }) : assignedTargets;
     assigned.forEach((target) => runs.push({ sourceKey, target }));
   }
   const offset = Math.min(config.offset, runs.length);
@@ -97,7 +113,10 @@ function projectionReasons(projection) {
   ].map(String))];
 }
 
-export function assessProbeRun({ sourceKey, target, items = [], projections = [], publicListingCount = null, publicFreshness = null }) {
+export function assessProbeRun({
+  sourceKey, target, items = [], projections = [], publicListingCount = null, publicFreshness = null,
+  product = null, queryVariants = [],
+}) {
   const hasPublicCount = publicListingCount !== null && publicListingCount !== undefined
     && Number.isFinite(Number(publicListingCount));
   const expectedId = target.canonicalProductId || null;
@@ -110,6 +129,19 @@ export function assessProbeRun({ sourceKey, target, items = [], projections = []
   const wrongModel = expectedId
     ? projections.filter((projection) => projection?.canonical_product_id && projection.canonical_product_id !== expectedId)
     : [];
+  const independentCandidateIndexes = product ? items.map((item, index) => ({ item, index }))
+    .filter(({ item, index }) => {
+      const projection = projections[index];
+      return strongProductTitleMatch(product, `${item?.title || ""} ${item?.description || ""}`)
+        && projection?.lifecycle_status === "ACTIVE"
+        && ["SINGLE_COMPONENT", "SAME_PRODUCT_LOT"].includes(projection?.listing_kind)
+        && projection?.condition_code === "USED_WORKING"
+        && Number(projection?.unit_price) > 0;
+    }).map(({ index }) => index) : [];
+  const independentMatchedCount = independentCandidateIndexes
+    .filter((index) => projections[index]?.canonical_product_id === expectedId).length;
+  const independentMissIndexes = independentCandidateIndexes
+    .filter((index) => projections[index]?.canonical_product_id !== expectedId);
   let status;
   if (items.length === 0) status = hasPublicCount && Number(publicListingCount) > 0 ? "PUBLIC_ONLY" : "SOURCE_EMPTY";
   else if (!expectedId) status = categoryMatches.length > 0 ? "CATEGORY_MATCH" : "CATEGORY_MISMATCH";
@@ -133,6 +165,19 @@ export function assessProbeRun({ sourceKey, target, items = [], projections = []
     eligible_exact_match_count: eligibleExactMatches.length,
     unresolved_model_count: unresolved.length,
     wrong_model_count: wrongModel.length,
+    independent_candidate_count: independentCandidateIndexes.length,
+    independent_matched_count: independentMatchedCount,
+    independent_match_rate: independentCandidateIndexes.length > 0
+      ? Number((independentMatchedCount / independentCandidateIndexes.length).toFixed(4))
+      : null,
+    independent_miss_samples: independentMissIndexes.slice(0, 5).map((index) => ({
+      item_id: String(items[index]?.source_listing_id || items[index]?.item_id || items[index]?.id || index),
+      title: String(items[index]?.title || "").slice(0, 300),
+      url: String(items[index]?.url || "").slice(0, 1_000),
+      projected_product_id: projections[index]?.canonical_product_id || null,
+      exclusion_reasons: projectionReasons(projections[index]),
+    })),
+    query_variants: [...new Set(queryVariants.map((query) => String(query || "").trim()).filter(Boolean))].slice(0, 20),
     public_listing_count: hasPublicCount ? Number(publicListingCount) : null,
     public_freshness: publicFreshness || null,
     samples: items.slice(0, 3).map((item, index) => ({
@@ -149,12 +194,19 @@ export function summarizeProbeRuns(rows, { offset, targetLimit, totalRuns }) {
   const statusCounts = Object.fromEntries([...new Set(rows.map((row) => row.status))]
     .sort((left, right) => STATUS_PRIORITY.indexOf(left) - STATUS_PRIORITY.indexOf(right) || left.localeCompare(right))
     .map((status) => [status, rows.filter((row) => row.status === status).length]));
+  const independentCandidateCount = rows.reduce((total, row) => total + Number(row.independent_candidate_count || 0), 0);
+  const independentMatchedCount = rows.reduce((total, row) => total + Number(row.independent_matched_count || 0), 0);
   return {
     status_counts: statusCounts,
     checked_count: rows.length,
     actionable_count: rows.filter((row) => [
       "SOURCE_ERROR", "PUBLIC_MISSING", "CLASSIFIER_UNRESOLVED", "SOURCE_MATCH_EXCLUDED",
     ].includes(row.status)).length,
+    independent_candidate_count: independentCandidateCount,
+    independent_matched_count: independentMatchedCount,
+    independent_match_rate: independentCandidateCount > 0
+      ? Number((independentMatchedCount / independentCandidateCount).toFixed(4))
+      : null,
     next_offset: offset + Math.min(rows.length, targetLimit) < totalRuns ? offset + rows.length : null,
   };
 }

@@ -2,9 +2,17 @@ import { collectOne } from "../cloudflare/live-search.mjs";
 import { pcCollectionTargetSetV2 } from "../cloudflare/pc-directory-http.mjs";
 import { collectDanawaCategoryListings, SPECIALIST_FIXTURE_PARSERS } from "../collector/logic/pc-source-adapters.mjs";
 import { PC_SOURCE_REGISTRY, getPcSource } from "../collector/logic/pc-source-registry.mjs";
+import { PC_PRODUCT_MASTER_V2 } from "../market/data/pc-product-master-v2.mjs";
+import { publicPcProducts } from "../market/logic/pc-public-catalog.mjs";
 import { PcPartsLedger } from "./pc-parts-ledger.mjs";
 import { PcShadowPipeline } from "./pc-shadow-pipeline.mjs";
-import { assessProbeRun, parseProbeConfig, selectProbeRuns, summarizeProbeRuns } from "./pc-source-coverage-core.mjs";
+import {
+  assessProbeRun,
+  parseProbeConfig,
+  pcProductQueryVariants,
+  selectProbeRuns,
+  summarizeProbeRuns,
+} from "./pc-source-coverage-core.mjs";
 
 const operationalSources = PC_SOURCE_REGISTRY.filter((source) => source.directory_source === true
   && source.policy_status === "APPROVED" && source.runtime_status === "ENABLED");
@@ -74,11 +82,42 @@ ledger.migrate();
 const pipeline = new PcShadowPipeline({ ledger });
 await pipeline.initialize();
 const checkedAt = new Date().toISOString();
+const productById = new Map([...PC_PRODUCT_MASTER_V2, ...publicPcProducts()]
+  .map((product) => [product.id, product]));
 const rows = [];
 for (const { sourceKey, target } of selection.runs) {
   try {
     getPcSource(sourceKey);
-    const items = await collectTargetItems(sourceKey, target);
+    const product = productById.get(target.canonicalProductId) || null;
+    const queryVariants = config.queryVariants && product
+      ? pcProductQueryVariants(product, { sourceKey, maximum: config.maxQueryVariants })
+      : [target.queryText];
+    const dedupedItems = new Map();
+    const queryResults = [];
+    for (let queryIndex = 0; queryIndex < queryVariants.length; queryIndex += 1) {
+      const queryText = queryVariants[queryIndex];
+      try {
+        const collected = await collectTargetItems(sourceKey, { ...target, queryText });
+        for (const item of collected) {
+          const identity = String(item?.source_listing_id || item?.item_id || item?.id || item?.url || "").trim();
+          if (identity && !dedupedItems.has(identity)) dedupedItems.set(identity, item);
+        }
+        queryResults.push({ query_text: queryText, received_count: collected.length, error: null });
+      } catch (error) {
+        queryResults.push({
+          query_text: queryText,
+          received_count: 0,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+      if (queryIndex + 1 < queryVariants.length && config.delayMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, config.delayMs));
+      }
+    }
+    if (queryResults.every((result) => result.error)) {
+      throw new Error(`ALL_QUERY_VARIANTS_FAILED:${queryResults.map((result) => result.error).join(";")}`);
+    }
+    const items = [...dedupedItems.values()];
     const projections = items.map((item) => {
       const normalized = pipeline.normalizeItem({ ...item, site: sourceKey }, checkedAt);
       return {
@@ -88,6 +127,9 @@ for (const { sourceKey, target } of selection.runs) {
         lifecycle_status: normalized.state.status,
         price_eligible: normalized.priceEligible,
         statistics_eligible: normalized.normalized.statisticsEligible,
+        listing_kind: normalized.normalized.listingKind,
+        condition_code: normalized.normalized.conditionCode,
+        unit_price: normalized.normalized.unitPrice,
         exclusion_reasons: normalized.exclusionReasons,
         statistics_exclusion_reasons: normalized.normalized.statisticsExclusionReasons,
       };
@@ -97,7 +139,10 @@ for (const { sourceKey, target } of selection.runs) {
       sourceKey, target, items, projections,
       publicListingCount: publicEvidence.count,
       publicFreshness: publicEvidence.freshness,
+      product,
+      queryVariants,
     }));
+    rows.at(-1).query_results = queryResults;
   } catch (error) {
     rows.push({
       source_key: sourceKey,
@@ -115,7 +160,7 @@ for (const { sourceKey, target } of selection.runs) {
 ledger.close();
 
 const report = {
-  report_version: "pc-source-coverage-v2",
+  report_version: "pc-source-coverage-v3",
   target_set_version: targetSet.targetSetVersion,
   checked_at: checkedAt,
   source_keys: config.sourceKeys,
@@ -123,6 +168,8 @@ const report = {
     product_ids: config.productIds,
     categories: config.categories,
     cadence_class: config.cadenceClass,
+    query_variants: config.queryVariants,
+    max_query_variants: config.maxQueryVariants,
   },
   offset: config.offset,
   target_limit: config.targetLimit,

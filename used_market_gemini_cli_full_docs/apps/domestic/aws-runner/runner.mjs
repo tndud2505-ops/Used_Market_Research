@@ -25,6 +25,7 @@ import { collectionIdentity, SearchIndex } from "./search-index.mjs";
 import { PcPartsLedger } from "./pc-parts-ledger.mjs";
 import { stabilizeIncrementalPcProjections } from "./pc-projection-republish-policy.mjs";
 import { parsePriceStatsRequest, priceStatsResponse } from "./pc-price-stats-http.mjs";
+import { schedulerReadDeferral } from "./pc-scheduler-admission.mjs";
 import { PcShadowPipeline } from "./pc-shadow-pipeline.mjs";
 import { explicitSoldText, structuredSoldEvidenceFromHtml } from "../market/logic/listing-lifecycle.mjs";
 import { pcCatalogResponse, pcCollectionTargetSetV2, pcProductsResponse } from "../cloudflare/pc-directory-http.mjs";
@@ -109,6 +110,7 @@ const INDEX_BACKGROUND_MAINTENANCE_ENABLED = String(process.env.RUNNER_INDEX_BAC
 const INDEX_DAILY_BACKUP_ENABLED = String(process.env.RUNNER_INDEX_DAILY_BACKUP_ENABLED ?? "false").toLowerCase() === "true";
 const INDEX_STATUS_CACHE_TTL_MS = 10_000;
 const PC_READ_SCHEDULER_PAUSE_MS = 5_000;
+const PC_READ_SCHEDULER_MAX_DEFERRAL_MS = 10 * 60 * 1_000;
 const PC_SCHEDULER_TICK_MS = 30_000;
 // Do not replay a multi-hour backlog synchronously during process startup.
 // The persisted per-target runtime still catches up on the normal cadence,
@@ -121,9 +123,9 @@ const PC_SHADOW_READY_MS = 7 * 24 * 60 * 60 * 1000;
 const PC_PUBLICATION_RECENT_MS = 26 * 60 * 60 * 1000;
 const PC_RECHECK_LIMIT_PER_RUN = 20;
 const PC_SOURCE_TARGETS_PER_RUN = Math.min(128, Math.max(4,
-  Number.parseInt(process.env.PC_SOURCE_TARGETS_PER_RUN || "12", 10) || 12));
+  Number.parseInt(process.env.PC_SOURCE_TARGETS_PER_RUN || "80", 10) || 80));
 const PC_SOURCE_TARGET_CONCURRENCY = Math.min(8, Math.max(1,
-  Number.parseInt(process.env.PC_SOURCE_TARGET_CONCURRENCY || "2", 10) || 2));
+  Number.parseInt(process.env.PC_SOURCE_TARGET_CONCURRENCY || "6", 10) || 6));
 const PC_HELLOMARKET_DETAIL_LIMIT = Math.min(120, Math.max(0,
   Number.parseInt(process.env.PC_HELLOMARKET_DETAIL_LIMIT || "40", 10) || 0));
 const PC_EXTERNAL_FETCH_TIMEOUT_MS = 30_000;
@@ -258,6 +260,7 @@ let backgroundWindowStartedAt = Date.now();
 let backgroundRunsThisHour = 0;
 let lastMaintenanceDate = "";
 let lastPcPublicReadAt = 0;
+let pcSchedulerReadDeferralStartedAt = 0;
 let indexRuntimeStatusCache = { expiresAt: 0, value: null };
 let pcOperationalReadinessCache = { expiresAt: 0, value: null };
 const searchExecutionStorage = new AsyncLocalStorage();
@@ -270,10 +273,6 @@ const searchRuntimeMetrics = {
 
 function markPcPublicRead() {
   lastPcPublicReadAt = Date.now();
-}
-
-function pcPublicReadsRecentlyActive() {
-  return lastPcPublicReadAt > 0 && Date.now() - lastPcPublicReadAt < PC_READ_SCHEDULER_PAUSE_MS;
 }
 
 function pcPartsLedgerMigrationNeedsBackup(db) {
@@ -499,7 +498,7 @@ function toImportItem(item) {
   return {
     item_id: item.item_id || item.id,
     site: item.site,
-    category_id: item.category_id || "all",
+    category_id: item.category_id || "pc",
     title: item.title,
     search_text: item.search_text || item.title,
     price_value: item.price,
@@ -512,9 +511,19 @@ function toImportItem(item) {
     canonical_product_id: item.canonical_product_id || null,
     canonical_display_name: item.canonical_display_name || null,
     canonical_manufacturer: item.canonical_manufacturer || null,
-    board_manufacturer: item.board_manufacturer || null,
+    board_manufacturer: item.board_manufacturer || item.spec?.board_manufacturer || null,
     listing_kind: item.listing_kind || "UNKNOWN",
-    pc_category_code: item.category_code || null,
+    pc_category_code: item.category_code || item.pc_category_code || null,
+    market_segment: item.market_segment || "UNKNOWN",
+    listing_type: item.listing_type || "UNKNOWN",
+    condition_group: item.condition_group || "UNKNOWN",
+    spec_group_id: item.spec_group_id || null,
+    classification_confidence: Number(item.classification_confidence || 0),
+    model_confidence: Number(item.model_confidence || 0),
+    quantity_confidence: Number(item.quantity_confidence || 0),
+    price_scope_confidence: Number(item.price_scope_confidence || 0),
+    statistics_eligible: item.statistics_eligible === true,
+    statistics_exclusion_reasons: item.statistics_exclusion_reasons || [],
     quantity: item.quantity || null,
     price_scope: item.price_scope || "UNKNOWN",
     condition_code: item.condition_code || "UNKNOWN",
@@ -1569,7 +1578,14 @@ function pcSourceAdapter(sourceKey) {
 
 async function runPcSourceSchedulerTick() {
   if (!PC_PARTS_SCHEDULER_ENABLED || !pcPipeline || !pcLedger || pcSchedulerActive) return;
-  if (pcPublicReadsRecentlyActive()) return;
+  const admission = schedulerReadDeferral({
+    lastPublicReadAtMs: lastPcPublicReadAt,
+    deferralStartedAtMs: pcSchedulerReadDeferralStartedAt,
+    recentReadWindowMs: PC_READ_SCHEDULER_PAUSE_MS,
+    maximumDeferralMs: PC_READ_SCHEDULER_MAX_DEFERRAL_MS
+  });
+  pcSchedulerReadDeferralStartedAt = admission.nextDeferralStartedAtMs;
+  if (admission.defer) return;
   pcSchedulerActive = true;
   const through = new Date().toISOString();
   const tickSignal = AbortSignal.timeout(PC_SCHEDULER_WATCHDOG_MS);
@@ -2104,6 +2120,8 @@ const server = http.createServer(async (req, res) => {
         ledger_ready: Boolean(pcLedger),
         scheduler_enabled: PC_PARTS_SCHEDULER_ENABLED,
         scheduler_active: pcSchedulerActive,
+        source_targets_per_run: PC_SOURCE_TARGETS_PER_RUN,
+        source_target_concurrency: PC_SOURCE_TARGET_CONCURRENCY,
         d1_background_mirror_enabled: D1_BACKGROUND_MIRROR_ENABLED,
         d1_background_mirror_configured: Boolean(IMPORT_URL && IMPORT_TOKEN),
         publication_configured: Boolean(STATS_IMPORT_URL && IMPORT_TOKEN),
