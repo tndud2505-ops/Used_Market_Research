@@ -60,6 +60,11 @@ assert.match(runnerScript, /enrichHelloMarketDetails\(items/u,
   "the scheduled HelloMarket collector must classify public detail text, not search-card titles alone");
 assert.match(installScript, /pc-reviewed-listing-exclusions\.mjs/u,
   "the AWS installer must copy and syntax-check the reviewed listing exclusions module");
+assert.match(installScript,
+  /install -m 0644 "\$SOURCE_ROOT\/market\/logic\/pc-search-query-variants\.mjs" "\$APP_ROOT\/market\/logic\/pc-search-query-variants\.mjs"/u,
+  "the AWS installer must deploy the query variant module imported by the target set");
+assert.match(installScript, /node --check "\$APP_ROOT\/market\/logic\/pc-search-query-variants\.mjs"/u,
+  "the AWS installer must syntax-check the deployed query variant module");
 const ledgerScript = await read("aws-runner/pc-parts-ledger.mjs");
 assert.match(ledgerScript, /rows\.filter\(\(row\) => !reviewedPcListingExclusion/u,
   "reviewed source-listing exclusions must also remove historical statistics members");

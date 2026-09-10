@@ -52,6 +52,7 @@ for required_file in \
   collector/logic/pc-source-adapters.mjs \
   collector/logic/pc-specialist-targets.mjs \
   market/logic/pc-parts-classifier.mjs \
+  market/logic/pc-search-query-variants.mjs \
   market/logic/pc-reviewed-listing-exclusions.mjs \
   market/logic/pc-parts-directory.mjs \
   market/data/pc-product-master-v1.mjs \
@@ -164,6 +165,7 @@ if [[ "$SOURCE_ROOT" != "$APP_ROOT" ]]; then
   install -m 0644 "$SOURCE_ROOT/collector/logic/pc-source-adapters.mjs" "$APP_ROOT/collector/logic/pc-source-adapters.mjs"
   install -m 0644 "$SOURCE_ROOT/collector/logic/pc-specialist-targets.mjs" "$APP_ROOT/collector/logic/pc-specialist-targets.mjs"
   install -m 0644 "$SOURCE_ROOT/market/logic/pc-parts-classifier.mjs" "$APP_ROOT/market/logic/pc-parts-classifier.mjs"
+  install -m 0644 "$SOURCE_ROOT/market/logic/pc-search-query-variants.mjs" "$APP_ROOT/market/logic/pc-search-query-variants.mjs"
   install -m 0644 "$SOURCE_ROOT/market/logic/pc-reviewed-listing-exclusions.mjs" "$APP_ROOT/market/logic/pc-reviewed-listing-exclusions.mjs"
   install -m 0644 "$SOURCE_ROOT/market/logic/pc-parts-directory.mjs" "$APP_ROOT/market/logic/pc-parts-directory.mjs"
   install -m 0644 "$SOURCE_ROOT/market/logic/listing-lifecycle.mjs" "$APP_ROOT/market/logic/listing-lifecycle.mjs"
@@ -301,6 +303,7 @@ node --check "$APP_ROOT/collector/logic/pc-source-registry.mjs"
 node --check "$APP_ROOT/collector/logic/pc-source-adapters.mjs"
 node --check "$APP_ROOT/collector/logic/pc-specialist-targets.mjs"
 node --check "$APP_ROOT/market/logic/pc-parts-classifier.mjs"
+node --check "$APP_ROOT/market/logic/pc-search-query-variants.mjs"
 node --check "$APP_ROOT/market/logic/pc-reviewed-listing-exclusions.mjs"
 node --check "$APP_ROOT/market/logic/pc-parts-directory.mjs"
 node --check "$APP_ROOT/market/logic/listing-lifecycle.mjs"
