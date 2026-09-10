@@ -65,6 +65,12 @@ assert.match(installScript,
   "the AWS installer must deploy the query variant module imported by the target set");
 assert.match(installScript, /node --check "\$APP_ROOT\/market\/logic\/pc-search-query-variants\.mjs"/u,
   "the AWS installer must syntax-check the deployed query variant module");
+assert.match(installScript,
+  /install -m 0644 "\$SOURCE_ROOT\/market\/logic\/pc-public-catalog\.mjs" "\$APP_ROOT\/market\/logic\/pc-public-catalog\.mjs"/u,
+  "the AWS installer must deploy the public catalog used to build collection targets");
+assert.match(installScript,
+  /cp -a "\$SOURCE_ROOT\/market\/data\/browse-flows\/\." "\$APP_ROOT\/market\/data\/browse-flows\/"/u,
+  "the AWS installer must deploy the browse-flow dependencies imported by the directory module");
 const ledgerScript = await read("aws-runner/pc-parts-ledger.mjs");
 assert.match(ledgerScript, /rows\.filter\(\(row\) => !reviewedPcListingExclusion/u,
   "reviewed source-listing exclusions must also remove historical statistics members");

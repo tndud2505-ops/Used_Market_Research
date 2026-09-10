@@ -53,10 +53,12 @@ for required_file in \
   collector/logic/pc-specialist-targets.mjs \
   market/logic/pc-parts-classifier.mjs \
   market/logic/pc-search-query-variants.mjs \
+  market/logic/pc-public-catalog.mjs \
   market/logic/pc-reviewed-listing-exclusions.mjs \
   market/logic/pc-parts-directory.mjs \
   market/data/pc-product-master-v1.mjs \
-  market/data/pc-product-master-v2.mjs; do
+  market/data/pc-product-master-v2.mjs \
+  market/data/browse-flows/index.mjs; do
   if [[ ! -f "${SOURCE_ROOT}/${required_file}" ]]; then
     fail "PC 원장 import 파일이 없습니다: ${SOURCE_ROOT}/${required_file}"
   fi
@@ -152,7 +154,8 @@ log "애플리케이션 파일 설치: ${APP_ROOT}"
 install -d -o root -g root -m 0755 "$APP_ROOT"
 install -d -o root -g root -m 0755 \
   "$APP_ROOT/aws-runner" "$APP_ROOT/cloudflare" \
-  "$APP_ROOT/collector/logic" "$APP_ROOT/market/logic" "$APP_ROOT/market/data"
+  "$APP_ROOT/collector/logic" "$APP_ROOT/market/logic" "$APP_ROOT/market/data" \
+  "$APP_ROOT/market/data/browse-flows"
 
 if [[ "$SOURCE_ROOT" != "$APP_ROOT" ]]; then
   cp -a "$SOURCE_ROOT/aws-runner/." "$APP_ROOT/aws-runner/"
@@ -166,11 +169,13 @@ if [[ "$SOURCE_ROOT" != "$APP_ROOT" ]]; then
   install -m 0644 "$SOURCE_ROOT/collector/logic/pc-specialist-targets.mjs" "$APP_ROOT/collector/logic/pc-specialist-targets.mjs"
   install -m 0644 "$SOURCE_ROOT/market/logic/pc-parts-classifier.mjs" "$APP_ROOT/market/logic/pc-parts-classifier.mjs"
   install -m 0644 "$SOURCE_ROOT/market/logic/pc-search-query-variants.mjs" "$APP_ROOT/market/logic/pc-search-query-variants.mjs"
+  install -m 0644 "$SOURCE_ROOT/market/logic/pc-public-catalog.mjs" "$APP_ROOT/market/logic/pc-public-catalog.mjs"
   install -m 0644 "$SOURCE_ROOT/market/logic/pc-reviewed-listing-exclusions.mjs" "$APP_ROOT/market/logic/pc-reviewed-listing-exclusions.mjs"
   install -m 0644 "$SOURCE_ROOT/market/logic/pc-parts-directory.mjs" "$APP_ROOT/market/logic/pc-parts-directory.mjs"
   install -m 0644 "$SOURCE_ROOT/market/logic/listing-lifecycle.mjs" "$APP_ROOT/market/logic/listing-lifecycle.mjs"
   install -m 0644 "$SOURCE_ROOT/market/data/pc-product-master-v1.mjs" "$APP_ROOT/market/data/pc-product-master-v1.mjs"
   install -m 0644 "$SOURCE_ROOT/market/data/pc-product-master-v2.mjs" "$APP_ROOT/market/data/pc-product-master-v2.mjs"
+  cp -a "$SOURCE_ROOT/market/data/browse-flows/." "$APP_ROOT/market/data/browse-flows/"
 fi
 
 chown -R root:root "$APP_ROOT/aws-runner" "$APP_ROOT/cloudflare" "$APP_ROOT/collector" "$APP_ROOT/market"
@@ -304,9 +309,13 @@ node --check "$APP_ROOT/collector/logic/pc-source-adapters.mjs"
 node --check "$APP_ROOT/collector/logic/pc-specialist-targets.mjs"
 node --check "$APP_ROOT/market/logic/pc-parts-classifier.mjs"
 node --check "$APP_ROOT/market/logic/pc-search-query-variants.mjs"
+node --check "$APP_ROOT/market/logic/pc-public-catalog.mjs"
 node --check "$APP_ROOT/market/logic/pc-reviewed-listing-exclusions.mjs"
 node --check "$APP_ROOT/market/logic/pc-parts-directory.mjs"
 node --check "$APP_ROOT/market/logic/listing-lifecycle.mjs"
+for browse_flow_file in "$APP_ROOT"/market/data/browse-flows/*.mjs; do
+  node --check "$browse_flow_file"
+done
 node --check "$APP_ROOT/cloudflare/live-search.mjs"
 node --check "$APP_ROOT/cloudflare/category-filter.mjs"
 node --check "$APP_ROOT/cloudflare/category-source-map.mjs"
