@@ -44,10 +44,14 @@
 .analysis-context-row { gap:10px 24px; margin-bottom:8px; }
 .pc-tools[data-page=analysis] .analysis-heading { min-height:38px; }
 .pc-tools h2:not(.sr-only) { font-size:20px; }
-.analysis-context-row .tools-chart-toolbar { min-width:0; flex:1 1 680px; flex-wrap:wrap; }
+.analysis-context-row .tools-chart-toolbar { min-width:0; flex:1 1 340px; flex-wrap:wrap; }
 .analysis-context-row #chart-navigation { flex-shrink:0; }
 .tools-chart { margin-top:12px; }
 .tools-chart svg, .tools-chart-plot { min-width:320px; }
+.analysis-chart-area { padding-top:4px; }
+.analysis-chart-area .chart-period { justify-content:flex-end; align-items:center; gap:8px; }
+.chart-period .tools-range-field { display:flex; align-items:center; gap:4px; }
+.analysis-chart-area .tools-chart { margin-top:0; }
 .tools-models { margin-top:18px; }
 .tools-chart-legend { font-size:11px; color:var(--ink-soft); }
 .tools-affiliate:not([hidden]) { display:block; margin:8px 0 12px; padding:0; border:0; background:transparent; max-width:100%; }
@@ -83,6 +87,8 @@
   .pc-tools[data-page=builder] .tools-builder-layout { grid-template-columns:minmax(0,1fr); }
 }
 @media(max-width:640px) {
+  .chart-period .tools-range-field { display:grid; gap:0; }
+  .analysis-chart-area .chart-period { align-items:end; }
   .site-header, .tools-header { position:static; flex-wrap:wrap; gap:0; height:auto; min-height:0; padding:0 12px 8px; }
   .site-header .brand, .tools-header .brand { height:48px; min-height:48px; }
   .site-header nav, .tools-header nav { width:100%; gap:22px; }

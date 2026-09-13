@@ -3,12 +3,12 @@ import { readJson, createPriceStore } from './pc-tools-data.mjs?v=coverage-v4';
 import { drawChart } from './pc-tools-chart.mjs?v=aligned-v1';
 import { createDatePicker } from './pc-tools-calendar.mjs?v=coverage-v4';
 import { createAdfitSlot } from './adfit.js?v=adfit-v2';
-import { createContextualAffiliate } from './affiliate.js?v=compact-ad-v1';
+import { createContextualAffiliate } from './affiliate.js?v=compact-ad-v2';
 
 const builder = document.body.dataset.page === 'builder';
 const $ = selector => document.querySelector(selector);
 const adfit = createAdfitSlot($('#adfit-banner'));
-const affiliate = createContextualAffiliate($('#contextual-offer'));
+const affiliate = builder ? createContextualAffiliate($('#contextual-offer')) : null;
 const STORAGE_KEY = 'used-pick:pc-build:v1';
 const PAGE_SIZE = 12;
 const state = {
@@ -311,7 +311,7 @@ function refreshPrices() {
   const targets = state.sort === 'price' ? currentProducts() : pageGroups().flatMap(g => g.products);
   const selected = state.byId.get(state.selectedId);
   const contextProduct = selected?.category_code === state.category ? selected : null;
-  void affiliate.update({ hasResults: state.ready && currentProducts().length > 0,
+  void affiliate?.update({ hasResults: state.ready && currentProducts().length > 0,
     canonical_product_id: contextProduct ? idOf(contextProduct) : '', category_code: state.category });
   if (selected) targets.push(selected);
   if (builder) targets.push(...state.entries.map(e => state.byId.get(e.id)).filter(Boolean));

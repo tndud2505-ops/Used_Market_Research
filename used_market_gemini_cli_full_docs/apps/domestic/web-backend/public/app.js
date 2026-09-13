@@ -1,4 +1,4 @@
-import { createContextualAffiliate } from "./affiliate.js?v=compact-ad-v1";
+import { createContextualAffiliate } from "./affiliate.js?v=compact-ad-v2";
 import { createAdfitSlot } from "./adfit.js?v=adfit-v2";
 
 const PRODUCT_QUERY_KEYS = new Set([

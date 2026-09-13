@@ -65,7 +65,7 @@ assert.match(affiliateUi, /sponsored noopener noreferrer/u);
 assert.match(affiliateUi, /referrerPolicy: "no-referrer"/u);
 assert.match(affiliateUi, /credentials: "omit"/u);
 assert.match(affiliateUi, /affiliate-icon/u);
-assert.match(affiliateUi, /offer\.cta_label\} →/u);
+assert.match(affiliateUi, /link\.textContent = offer\.cta_label;/u);
 assert.doesNotMatch(migration, /query|title|url|ip|user|session/iu);
 
 const now = new Date("2026-08-29T00:00:00.000Z");
@@ -338,7 +338,7 @@ try {
   assert.equal(root.hidden, false);
   const flatten = (node) => [node, ...node.children.flatMap(flatten)];
   const disclosureDetails = flatten(root).find((child) => child.tag === "details");
-  assert.equal(disclosureDetails.children[0].textContent, "광고·구매 시 수수료", "commission relationship must remain visible in the compact row");
+  assert.equal(disclosureDetails.children[0].textContent, "광고", "the compact row must still identify advertising and expose its disclosure");
   assert.match(disclosureDetails.children[1].textContent, new RegExp(`^${COUPANG_COMMISSION_DISCLOSURE}`), "full disclosure must remain available next to the ad link");
   const adLink = flatten(root).find((child) => child.tag === "a");
   assert.equal(adLink.rel, "sponsored noopener noreferrer");

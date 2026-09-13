@@ -138,14 +138,14 @@ export function createContextualAffiliate(root, { now = Date.now } = {}) {
     link.target = "_blank";
     link.rel = "sponsored noopener noreferrer";
     link.referrerPolicy = "no-referrer";
-    link.textContent = `${offer.cta_label} →`;
+    link.textContent = offer.cta_label;
     link.title = offer.title;
     link.setAttribute("aria-label", `광고 · ${offer.provider} · ${offer.title} 보기 · 새 창`);
     link.addEventListener("click", () => record("click", offer));
     const details = document.createElement("details");
     details.className = "affiliate-details";
     const summary = document.createElement("summary");
-    summary.textContent = "광고·구매 시 수수료";
+    summary.textContent = "광고";
     summary.setAttribute("aria-label", "쿠팡 파트너스 광고·수수료 상세 안내");
     const disclosure = document.createElement("p");
     disclosure.className = "affiliate-disclosure";
