@@ -1,0 +1,97 @@
+/* Shared, flat layout refinement. Ads never reserve space without a creative. */
+:root { --canvas:#fff; --surface:#fff; --bg:#fff; --line:#e8e6e2; --line-strong:#d8d5cf; }
+.site-header, .tools-header { display:flex; align-items:center; gap:42px; height:68px; min-height:68px; padding:0 24px; background:rgb(255 255 255 / 97%); }
+.site-header .brand, .tools-header .brand { height:68px; min-height:68px; }
+.site-header nav, .tools-header nav { display:flex; align-items:center; gap:26px; }
+.tools-main { padding-top:18px; }
+.pc-tools[data-page=builder] .tools-builder-layout { margin-top:0; align-items:start; gap:24px; }
+.tools-builder-layout > section:first-child { padding-top:0; }
+.pc-tools h2.build-heading { display:flex; align-items:center; height:36px; margin:0 0 8px; font-size:14px; }
+.pc-tools[data-page=builder] .tools-controls { min-height:36px; margin-bottom:8px; gap:8px; }
+.tools-controls select { border:1px solid var(--line-strong); padding:6px 8px; }
+.pc-tools[data-page=builder] .tools-controls label { min-width:0; }
+.pc-tools[data-page=builder] .tools-controls select { max-width:140px; }
+.pc-tools table { table-layout:fixed; }
+.pc-tools th { height:40px; background:#fafaf8; }
+.pc-tools td { height:52px; overflow-wrap:anywhere; }
+.pc-tools td.model-name { min-width:0; }
+.pc-tools td.price { white-space:normal; }
+.pc-tools tr.is-selected > td { background:#fff8f4; }
+#build-table .build-col-part { width:18%; }
+#build-table .build-col-model { width:29%; }
+#build-table .build-col-active { width:20%; }
+#build-table .build-col-sold { width:20%; }
+#build-table .build-col-action { width:13%; }
+#build-table input[type=number] { width:36px; margin-left:6px; }
+#build-table td:last-child:not([colspan]) { white-space:nowrap; padding-left:2px; padding-right:2px; }
+#build-table .build-empty { text-align:left; }
+#build-table .build-empty button { width:100%; text-align:left; color:var(--muted); }
+#build-table .build-empty button:hover { color:var(--accent-strong); }
+#model-table th:first-child { width:44%; }
+#model-table th:last-child { width:12%; }
+#model-table th:not(:first-child), #model-table td:not(:first-child) { text-align:right; }
+#model-table td:last-child:not([colspan]), #model-table th:last-child { text-align:center; }
+#model-table td[colspan] { text-align:left; }
+.build-result { padding-top:14px; }
+.build-result .tools-summary { gap:8px 16px; padding-bottom:12px; border-bottom:1px solid var(--line); }
+.pc-tools[data-page=builder] .build-result .tools-summary-item strong { font-size:16px; }
+.analysis-filter-bar { margin-bottom:16px; }
+.analysis-context-row { gap:10px 24px; margin-bottom:8px; }
+.pc-tools[data-page=analysis] .analysis-heading { min-height:38px; }
+.pc-tools h2:not(.sr-only) { font-size:20px; }
+.tools-chart-toolbar { min-width:0; }
+.tools-chart { margin-top:12px; }
+.tools-chart svg, .tools-chart-plot { min-width:320px; }
+.tools-models { margin-top:18px; }
+.tools-chart-legend { font-size:11px; color:var(--ink-soft); }
+.tools-affiliate:not([hidden]) { display:block; margin:8px 0 12px; padding:0; border:0; background:transparent; max-width:100%; }
+.tools-affiliate .affiliate-main { gap:6px; }
+.tools-affiliate .affiliate-copy { display:flex; flex-wrap:wrap; align-items:center; gap:4px 10px; min-width:0; }
+.tools-affiliate .affiliate-part-icon { width:18px; height:18px; flex:none; }
+.tools-affiliate .affiliate-link { min-height:24px; padding:2px 0; font-size:12px; }
+.tools-affiliate .affiliate-details { font-size:10px; }
+.tools-affiliate .affiliate-disclosure { max-width:min(340px,80vw); }
+.adfit-banner:not([hidden]) { margin:20px auto 0; max-width:100%; }
+.listing-topbar { display:flex; flex-wrap:wrap; align-items:center; gap:6px 18px; padding:10px 14px; border-bottom:1px solid var(--line); }
+.listing-topbar .listing-heading, .listing-topbar .listing-heading:has(.model-detail-open:not([hidden])) { display:flex; flex:1 1 auto; align-items:center; flex-wrap:wrap; gap:8px 18px; min-height:36px; padding:0; border:0; position:static; }
+.listing-topbar .listing-heading-main { flex:0 0 auto; }
+.listing-topbar .listing-heading .contextual-offer:not([hidden]) { flex:0 1 auto; margin:0; min-width:0; max-width:100%; }
+.listing-topbar .listing-options { flex:1 1 auto; min-width:0; margin:0; padding:0; border:0; }
+.listing-topbar .listing-controls { display:flex; flex-wrap:wrap; align-items:center; gap:8px 16px; min-height:36px; padding:0; margin:0; border:0; }
+.listing-topbar .listing-sort-tabs { flex:0 0 auto; }
+.listing-topbar .listing-price-range { display:flex; align-items:center; gap:6px; margin-left:auto; }
+.listing-topbar .listing-price-range input { width:82px; min-width:0; border-radius:2px; }
+.listing-topbar .listing-price-range button[type=submit] { border-radius:2px; background:var(--accent-strong); }
+.listing-topbar .listing-message:not([hidden]) { flex-basis:100%; order:3; }
+.listing-topbar .listing-options-toggle { display:none; }
+@media(min-width:1101px) {
+  .pc-tools[data-page=builder] .tools-builder-layout { grid-template-columns:minmax(510px,.85fr) minmax(0,1.15fr); }
+}
+@media(max-width:1320px) {
+  .analysis-context-row .tools-chart-toolbar { flex-basis:100%; flex-wrap:wrap; }
+}
+@media(max-width:1100px) {
+  .tools-builder-layout > section:first-child { padding-top:0; }
+}
+@media(max-width:640px) {
+  .site-header, .tools-header { position:static; flex-wrap:wrap; gap:0; height:auto; min-height:0; padding:0 12px 8px; }
+  .site-header .brand, .tools-header .brand { height:48px; min-height:48px; }
+  .site-header nav, .tools-header nav { width:100%; gap:22px; }
+  .site-header nav a, .tools-header nav a { padding:11px 0; font-size:12px; }
+  .tools-main { padding:14px 12px 24px; }
+  .pc-tools table { min-width:540px; }
+  #build-table table { min-width:500px; }
+  .tools-builder-layout > section:first-child { padding-top:0; }
+  .pc-tools[data-page=builder] .tools-controls { flex-wrap:wrap; }
+  .tools-table-scroll th:last-child, .tools-table-scroll td:last-child:not([colspan]) { background:#fff; }
+  .pc-tools[data-page=analysis] .analysis-heading .tools-summary-item strong { font-size:17px; }
+  .analysis-context-row .tools-chart-toolbar { gap:8px; }
+  .tools-source-selector { padding-bottom:2px; }
+  .listing-topbar { padding:10px; gap:6px; }
+  .listing-topbar .listing-heading { flex-basis:100%; gap:6px 14px; }
+  .listing-topbar .listing-heading-main { justify-content:flex-start; }
+  .listing-topbar .listing-controls { gap:8px; }
+  .listing-topbar .listing-price-range { margin-left:0; width:100%; flex-wrap:wrap; }
+  .listing-topbar .listing-price-range input { width:90px; }
+  .listing-topbar .listing-heading .affiliate-copy { flex-wrap:wrap; }
+}

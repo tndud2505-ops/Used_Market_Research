@@ -1058,7 +1058,8 @@ function setModelFiltersCollapsed(collapsed) {
 }
 
 function setListingOptionsCollapsed(collapsed) {
-  state.listingOptionsCollapsed = Boolean(mobileFacetMedia.matches && collapsed);
+  // Sorting and price inputs remain visible in the compact, wrapping toolbar.
+  state.listingOptionsCollapsed = false;
   dom.listingOptions.hidden = state.listingOptionsCollapsed;
   dom.listingOptionsToggle.setAttribute("aria-expanded", String(!state.listingOptionsCollapsed));
   const suffix = listingPriceControlsActive() ? " · 적용 중" : "";

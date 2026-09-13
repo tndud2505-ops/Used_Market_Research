@@ -1,12 +1,14 @@
 import { SERIES, idOf, nameOf, naturalCompare, money, metricValue, groupProducts, scopedStats, sourceStats, priceDateRange, modelPageItems, buildTotals, compatibility, validateBuild, dailySeries, percentChange } from './pc-tools-core.mjs?v=coverage-v4';
 import { readJson, createPriceStore } from './pc-tools-data.mjs?v=coverage-v4';
-import { drawChart } from './pc-tools-chart.mjs?v=compact-v3';
+import { drawChart } from './pc-tools-chart.mjs?v=aligned-v1';
 import { createDatePicker } from './pc-tools-calendar.mjs?v=coverage-v4';
 import { createAdfitSlot } from './adfit.js?v=adfit-v2';
+import { createContextualAffiliate } from './affiliate.js?v=compact-ad-v1';
 
 const builder = document.body.dataset.page === 'builder';
 const $ = selector => document.querySelector(selector);
 const adfit = createAdfitSlot($('#adfit-banner'));
+const affiliate = createContextualAffiliate($('#contextual-offer'));
 const STORAGE_KEY = 'used-pick:pc-build:v1';
 const PAGE_SIZE = 12;
 const state = {
@@ -225,7 +227,6 @@ function summaryItem(label, value, detail = '', className = '') {
 function renderSummary() {
   const summary = $('#tools-summary'); summary.replaceChildren();
   if (builder) {
-    if (!state.entries.length) { summary.append(el('span', 'tools-caption', '부품을 선택하세요')); return; }
     const totals = buildTotals(state.entries, selectionData);
     summary.append(summaryItem('선택', `${state.entries.length}종`, `${state.entries.reduce((n, e) => n + e.quantity, 0)}개`));
     SERIES.filter(s => s.key !== 'confirmed_transactions' || totals[s.key].covered > 0).forEach(s => {
@@ -246,11 +247,20 @@ function renderBuild() {
   const quantityFocus = container.contains(focus) && focus.dataset.quantity;
   if (quantityFocus) return;
   const { table, body } = makeTable(['부품 / 수량', '선택 모델', '판매중 가격', '판매완료 표시가', '']);
+  const columns = el('colgroup');
+  ['part', 'model', 'active', 'sold', 'action'].forEach(name => columns.append(el('col', `build-col-${name}`)));
+  table.prepend(columns);
   state.categories.forEach(category => {
     const entry = state.entries.find(e => e.category === category.code), p = state.byId.get(entry?.id), data = entry ? selectionData(entry) : null;
     const row = el('tr', state.category === category.code ? 'is-selected' : ''), part = el('td', '', category.label);
+    if (!entry) {
+      const empty = el('td', 'build-empty'); empty.colSpan = 4;
+      const choose = action('+ 부품 선택', 'category', { category: category.code });
+      choose.setAttribute('aria-label', `${category.label} 부품 선택`); empty.append(choose);
+      row.append(part, empty); body.append(row); return;
+    }
     if (entry) {
-      const input = el('input'); input.type = 'number'; input.min = '1'; input.max = '16'; input.value = entry.quantity; input.dataset.quantity = entry.id; input.setAttribute('aria-label', `${category.label} 수량`); part.append(el('br'), input);
+      const input = el('input'); input.type = 'number'; input.min = '1'; input.max = '16'; input.value = entry.quantity; input.dataset.quantity = entry.id; input.setAttribute('aria-label', `${category.label} 수량`); part.append(input);
     }
     const name = el('td', 'model-name', p ? nameOf(p) : '—');
     if (entry?.manufacturer) name.append(el('small', '', `${entry.manufacturer} · 제조사 기준`));
@@ -263,7 +273,6 @@ function renderBuild() {
   const result = compatibility(state.entries, state.byId), box = $('#build-compatibility'); box.replaceChildren();
   box.hidden = !result.checks.length; box.title = result.note;
   result.checks.forEach(c => box.append(el('span', c.status, `${c.label} ${c.status === 'match' ? '일치' : c.status === 'conflict' ? '충돌' : '미확인'} · ${c.detail}`)));
-  $('#save-build').disabled = !state.ready; $('#share-build').disabled = !state.entries.length; $('#clear-build').disabled = !state.entries.length;
 }
 function renderAnalysis() {
   const record = analysisRecord(state.selectedId), base = record?.data;
@@ -283,7 +292,7 @@ function renderAnalysis() {
   controls.title = `${window.from} ~ ${window.to} · ${window.days}일`;
   const sourceControls = $('#chart-sources'), sourceFocus = sourceControls.contains(document.activeElement) ? document.activeElement.dataset.source : null; sourceControls.replaceChildren();
   const sourceOrder = ['ebay', 'joonggonara', 'bunjang'];
-  const availableSources = new Set(state.sources.map(source => String(source.source_id || '')));
+  const availableSources = new Set([...sourceOrder, ...state.sources.map(source => String(source.source_id || ''))]);
   const sourceIds = [...sourceOrder.filter(id => availableSources.has(id)),
     ...[...availableSources].filter(id => id && !sourceOrder.includes(id)).sort(naturalCompare)];
   [['', '국내 전체'], ...sourceIds.map(id => [id, id === 'ebay' ? 'eBay (USD)' : SOURCE_LABELS[id] || id])].forEach(([id, label]) => {
@@ -301,6 +310,9 @@ function render() { renderControls(); renderSummary(); renderModelTable(); if (b
 function refreshPrices() {
   const targets = state.sort === 'price' ? currentProducts() : pageGroups().flatMap(g => g.products);
   const selected = state.byId.get(state.selectedId);
+  const contextProduct = selected?.category_code === state.category ? selected : null;
+  void affiliate.update({ hasResults: state.ready && currentProducts().length > 0,
+    canonical_product_id: contextProduct ? idOf(contextProduct) : '', category_code: state.category });
   if (selected) targets.push(selected);
   if (builder) targets.push(...state.entries.map(e => state.byId.get(e.id)).filter(Boolean));
   void prices.load(targets, builder ? 30 : state.days, builder ? '' : state.range.to);
@@ -344,10 +356,9 @@ document.addEventListener('click', event => {
     const product = state.byId.get(id); if (!product) return;
     state.entries = validateBuild([...state.entries.filter(e => e.category !== product.category_code), { id, quantity: state.entries.find(e => e.category === product.category_code)?.quantity || 1, manufacturer }], state.byId, new Set(state.categories.map(c => c.code)));
     state.selectedId = id; state.selectedManufacturer = manufacturer;
-    $('#share-output').hidden = true;
     status('');
   }
-  if (type === 'remove') { state.entries = state.entries.filter(e => e.id !== id); status(''); $('#share-output').hidden = true; }
+  if (type === 'remove') { state.entries = state.entries.filter(e => e.id !== id); status(''); }
   if (type === 'analyze') {
     state.selectedId = id; state.selectedManufacturer = manufacturer; state.chartDate = ''; state.source = '';
     const url = new URL(location.href); url.searchParams.set('model', id); if (manufacturer) url.searchParams.set('manufacturer', manufacturer); else url.searchParams.delete('manufacturer');
@@ -360,7 +371,7 @@ document.addEventListener('change', event => {
   if (target.dataset.quantity) {
     const entry = state.entries.find(e => e.id === target.dataset.quantity); const n = Number(target.value);
     if (!Number.isInteger(n) || n < 1 || n > 16) { target.value = entry.quantity; status('수량은 1~16개로 입력해 주세요.', true); return; }
-    entry.quantity = n; $('#share-output').hidden = true; renderSummary(); status(''); return;
+    entry.quantity = n; renderSummary(); status(''); return;
   }
   if (target.id === 'tool-category') { selectCategory(target.value); return; }
   if (target.id === 'tool-manufacturer') { state.manufacturer = target.value; state.generation = ''; }
@@ -376,24 +387,8 @@ document.addEventListener('input', event => {
   const entry = state.entries.find(e => e.id === target.dataset.quantity), n = Number(target.value);
   if (!entry || !Number.isInteger(n) || n < 1 || n > 16) return;
   entry.quantity = n;
-  $('#share-output').hidden = true;
   renderSummary();
 });
-if (builder) {
-  $('#save-build').addEventListener('click', () => {
-    if (!state.ready) return;
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state.entries)); status('저장됨'); }
-    catch { status('브라우저 저장소를 사용할 수 없습니다. 공유 주소로 보관해 주세요.', true); }
-  });
-  $('#share-build').addEventListener('click', async () => {
-    if (!state.ready || !state.entries.length) return;
-    const url = new URL('/computer-builder.html', location.origin); url.hash = `build=${encodeURIComponent(JSON.stringify(state.entries))}`;
-    $('#share-url').value = url.href; $('#share-output').hidden = false;
-    try { await navigator.clipboard.writeText(url.href); status('공유 주소 복사됨'); }
-    catch { $('#share-url').focus(); $('#share-url').select(); status('공유 주소를 복사하세요.'); }
-  });
-  $('#clear-build').addEventListener('click', () => { state.entries = []; $('#share-output').hidden = true; renderSummary(); renderBuild(); renderModelTable(); status('비움 · 저장하면 기존 조합도 지워집니다.'); });
-}
 
 async function start() {
   try {
@@ -424,7 +419,7 @@ async function start() {
     }
     if (state.selectedId) revealModel(state.selectedId);
     render(); refreshPrices();
-    if (!builder) adfit.setEligible(true);
+    adfit.setEligible(true);
   } catch (error) {
     status(`${error.message} `, true);
     const button = el('button', '', '다시 시도'); button.type = 'button'; button.addEventListener('click', start); $('#tools-status').append(button);

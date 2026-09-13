@@ -19,7 +19,7 @@ export function drawChart(container, series, { index = false, label = '가격 �
     container.append(empty);
     return;
   }
-  const width = Math.max(560, container.clientWidth), height = 280, left = 78, right = 24, top = 24, bottom = 42;
+  const width = Math.max(320, container.clientWidth), height = 280, left = 68, right = 24, top = 24, bottom = 42;
   const values = points.map(p => p.value);
   let low = Math.min(...values), high = Math.max(...values);
   const margin = Math.max((high - low) * 0.2, high * 0.025, 1);

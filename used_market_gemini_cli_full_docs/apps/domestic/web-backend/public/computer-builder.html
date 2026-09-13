@@ -5,7 +5,7 @@
   <title>컴퓨터 맞추기 | USED PICK</title>
   <meta name="description" content="PC 부품 모델을 직접 선택하고 판매중 가격과 판매완료 표시가격을 구분해 비교하세요.">
   <link rel="icon" href="/assets/mark.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css?v=pc-tools-v1"><link rel="stylesheet" href="/pc-tools.css?v=compact-v3">
+  <link rel="stylesheet" href="/styles.css?v=pc-tools-v1"><link rel="stylesheet" href="/pc-tools.css?v=compact-v3"><link rel="stylesheet" href="/ui-refinement.css?v=aligned-v1">
 </head>
 <body class="pc-tools" data-page="builder">
   <a class="skip-link" href="#main">본문으로 건너뛰기</a>
@@ -17,18 +17,20 @@
     <h1 class="sr-only">컴퓨터 맞추기</h1>
     <div id="tools-status" role="status" aria-live="polite">불러오는 중</div>
     <div class="tools-builder-layout">
-      <section aria-labelledby="build-title"><h2 id="build-title" class="sr-only">선택 부품</h2><div id="build-table" class="tools-table-scroll" tabindex="0" aria-label="선택 부품 표"></div>
+      <section aria-labelledby="build-title"><h2 id="build-title" class="build-heading">선택 부품</h2><div id="build-table" class="tools-table-scroll" tabindex="0" aria-label="선택 부품 표"></div>
         <div class="build-result">
           <div id="tools-summary" class="tools-summary" aria-live="polite"></div>
           <div id="build-compatibility" class="tools-compatibility" hidden></div>
-          <div class="tools-actions"><button id="save-build" type="button" disabled>조합 저장</button><button id="share-build" type="button" disabled>공유</button><button id="clear-build" type="button" disabled>비우기</button></div>
-          <div id="share-output" hidden><label for="share-url">공유 주소</label><textarea id="share-url" readonly rows="2"></textarea></div>
+          <section class="contextual-offer tools-affiliate" id="contextual-offer" aria-label="쿠팡 파트너스 광고" hidden></section>
+          <aside class="adfit-banner" id="adfit-banner" aria-label="카카오 AdFit 광고" hidden>
+            <ins class="kakao_ad_area" style="display:none;" data-ad-unit="DAN-gvTVDnxVn9S3leR5" data-ad-width="320" data-ad-height="100"></ins>
+          </aside>
         </div>
       </section>
       <section aria-labelledby="picker-title"><h2 id="picker-title" class="sr-only">모델 선택</h2><div id="model-controls"></div><div id="model-table" class="tools-table-scroll" tabindex="0" aria-label="부품 모델 목록"></div><nav id="model-pages" class="tools-pages" aria-label="모델 페이지"></nav></section>
     </div>
   </main>
   <footer class="tools-footer"><a href="/guide.html">이용 안내</a><a href="/privacy.html">개인정보처리방침</a><a href="/terms.html">이용약관</a></footer>
-  <script type="module" src="/pc-tools.js?v=compact-v3"></script>
+  <script type="module" src="/pc-tools.js?v=aligned-v1"></script>
 </body>
 </html>
