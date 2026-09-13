@@ -3,7 +3,7 @@
 .site-header, .tools-header { display:flex; align-items:center; gap:42px; height:68px; min-height:68px; padding:0 24px; background:rgb(255 255 255 / 97%); }
 .site-header .brand, .tools-header .brand { height:68px; min-height:68px; }
 .site-header nav, .tools-header nav { display:flex; align-items:center; gap:26px; }
-.tools-main { padding-top:18px; }
+.tools-main { padding-top:18px; container-type:inline-size; }
 .pc-tools[data-page=builder] .tools-builder-layout { margin-top:0; align-items:start; gap:24px; }
 .tools-builder-layout > section:first-child { padding-top:0; }
 .pc-tools h2.build-heading { display:flex; align-items:center; height:36px; margin:0 0 8px; font-size:14px; }
@@ -35,11 +35,17 @@
 .build-result { padding-top:14px; }
 .build-result .tools-summary { gap:8px 16px; padding-bottom:12px; border-bottom:1px solid var(--line); }
 .pc-tools[data-page=builder] .build-result .tools-summary-item strong { font-size:16px; }
-.analysis-filter-bar { margin-bottom:16px; }
+.analysis-filter-bar { display:flex; flex-wrap:wrap; margin-bottom:16px; }
+.analysis-filter-bar > .tools-tabs { flex:1 1 560px; }
+.analysis-filter-bar #model-controls { flex:0 1 auto; }
+.pc-tools[data-page=analysis] .analysis-filter-bar .tools-controls { flex-wrap:wrap; justify-content:flex-start; }
+.tools-controls label, .tools-controls select, .tools-range-field { flex-shrink:0; }
+.tools-check, .tools-range-field > label { white-space:nowrap; }
 .analysis-context-row { gap:10px 24px; margin-bottom:8px; }
 .pc-tools[data-page=analysis] .analysis-heading { min-height:38px; }
 .pc-tools h2:not(.sr-only) { font-size:20px; }
-.tools-chart-toolbar { min-width:0; }
+.analysis-context-row .tools-chart-toolbar { min-width:0; flex:1 1 680px; flex-wrap:wrap; }
+.analysis-context-row #chart-navigation { flex-shrink:0; }
 .tools-chart { margin-top:12px; }
 .tools-chart svg, .tools-chart-plot { min-width:320px; }
 .tools-models { margin-top:18px; }
@@ -72,6 +78,9 @@
 }
 @media(max-width:1100px) {
   .tools-builder-layout > section:first-child { padding-top:0; }
+}
+@container(max-width:1100px) {
+  .pc-tools[data-page=builder] .tools-builder-layout { grid-template-columns:minmax(0,1fr); }
 }
 @media(max-width:640px) {
   .site-header, .tools-header { position:static; flex-wrap:wrap; gap:0; height:auto; min-height:0; padding:0 12px 8px; }
