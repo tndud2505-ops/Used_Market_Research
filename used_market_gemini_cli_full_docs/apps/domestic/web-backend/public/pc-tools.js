@@ -1,6 +1,6 @@
 import { SERIES, idOf, nameOf, naturalCompare, money, metricValue, groupProducts, scopedStats, sourceStats, priceDateRange, modelPageItems, buildTotals, compatibility, validateBuild, dailySeries, percentChange } from './pc-tools-core.mjs?v=coverage-v4';
 import { readJson, createPriceStore } from './pc-tools-data.mjs?v=coverage-v4';
-import { drawChart } from './pc-tools-chart.mjs?v=layout-v2';
+import { drawChart } from './pc-tools-chart.mjs?v=compact-v3';
 import { createDatePicker } from './pc-tools-calendar.mjs?v=coverage-v4';
 import { createAdfitSlot } from './adfit.js?v=adfit-v2';
 
@@ -112,7 +112,6 @@ function renderControls() {
   const check = el('label', 'tools-check');
   const input = el('input'); input.type = 'checkbox'; input.id = 'tool-group'; input.checked = state.grouped;
   check.append(input, document.createTextNode('동일 모델 묶기')); controls.append(check);
-  controls.append(action('새로고침', 'retry'));
   $('#model-controls').replaceChildren(controls);
   if (builder) $('#picker-title').textContent = `${labelOf(state.category)} 모델 선택`;
   else {
@@ -131,7 +130,8 @@ function priceCell(data, key, record, { showChange = false } = {}) {
   const td = el('td', `price series-${key}`);
   const currency = record?.data?.methodology?.currency || 'KRW';
   const metric = data?.[key], presentation = pricePresentation(metric, key, currency);
-  td.append(document.createTextNode(record?.state === 'loading' ? '확인 중' : record?.state === 'error' ? '조회 실패' : presentation.text));
+  if (record?.state === 'error') td.append(action('다시 시도', 'retry'));
+  else td.append(document.createTextNode(record?.state === 'loading' ? '확인 중' : presentation.text));
   td.classList.toggle('is-empty', presentation.empty);
   td.title = `${presentation.label} · 표본 ${Number(metric?.sample_count || 0).toLocaleString('ko-KR')}건${builder ? ' · 최근 30일' : ` · ${state.range.from} ~ ${state.range.to}`}${data?.integrity_filtered_source_count || data?.integrity_repaired_source_ids?.length ? ' · 불일치 사이트 제외' : ''}`;
   if (data?.availability?.status === 'unavailable') td.title = '공개 통계 미제공';
@@ -225,10 +225,11 @@ function summaryItem(label, value, detail = '', className = '') {
 function renderSummary() {
   const summary = $('#tools-summary'); summary.replaceChildren();
   if (builder) {
+    if (!state.entries.length) { summary.append(el('span', 'tools-caption', '부품을 선택하세요')); return; }
     const totals = buildTotals(state.entries, selectionData);
     summary.append(summaryItem('선택', `${state.entries.length}종`, `${state.entries.reduce((n, e) => n + e.quantity, 0)}개`));
     SERIES.filter(s => s.key !== 'confirmed_transactions' || totals[s.key].covered > 0).forEach(s => {
-      const total = totals[s.key]; summary.append(summaryItem(`${s.label.replace(' 평균', '').replace(' 표시가', '')} ${total.complete || !total.total ? '합계' : '부분 합계'}`, displayPrice(total.amount), `${total.covered}/${total.total}종 가격 반영 · 최근 30일`, `series-${s.key}`));
+      const total = totals[s.key]; summary.append(summaryItem(`${s.label} ${total.complete || !total.total ? '합계' : '부분 합계'}`, displayPrice(total.amount), `${total.covered}/${total.total}종 가격 반영 · 최근 30일`, `series-${s.key}`));
     });
   } else if (state.selectedId) {
     const record = analysisRecord(state.selectedId);
@@ -289,11 +290,11 @@ function renderAnalysis() {
     const button = action(label, 'chart-source', { source: id }); button.setAttribute('aria-pressed', String(state.source === id)); sourceControls.append(button);
   });
   if (sourceFocus != null) [...sourceControls.children].find(b => b.dataset.source === sourceFocus)?.focus({ preventScroll: true });
-  const coverage = $('#chart-coverage'); coverage.textContent = ''; coverage.hidden = true;
+  const coverage = $('#chart-coverage'); coverage.replaceChildren(); coverage.hidden = true;
   const series = SERIES.slice(0, 2).map(s => ({ key: s.key, points: dailySeries(data, s.key, state.days) }));
   $('#chart-title').textContent = `${nameOf(state.byId.get(state.selectedId))}${state.selectedManufacturer ? ` · ${state.selectedManufacturer}` : ''}`;
   $('#price-chart').setAttribute('aria-busy', String(record?.state === 'loading'));
-  if (record?.state === 'error') { coverage.textContent = '가격 조회 실패 · 새로고침'; coverage.hidden = false; }
+  if (record?.state === 'error') { coverage.append(document.createTextNode('가격 조회 실패 · '), action('다시 시도', 'retry')); coverage.hidden = false; }
   drawChart($('#price-chart'), series, { label: $('#chart-title').textContent, selectedDate: state.chartDate || window.to, currency });
 }
 function render() { renderControls(); renderSummary(); renderModelTable(); if (builder) renderBuild(); else renderAnalysis(); }
@@ -332,8 +333,8 @@ document.addEventListener('click', event => {
     } catch (error) { status(error.message, true); }
     return;
   }
-  if (type === 'chart-source') { state.source = button.dataset.source; renderSummary(); renderAnalysis(); return; }
-  if (type === 'retry') { prices.clear(); overseasPrices?.clear(); status('새로고침'); refreshPrices(); return; }
+  if (type === 'chart-source') { state.source = button.dataset.source; renderSummary(); renderAnalysis(); refreshPrices(); return; }
+  if (type === 'retry') { prices.clear(); overseasPrices?.clear(); status(''); refreshPrices(); return; }
   if (type === 'page') {
     state.page = Math.max(1, Math.min(Math.ceil(groups().length / PAGE_SIZE) || 1, Number(button.dataset.page)));
     renderModelTable(); $('#model-table').scrollTop = 0; refreshPrices(); return;
@@ -430,6 +431,9 @@ async function start() {
   }
 }
 void start();
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && state.ready) refreshPrices();
+});
 let resizeFrame;
 window.addEventListener('resize', () => {
   if (builder || !state.ready) return;
