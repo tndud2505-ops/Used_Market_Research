@@ -41,11 +41,6 @@ body.pc-tools { display:flex; flex-direction:column; min-height:100dvh; }
 .pc-tools td.price { white-space:nowrap; font-variant-numeric:tabular-nums; font-weight:650; }
 .pc-tools td small { display:block; font-size:11px; font-weight:400; color:var(--muted); }
 .pc-tools td.model-name { min-width:150px; }
-.pc-tools .tools-subrow td { padding-top:10px; padding-bottom:10px; }
-.pc-tools .tools-subrow td:first-child { padding-left:26px; }
-.pc-tools tr.is-selected .model-toggle { color:var(--accent-strong); }
-.pc-tools button.model-toggle { padding:0; text-align:left; white-space:normal; font-weight:650; }
-.pc-tools button.model-toggle span { display:inline-block; width:16px; color:var(--muted); }
 .series-active { color:var(--accent-strong); }.series-sold { color:var(--sold); }.series-confirmed_transactions { color:var(--confirmed); }
 .price.is-empty { color:var(--muted); font-weight:400; }
 .tools-controls { display:flex; flex-wrap:wrap; gap:8px 20px; align-items:center; margin:0 0 14px; }
@@ -128,7 +123,6 @@ body.pc-tools { display:flex; flex-direction:column; min-height:100dvh; }
 .pc-tools[data-page=builder] table { font-size:14px; }
 .pc-tools[data-page=builder] th { font-size:12px; padding:10px 8px; }
 .pc-tools[data-page=builder] td { padding:7px 8px; }
-.pc-tools[data-page=builder] .model-toggle { font-size:15px; }
 .pc-tools[data-page=builder] .tools-controls { gap:8px 14px; margin-bottom:8px; }
 .pc-tools[data-page=builder] .tools-builder-layout { margin-top:18px; gap:28px; }
 .pc-tools[data-page=builder] #model-table { max-height:max(400px,calc(100dvh - 258px)); }

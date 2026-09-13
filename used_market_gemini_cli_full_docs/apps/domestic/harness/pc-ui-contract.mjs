@@ -35,6 +35,16 @@ assert.equal(analysisHtml.includes('id="overview-button"'), false, "overall tren
 assert.equal(analysisHtml.includes('id="chart-mode"'), false, "price analysis must remain in amount mode");
 requireText(toolsScript, "const sourceOrder = ['ebay', 'joonggonara', 'bunjang']",
   "analysis sites must keep the requested visible order after the domestic total");
+requireText(toolsScript, "const visibleSeries = builder ? SERIES.filter(s => s.key !== 'confirmed_transactions') : [];",
+  "analysis model rows must keep only the model and view columns");
+requireText(toolsScript, "const link = el('a', 'model-name-link', nameOf(product));",
+  "the visible model name must be the direct original-search link");
+assert.equal(toolsScript.includes("state.expanded"), false, "flat model rows must not retain expansion state");
+assert.equal(toolsScript.includes("동일 모델 묶기"), false, "flat model rows must not expose a grouping toggle");
+assert.equal(toolsScript.includes("'판매중 가격', '판매완료 표시가', ''"), false,
+  "the builder selection table must not repeat price columns");
+assert.equal(toolsScript.includes("'원문 검색'"), false,
+  "the model name link must not repeat a separate original-search label");
 requireText(toolsScript, "[['', '국내 전체']", "analysis must keep an explicit domestic aggregate tab");
 requireText(toolsScript, "state.sources = (catalog.sources || [])",
   "analysis source tabs must follow the operational catalog instead of per-model evidence");

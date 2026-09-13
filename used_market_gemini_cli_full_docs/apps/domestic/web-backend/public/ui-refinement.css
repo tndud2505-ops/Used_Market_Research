@@ -12,9 +12,8 @@
 .pc-tools[data-page=builder] .tools-controls label { min-width:0; }
 .pc-tools[data-page=builder] .tools-controls select { max-width:140px; }
 .pc-tools table { table-layout:fixed; }
-.model-source-link { margin-left:8px; font-size:11px; font-weight:400; color:var(--accent-strong); text-decoration:none; white-space:nowrap; }
-.model-source-link:hover { text-decoration:underline; text-underline-offset:3px; }
-.tools-subrow .model-source-link { margin-left:0; }
+.model-name-link { color:var(--ink); font-weight:650; text-decoration:none; }
+.model-name-link:hover { color:var(--accent-strong); text-decoration:underline; text-underline-offset:3px; }
 .pc-tools th { height:40px; background:#fafaf8; }
 .pc-tools td { height:52px; overflow-wrap:anywhere; }
 .pc-tools td.model-name { min-width:0; }
@@ -22,9 +21,7 @@
 .pc-tools tr.is-selected > td { background:#fff8f4; }
 #build-table .build-col-part { width:18%; }
 #build-table .build-col-model { width:29%; }
-#build-table .build-col-active { width:20%; }
-#build-table .build-col-sold { width:20%; }
-#build-table .build-col-action { width:13%; }
+#build-table .build-col-action { width:18%; }
 #build-table input[type=number] { width:36px; margin-left:6px; }
 #build-table td:last-child:not([colspan]) { white-space:nowrap; padding-left:2px; padding-right:2px; }
 #build-table .build-empty { text-align:left; }

@@ -16,7 +16,7 @@ export const money = (value, currency = 'KRW') => {
 };
 export function metricValue(metric) {
   if (!(Number(metric?.sample_count) > 0)) return null;
-  for (const key of ['mean', 'median']) {
+  for (const key of ['mean', 'median', 'average']) {
     const value = metric?.[key];
     if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) continue;
     if (typeof metric.min === 'number' && value < metric.min) continue;
@@ -27,20 +27,25 @@ export function metricValue(metric) {
 }
 export function metricIsConsistent(metric) {
   const count = Number(metric?.sample_count || 0);
-  if (count <= 0) return metric?.mean == null && metric?.median == null;
+  if (count <= 0) return metric?.mean == null && metric?.median == null && metric?.average == null;
   const minimum = metric?.min == null ? null : Number(metric.min);
   const maximum = metric?.max == null ? null : Number(metric.max);
   const mean = metric?.mean == null ? null : Number(metric.mean);
   const median = metric?.median == null ? null : Number(metric.median);
-  if (count >= 5 && metric?.aggregate_incomplete !== true && (!Number.isFinite(mean) || mean <= 0)) return false;
+  const average = metric?.average == null ? null : Number(metric.average);
+  const central = mean ?? median ?? average;
+  if (count >= 5 && metric?.aggregate_incomplete !== true && (!Number.isFinite(central) || central <= 0)) return false;
   if (mean !== null && (!Number.isFinite(mean) || mean <= 0)) return false;
   if (count >= 3 && count < 5 && (!Number.isFinite(median) || median <= 0)) return false;
   if (median !== null && (!Number.isFinite(median) || median <= 0)) return false;
+  if (average !== null && (!Number.isFinite(average) || average <= 0)) return false;
   if (Number.isFinite(minimum) && Number.isFinite(maximum) && minimum > maximum) return false;
   if (Number.isFinite(mean) && Number.isFinite(minimum) && mean < minimum) return false;
   if (Number.isFinite(mean) && Number.isFinite(maximum) && mean > maximum) return false;
   if (Number.isFinite(median) && Number.isFinite(minimum) && median < minimum) return false;
   if (Number.isFinite(median) && Number.isFinite(maximum) && median > maximum) return false;
+  if (Number.isFinite(average) && Number.isFinite(minimum) && average < minimum) return false;
+  if (Number.isFinite(average) && Number.isFinite(maximum) && average > maximum) return false;
   return true;
 }
 export function normalizedName(value) {
@@ -91,16 +96,17 @@ export function coherentStats(data) {
     const count = metrics.reduce((sum, metric) => sum + Number(metric.sample_count), 0);
     const minimums = metrics.map(metric => Number(metric.min)).filter(value => Number.isFinite(value) && value > 0);
     const maximums = metrics.map(metric => Number(metric.max)).filter(value => Number.isFinite(value) && value > 0);
-    const allHaveMean = metrics.length > 0 && metrics.every(metric => Number.isFinite(Number(metric.mean)) && Number(metric.mean) > 0);
+    const centralOf = metric => ['mean', 'average'].map(key => Number(metric[key])).find(value => Number.isFinite(value) && value > 0) ?? null;
+    const allHaveCentral = metrics.length > 0 && metrics.every(metric => centralOf(metric) != null);
     return {
       sample_count: count,
       min: minimums.length ? Math.min(...minimums) : null,
       max: maximums.length ? Math.max(...maximums) : null,
-      mean: count && allHaveMean
-        ? metrics.reduce((sum, metric) => sum + Number(metric.mean) * Number(metric.sample_count), 0) / count
+      mean: count && allHaveCentral
+        ? metrics.reduce((sum, metric) => sum + centralOf(metric) * Number(metric.sample_count), 0) / count
         : null,
       median: null,
-      aggregate_incomplete: count > 0 && !allHaveMean,
+      aggregate_incomplete: count > 0 && !allHaveCentral,
     };
   };
   const days = new Map();
