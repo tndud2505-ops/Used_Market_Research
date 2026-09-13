@@ -10,14 +10,39 @@ const analysisHtml = readFileSync(path.join(appRoot, "web-backend/public/price-a
 const builderHtml = readFileSync(path.join(appRoot, "web-backend/public/computer-builder.html"), "utf8");
 const script = readFileSync(path.join(appRoot, "web-backend/public/app.js"), "utf8");
 const styles = readFileSync(path.join(appRoot, "web-backend/public/styles.css"), "utf8");
+const toolsScript = readFileSync(path.join(appRoot, "web-backend/public/pc-tools.js"), "utf8");
+const toolsChart = readFileSync(path.join(appRoot, "web-backend/public/pc-tools-chart.mjs"), "utf8");
+const toolsStyles = readFileSync(path.join(appRoot, "web-backend/public/pc-tools.css"), "utf8");
 const requireText = (source, value, message) => assert.ok(source.includes(value), message);
 
-requireText(html, '<a href="/index.html" aria-current="page">중고 시세</a>',
-  "the listing page must remain directly reachable after analysis becomes home");
-requireText(analysisHtml, '<a href="/" aria-current="page">가격 분석</a>',
-  "price analysis must be the default home navigation target");
-requireText(builderHtml, '<a href="/">가격 분석</a>',
-  "the builder must link back to the default analysis home");
+requireText(html, '<a href="/" aria-current="page">중고 시세</a>',
+  "the listing page must be the default home navigation target");
+requireText(analysisHtml, '<a href="/price-analysis.html" aria-current="page">가격 분석</a>',
+  "price analysis must retain its own explicit navigation target");
+requireText(builderHtml, '<a href="/price-analysis.html">가격 분석</a>',
+  "the builder must link to the explicit price-analysis page");
+requireText(analysisHtml, 'href="https://used-pick.com/price-analysis.html"',
+  "price analysis must publish its explicit canonical URL");
+requireText(html, 'href="https://used-pick.com/"', "the listing home must publish the root canonical URL");
+
+assert.ok(analysisHtml.indexOf('id="analysis-categories"') < analysisHtml.indexOf('id="model-controls"'),
+  "analysis component tabs must lead directly into the model filters");
+assert.ok(analysisHtml.indexOf('id="chart-title"') < analysisHtml.indexOf('id="tools-summary"'),
+  "selected-model prices must sit beside the model name");
+requireText(analysisHtml, 'class="tools-source-label">사이트</span>',
+  "analysis source tabs need the same short label as the listing page");
+assert.equal(analysisHtml.includes('id="overview-button"'), false, "overall trend must be removed");
+assert.equal(analysisHtml.includes('id="chart-mode"'), false, "price analysis must remain in amount mode");
+requireText(toolsScript, "const sourceOrder = ['ebay', 'joonggonara', 'bunjang']",
+  "analysis sites must keep the requested visible order after the domestic total");
+requireText(toolsScript, "[['', '국내 전체']", "analysis must keep an explicit domestic aggregate tab");
+requireText(toolsScript, "state.sources = (catalog.sources || [])",
+  "analysis source tabs must follow the operational catalog instead of per-model evidence");
+assert.equal(toolsScript.includes('state.overview'), false, "removed overall-trend state must not remain reachable");
+assert.equal(toolsScript.includes("target.id === 'chart-mode'"), false, "removed index-mode control must not retain an event path");
+requireText(toolsChart, "empty.textContent = '가격 자료 없음'", "a source without evidence needs an honest empty state");
+requireText(toolsStyles, 'width:min(1536px,100%)', "tool pages must share the listing page container width");
+requireText(toolsStyles, '.tools-source-label', "analysis sites must use a flat labelled tab row");
 
 const categoryIndex = html.indexOf('id="category-select"');
 const modelIndex = html.indexOf('id="model-select"');
@@ -66,7 +91,7 @@ requireText(script, "payload?.available_facets", "the model response must drive 
 requireText(html, 'class="source-selector-label">사이트</span>', "site scope needs a short visible label");
 requireText(script, 'input.type = "radio"', "site controls must use the same single-selection semantics as price analysis");
 requireText(script, 'input.name = "listing-source"', "main listing site tabs must form one radio group");
-requireText(script, '["ebay", "joonggonara", "bunjang", "hellomarket", "coolenjoy", "danawa"]',
+requireText(script, '["ebay", "joonggonara", "bunjang"]',
   "eBay must stay visible before the individual domestic marketplaces");
 requireText(script, 'source.id === "ebay" ? "eBay (USD)"', "the overseas tab must state its separate currency");
 requireText(script, "state.selectedSites.add(source.id)", "a site tab must apply one exact source");

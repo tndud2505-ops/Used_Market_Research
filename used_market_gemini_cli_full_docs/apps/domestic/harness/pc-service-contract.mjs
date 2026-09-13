@@ -199,9 +199,10 @@ const authoritativeProjectionSet = collectAuthoritativePcProjections(
   (sourceId, sourceListingId) => republishProjectionBySourcePair.get(`${sourceId}\u0000${sourceListingId}`)
 );
 assert.deepEqual(authoritativeProjectionSet.items.map((item) => item.item_id).sort(), [
-  "bunjang:1001", "danawa:1002"
-], "only the active pipeline's authoritative eligible identities may drive republication");
-assert.equal(authoritativeProjectionSet.ineligible_count, 5);
+  "bunjang:1001"
+], "only enabled directory sources in the active pipeline may drive republication");
+assert.equal(authoritativeProjectionSet.ineligible_count, 6,
+  "otherwise eligible rows from retired sources must remain outside republication authority");
 const activeV9Fixture = {
   normalization_version: 9, parser_version: "pc-parser-v5", rule_version: "pc-rules-v9", filter_version: "pc-filter-v5"
 };
@@ -318,6 +319,16 @@ const legacyLotIdentity = {
   item_id: `danawa:${eligibleLotRepublishProjection.url}`,
   id: `danawa:${eligibleLotRepublishProjection.url}`
 };
+const eligibleBunjangLotProjection = {
+  ...eligibleLotRepublishProjection,
+  item_id: "bunjang:1002", id: "bunjang:1002", site: "bunjang",
+  url: "https://m.bunjang.co.kr/products/1002"
+};
+const legacyBunjangLotIdentity = {
+  ...eligibleBunjangLotProjection,
+  item_id: `bunjang:${eligibleBunjangLotProjection.url}`,
+  id: `bunjang:${eligibleBunjangLotProjection.url}`
+};
 const reconciliationFixture = buildPcProjectionReconciliation({
   authoritative: authoritativeProjectionSet.items,
   d1Public: [{ ...eligibleRepublishProjection, canonical_product_id: "gpu:nvidia:stale-v8-target" }, legacyLotIdentity, staleD1Fixture],
@@ -325,42 +336,38 @@ const reconciliationFixture = buildPcProjectionReconciliation({
   pipelineVersion: activeV9Fixture,
   authorityCoverage: authoritativeProjectionSet
 });
-assert.equal(reconciliationFixture.authoritative_count, 2);
-assert.deepEqual(reconciliationFixture.d1_stale.map((item) => item.item_id), [
-  "bunjang:stale-v8-system", legacyLotIdentity.item_id
-]);
-assert.deepEqual(reconciliationFixture.local_stale.map((item) => item.item_id), ["danawa:stale-v8-quantity"]);
+assert.equal(reconciliationFixture.authoritative_count, 1);
+assert.deepEqual(reconciliationFixture.d1_stale.map((item) => item.item_id), ["bunjang:stale-v8-system"]);
+assert.deepEqual(reconciliationFixture.local_stale.map((item) => item.item_id), [],
+  "retired source rows stay outside the active reconciliation scope");
 assert.equal(reconciliationFixture.d1_upserts.find((item) => item.item_id === "bunjang:1001").canonical_product_id,
   "gpu:nvidia:rtx-3080", "the authoritative canonical target replaces the stale public target in place");
-assert.equal(reconciliationFixture.d1_missing_count, 1,
-  "a legacy-only identity is missing until the canonical item ID is upserted");
-assert.equal(reconciliationFixture.d1_upserts.find((item) => item.listing_kind === "SAME_PRODUCT_LOT").item_id,
-  eligibleLotRepublishProjection.item_id, "reconciliation always upserts the authoritative canonical item ID");
+assert.equal(reconciliationFixture.d1_missing_count, 0);
 const canonicalIdMigrationFixture = buildPcProjectionReconciliation({
-  authoritative: [eligibleLotRepublishProjection],
-  d1Public: [legacyLotIdentity],
-  localPublic: [eligibleLotRepublishProjection],
+  authoritative: [eligibleBunjangLotProjection],
+  d1Public: [legacyBunjangLotIdentity],
+  localPublic: [eligibleBunjangLotProjection],
   pipelineVersion: activeV9Fixture,
-  sources: ["danawa"]
+  sources: ["bunjang"]
 });
 assert.equal(canonicalIdMigrationFixture.d1_stale_count, 1);
 assert.equal(canonicalIdMigrationFixture.d1_missing_count, 1);
-assert.equal(canonicalIdMigrationFixture.d1_stale[0].item_id, legacyLotIdentity.item_id);
-assert.equal(canonicalIdMigrationFixture.d1_upserts[0].item_id, eligibleLotRepublishProjection.item_id,
+assert.equal(canonicalIdMigrationFixture.d1_stale[0].item_id, legacyBunjangLotIdentity.item_id);
+assert.equal(canonicalIdMigrationFixture.d1_upserts[0].item_id, eligibleBunjangLotProjection.item_id,
   "a legacy-only representative is tombstoned while its canonical ID is inserted non-destructively");
 assert.equal(canonicalIdMigrationFixture.local_stale_count, 0);
 assert.equal(canonicalIdMigrationFixture.local_missing_count, 0,
   "an exact canonical representative remains present and is not tombstoned");
 const canonicalWithAliasFixture = buildPcProjectionReconciliation({
-  authoritative: [eligibleLotRepublishProjection],
-  d1Public: [eligibleLotRepublishProjection, legacyLotIdentity],
-  localPublic: [eligibleLotRepublishProjection],
+  authoritative: [eligibleBunjangLotProjection],
+  d1Public: [eligibleBunjangLotProjection, legacyBunjangLotIdentity],
+  localPublic: [eligibleBunjangLotProjection],
   pipelineVersion: activeV9Fixture,
-  sources: ["danawa"]
+  sources: ["bunjang"]
 });
 assert.equal(canonicalWithAliasFixture.d1_missing_count, 0);
-assert.deepEqual(canonicalWithAliasFixture.d1_stale.map((item) => item.item_id), [legacyLotIdentity.item_id]);
-assert.deepEqual(canonicalWithAliasFixture.d1_upserts.map((item) => item.item_id), [eligibleLotRepublishProjection.item_id],
+assert.deepEqual(canonicalWithAliasFixture.d1_stale.map((item) => item.item_id), [legacyBunjangLotIdentity.item_id]);
+assert.deepEqual(canonicalWithAliasFixture.d1_upserts.map((item) => item.item_id), [eligibleBunjangLotProjection.item_id],
   "an exact canonical row survives while only its legacy alias is tombstoned");
 const ebayCanonicalProjection = repairAuthoritativePcProjection("ebay", "v1|116454586914|0", {
   ...eligibleRepublishProjection,
@@ -394,15 +401,15 @@ assert.equal(ebayLegacyTombstone.item_id, ebayLegacyProjection.item_id);
 assert.equal(ebayLegacyTombstone.price_eligible, false,
   "legacy aliases are retained as non-destructive tombstones");
 assert.throws(() => buildPcProjectionReconciliation({
-  authoritative: [eligibleLotRepublishProjection],
+  authoritative: [eligibleBunjangLotProjection],
   d1Public: [{
-    ...eligibleLotRepublishProjection,
-    url: "https://dmall.danawa.com/v3/?controller=sale&methods=blog&seq=wrong-identity"
+    ...eligibleBunjangLotProjection,
+    url: "https://m.bunjang.co.kr/products/wrong-identity"
   }],
-  localPublic: [eligibleLotRepublishProjection],
+  localPublic: [eligibleBunjangLotProjection],
   pipelineVersion: activeV9Fixture,
-  sources: ["danawa"]
-}), /D1_PUBLIC_STALE_UPSERT_ITEM_ID_COLLISION:danawa:1002/u,
+  sources: ["bunjang"]
+}), /D1_PUBLIC_STALE_UPSERT_ITEM_ID_COLLISION:bunjang:1002/u,
 "the plan fails closed if one item ID would otherwise be both upserted and tombstoned");
 const reorderedReconciliationFixture = buildPcProjectionReconciliation({
   authoritative: [...authoritativeProjectionSet.items].reverse(),
@@ -419,8 +426,8 @@ assert.ok(staleTombstone.exclusion_reasons.includes("NOT_IN_ACTIVE_PIPELINE_ELIG
 assert.throws(() => parsePcProjectionRepublishArguments(["--apply"]), /requires checksum and all exact expected counts/u);
 const confirmedReconciliation = parsePcProjectionRepublishArguments([
   "--apply", `--confirm-checksum=${reconciliationFixture.checksum}`,
-  "--expect-authoritative-count=2", "--expect-d1-stale-count=2", "--expect-d1-missing-count=1",
-  "--expect-local-stale-count=1", "--expect-local-missing-count=0",
+  "--expect-authoritative-count=1", "--expect-d1-stale-count=1", "--expect-d1-missing-count=0",
+  "--expect-local-stale-count=0", "--expect-local-missing-count=0",
   "--expect-source-pair-count=7", "--expect-projection-count=7", "--expect-version-covered-count=7"
 ]);
 assert.equal(assertPcProjectionApplyConfirmation(confirmedReconciliation, reconciliationFixture), true);
@@ -892,7 +899,7 @@ try {
   const productsResponse = await fetch(`${baseUrl}/api/pc/products?category_code=GPU&query=RTX%203080&limit=10`, { headers });
   assert.equal(productsResponse.status, 200, stderr);
   assert.equal((await productsResponse.json()).data.products.items[0].id, "gpu:nvidia:rtx-3080");
-  const listingsResponse = await fetch(`${baseUrl}/api/pc/listings?canonical_product_id=gpu%3Anvidia%3Artx-3080&board_manufacturer=ASUS&sites=danawa&sort=price_asc&price_min=400000&price_max=600000&currency=KRW&limit=2`, { headers });
+  const listingsResponse = await fetch(`${baseUrl}/api/pc/listings?canonical_product_id=gpu%3Anvidia%3Artx-3080&board_manufacturer=ASUS&sites=joonggonara&sort=price_asc&price_min=400000&price_max=600000&currency=KRW&limit=2`, { headers });
   assert.equal(listingsResponse.status, 200, stderr);
   const listingsPayload = await listingsResponse.json();
   assert.equal(listingsPayload.data.items[0].canonical_product_id, "gpu:nvidia:rtx-3080");
@@ -901,7 +908,7 @@ try {
   assert.equal(typeof listingsPayload.data.as_of, "string");
   assert.equal(typeof listingsPayload.data.freshness.state, "string");
   assert.equal(Object.hasOwn(listingsPayload.data.pagination, "next_cursor"), true);
-  assert.ok(Number(listingsPayload.data.source_counts?.danawa || 0) > 0,
+  assert.ok(Number(listingsPayload.data.source_counts?.joonggonara || 0) > 0,
     "the AWS listing path must publish whole-query source counts");
   const authorized = await fetch(`${baseUrl}/api/search`, {
     method: "POST", headers, body: JSON.stringify(pcRequest)
@@ -993,8 +1000,8 @@ d1.prepare(`INSERT INTO listings(item_id, site, category_id, title, search_text,
   canonical_product_id, canonical_display_name, canonical_manufacturer, board_manufacturer, listing_kind, pc_category_code, quantity, price_scope, condition_code,
   lifecycle_status, market_pool, price_eligible, exclusion_reasons_json)
   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, '[]')`).run(
-  "danawa:d1-pc", "danawa", "pc", "RTX 3080 D1 백업", "RTX 3080 D1 백업", 490_000, "KRW",
-  "https://dmall.danawa.com/v3/?controller=sale&methods=blog&seq=d1-pc", "https://images.example.test/d1-pc.jpg", "2026-08-29T00:00:00.000Z",
+  "joonggonara:d1-pc", "joonggonara", "pc", "RTX 3080 D1 백업", "RTX 3080 D1 백업", 490_000, "KRW",
+  "https://web.joongna.com/product/d1-pc", "https://images.example.test/d1-pc.jpg", "2026-08-29T00:00:00.000Z",
   "gpu:nvidia:rtx-3080", "NVIDIA GeForce RTX 3080", null, "ASUS", "SINGLE_COMPONENT", "GPU", 1, "TOTAL",
   "USED_WORKING", "ACTIVE", "KR_C2C_USED"
 );
@@ -1222,13 +1229,12 @@ const customRangeFallback = await worker.fetch(new Request(
 ), importEnv);
 assert.equal(customRangeFallback.status, 503, 'custom ranges must never reuse the current 30-day D1 projection');
 const publishedStatsPayload = (await publishedStatsResponse.json()).data;
-assert.deepEqual(publishedStatsPayload.by_source.map((source) => source.source_id), ["bunjang", "danawa", "joonggonara"]);
+assert.deepEqual(publishedStatsPayload.by_source.map((source) => source.source_id), ["bunjang", "joonggonara"],
+  "retired sources must not remain selectable in public price statistics");
 assert.equal(publishedStatsPayload.active.sample_count, 5,
   "the published aggregate must remain ledger-member based instead of summing per-source projections");
 assert.equal(publishedStatsPayload.as_of, "2026-08-29T00:00:00.000Z",
   "adding a current source projection must not relabel the published aggregate with a newer timestamp");
-assert.equal(publishedStatsPayload.by_source.find((source) => source.source_id === "danawa").active.sample_count, 1,
-  "a newly collected D1 source must be visible even before the next aggregate publication");
 assert.equal(publishedStatsPayload.by_source.find((source) => source.source_id === "joonggonara").active.median, 490_000,
   "stored per-source statistics must remain independently selectable by the UI site filter");
 const ssdStatsResponse = await worker.fetch(new Request(
@@ -1539,14 +1545,14 @@ try {
     SEARCH_CURSOR_SECRET: "fixture-runner-token"
   };
   const firstAwsListing = await worker.fetch(new Request(
-    "https://used-pick.test/api/pc/listings?sites=danawa&canonical_product_id=gpu%3Anvidia%3Artx-3080"
+    "https://used-pick.test/api/pc/listings?sites=joonggonara&canonical_product_id=gpu%3Anvidia%3Artx-3080"
   ), pcReadRouteEnv);
   assert.equal(firstAwsListing.status, 200);
   assert.equal(firstAwsListing.headers.get("x-search-data-source"), "aws-runner");
   assert.equal(firstAwsListing.headers.get("x-pc-read-cache"), "MISS");
   assert.equal((await firstAwsListing.json()).data.source, "aws");
   const cachedAwsListing = await worker.fetch(new Request(
-    "https://used-pick.test/api/pc/listings?canonical_product_id=gpu%3Anvidia%3Artx-3080&sites=danawa"
+    "https://used-pick.test/api/pc/listings?canonical_product_id=gpu%3Anvidia%3Artx-3080&sites=joonggonara"
   ), pcReadRouteEnv);
   assert.equal(cachedAwsListing.headers.get("x-pc-read-cache"), "HIT");
   assert.equal(pcReadRunnerCalls.filter((pathname) => pathname === "/api/pc/listings").length, 1,
@@ -1569,7 +1575,7 @@ try {
 
   pcReadRunnerMode = "client-error";
   const clientErrorResponse = await worker.fetch(new Request(
-    "https://used-pick.test/api/pc/listings?sites=danawa&limit=3"
+    "https://used-pick.test/api/pc/listings?sites=joonggonara&limit=3"
   ), pcReadRouteEnv);
   assert.equal(clientErrorResponse.status, 410,
     "runner client and cursor errors must not be hidden by D1 fallback");
@@ -1579,7 +1585,7 @@ try {
     "AWS success and client errors must not read D1");
 
   const missingRunnerResponse = await worker.fetch(new Request(
-    "https://used-pick.test/api/pc/listings?sites=danawa&limit=6"
+    "https://used-pick.test/api/pc/listings?sites=joonggonara&limit=6"
   ), {
     ...pcReadRouteEnv,
     SEARCH_RUNNER_URL: "",
@@ -1593,32 +1599,32 @@ try {
 
   pcReadRunnerMode = "server-error";
   const disabledD1Fallback = await worker.fetch(new Request(
-    "https://used-pick.test/api/pc/listings?sites=danawa&limit=7"
+    "https://used-pick.test/api/pc/listings?sites=joonggonara&limit=7"
   ), { ...pcReadRouteEnv, D1_LISTING_FALLBACK_ENABLED: "false" });
   assert.equal(disabledD1Fallback.status, 503,
     "D1 listing fallback must remain disabled in the default AWS-primary profile");
   assert.equal(pcReadD1PrepareCalls, 0);
   const cursorFailureResponse = await worker.fetch(new Request(
-    "https://used-pick.test/api/pc/listings?sites=danawa&cursor=runner-page-cursor"
+    "https://used-pick.test/api/pc/listings?sites=joonggonara&cursor=runner-page-cursor"
   ), pcReadRouteEnv);
   assert.equal(cursorFailureResponse.status, 503,
     "an AWS cursor must never continue against a different D1 snapshot");
   assert.equal(pcReadD1PrepareCalls, 0);
 
   const fallbackManifestAt = new Date().toISOString();
-  const fallbackTargetId = "pc-target:2:category-v9:GPU";
+  const fallbackTargetId = "pc-target:2:market-v10:GPU:0";
   d1.prepare(`INSERT INTO pc_listing_collection_manifests(
     source_id, as_of, manifest_version, successful_target_ids_json, successful_target_count, mirrored_at
-  ) VALUES ('danawa', ?, 'pc-listing-collection-v1', ?, 1, ?)`).run(
+  ) VALUES ('joonggonara', ?, 'pc-listing-collection-v1', ?, 1, ?)`).run(
     fallbackManifestAt, JSON.stringify([fallbackTargetId]), fallbackManifestAt
   );
   d1.prepare(`INSERT INTO pc_listing_collection_target_runtime(
     source_id, target_id, last_succeeded_at, manifest_version, mirrored_at
-  ) VALUES ('danawa', ?, ?, 'pc-listing-collection-v1', ?)`).run(
+  ) VALUES ('joonggonara', ?, ?, 'pc-listing-collection-v1', ?)`).run(
     fallbackTargetId, fallbackManifestAt, fallbackManifestAt
   );
   const d1ListingFallback = await worker.fetch(new Request(
-    "https://used-pick.test/api/pc/listings?canonical_product_id=gpu%3Anvidia%3Artx-3080&sites=danawa&limit=4"
+    "https://used-pick.test/api/pc/listings?canonical_product_id=gpu%3Anvidia%3Artx-3080&sites=joonggonara&limit=4"
   ), pcReadRouteEnv);
   assert.equal(d1ListingFallback.status, 200);
   assert.equal(d1ListingFallback.headers.get("x-search-data-source"), "d1-fallback");
@@ -1627,11 +1633,11 @@ try {
   assert.equal(pcReadD1PrepareCalls > 0, true,
     "runner server errors may read a fresh complete D1 fallback snapshot");
   d1.prepare(`DELETE FROM pc_listing_collection_target_runtime
-    WHERE source_id = 'danawa' AND last_succeeded_at = ?`).run(fallbackManifestAt);
+    WHERE source_id = 'joonggonara' AND last_succeeded_at = ?`).run(fallbackManifestAt);
   d1.prepare(`DELETE FROM pc_listing_collection_manifests
-    WHERE source_id = 'danawa' AND as_of = ?`).run(fallbackManifestAt);
+    WHERE source_id = 'joonggonara' AND as_of = ?`).run(fallbackManifestAt);
   const staleD1Fallback = await worker.fetch(new Request(
-    "https://used-pick.test/api/pc/listings?canonical_product_id=gpu%3Anvidia%3Artx-3080&sites=danawa&limit=5"
+    "https://used-pick.test/api/pc/listings?canonical_product_id=gpu%3Anvidia%3Artx-3080&sites=joonggonara&limit=5"
   ), pcReadRouteEnv);
   assert.equal(staleD1Fallback.status, 503,
     "stale or incomplete D1 listings must not be exposed as active fallback inventory");
@@ -1702,19 +1708,19 @@ const insertCatalogScopeFixture = paginationD1.prepare(`INSERT INTO listings(
   item_id, site, category_id, title, search_text, price_value, currency, url, updated_at, active,
   canonical_product_id, canonical_display_name, canonical_manufacturer, listing_kind, pc_category_code,
   quantity, price_scope, condition_code, lifecycle_status, market_pool, price_eligible, exclusion_reasons_json
-) VALUES (?, 'danawa', 'pc', ?, ?, ?, 'KRW', ?, '2026-08-31T02:00:00.000Z', 1,
+) VALUES (?, 'joonggonara', 'pc', ?, ?, ?, 'KRW', ?, '2026-08-31T02:00:00.000Z', 1,
   ?, ?, ?, 'SINGLE_COMPONENT', 'RAM', 1, 'TOTAL', 'USED_WORKING', 'ACTIVE', 'KR_C2C_USED', 1, '[]')`);
-insertCatalogScopeFixture.run("danawa:ram-samsung-16", "Samsung DDR5 16GB", "Samsung DDR5 16GB", 42_000,
-  "https://dmall.danawa.com/v3/?controller=sale&methods=blog&seq=ram-samsung-16",
+insertCatalogScopeFixture.run("joonggonara:ram-samsung-16", "Samsung DDR5 16GB", "Samsung DDR5 16GB", 42_000,
+  "https://web.joongna.com/product/ram-samsung-16",
   "ram:samsung:ddr5:16gb", "Samsung DDR5 16GB", "Samsung");
-insertCatalogScopeFixture.run("danawa:ram-hynix-16", "SK hynix DDR5 16GB", "SK hynix DDR5 16GB", 39_000,
-  "https://dmall.danawa.com/v3/?controller=sale&methods=blog&seq=ram-hynix-16",
+insertCatalogScopeFixture.run("joonggonara:ram-hynix-16", "SK hynix DDR5 16GB", "SK hynix DDR5 16GB", 39_000,
+  "https://web.joongna.com/product/ram-hynix-16",
   "ram:sk-hynix:ddr5:16gb", "SK hynix DDR5 16GB", "SK hynix");
-insertCatalogScopeFixture.run("danawa:ram-samsung-8", "Samsung DDR5 8GB", "Samsung DDR5 8GB", 22_000,
-  "https://dmall.danawa.com/v3/?controller=sale&methods=blog&seq=ram-samsung-8",
+insertCatalogScopeFixture.run("joonggonara:ram-samsung-8", "Samsung DDR5 8GB", "Samsung DDR5 8GB", 22_000,
+  "https://web.joongna.com/product/ram-samsung-8",
   "ram:samsung:ddr5:8gb", "Samsung DDR5 8GB", "Samsung");
 const catalogScopeObservationStart = bindingObservations.length;
-const catalogScopeBase = "https://used-pick.test/api/pc/listings?category_code=RAM&generation=DDR5&module_capacity_gb=16&sites=danawa&currency=KRW&limit=1";
+const catalogScopeBase = "https://used-pick.test/api/pc/listings?category_code=RAM&generation=DDR5&module_capacity_gb=16&sites=joonggonara&currency=KRW&limit=1";
 const catalogScopeResponse = await worker.fetch(new Request(
   catalogScopeBase
 ), bindingBudgetEnv);
@@ -1795,7 +1801,7 @@ const siteRecentPlan = d1.prepare(`EXPLAIN QUERY PLAN SELECT item_id FROM listin
 assert.match(siteRecentPlan, /idx_listings_pc_public_site_recent/u,
   "site-only recent browse must use the site-prefixed public-listing index");
 const workerListings = await worker.fetch(new Request(
-  "https://used-pick.test/api/pc/listings?canonical_product_id=gpu%3Anvidia%3Artx-3080&board_manufacturer=ASUS&sites=danawa&sort=price_asc&price_min=400000&price_max=600000&currency=KRW"
+  "https://used-pick.test/api/pc/listings?canonical_product_id=gpu%3Anvidia%3Artx-3080&board_manufacturer=ASUS&sites=joonggonara&sort=price_asc&price_min=400000&price_max=600000&currency=KRW"
 ), { ...importEnv, SEARCH_CURSOR_SECRET: "fixture-cursor-secret-that-is-long-enough" });
 assert.equal(workerListings.status, 200);
 const workerListingsPayload = await workerListings.json();
@@ -1825,9 +1831,9 @@ const d1ListingItemsBeforeFreshnessMirror = structuredClone(workerListingsPayloa
 const sourceRuntimeCollectedAt = new Date(Date.now() - 30_000).toISOString();
 const unrelatedSourceRuntimeCollectedAt = new Date(Date.now() - 5_000).toISOString();
 const freshnessTargetIds = Object.freeze({
-  bunjangGpu: "pc-target:2:market-v9:GPU:0",
-  danawaGpu: "pc-target:2:category-v9:GPU",
-  danawaCpu: "pc-target:2:category-v9:CPU"
+  bunjangGpu: "pc-target:2:market-v10:GPU:0",
+  joonggonaraGpu: "pc-target:2:market-v10:GPU:0",
+  joonggonaraCpu: "pc-target:2:market-v10:CPU:1"
 });
 const mirrorCollectionManifest = async (sourceId, asOf, successfulTargetIds) => {
   const response = await worker.fetch(new Request("https://used-pick.test/admin/import-listings", {
@@ -1848,13 +1854,13 @@ const mirrorCollectionManifest = async (sourceId, asOf, successfulTargetIds) => 
 };
 assert.equal((await mirrorCollectionManifest("bunjang", unrelatedSourceRuntimeCollectedAt,
   [freshnessTargetIds.bunjangGpu])).response.status, 200);
-const sourceManifest = await mirrorCollectionManifest("danawa", sourceRuntimeCollectedAt,
-  [freshnessTargetIds.danawaGpu]);
+const sourceManifest = await mirrorCollectionManifest("joonggonara", sourceRuntimeCollectedAt,
+  [freshnessTargetIds.joonggonaraGpu]);
 assert.equal(sourceManifest.response.status, 200);
 assert.equal(sourceManifest.payload.collection_manifest.as_of, sourceRuntimeCollectedAt);
-assert.deepEqual(sourceManifest.payload.collection_manifest.successful_target_ids, [freshnessTargetIds.danawaGpu]);
+assert.deepEqual(sourceManifest.payload.collection_manifest.successful_target_ids, [freshnessTargetIds.joonggonaraGpu]);
 const runtimeFreshnessResponse = await worker.fetch(new Request(
-  "https://used-pick.test/api/pc/listings?canonical_product_id=gpu%3Anvidia%3Artx-3080&board_manufacturer=ASUS&sites=danawa&sort=price_asc&price_min=400000&price_max=600000&currency=KRW"
+  "https://used-pick.test/api/pc/listings?canonical_product_id=gpu%3Anvidia%3Artx-3080&board_manufacturer=ASUS&sites=joonggonara&sort=price_asc&price_min=400000&price_max=600000&currency=KRW"
 ), { ...importEnv, SEARCH_CURSOR_SECRET: "fixture-cursor-secret-that-is-long-enough" });
 assert.equal(runtimeFreshnessResponse.status, 200);
 const runtimeFreshnessPayload = await runtimeFreshnessResponse.json();
@@ -1877,7 +1883,7 @@ try {
     throw new Error("public listing GET must not call the runner");
   };
   const d1OnlyFreshnessResponse = await worker.fetch(new Request(
-    "https://used-pick.test/api/pc/listings?canonical_product_id=gpu%3Anvidia%3Artx-3080&sites=danawa&currency=KRW"
+    "https://used-pick.test/api/pc/listings?canonical_product_id=gpu%3Anvidia%3Artx-3080&sites=joonggonara&currency=KRW"
   ), {
     ...importEnv,
     SEARCH_CURSOR_SECRET: "fixture-cursor-secret-that-is-long-enough",
@@ -1892,34 +1898,34 @@ try {
   globalThis.fetch = fetchBeforeD1OnlyFreshness;
 }
 const olderSourceRuntime = new Date(Date.parse(sourceRuntimeCollectedAt) - 60_000).toISOString();
-const olderManifest = await mirrorCollectionManifest("danawa", olderSourceRuntime, [freshnessTargetIds.danawaGpu]);
+const olderManifest = await mirrorCollectionManifest("joonggonara", olderSourceRuntime, [freshnessTargetIds.joonggonaraGpu]);
 assert.equal(olderManifest.response.status, 200);
 assert.equal(olderManifest.payload.collection_manifest.as_of, olderSourceRuntime,
   "append-only history accepts an older immutable manifest without replacing the latest state");
-const idempotentManifestRetry = await mirrorCollectionManifest("danawa", sourceRuntimeCollectedAt,
-  [freshnessTargetIds.danawaGpu]);
+const idempotentManifestRetry = await mirrorCollectionManifest("joonggonara", sourceRuntimeCollectedAt,
+  [freshnessTargetIds.joonggonaraGpu]);
 assert.equal(idempotentManifestRetry.response.status, 200,
   "an exact source/as_of manifest retry must be idempotent even when it has no listing rows");
-const equalTimeConflict = await mirrorCollectionManifest("danawa", sourceRuntimeCollectedAt,
-  [freshnessTargetIds.danawaCpu]);
+const equalTimeConflict = await mirrorCollectionManifest("joonggonara", sourceRuntimeCollectedAt,
+  [freshnessTargetIds.joonggonaraCpu]);
 assert.equal(equalTimeConflict.response.status, 409,
   "the same source/as_of cannot be rewritten with a different successful target set");
 const postConflictFreshness = await worker.fetch(new Request(
-  "https://used-pick.test/api/pc/listings?canonical_product_id=gpu%3Anvidia%3Artx-3080&sites=danawa&currency=KRW"
+  "https://used-pick.test/api/pc/listings?canonical_product_id=gpu%3Anvidia%3Artx-3080&sites=joonggonara&currency=KRW"
 ), { ...importEnv, SEARCH_CURSOR_SECRET: "fixture-cursor-secret-that-is-long-enough" });
 assert.equal((await postConflictFreshness.json()).data.freshness.last_collected_at, sourceRuntimeCollectedAt,
   "a conflicting equal-time manifest must leave the accepted target coverage unchanged");
 const concurrentManifestAt = new Date(Date.parse(sourceRuntimeCollectedAt) + 2).toISOString();
 const concurrentManifestResults = await Promise.all([
-  mirrorCollectionManifest("danawa", concurrentManifestAt, [freshnessTargetIds.danawaGpu]),
-  mirrorCollectionManifest("danawa", concurrentManifestAt, [freshnessTargetIds.danawaCpu])
+  mirrorCollectionManifest("joonggonara", concurrentManifestAt, [freshnessTargetIds.joonggonaraGpu]),
+  mirrorCollectionManifest("joonggonara", concurrentManifestAt, [freshnessTargetIds.joonggonaraCpu])
 ]);
 assert.deepEqual(concurrentManifestResults.map((result) => result.response.status).sort(), [200, 409],
   "concurrent different manifests for one immutable source/as_of must have exactly one winner");
 const concurrentManifestRow = d1.prepare(`SELECT successful_target_ids_json
-  FROM pc_listing_collection_manifests WHERE source_id = 'danawa' AND as_of = ?`).get(concurrentManifestAt);
+  FROM pc_listing_collection_manifests WHERE source_id = 'joonggonara' AND as_of = ?`).get(concurrentManifestAt);
 const concurrentTargetRows = d1.prepare(`SELECT target_id FROM pc_listing_collection_target_runtime
-  WHERE source_id = 'danawa' AND last_succeeded_at = ? ORDER BY target_id`).all(concurrentManifestAt);
+  WHERE source_id = 'joonggonara' AND last_succeeded_at = ? ORDER BY target_id`).all(concurrentManifestAt);
 assert.deepEqual(concurrentTargetRows.map((row) => row.target_id), JSON.parse(concurrentManifestRow.successful_target_ids_json),
   "a losing concurrent manifest cannot pollute the winning manifest's target runtime rows");
 
@@ -1943,7 +1949,6 @@ const insertCoverageListing = coverageD1.prepare(`INSERT INTO listings(
   'gpu:nvidia:rtx-3080', 'NVIDIA GeForce RTX 3080', 'SINGLE_COMPONENT', 'GPU', 1, 'TOTAL',
   'USED_WORKING', 'ACTIVE', 'KR_C2C_USED', 1, '[]')`);
 for (const [site, price, url] of [
-  ["danawa", 490_000, "https://dmall.danawa.com/v3/?controller=sale&methods=blog&seq=coverage-danawa"],
   ["bunjang", 500_000, "https://m.bunjang.co.kr/products/990001"],
   ["joonggonara", 510_000, "https://web.joongna.com/product/990002"]
 ]) {
@@ -1958,9 +1963,9 @@ const insertCoverageRuntime = (sourceId, targetId, asOf, mirroredAt = asOf) => {
     source_id, target_id, last_succeeded_at, manifest_version, mirrored_at
   ) VALUES (?, ?, ?, 'pc-listing-collection-v1', ?)`).run(sourceId, targetId, asOf, mirroredAt);
 };
-const coverageDanawaAt = new Date(Date.now() - 30_000).toISOString();
+const coverageJoonggonaraAt = new Date(Date.now() - 30_000).toISOString();
 const coverageBunjangAt = new Date(Date.now() - 3 * 60 * 60 * 1_000).toISOString();
-insertCoverageRuntime("danawa", freshnessTargetIds.danawaGpu, coverageDanawaAt);
+insertCoverageRuntime("joonggonara", freshnessTargetIds.joonggonaraGpu, coverageJoonggonaraAt);
 insertCoverageRuntime("bunjang", freshnessTargetIds.bunjangGpu, coverageBunjangAt);
 const coverageEnv = {
   DB: d1Adapter(coverageD1, { maxBindings: 90 }),
@@ -1968,7 +1973,7 @@ const coverageEnv = {
   SEARCH_CURSOR_SECRET: "fixture-coverage-secret-that-is-long-enough"
 };
 const multiSourceCoverage = await worker.fetch(new Request(
-  "https://used-pick.test/api/pc/listings?canonical_product_id=gpu%3Anvidia%3Artx-3080&sites=danawa,bunjang&currency=KRW&limit=1"
+  "https://used-pick.test/api/pc/listings?canonical_product_id=gpu%3Anvidia%3Artx-3080&sites=joonggonara,bunjang&currency=KRW&limit=1"
 ), coverageEnv);
 const multiSourceCoveragePayload = await multiSourceCoverage.json();
 assert.equal(multiSourceCoveragePayload.data.freshness.last_collected_at, coverageBunjangAt,
@@ -1977,7 +1982,7 @@ assert.equal(multiSourceCoveragePayload.data.freshness.state, "STALE");
 assert.equal(multiSourceCoveragePayload.data.freshness.required_target_count, 2);
 assert.equal(multiSourceCoveragePayload.data.freshness.covered_target_count, 2);
 const incompleteCoverage = await worker.fetch(new Request(
-  "https://used-pick.test/api/pc/listings?canonical_product_id=gpu%3Anvidia%3Artx-3080&sites=danawa,joonggonara&currency=KRW"
+  "https://used-pick.test/api/pc/listings?canonical_product_id=gpu%3Anvidia%3Artx-3080&sites=bunjang,ebay"
 ), coverageEnv);
 const incompleteCoveragePayload = await incompleteCoverage.json();
 assert.equal(incompleteCoveragePayload.data.freshness.last_collected_at, null);
@@ -1986,7 +1991,7 @@ assert.equal(incompleteCoveragePayload.data.freshness.required_target_count, 2);
 assert.equal(incompleteCoveragePayload.data.freshness.covered_target_count, 1,
   "one fresh source cannot mask a missing source-target runtime");
 const zeroResultSourceCoverage = await worker.fetch(new Request(
-  "https://used-pick.test/api/pc/listings?canonical_product_id=gpu%3Anvidia%3Artx-3080&sites=danawa,coolenjoy&currency=KRW"
+  "https://used-pick.test/api/pc/listings?canonical_product_id=gpu%3Anvidia%3Artx-3080&sites=joonggonara,ebay"
 ), coverageEnv);
 const zeroResultSourceCoveragePayload = await zeroResultSourceCoverage.json();
 assert.equal(zeroResultSourceCoveragePayload.data.total, 1,
@@ -1999,21 +2004,21 @@ assert.equal(zeroResultSourceCoveragePayload.data.freshness.covered_target_count
 const cursorAsOf = multiSourceCoveragePayload.data.as_of;
 const lateCoverageAt = new Date(Date.parse(cursorAsOf) - 1_000).toISOString();
 const lateMirrorAt = new Date(Date.parse(cursorAsOf) + 1).toISOString();
-insertCoverageRuntime("danawa", freshnessTargetIds.danawaGpu, lateCoverageAt, lateMirrorAt);
+insertCoverageRuntime("joonggonara", freshnessTargetIds.joonggonaraGpu, lateCoverageAt, lateMirrorAt);
 insertCoverageRuntime("bunjang", freshnessTargetIds.bunjangGpu, lateCoverageAt, lateMirrorAt);
 const pinnedCoveragePage = await worker.fetch(new Request(
-  `https://used-pick.test/api/pc/listings?canonical_product_id=gpu%3Anvidia%3Artx-3080&sites=danawa,bunjang&currency=KRW&limit=1&cursor=${encodeURIComponent(multiSourceCoveragePayload.data.pagination.next_cursor)}`
+  `https://used-pick.test/api/pc/listings?canonical_product_id=gpu%3Anvidia%3Artx-3080&sites=joonggonara,bunjang&currency=KRW&limit=1&cursor=${encodeURIComponent(multiSourceCoveragePayload.data.pagination.next_cursor)}`
 ), coverageEnv);
 assert.equal((await pinnedCoveragePage.json()).data.freshness.last_collected_at, coverageBunjangAt,
   "cursor continuation must exclude a backfilled success that became visible after the first page");
 const currentCoverage = await worker.fetch(new Request(
-  "https://used-pick.test/api/pc/listings?canonical_product_id=gpu%3Anvidia%3Artx-3080&sites=danawa,bunjang&currency=KRW&limit=1"
+  "https://used-pick.test/api/pc/listings?canonical_product_id=gpu%3Anvidia%3Artx-3080&sites=joonggonara,bunjang&currency=KRW&limit=1"
 ), coverageEnv);
 assert.equal((await currentCoverage.json()).data.freshness.last_collected_at, lateCoverageAt,
   "a new first page may observe an older collection success mirrored after the prior cursor snapshot");
 coverageD1.close();
 const genericManufacturerListings = await worker.fetch(new Request(
-  "https://used-pick.test/api/pc/listings?canonical_product_id=gpu%3Anvidia%3Artx-3080&manufacturer=ASUS&sites=danawa&currency=KRW"
+  "https://used-pick.test/api/pc/listings?canonical_product_id=gpu%3Anvidia%3Artx-3080&manufacturer=ASUS&sites=joonggonara&currency=KRW"
 ), { ...importEnv, SEARCH_CURSOR_SECRET: "fixture-cursor-secret-that-is-long-enough" });
 assert.equal((await genericManufacturerListings.json()).data.items.length, 1,
   "the legacy manufacturer filter must also match an explicit GPU board manufacturer when canonical_manufacturer is null");
@@ -2071,33 +2076,33 @@ const importResponse = await worker.fetch(new Request("https://used-pick.test/ad
     canonical_product_id: "gpu:nvidia:rtx-3080", listing_kind: "SINGLE_COMPONENT", category_code: "GPU",
     quantity: 1, price_scope: "TOTAL", condition_code: "USED_WORKING", price_eligible: true, exclusion_reasons: []
   }, {
-    item_id: "danawa:allowed-import", site: "danawa", category_id: "pc",
-    title: "RTX 3080 다나와 장터", price: 475_000, currency: "KRW",
-    url: "http://dmall.danawa.com/v3/?controller=sale&methods=blog&seq=12345",
+    item_id: "joonggonara:allowed-import", site: "joonggonara", category_id: "pc",
+    title: "RTX 3080 중고나라", price: 475_000, currency: "KRW",
+    url: "https://web.joongna.com/product/allowed-import",
     lifecycle_status: "ACTIVE", market_pool: "KR_C2C_USED",
     canonical_product_id: "gpu:nvidia:rtx-3080", canonical_display_name: "NVIDIA GeForce RTX 3080",
     canonical_manufacturer: "ASUS", board_manufacturer: "ASUS", listing_kind: "SINGLE_COMPONENT", category_code: "GPU", quantity: 1,
     price_scope: "TOTAL", condition_code: "USED_WORKING", price_eligible: true, exclusion_reasons: []
   }, {
-    item_id: "danawa:board-evidence-import", site: "danawa", category_id: "pc",
-    title: "MSI RTX 3080 다나와 장터", price: 476_000, currency: "KRW",
-    url: "https://dmall.danawa.com/v3/?controller=sale&methods=blog&seq=12346",
+    item_id: "joonggonara:board-evidence-import", site: "joonggonara", category_id: "pc",
+    title: "MSI RTX 3080 중고나라", price: 476_000, currency: "KRW",
+    url: "https://web.joongna.com/product/board-evidence-import",
     lifecycle_status: "ACTIVE", market_pool: "KR_C2C_USED",
     canonical_product_id: "gpu:nvidia:rtx-3080", canonical_display_name: "NVIDIA GeForce RTX 3080",
     canonical_manufacturer: null, listing_kind: "SINGLE_COMPONENT", category_code: "GPU", quantity: 1,
     price_scope: "TOTAL", condition_code: "USED_WORKING", price_eligible: true, exclusion_reasons: [],
     evidence: [{ field: "board_manufacturer", value: "MSI", source: "TITLE_ALIAS" }]
   }, {
-    item_id: "danawa:invalid-quantity-import", site: "danawa", category_id: "pc",
+    item_id: "joonggonara:invalid-quantity-import", site: "joonggonara", category_id: "pc",
     title: "RTX 3080 수량 미확인", price: 477_000, currency: "KRW",
-    url: "https://dmall.danawa.com/v3/?controller=sale&methods=blog&seq=12347",
+    url: "https://web.joongna.com/product/invalid-quantity-import",
     lifecycle_status: "ACTIVE", market_pool: "KR_C2C_USED",
     canonical_product_id: "gpu:nvidia:rtx-3080", listing_kind: "SINGLE_COMPONENT", category_code: "GPU",
     quantity: null, price_scope: "TOTAL", condition_code: "USED_WORKING", price_eligible: true, exclusion_reasons: []
   }, {
-    item_id: "danawa:ambiguous-price-import", site: "danawa", category_id: "pc",
+    item_id: "joonggonara:ambiguous-price-import", site: "joonggonara", category_id: "pc",
     title: "RTX 3080 2개 가격범위 불명", price: 478_000, currency: "KRW",
-    url: "https://dmall.danawa.com/v3/?controller=sale&methods=blog&seq=12348",
+    url: "https://web.joongna.com/product/ambiguous-price-import",
     lifecycle_status: "ACTIVE", market_pool: "KR_C2C_USED",
     canonical_product_id: "gpu:nvidia:rtx-3080", listing_kind: "SAME_PRODUCT_LOT", category_code: "GPU",
     quantity: 2, price_scope: "AMBIGUOUS", condition_code: "USED_WORKING", price_eligible: true, exclusion_reasons: []
@@ -2130,26 +2135,26 @@ const importedPii = d1.prepare("SELECT active, title, search_text, seller_name F
 assert.equal(importedPii.active, 1);
 assert.equal(importedPii.seller_name, null);
 assert.doesNotMatch(JSON.stringify(importedPii), /010-1234-5678|seller@example\.com/u);
-for (const itemId of [
-  "bunjang:allowed-import",
-  "hellomarket:allowed-import",
-  "coolenjoy:allowed-import"
-]) {
+for (const itemId of ["bunjang:allowed-import"]) {
   assert.equal(d1.prepare("SELECT active FROM listings WHERE item_id = ?").get(itemId)?.active, 1,
     `${itemId} must be accepted into the stored PC directory projection`);
 }
+for (const itemId of ["hellomarket:allowed-import", "coolenjoy:allowed-import"]) {
+  assert.equal(d1.prepare("SELECT 1 FROM listings WHERE item_id = ?").get(itemId), undefined,
+    `${itemId} must be rejected after its source is retired`);
+}
 assert.equal(d1.prepare("SELECT 1 FROM listings WHERE item_id = ?").get("danawa:wrong-source-host"), undefined,
   "a listing URL from another source host must not be stored under the wrong site key");
-assert.equal(d1.prepare("SELECT active FROM listings WHERE item_id = ?").get("danawa:allowed-import").active, 1);
-assert.match(d1.prepare("SELECT url FROM listings WHERE item_id = ?").get("danawa:allowed-import").url, /^https:/u);
+assert.equal(d1.prepare("SELECT active FROM listings WHERE item_id = ?").get("joonggonara:allowed-import").active, 1);
+assert.match(d1.prepare("SELECT url FROM listings WHERE item_id = ?").get("joonggonara:allowed-import").url, /^https:/u);
 assert.equal(d1.prepare("SELECT board_manufacturer FROM listings WHERE item_id = ?")
-  .get("danawa:board-evidence-import").board_manufacturer, "MSI");
+  .get("joonggonara:board-evidence-import").board_manufacturer, "MSI");
 const invalidQuantity = d1.prepare("SELECT price_eligible, exclusion_reasons_json FROM listings WHERE item_id = ?")
-  .get("danawa:invalid-quantity-import");
+  .get("joonggonara:invalid-quantity-import");
 assert.equal(invalidQuantity.price_eligible, 0);
 assert.ok(JSON.parse(invalidQuantity.exclusion_reasons_json).includes("QUANTITY_UNKNOWN"));
 const ambiguousPrice = d1.prepare("SELECT price_eligible, exclusion_reasons_json FROM listings WHERE item_id = ?")
-  .get("danawa:ambiguous-price-import");
+  .get("joonggonara:ambiguous-price-import");
 assert.equal(ambiguousPrice.price_eligible, 0);
 assert.ok(JSON.parse(ambiguousPrice.exclusion_reasons_json).includes("PRICE_SCOPE_AMBIGUOUS"));
 assert.equal(d1.prepare("SELECT price_eligible FROM listings WHERE item_id = ?")
@@ -2237,14 +2242,13 @@ assert.equal((await reconciledD1Listings.json()).data.items
   .some((item) => item.item_id === staleD1Fixture.item_id), false,
 "a reconciled stale D1 projection remains stored but is absent from the public API");
 const boardEvidenceListings = await worker.fetch(new Request(
-  "https://used-pick.test/api/pc/listings?canonical_product_id=gpu%3Anvidia%3Artx-3080&board_manufacturer=MSI&sites=danawa&currency=KRW"
+  "https://used-pick.test/api/pc/listings?canonical_product_id=gpu%3Anvidia%3Artx-3080&board_manufacturer=MSI&sites=joonggonara&currency=KRW"
 ), { ...importEnv, SEARCH_CURSOR_SECRET: "fixture-cursor-secret-that-is-long-enough" });
 const boardEvidenceItems = (await boardEvidenceListings.json()).data.items;
 assert.equal(boardEvidenceItems.length, 1);
 assert.equal(boardEvidenceItems[0].board_manufacturer, "MSI");
-assert.equal(boardEvidenceItems.some((item) => item.item_id === "danawa:invalid-quantity-import"), false);
-assert.equal(boardEvidenceItems.some((item) => item.item_id === "danawa:ambiguous-price-import"), false);
-for (const site of ["bunjang", "hellomarket", "coolenjoy"]) {
+assert.equal(boardEvidenceItems[0].item_id, "joonggonara:board-evidence-import");
+for (const site of ["bunjang"]) {
   const sourceListings = await worker.fetch(new Request(
     `https://used-pick.test/api/pc/listings?canonical_product_id=gpu%3Anvidia%3Artx-3080&sites=${site}&currency=KRW`
   ), { ...importEnv, SEARCH_CURSOR_SECRET: "fixture-cursor-secret-that-is-long-enough" });
@@ -2322,7 +2326,7 @@ assert.equal(categoryApp.status, 200);
 assert.equal(assetPaths.at(-1), "/index.html", "category routes must serve the app shell without redirecting away from the category URL");
 const defaultHome = await worker.fetch(new Request("https://used-pick.test/"), routeAssets);
 assert.equal(defaultHome.status, 200);
-assert.equal(assetPaths.at(-1), "/price-analysis.html", "the default home must serve the owned price-analysis experience");
+assert.equal(assetPaths.at(-1), "/index.html", "the default home must serve the used-price listing experience");
 
 const internalSecret = "database-password=must-not-leak";
 let localSearchCalls = 0;
@@ -2338,7 +2342,19 @@ const server = createServer(0, {
     pagination: { has_more: false, next_cursor: null },
     as_of: "2026-08-29T00:00:00.000Z",
     freshness: { as_of: "2026-08-29T00:00:00.000Z", last_collected_at: "2026-08-29T00:00:00.000Z", age_seconds: 0, state: "FRESH" }
-  })
+  }),
+  getPcPriceStats: (query) => {
+    assert.equal(query.canonicalProductId, "cpu:amd:ryzen-3-2200g");
+    assert.equal(query.asOf, "2026-09-10T23:59:59.999Z");
+    return {
+      active: { sample_count: 2, median: 33_250, mean: 33_250, min: 21_000, max: 45_500 },
+      sold: { sample_count: 0, median: null, mean: null },
+      confirmed_transactions: { sample_count: 0, median: null, mean: null },
+      by_source: [{ source_id: "bunjang", active: { sample_count: 2, mean: 33_250 } }],
+      daily: [{ date: "2026-09-10", active: { sample_count: 2, mean: 33_250 } }],
+      as_of: "2026-09-10T12:00:00.000Z"
+    };
+  }
 });
 try {
   if (!server.listening) await once(server, "listening");
@@ -2346,8 +2362,8 @@ try {
   const baseUrl = `http://127.0.0.1:${address.port}`;
   const localHome = await fetch(`${baseUrl}/`);
   assert.equal(localHome.status, 200);
-  assert.match(await localHome.text(), /<title>PC 부품 가격 분석 \| USED PICK<\/title>/u,
-    "the local server must use price analysis as its default home too");
+  assert.match(await localHome.text(), /<title>중고 PC·컴퓨터 부품 검색 \| 중고 시세 비교 \| USED PICK<\/title>/u,
+    "the local server must use the listing experience as its default home too");
   const deniedCors = await fetch(`${baseUrl}/health`, { headers: { origin: "https://evil.example" } });
   assert.equal(deniedCors.headers.get("access-control-allow-origin"), null);
   const hidden = await fetch(`${baseUrl}/api/search`, {
@@ -2359,12 +2375,28 @@ try {
   assert.doesNotMatch(hiddenText, new RegExp(internalSecret, "u"));
   const localCatalog = await fetch(`${baseUrl}/api/pc/catalog`);
   assert.equal(localCatalog.status, 200);
+  const localCatalogData = (await localCatalog.json()).data;
+  assert.deepEqual(localCatalogData.sources.map((source) => source.source_id).sort(), ["bunjang", "ebay", "joonggonara"],
+    "the local PC catalog must expose exactly the three current operational sources");
+  const localCategories = await fetch(`${baseUrl}/api/categories`);
+  assert.equal(localCategories.status, 200);
+  const localCategoryData = (await localCategories.json()).data;
+  assert.deepEqual(Object.keys(localCategoryData.site_plans).sort(), ["bunjang", "ebay", "joonggonara"],
+    "the local category catalog must not retain disabled source plans");
   const localProducts = await fetch(`${baseUrl}/api/pc/products?category_code=GPU&query=RTX%203080`);
   assert.equal((await localProducts.json()).data.products.items[0].id, "gpu:nvidia:rtx-3080");
-  const localListings = await fetch(`${baseUrl}/api/pc/listings?canonical_product_id=gpu%3Anvidia%3Artx-3080&manufacturer=ASUS&sites=danawa&price_min=400000&price_max=600000`);
+  const localListings = await fetch(`${baseUrl}/api/pc/listings?canonical_product_id=gpu%3Anvidia%3Artx-3080&manufacturer=ASUS&sites=joonggonara&price_min=400000&price_max=600000`);
   const localListingItem = (await localListings.json()).data.items[0];
   assert.equal(localListingItem.canonical_product_id, "gpu:nvidia:rtx-3080");
   assert.equal(localListingItem.canonical_manufacturer, "ASUS");
+  const localStats = await fetch(`${baseUrl}/api/products/cpu%3Aamd%3Aryzen-3-2200g/price-stats?days=30&market_pool=KR_C2C_USED&condition=USED_WORKING&currency=KRW&as_of=2026-09-10`);
+  assert.equal(localStats.status, 200);
+  const localStatsData = (await localStats.json()).data;
+  assert.equal(localStatsData.window.to, "2026-09-10",
+    "the local publication route must preserve the shared requested price window");
+  assert.equal(localStatsData.active.sample_count, 2);
+  assert.equal(localStatsData.active.mean, 33_250,
+    "the local publication route must preserve collected values while normalizing the API shape");
   assert.equal(localSearchCalls, 1, "PC directory GET routes must not invoke the live search collector");
 } finally {
   server.close();

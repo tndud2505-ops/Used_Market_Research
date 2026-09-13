@@ -1106,7 +1106,7 @@ function renderSourceFilters() {
   dom.sourceFacetRow.hidden = state.sources.length === 0;
   syncSourceFilterSummary();
   if (!state.sources.length) return;
-  const priority = ["ebay", "joonggonara", "bunjang", "hellomarket", "coolenjoy", "danawa"];
+  const priority = ["ebay", "joonggonara", "bunjang"];
   const compactLabels = {
     joonggonara: "중고나라",
     bunjang: "번개장터",

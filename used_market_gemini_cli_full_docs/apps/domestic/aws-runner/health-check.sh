@@ -7,6 +7,7 @@ TIMEOUT_SECONDS="${RUNNER_HEALTH_TIMEOUT_SECONDS:-15}"
 WAIT_SECONDS="${RUNNER_HEALTH_WAIT_SECONDS:-60}"
 RUN_JOB=false
 REQUIRE_PUBLIC=false
+REQUIRE_PC_CONTINUOUS=false
 JOB_NAME="${RUNNER_HEALTH_JOB:-gpu-fast-scan}"
 RUNNER_TOKEN_INPUT="${RUNNER_TOKEN:-}"
 LOCAL_INSTANCE_ID=''
@@ -17,12 +18,14 @@ usage() {
   bash health-check.sh
   RUNNER_PUBLIC_URL=https://runner.example.com bash health-check.sh
   RUNNER_PUBLIC_URL=https://runner.example.com bash health-check.sh --require-public
+  RUNNER_PUBLIC_URL=https://runner.example.com bash health-check.sh --require-public --require-pc-continuous
   RUNNER_TOKEN='...' bash health-check.sh --run-job
 
 옵션:
   --run-job       인증된 실제 수집 작업 1개를 실행합니다. 기본 작업은 gpu-fast-scan입니다.
   --job NAME      --run-job에서 실행할 작업명을 바꿉니다.
   --require-public  공개 URL과 로컬 URL이 같은 새 Runner 인스턴스를 가리키는지 필수 검사합니다.
+  --require-pc-continuous  PC 스케줄러·소스 최근 수집·배치 처리량이 지속 운영 가능한지 검사합니다.
 EOF
 }
 
@@ -30,6 +33,7 @@ while (($# > 0)); do
   case "$1" in
     --run-job) RUN_JOB=true ;;
     --require-public) REQUIRE_PUBLIC=true ;;
+    --require-pc-continuous) REQUIRE_PC_CONTINUOUS=true ;;
     --job)
       (($# >= 2)) || { usage >&2; exit 2; }
       JOB_NAME="$2"
@@ -69,12 +73,12 @@ check_health() {
   done
 
   if command -v jq >/dev/null 2>&1; then
-    printf '%s\n' "$payload" | jq -e '
+    printf '%s\n' "$payload" | jq -e --argjson require_pc_continuous "$REQUIRE_PC_CONTINUOUS" '
       .ok == true and
       .service == "used-market-aws-runner" and
       .search_index.enabled == true and
       (.search_index.process_instance.id | type == "string" and length > 0) and
-      (.target_sites | type == "array" and length > 0) and
+      (.target_sites | sort) == ["bunjang", "ebay", "joonggonara"] and
       .pc_parts.ledger_ready == true and
       (.pc_parts.collection_targets.target_set_version | type == "string" and length > 0) and
       (.pc_parts.collection_targets.target_checksum | type == "string" and length > 0) and
@@ -82,9 +86,14 @@ check_health() {
       (.pc_parts.collection_targets.enabled_target_count > 0) and
       (.pc_parts.collection_targets.enabled_target_count <= .pc_parts.collection_targets.declared_target_count) and
       .pc_parts.collection_targets.monitor_target_count == 0 and
-      (.pc_parts.required_source_keys | type == "array" and length > 0) and
+      .pc_parts.collection_capacity.all_sources_sufficient == true and
+      (.pc_parts.required_source_keys | sort) == ["bunjang", "ebay", "joonggonara"] and
       (.pc_parts.source_readiness | type == "array") and
-      (.pc_parts.review_required_active_sources | length) == 0
+      (.pc_parts.review_required_active_sources | length) == 0 and
+      ($require_pc_continuous == false or (
+        .pc_parts.scheduler_enabled == true and
+        .pc_parts.all_sources_ready == true
+      ))
     ' >/dev/null || {
       printf '[health] FAIL: %s 응답의 서비스·대상 사이트·PC 수집 대상 세트가 예상과 다릅니다.\n' "$label" >&2
       printf '%s\n' "$payload" >&2

@@ -1517,7 +1517,7 @@ export default {
 
     if (request.method === "GET" || request.method === "HEAD") {
       if (url.pathname === "/") {
-        const assetResponse = await serveAssets(new Request(new URL("/price-analysis.html", request.url), request), env);
+        const assetResponse = await serveAssets(new Request(new URL("/index.html", request.url), request), env);
         if (assetResponse) return assetResponse;
       }
       if (url.pathname === "/used-market-categories.html") {

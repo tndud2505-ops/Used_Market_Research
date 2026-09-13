@@ -7,6 +7,7 @@ import { reviewedPcListingExclusion } from "../market/logic/pc-reviewed-listing-
 
 const HOUR_MS = 60 * 60 * 1000;
 const HOURLY_COLLECTION_GUARD_MS = 55 * 60 * 1000;
+const MAX_TARGET_FAILURE_RETRY_MS = 8 * HOURLY_COLLECTION_GUARD_MS;
 const DAY_MS = 24 * HOUR_MS;
 const SOLD_EVIDENCE_TYPES = new Set(["STRUCTURED_STATUS", "OFFICIAL_API", "EXPLICIT_TEXT"]);
 const LIFECYCLE_STATUSES = new Set([
@@ -21,6 +22,10 @@ const POSITIVE_SPEC_FIELDS = new Set([
 ]);
 const LATEST_STATE_IDENTITY_CHUNK = 200;
 const PRICE_STAT_METRIC_SCOPES = ["ACTIVE", "RESERVED", "SOLD", "CONFIRMED_TRANSACTION"];
+const VOLATILE_RAW_PAYLOAD_KEYS = new Set([
+  "capturedat", "collectedat", "fetchedat", "ingestedat", "lastcheckedat",
+  "lastseenat", "observedat", "requestedat", "updatedat"
+]);
 
 export const PC_PARTS_LEDGER_TABLES = Object.freeze([
   "sources",
@@ -36,6 +41,7 @@ export const PC_PARTS_LEDGER_TABLES = Object.freeze([
   "duplicate_clusters",
   "duplicate_cluster_members",
   "daily_price_stats",
+  "daily_price_stat_windows",
   "daily_price_stat_members",
   "daily_source_price_stats",
   "daily_source_price_stat_members",
@@ -294,6 +300,20 @@ function redactPayload(value, key = "") {
     return result;
   }
   return typeof value === "string" ? redactString(value) : value;
+}
+
+function payloadIdentityValue(value) {
+  if (Array.isArray(value)) return value.map(payloadIdentityValue);
+  if (value && typeof value === "object") {
+    const result = {};
+    for (const [key, child] of Object.entries(value)) {
+      const normalizedKey = key.toLowerCase().replace(/[^a-z0-9]+/gu, "");
+      if (VOLATILE_RAW_PAYLOAD_KEYS.has(normalizedKey)) continue;
+      result[key] = payloadIdentityValue(child);
+    }
+    return result;
+  }
+  return value;
 }
 
 function parseJson(value, fallback) {
@@ -738,6 +758,24 @@ export class PcPartsLedger {
         ) STRICT;
         CREATE INDEX IF NOT EXISTS idx_daily_price_stats_lookup ON daily_price_stats(canonical_product_id, market_pool, condition_code, currency, stat_date DESC);
 
+        CREATE TABLE IF NOT EXISTS daily_price_stat_windows (
+          canonical_product_id TEXT NOT NULL,
+          market_pool TEXT NOT NULL,
+          condition_code TEXT NOT NULL,
+          currency TEXT NOT NULL,
+          normalization_version INTEGER NOT NULL DEFAULT 1,
+          parser_version TEXT NOT NULL,
+          rule_version TEXT NOT NULL,
+          filter_version TEXT NOT NULL,
+          from_date TEXT NOT NULL,
+          through_date TEXT NOT NULL,
+          as_of TEXT NOT NULL,
+          PRIMARY KEY(canonical_product_id, market_pool, condition_code, currency,
+            normalization_version, parser_version, rule_version, filter_version)
+        ) STRICT;
+        CREATE INDEX IF NOT EXISTS idx_daily_price_stat_windows_lookup
+          ON daily_price_stat_windows(canonical_product_id, market_pool, condition_code, currency, through_date DESC);
+
         CREATE TABLE IF NOT EXISTS daily_price_stat_members (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           daily_price_stat_id INTEGER NOT NULL REFERENCES daily_price_stats(id) ON DELETE CASCADE,
@@ -895,6 +933,7 @@ export class PcPartsLedger {
       this.db.prepare("INSERT OR IGNORE INTO pc_parts_schema_migrations(version, applied_at) VALUES (7, ?)").run(versionTimestamp);
       this.db.prepare("INSERT OR IGNORE INTO pc_parts_schema_migrations(version, applied_at) VALUES (8, ?)").run(versionTimestamp);
       this.db.prepare("INSERT OR IGNORE INTO pc_parts_schema_migrations(version, applied_at) VALUES (9, ?)").run(versionTimestamp);
+      this.db.prepare("INSERT OR IGNORE INTO pc_parts_schema_migrations(version, applied_at) VALUES (10, ?)").run(versionTimestamp);
       this.db.exec("COMMIT");
     } catch (error) {
       try { this.db.exec("ROLLBACK"); } catch {}
@@ -1209,6 +1248,46 @@ export class PcPartsLedger {
     };
   }
 
+  getSourceTargetCoverage(sourceId, asOf = new Date(this.now())) {
+    const source = requireValue(sourceId, "sourceId").toLowerCase();
+    const asOfMs = new Date(asOf).getTime();
+    if (!Number.isFinite(asOfMs)) throw new TypeError("asOf must be a valid date");
+    const rows = this.db.prepare(`SELECT t.*, s.activated_at, r.last_started_at, r.last_succeeded_at,
+        r.failure_count, r.last_error
+      FROM pc_collection_targets t
+      JOIN pc_collection_target_sets s ON s.target_set_version = t.target_set_version
+      LEFT JOIN pc_source_target_runtime r ON r.source_id = ? AND r.target_id = t.target_id
+      WHERE s.set_status = 'ACTIVE' AND t.enabled = 1
+      ORDER BY t.target_order, t.target_id`).all(source).filter((row) => {
+        const sourceKeys = parseJson(row.source_keys_json, []);
+        return !Array.isArray(sourceKeys) || sourceKeys.length === 0 || sourceKeys.includes(source);
+      });
+    let succeededTargetCount = 0;
+    let failedTargetCount = 0;
+    let staleTargetCount = 0;
+    for (const row of rows) {
+      const targetIntervalMs = Math.max(55, Number(row.minimum_interval_minutes) || 55) * 60 * 1_000;
+      const lastSucceededMs = Date.parse(String(row.last_succeeded_at || ""));
+      const activatedMs = Date.parse(String(row.created_at || row.activated_at || ""));
+      if (Number.isFinite(lastSucceededMs)) succeededTargetCount += 1;
+      if (Number(row.failure_count || 0) > 0) failedTargetCount += 1;
+      const freshnessBaselineMs = Number.isFinite(lastSucceededMs) ? lastSucceededMs : activatedMs;
+      if (Number.isFinite(freshnessBaselineMs) && asOfMs > freshnessBaselineMs + 2 * targetIntervalMs) {
+        staleTargetCount += 1;
+      }
+    }
+    const targetCount = rows.length;
+    return {
+      target_count: targetCount,
+      succeeded_target_count: succeededTargetCount,
+      never_succeeded_target_count: Math.max(0, targetCount - succeededTargetCount),
+      failed_target_count: failedTargetCount,
+      stale_target_count: staleTargetCount,
+      success_ratio: targetCount > 0 ? Number((succeededTargetCount / targetCount).toFixed(4)) : 0,
+      coverage_ready: targetCount > 0 && staleTargetCount === 0
+    };
+  }
+
   listDueCollectionTargets(sourceId, asOf = new Date(this.now()), minimumIntervalMs = HOURLY_COLLECTION_GUARD_MS, limit = null) {
     const source = requireValue(sourceId, "sourceId");
     const asOfMs = new Date(asOf).getTime();
@@ -1227,12 +1306,17 @@ export class PcPartsLedger {
       if (Array.isArray(sourceKeys) && sourceKeys.length > 0 && !sourceKeys.includes(source.toLowerCase())) return null;
       const targetIntervalMs = Math.max(55, Number(row.minimum_interval_minutes) || 55) * 60 * 1_000;
       const effectiveIntervalMs = Math.max(globalIntervalMs, targetIntervalMs);
+      const failureCount = Math.max(0, Number(row.failure_count || 0));
+      const retryIntervalMs = failureCount > 0
+        ? Math.min(effectiveIntervalMs, MAX_TARGET_FAILURE_RETRY_MS,
+          HOURLY_COLLECTION_GUARD_MS * (2 ** Math.min(3, failureCount - 1)))
+        : effectiveIntervalMs;
       if (!row.last_started_at) return { row, effectiveIntervalMs, neverStarted: true, dueAtMs: Number.NEGATIVE_INFINITY };
       const lastStartedMs = Date.parse(row.last_started_at);
       if (!Number.isFinite(lastStartedMs)) {
         return { row, effectiveIntervalMs, neverStarted: true, dueAtMs: Number.NEGATIVE_INFINITY };
       }
-      const dueAtMs = lastStartedMs + effectiveIntervalMs;
+      const dueAtMs = lastStartedMs + retryIntervalMs;
       return asOfMs >= dueAtMs ? { row, effectiveIntervalMs, neverStarted: false, dueAtMs } : null;
     }).filter(Boolean).sort((left, right) => (
       left.effectiveIntervalMs - right.effectiveIntervalMs
@@ -1779,7 +1863,12 @@ export class PcPartsLedger {
     const safeSellerRef = redactedSellerRef ? `[SELLER:${hash(redactedSellerRef).slice(0, 16)}]` : null;
     const safePayload = redactPayload(input.rawPayload ?? {});
     const rawJson = stableJson(safePayload);
-    const payloadHash = hash({ rawJson, title: safeTitle, description: safeDescription, sellerRef: safeSellerRef });
+    const payloadHash = hash({
+      rawPayload: payloadIdentityValue(safePayload),
+      title: safeTitle,
+      description: safeDescription,
+      sellerRef: safeSellerRef
+    });
 
     return this.transaction(() => {
       let raw = this.db.prepare("SELECT * FROM raw_listings WHERE source_id = ? AND source_listing_id = ? AND payload_hash = ?")
@@ -2233,14 +2322,6 @@ export class PcPartsLedger {
         add(dayKey(soldRow.observed_at), "CONFIRMED_TRANSACTION", row, comparableScopePrice(row.transaction_price, row.quantity, row.price_scope));
       }
     }
-    for (let day = Date.parse(`${from.slice(0, 10)}T00:00:00.000Z`);
-      day <= Date.parse(`${asOf.slice(0, 10)}T00:00:00.000Z`); day += DAY_MS) {
-      const date = dayKey(new Date(day));
-      for (const scope of PRICE_STAT_METRIC_SCOPES) {
-        const key = `${date}\u0000${scope}`;
-        if (!groups.has(key)) groups.set(key, []);
-      }
-    }
     const aggregateScopeSummaries = new Map();
     for (const [key, members] of groups) {
       const scope = key.split("\u0000")[1];
@@ -2269,6 +2350,18 @@ export class PcPartsLedger {
     return this.transaction(() => {
       this.db.prepare(`DELETE FROM daily_price_stats WHERE canonical_product_id = ? AND market_pool = ? AND condition_code = ? AND currency = ? AND stat_date >= ? AND stat_date <= ?`)
         .run(canonicalProductId, marketPool, condition, currency, from.slice(0, 10), asOf.slice(0, 10));
+      this.db.prepare(`INSERT INTO daily_price_stat_windows(
+          canonical_product_id, market_pool, condition_code, currency, normalization_version,
+          parser_version, rule_version, filter_version, from_date, through_date, as_of
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(canonical_product_id, market_pool, condition_code, currency,
+          normalization_version, parser_version, rule_version, filter_version) DO UPDATE SET
+          from_date = CASE WHEN excluded.from_date < from_date THEN excluded.from_date ELSE from_date END,
+          through_date = CASE WHEN excluded.through_date > through_date THEN excluded.through_date ELSE through_date END,
+          as_of = excluded.as_of`).run(
+        canonicalProductId, marketPool, condition, currency, normalizationVersion,
+        parserVersion, ruleVersion, filterVersion, from.slice(0, 10), asOf.slice(0, 10), asOf
+      );
       const insertStat = this.db.prepare(`
         INSERT INTO daily_price_stats(stat_date, canonical_product_id, market_pool, condition_code, currency, metric_scope,
           sample_count, unit_count, mean_value, median_value, trimmed_mean_value, min_value, max_value, p25_value, p75_value,
@@ -2306,6 +2399,7 @@ export class PcPartsLedger {
         }
         for (const sourceId of sourceIds) {
           const sourceMembers = members.filter((member) => member.row.source_id === sourceId);
+          if (sourceMembers.length === 0) continue;
           const sourceSummary = summarize(
             sourceMembers.map((member) => member.price),
             sourceMembers.reduce((sum, member) => sum + Math.max(1, Number(member.row.quantity) || 1), 0)
@@ -2348,7 +2442,7 @@ export class PcPartsLedger {
   }
 
   storedDailyMetric(row) {
-    if (!row) return summarize([]);
+    if (!row) return { ...summarize([]), average: null, seven_day_sold_median: null };
     const sampleCount = Math.max(0, Number(row.sample_count) || 0);
     const unitCount = Math.max(0, Number(row.unit_count) || 0);
     const average = sampleCount > 0
@@ -2430,6 +2524,21 @@ export class PcPartsLedger {
     dailyMap.get(row.stat_date)[row.metric_scope === "CONFIRMED_TRANSACTION" ? "confirmed_transactions" : row.metric_scope.toLowerCase()] = this.storedDailyMetric(row);
   }
 
+  denseStoredDailyRows(dailyMap, fromDate, throughDate) {
+    if (!fromDate || !throughDate || fromDate > throughDate) return [];
+    const result = [];
+    for (let day = Date.parse(`${fromDate}T00:00:00.000Z`);
+      day <= Date.parse(`${throughDate}T00:00:00.000Z`); day += DAY_MS) {
+      const date = dayKey(new Date(day));
+      const row = { date, ...(dailyMap.get(date) || {}) };
+      for (const key of ["active", "reserved", "sold", "confirmed_transactions"]) {
+        if (!row[key]) row[key] = this.storedDailyMetric(null);
+      }
+      result.push(row);
+    }
+    return result;
+  }
+
   getStoredDailyPriceStats(options) {
     const canonicalProductId = requireValue(options.canonicalProductId, "canonicalProductId");
     const marketPool = requireValue(options.marketPool, "marketPool");
@@ -2440,6 +2549,13 @@ export class PcPartsLedger {
     const parserVersion = cleanText(options.parserVersion || "pc-parser-v1", 100);
     const ruleVersion = cleanText(options.ruleVersion || "pc-rules-v1", 100);
     const filterVersion = cleanText(options.filterVersion || "pc-filter-v1", 100);
+    const windowRow = this.db.prepare(`SELECT * FROM daily_price_stat_windows
+      WHERE canonical_product_id = ? AND market_pool = ? AND condition_code = ? AND currency = ?
+        AND normalization_version = ?
+        AND parser_version = ? AND rule_version = ? AND filter_version = ?`).get(
+      canonicalProductId, marketPool, condition, currency, normalizationVersion,
+      parserVersion, ruleVersion, filterVersion
+    );
     const dailyRows = this.db.prepare(`
       SELECT * FROM daily_price_stats WHERE canonical_product_id = ? AND market_pool = ? AND condition_code = ?
         AND currency = ? AND stat_date >= ? AND stat_date <= ?
@@ -2477,6 +2593,10 @@ export class PcPartsLedger {
       if (!sourceRowsByScope.has(key)) sourceRowsByScope.set(key, []);
       sourceRowsByScope.get(key).push(row);
     }
+    const availableFrom = windowRow?.from_date || dailyRows[0]?.stat_date || null;
+    const availableThrough = windowRow?.through_date || dailyRows.at(-1)?.stat_date || null;
+    const denseFrom = availableFrom ? (availableFrom > from.slice(0, 10) ? availableFrom : from.slice(0, 10)) : null;
+    const denseThrough = availableThrough ? (availableThrough < asOf.slice(0, 10) ? availableThrough : asOf.slice(0, 10)) : null;
     const sourceMetric = (sourceId, scope) => this.storedSummaryFromDailyRows(sourceRowsByScope.get(`${sourceId}\u0000${scope}`) || []);
     const bySource = [...sourceDailyMaps.entries()]
       .filter(([sourceId]) => PRICE_STAT_METRIC_SCOPES.some((scope) => sourceMetric(sourceId, scope).sample_count > 0))
@@ -2492,7 +2612,7 @@ export class PcPartsLedger {
           reserved,
           sold,
           confirmed_transactions: sourceMetric(sourceId, "CONFIRMED_TRANSACTION"),
-          daily: [...daily.values()],
+          daily: this.denseStoredDailyRows(daily, denseFrom, denseThrough),
           traceability: { member_count: null }
         };
       });
@@ -2509,7 +2629,7 @@ export class PcPartsLedger {
       confirmed_transactions: this.storedSummaryFromDailyRows(rowsByScope.get("CONFIRMED_TRANSACTION") || []),
       by_source: bySource,
       by_manufacturer: [],
-      daily: [...dailyMap.values()],
+      daily: this.denseStoredDailyRows(dailyMap, denseFrom, denseThrough),
       confidence: { level: sold.sample_count < 3 ? "INSUFFICIENT" : sold.sample_count < 5 ? "LOW_SAMPLE" : sold.sample_count < 10 ? "MEDIUM" : "HIGH", reasons: sold.sample_count < 5 ? ["판매완료 표본 부족"] : [] },
       exclusions: { total: null, reasons: {} },
       methodology: {
@@ -2523,12 +2643,12 @@ export class PcPartsLedger {
       },
       versions: {
         normalization: normalizationVersion,
-        parser: versionRow?.parser_version || parserVersion,
-        rule: versionRow?.rule_version || ruleVersion,
-        filter: versionRow?.filter_version || filterVersion
+        parser: versionRow?.parser_version || windowRow?.parser_version || parserVersion,
+        rule: versionRow?.rule_version || windowRow?.rule_version || ruleVersion,
+        filter: versionRow?.filter_version || windowRow?.filter_version || filterVersion
       },
       traceability: { member_count: null },
-      as_of: versionRow?.as_of || asOf
+      as_of: versionRow?.as_of || windowRow?.as_of || asOf
     };
   }
 
@@ -2584,6 +2704,13 @@ export class PcPartsLedger {
     );
     reserved.disclosure = "예약중 매물에 표시된 가격이며 실제 거래가격이 아닙니다.";
     sold.disclosure = "판매완료 매물에 마지막으로 표시된 가격이며 실제 거래가격이 아닙니다.";
+    const windowRow = this.db.prepare(`SELECT * FROM daily_price_stat_windows
+      WHERE canonical_product_id = ? AND market_pool = ? AND condition_code = ? AND currency = ?
+        AND normalization_version = ?
+        AND parser_version = ? AND rule_version = ? AND filter_version = ?`).get(
+      canonicalProductId, marketPool, condition, currency, normalizationVersion,
+      parserVersion, ruleVersion, filterVersion
+    );
     const dailyRows = this.db.prepare(`
       SELECT * FROM daily_price_stats WHERE canonical_product_id = ? AND market_pool = ? AND condition_code = ?
         AND currency = ? AND stat_date >= ? AND stat_date <= ?
@@ -2595,25 +2722,7 @@ export class PcPartsLedger {
     const versionKeys = new Set(dailyRows.map((row) => `${row.parser_version}\u0000${row.rule_version}\u0000${row.filter_version}`));
     if (versionKeys.size > 1) throw new Error("MIXED_STAT_RULE_VERSIONS");
     const dailyMap = new Map();
-    for (const row of dailyRows) {
-      if (!dailyMap.has(row.stat_date)) dailyMap.set(row.stat_date, { date: row.stat_date });
-      dailyMap.get(row.stat_date)[row.metric_scope === "CONFIRMED_TRANSACTION" ? "confirmed_transactions" : row.metric_scope.toLowerCase()] = {
-        sample_count: row.sample_count,
-        unit_count: row.unit_count,
-        mean: row.mean_value,
-        median: row.median_value,
-        trimmed_mean: row.trimmed_mean_value,
-        min: row.min_value,
-        max: row.max_value,
-        p25: row.p25_value,
-        p75: row.p75_value,
-        seven_day_sold_median: row.metric_scope === "SOLD" ? row.seven_day_sold_median : null,
-        outlier_count: row.outlier_count,
-        outlier_lower_bound: row.outlier_lower_bound,
-        outlier_upper_bound: row.outlier_upper_bound,
-        confidence_level: row.confidence_level
-      };
-    }
+    for (const row of dailyRows) this.appendStoredDailyMetric(dailyMap, row);
     const versionRow = dailyRows.at(-1);
     const dailySourceRows = this.db.prepare(`
       SELECT d.stat_date, d.metric_scope, ds.*
@@ -2629,25 +2738,12 @@ export class PcPartsLedger {
     const sourceDailyMaps = new Map();
     for (const row of dailySourceRows) {
       if (!sourceDailyMaps.has(row.source_id)) sourceDailyMaps.set(row.source_id, new Map());
-      const daily = sourceDailyMaps.get(row.source_id);
-      if (!daily.has(row.stat_date)) daily.set(row.stat_date, { date: row.stat_date });
-      daily.get(row.stat_date)[row.metric_scope === "CONFIRMED_TRANSACTION" ? "confirmed_transactions" : row.metric_scope.toLowerCase()] = {
-        sample_count: row.sample_count,
-        unit_count: row.unit_count,
-        mean: row.mean_value,
-        median: row.median_value,
-        trimmed_mean: row.trimmed_mean_value,
-        min: row.min_value,
-        max: row.max_value,
-        p25: row.p25_value,
-        p75: row.p75_value,
-        seven_day_sold_median: row.metric_scope === "SOLD" ? row.seven_day_sold_median : null,
-        outlier_count: row.outlier_count,
-        outlier_lower_bound: row.outlier_lower_bound,
-        outlier_upper_bound: row.outlier_upper_bound,
-        confidence_level: row.confidence_level
-      };
+      this.appendStoredDailyMetric(sourceDailyMaps.get(row.source_id), row);
     }
+    const availableFrom = windowRow?.from_date || dailyRows[0]?.stat_date || null;
+    const availableThrough = windowRow?.through_date || dailyRows.at(-1)?.stat_date || null;
+    const denseFrom = availableFrom ? (availableFrom > from.slice(0, 10) ? availableFrom : from.slice(0, 10)) : null;
+    const denseThrough = availableThrough ? (availableThrough < asOf.slice(0, 10) ? availableThrough : asOf.slice(0, 10)) : null;
     const rowsBySource = new Map();
     for (const row of rows) {
       if (!rowsBySource.has(row.source_id)) rowsBySource.set(row.source_id, []);
@@ -2702,7 +2798,7 @@ export class PcPartsLedger {
         reserved: sourceReserved,
         sold: sourceSold,
         confirmed_transactions: sourceConfirmed,
-        daily: [...(sourceDailyMaps.get(sourceId)?.values() || [])],
+        daily: this.denseStoredDailyRows(sourceDailyMaps.get(sourceId) || new Map(), denseFrom, denseThrough),
         traceability: { member_count: Number(traceability?.count || 0) }
       };
     });
@@ -2777,7 +2873,7 @@ export class PcPartsLedger {
       confirmed_transactions: confirmed,
       by_source: bySource,
       by_manufacturer: byManufacturer,
-      daily: [...dailyMap.values()],
+      daily: this.denseStoredDailyRows(dailyMap, denseFrom, denseThrough),
       confidence: { level: sold.confidence_level, reasons: sold.sample_count < 5 ? ["판매완료 표본 부족"] : [] },
       exclusions: { total: excludedRows.length, reasons: exclusionReasons },
       methodology: {
@@ -2791,9 +2887,9 @@ export class PcPartsLedger {
       },
       versions: {
         normalization: normalizationVersion,
-        parser: versionRow?.parser_version || cleanText(options.parserVersion || "pc-parser-v1", 100),
-        rule: versionRow?.rule_version || cleanText(options.ruleVersion || "pc-rules-v1", 100),
-        filter: versionRow?.filter_version || cleanText(options.filterVersion || "pc-filter-v1", 100)
+        parser: versionRow?.parser_version || windowRow?.parser_version || parserVersion,
+        rule: versionRow?.rule_version || windowRow?.rule_version || ruleVersion,
+        filter: versionRow?.filter_version || windowRow?.filter_version || filterVersion
       },
       as_of: asOf
     };
@@ -2844,6 +2940,81 @@ export class PcPartsLedger {
   getPublicationRuntime(publicationKind = "PRODUCT_STATS") {
     return this.db.prepare(`SELECT publication_kind, publication_id, checksum, row_count, published_at
       FROM pc_publication_runtime WHERE publication_kind = ?`).get(requireValue(publicationKind, "publicationKind")) || null;
+  }
+
+  compactStorage(options = {}) {
+    const asOf = options.asOf instanceof Date ? options.asOf : new Date(options.asOf || this.now());
+    if (!Number.isFinite(asOf.getTime())) throw new TypeError("invalid compaction asOf");
+    const statsRetentionDays = Math.min(730, Math.max(30, Number(options.statsRetentionDays) || 730));
+    const crawlRunRetentionDays = Math.min(365, Math.max(7, Number(options.crawlRunRetentionDays) || 35));
+    const statsCutoff = dayKey(new Date(asOf.getTime() - (statsRetentionDays - 1) * DAY_MS));
+    const crawlCutoff = new Date(asOf.getTime() - crawlRunRetentionDays * DAY_MS).toISOString();
+    const activeVersion = this.getActivePipelineVersion();
+    const rollbackVersion = activeVersion?.previous_version_key
+      ? this.db.prepare("SELECT * FROM pc_pipeline_versions WHERE version_key = ?").get(activeVersion.previous_version_key)
+      : null;
+    const retainedNormalizationVersions = [...new Set([
+      activeVersion?.normalization_version,
+      rollbackVersion?.normalization_version
+    ].map(Number).filter((value) => Number.isInteger(value) && value > 0))];
+    const removableNormalizationVersions = this.db.prepare(`SELECT DISTINCT normalization_version
+      FROM pc_pipeline_versions
+      WHERE version_status IN ('SUPERSEDED', 'ROLLED_BACK')`).all()
+      .map((row) => Number(row.normalization_version))
+      .filter((value) => !retainedNormalizationVersions.includes(value));
+
+    return this.transaction(() => {
+      this.db.exec(`INSERT INTO daily_price_stat_windows(
+          canonical_product_id, market_pool, condition_code, currency, normalization_version,
+          parser_version, rule_version, filter_version, from_date, through_date, as_of
+        )
+        SELECT canonical_product_id, market_pool, condition_code, currency, normalization_version,
+          parser_version, rule_version, filter_version, MIN(stat_date), MAX(stat_date), MAX(as_of)
+        FROM daily_price_stats
+        GROUP BY canonical_product_id, market_pool, condition_code, currency, normalization_version,
+          parser_version, rule_version, filter_version
+        ON CONFLICT(canonical_product_id, market_pool, condition_code, currency,
+          normalization_version, parser_version, rule_version, filter_version) DO UPDATE SET
+          from_date = CASE WHEN excluded.from_date < from_date THEN excluded.from_date ELSE from_date END,
+          through_date = CASE WHEN excluded.through_date > through_date THEN excluded.through_date ELSE through_date END,
+          as_of = CASE WHEN excluded.as_of > as_of THEN excluded.as_of ELSE as_of END`);
+      const expiredStats = this.db.prepare("DELETE FROM daily_price_stats WHERE stat_date < ?").run(statsCutoff);
+      this.db.prepare("DELETE FROM daily_price_stat_windows WHERE through_date < ?").run(statsCutoff);
+      this.db.prepare(`UPDATE daily_price_stat_windows
+        SET from_date = CASE WHEN from_date < ? THEN ? ELSE from_date END`).run(statsCutoff, statsCutoff);
+      const emptyStats = this.db.prepare("DELETE FROM daily_price_stats WHERE sample_count = 0").run();
+      const emptySourceStats = this.db.prepare("DELETE FROM daily_source_price_stats WHERE sample_count = 0").run();
+      const expiredCrawlRuns = this.db.prepare("DELETE FROM crawl_runs WHERE started_at < ?").run(crawlCutoff);
+
+      let removedItems = { changes: 0 };
+      let removedNormalizations = { changes: 0 };
+      if (removableNormalizationVersions.length > 0) {
+        const placeholders = removableNormalizationVersions.map(() => "?").join(", ");
+        removedItems = this.db.prepare(`DELETE FROM listing_items
+          WHERE normalized_listing_id IN (
+            SELECT n.id FROM normalized_listings n
+            WHERE n.normalization_version IN (${placeholders})
+          )
+          AND NOT EXISTS (SELECT 1 FROM daily_price_stat_members m WHERE m.listing_item_id = listing_items.id)
+          AND NOT EXISTS (SELECT 1 FROM daily_source_price_stat_members m WHERE m.listing_item_id = listing_items.id)`)
+          .run(...removableNormalizationVersions);
+        removedNormalizations = this.db.prepare(`DELETE FROM normalized_listings
+          WHERE normalization_version IN (${placeholders})
+            AND NOT EXISTS (SELECT 1 FROM listing_items i WHERE i.normalized_listing_id = normalized_listings.id)`)
+          .run(...removableNormalizationVersions);
+      }
+      return {
+        stats_retention_days: statsRetentionDays,
+        crawl_run_retention_days: crawlRunRetentionDays,
+        retained_normalization_versions: retainedNormalizationVersions,
+        expired_stats_removed: Number(expiredStats.changes || 0),
+        empty_stats_removed: Number(emptyStats.changes || 0),
+        empty_source_stats_removed: Number(emptySourceStats.changes || 0),
+        expired_crawl_runs_removed: Number(expiredCrawlRuns.changes || 0),
+        old_listing_items_removed: Number(removedItems.changes || 0),
+        old_normalizations_removed: Number(removedNormalizations.changes || 0)
+      };
+    });
   }
 
   runIntegrityAudit(auditedAt = new Date(this.now())) {

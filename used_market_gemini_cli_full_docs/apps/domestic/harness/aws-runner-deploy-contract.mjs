@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { pcStatsTraceability } from "../aws-runner/pc-stats-traceability.mjs";
 
 const read = (relativePath) => readFile(new URL(`../${relativePath}`, import.meta.url), "utf8");
-const [runnerUnit, tunnelUnit, installScript, configureScript, healthScript, readme,
+const [runnerUnit, tunnelUnit, installScript, configureScript, healthScript, smokeScript, readme,
   publishStatsScript, completeStatsScript, importStatsScript, statsTraceabilityScript, runnerScript,
   statsRunnerScript, publicClassificationMigration, retiredSourceMigration] = await Promise.all([
   read("aws-runner/used-market-runner.service"),
@@ -11,6 +11,7 @@ const [runnerUnit, tunnelUnit, installScript, configureScript, healthScript, rea
   read("aws-runner/install-ubuntu24.sh"),
   read("aws-runner/configure-ubuntu24.sh"),
   read("aws-runner/health-check.sh"),
+  read("aws-runner/smoke-search.sh"),
   read("aws-runner/README.md"),
   read("aws-runner/publish-pc-stats-now.mjs"),
   read("aws-runner/complete-pc-stats-publication.mjs"),
@@ -49,6 +50,18 @@ for (const [label, source] of [["install", installScript], ["configure", configu
 }
 
 assert.match(healthScript, /--require-public/u);
+assert.match(healthScript, /--require-pc-continuous/u,
+  "operators need one explicit health mode that proves continuous PC collection readiness");
+assert.match(healthScript, /\.pc_parts\.collection_capacity\.all_sources_sufficient == true/u,
+  "deployment health must reject a target budget that cannot finish the daily model sweep");
+assert.match(healthScript, /\.pc_parts\.scheduler_enabled == true[\s\S]*\.pc_parts\.all_sources_ready == true/u,
+  "continuous health must require both the scheduler and recent committed source collection");
+assert.match(healthScript, /\["bunjang", "ebay", "joonggonara"\]/u,
+  "health must bind the exact approved operational source set");
+assert.match(smokeScript, /sites: \["bunjang", "joonggonara", "ebay"\]/u,
+  "authenticated smoke search must use only the current operational sources");
+assert.doesNotMatch(smokeScript, /hellomarket|rethinkmall|danawa|coolenjoy/u,
+  "retired sources must not return through the operator smoke command");
 assert.match(healthScript, /used-market-runner\.service used-market-tunnel\.service/u,
   "health must fail when either systemd unit is not enabled or active");
 assert.match(healthScript, /process_instance\.id/u);
@@ -150,20 +163,34 @@ assert.match(runnerScript, /process\.env\.PC_SOURCE_TARGETS_PER_RUN \|\| "80"/u,
   "the runtime default must cover the largest hourly plus daily source target budget");
 assert.match(runnerScript, /process\.env\.PC_SOURCE_TARGET_CONCURRENCY \|\| "6"/u,
   "the runtime default must process the expanded target budget within the scheduler window");
+assert.match(runnerScript, /collection_capacity: collectionCapacity/u,
+  "runner health must expose whether the configured batch can sustain the full target set");
 assert.match(installScript, /^PC_SOURCE_TARGETS_PER_RUN=80$/mu,
   "new AWS environments must persist the target throughput required for full daily master coverage");
 assert.match(installScript, /^PC_SOURCE_TARGET_CONCURRENCY=6$/mu,
   "new AWS environments must persist bounded source concurrency");
 assert.match(installScript,
-  /\[\[ -z "\$current_pc_source_targets_per_run" \|\| "\$current_pc_source_targets_per_run" == "12" \]\]/u,
-  "repeat installs must migrate only missing or legacy-default target throughput");
+  /if ! grep -q '\^PC_SOURCE_TARGETS_PER_RUN=' "\$RUNNER_ENV_FILE"; then\s+set_env_value PC_SOURCE_TARGETS_PER_RUN 80/u,
+  "repeat installs must add missing target throughput without overriding an explicit operator limit");
 assert.match(installScript,
-  /\[\[ -z "\$current_pc_source_target_concurrency" \|\| "\$current_pc_source_target_concurrency" == "2" \]\]/u,
-  "repeat installs must migrate only missing or legacy-default concurrency");
-assert.match(configureScript, /pc_source_targets_per_run < 4 \|\| pc_source_targets_per_run > 128/u,
-  "interactive reconfiguration must preserve valid operator target limits");
+  /if ! grep -q '\^PC_SOURCE_TARGET_CONCURRENCY=' "\$RUNNER_ENV_FILE"; then\s+set_env_value PC_SOURCE_TARGET_CONCURRENCY 6/u,
+  "repeat installs must add missing concurrency without overriding an explicit operator limit");
+assert.match(installScript, /PC_SOURCE_TARGETS_PER_RUN_OVERRIDE/u,
+  "repeat installs must provide an explicit operator-authorized legacy throughput upgrade path");
+assert.match(installScript, /configured_pc_source_targets_per_run < 71 \|\| configured_pc_source_targets_per_run > 128/u,
+  "repeat installs must stop before restarting an undersized continuous collector");
+assert.match(configureScript, /existing_pc_source_targets_per_run >= 71/u,
+  "interactive reconfiguration must replace an obsolete undersized default while preserving sufficient explicit settings");
+assert.match(configureScript, /pc_source_targets_per_run < 71 \|\| pc_source_targets_per_run > 128/u,
+  "interactive reconfiguration must enforce the current sustained target minimum");
 assert.match(configureScript, /pc_source_target_concurrency < 1 \|\| pc_source_target_concurrency > 8/u,
   "interactive reconfiguration must preserve valid operator concurrency");
+assert.match(configureScript, /PC_SOURCE_TARGETS_PER_RUN \[\$\{pc_source_targets_per_run_default\}\]/u,
+  "operators must be able to accept the repaired legacy target budget during reconfiguration");
+assert.match(runnerScript, /target_coverage_ready: targetCoverage\?\.coverage_ready === true/u,
+  "continuous runner health must expose stale per-target coverage instead of only source-level success");
+assert.match(configureScript, /PC_SOURCE_TARGET_CONCURRENCY \[\$\{pc_source_target_concurrency_default\}\]/u,
+  "operators must be able to adjust source concurrency without editing the protected env file manually");
 assert.match(configureScript, /^PC_SOURCE_TARGETS_PER_RUN=\$\{pc_source_targets_per_run\}$/mu,
   "runner reconfiguration must retain the repaired target throughput");
 assert.match(configureScript, /^PC_SOURCE_TARGET_CONCURRENCY=\$\{pc_source_target_concurrency\}$/mu,
@@ -191,6 +218,9 @@ assert.match(runnerScript, /const BACKGROUND_REFRESH_ENABLED = String\(process\.
   "legacy background refresh must be opt-in so it cannot starve public PC reads");
 assert.match(runnerScript, /const INDEX_STARTUP_BACKUP_ENABLED = String\(process\.env\.RUNNER_INDEX_STARTUP_BACKUP_ENABLED \?\? "false"\)/u,
   "large startup index backups must be opt-in outside schema migrations");
+assert.match(runnerScript,
+  /pcLedger = new PcPartsLedger\(\{ db: searchIndex\.db \}\);[\s\S]*?searchIndex\.createBackup\(\);[\s\S]*?pcLedger\.migrate\(\);/u,
+  "the PC identity SQL function must be registered before a migration backup reads expression indexes");
 assert.match(runnerScript, /const INDEX_BACKGROUND_MAINTENANCE_ENABLED = String\(process\.env\.RUNNER_INDEX_BACKGROUND_MAINTENANCE_ENABLED \?\? "false"\)/u,
   "large background index maintenance must be opt-in on the public runner");
 assert.match(runnerScript, /schedulerReadDeferral\(\{/u,

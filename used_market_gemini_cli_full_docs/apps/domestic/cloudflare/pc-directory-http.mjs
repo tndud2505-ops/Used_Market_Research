@@ -212,7 +212,7 @@ export function pcCollectionTargetSetV2() {
     ["ODD", "블루레이 ODD"]
   ];
   const categoryTargets = PC_PART_CATEGORY_SEEDS_V2.map((category, index) => ({
-    targetId: `pc-target:${PC_PRODUCT_MASTER_V2_VERSION}:category-v9:${category.code}`,
+    targetId: `pc-target:${PC_PRODUCT_MASTER_V2_VERSION}:category-v10:${category.code}`,
     canonicalProductId: null,
     categoryCode: category.code,
     queryText: category.label,
@@ -223,7 +223,7 @@ export function pcCollectionTargetSetV2() {
     enabled: true
   }));
   const generalTargets = generalQueries.map(([categoryCode, queryText], index) => ({
-    targetId: `pc-target:${PC_PRODUCT_MASTER_V2_VERSION}:market-v9:${categoryCode}:${index}`,
+    targetId: `pc-target:${PC_PRODUCT_MASTER_V2_VERSION}:market-v10:${categoryCode}:${index}`,
     canonicalProductId: null,
     categoryCode,
     queryText,
@@ -284,7 +284,7 @@ export function pcCollectionTargetSetV2() {
     for (let queryIndex = 0; queryIndex < uniquePlans.length; queryIndex += 1) {
       const plan = uniquePlans[queryIndex];
       exactTargets.push({
-        targetId: `pc-target:${PC_PRODUCT_MASTER_V2_VERSION}:master-v9:${product.id}:${plan.scope}:${queryIndex}`,
+        targetId: `pc-target:${PC_PRODUCT_MASTER_V2_VERSION}:master-v10:${product.id}:${plan.scope}:${queryIndex}`,
         canonicalProductId: product.id,
         categoryCode: product.category,
         queryText: plan.queryText,
@@ -298,8 +298,45 @@ export function pcCollectionTargetSetV2() {
     }
   }
   return {
-    targetSetVersion: `pc-targets:${PC_PRODUCT_MASTER_V2_VERSION}:full-master-v9`,
+    targetSetVersion: `pc-targets:${PC_PRODUCT_MASTER_V2_VERSION}:full-master-v10`,
     directoryVersion: PC_PRODUCT_MASTER_V2_VERSION,
     targets: [...categoryTargets, ...generalTargets, ...exactTargets]
+  };
+}
+
+export function pcCollectionCapacityPlan(targetsPerRun = 80) {
+  const configuredTargetsPerRun = Number(targetsPerRun);
+  if (!Number.isInteger(configuredTargetsPerRun) || configuredTargetsPerRun < 1 || configuredTargetsPerRun > 128) {
+    throw new TypeError("targetsPerRun must be an integer from 1 to 128");
+  }
+  const targets = pcCollectionTargetSetV2().targets.filter((target) => target.enabled !== false);
+  const sources = PC_SOURCE_REGISTRY
+    .filter((source) => source.directory_source === true
+      && source.policy_status === "APPROVED"
+      && source.runtime_status === "ENABLED")
+    .map((source) => {
+      const assigned = targets.filter((target) => target.sourceKeys.includes(source.key));
+      const hourlyTargetCount = assigned.filter((target) => target.cadenceClass === "HOURLY_CATEGORY").length;
+      const dailyTargetCount = assigned.filter((target) => target.cadenceClass === "DAILY_MASTER").length;
+      const runsPerDay = source.cadence.kst_minutes.length * 24;
+      const dailyCapacityPerDay = Math.max(0, configuredTargetsPerRun - hourlyTargetCount) * runsPerDay;
+      const minimumTargetsPerRun = hourlyTargetCount + Math.ceil(dailyTargetCount / Math.max(1, runsPerDay));
+      const hourlyCapacitySufficient = configuredTargetsPerRun >= hourlyTargetCount;
+      return {
+        source_key: source.key,
+        runs_per_day: runsPerDay,
+        hourly_target_count: hourlyTargetCount,
+        daily_target_count: dailyTargetCount,
+        daily_capacity_per_day: dailyCapacityPerDay,
+        minimum_targets_per_run: minimumTargetsPerRun,
+        configured_targets_per_run: configuredTargetsPerRun,
+        hourly_capacity_sufficient: hourlyCapacitySufficient,
+        capacity_sufficient: hourlyCapacitySufficient && dailyCapacityPerDay >= dailyTargetCount
+      };
+    });
+  return {
+    configured_targets_per_run: configuredTargetsPerRun,
+    all_sources_sufficient: sources.every((source) => source.capacity_sufficient),
+    sources
   };
 }

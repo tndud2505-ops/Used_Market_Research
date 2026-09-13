@@ -18,7 +18,7 @@ runner_token="${RUNNER_TOKEN:-$(read_env_value CLOUDFLARE_RUNNER_TOKEN)}"
 request_body="$(jq -cn --arg keyword "$KEYWORD" --arg category_id "$CATEGORY_ID" --arg sort "$SORT" '{
   keyword: $keyword,
   category_id: $category_id,
-  sites: ["joonggonara", "bunjang", "hellomarket", "rethinkmall"],
+  sites: ["bunjang", "joonggonara", "ebay"],
   sort: $sort,
   limit: 24,
   site_window: 40

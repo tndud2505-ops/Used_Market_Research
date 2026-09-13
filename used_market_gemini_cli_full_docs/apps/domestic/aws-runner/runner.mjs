@@ -28,7 +28,12 @@ import { parsePriceStatsRequest, priceStatsResponse } from "./pc-price-stats-htt
 import { schedulerReadDeferral } from "./pc-scheduler-admission.mjs";
 import { PcShadowPipeline } from "./pc-shadow-pipeline.mjs";
 import { explicitSoldText, structuredSoldEvidenceFromHtml } from "../market/logic/listing-lifecycle.mjs";
-import { pcCatalogResponse, pcCollectionTargetSetV2, pcProductsResponse } from "../cloudflare/pc-directory-http.mjs";
+import {
+  pcCatalogResponse,
+  pcCollectionCapacityPlan,
+  pcCollectionTargetSetV2,
+  pcProductsResponse
+} from "../cloudflare/pc-directory-http.mjs";
 import { publicPcModelsForApi } from "../market/logic/pc-public-catalog.mjs";
 import {
   decodePcListingsCursor,
@@ -282,7 +287,7 @@ function pcPartsLedgerMigrationNeedsBackup(db) {
     `).get();
     if (!table) return true;
     const version = Number(db.prepare("SELECT MAX(version) AS version FROM pc_parts_schema_migrations").get()?.version || 0);
-    return version < 9;
+    return version < 10;
   } catch {
     return true;
   }
@@ -297,12 +302,12 @@ if (INDEX_ENABLED) {
     });
     if (PC_PARTS_SHADOW_WRITE_ENABLED) {
       try {
+        pcLedger = new PcPartsLedger({ db: searchIndex.db });
         const databaseSize = typeof searchIndex.databaseSizeBytes === "function" ? searchIndex.databaseSizeBytes() : 0;
         if (INDEX_STARTUP_BACKUP_ENABLED
           || (databaseSize > 10 * 1024 * 1024 && pcPartsLedgerMigrationNeedsBackup(searchIndex.db))) {
           searchIndex.createBackup();
         }
-        pcLedger = new PcPartsLedger({ db: searchIndex.db });
         pcLedger.migrate();
         pcPipeline = new PcShadowPipeline({ ledger: pcLedger });
         await pcPipeline.initialize();
@@ -857,6 +862,7 @@ function recentTimestamp(value, maxAgeMs, now = Date.now()) {
 
 function computePcOperationalReadiness() {
   const now = Date.now();
+  const collectionCapacity = pcCollectionCapacityPlan(PC_SOURCE_TARGETS_PER_RUN);
   const requiredSources = PC_SOURCE_REGISTRY.filter((source) => (
     source.directory_source === true && source.policy_status === "APPROVED" && source.runtime_status === "ENABLED"
   ));
@@ -872,6 +878,7 @@ function computePcOperationalReadiness() {
     const activation = governance ? validateSourceGovernance(source, governance) : { ok: false, reason: "POLICY_REVIEW_MISSING" };
     const persisted = pcLedger?.getSource(source.key);
     const coverage = pcLedger?.getSourceCollectionCoverage(source.key, new Date(now));
+    const targetCoverage = pcLedger?.getSourceTargetCoverage(source.key, new Date(now));
     const firstCommittedCrawlAt = coverage?.first_committed_crawl_at || null;
     const lastCommittedCrawlAt = coverage?.last_committed_crawl_at || null;
     const policyApproved = source.policy_status === "APPROVED" && persisted?.policy_status === "APPROVED";
@@ -887,6 +894,7 @@ function computePcOperationalReadiness() {
     if (!runtimeEnabled) reasons.push("SOURCE_RUNTIME_NOT_ENABLED");
     if (!canaryEvidence) reasons.push(activation.reason || "SOURCE_CANARY_EVIDENCE_MISSING");
     if (!recentCommittedCrawl) reasons.push("SOURCE_COMMITTED_CRAWL_NOT_RECENT");
+    if (targetCoverage?.coverage_ready !== true) reasons.push("SOURCE_TARGET_COVERAGE_STALE");
     return {
       source_key: source.key,
       policy_status: persisted?.policy_status || source.policy_status,
@@ -901,6 +909,8 @@ function computePcOperationalReadiness() {
       max_gap_days_31d: maxGapDays,
       continuous_30_day_coverage: continuousCoverage,
       coverage_warning: continuousCoverage ? null : "SOURCE_30_DAY_COVERAGE_INSUFFICIENT",
+      target_coverage: targetCoverage || null,
+      target_coverage_ready: targetCoverage?.coverage_ready === true,
       activation_basis: governance?.governance_origin === "REGISTRY_OPERATOR_ATTESTATION"
         ? "OPERATOR_ATTESTED_DIRECT_PERMISSION"
         : "CONFIGURED_GOVERNANCE_AND_CANARY",
@@ -936,6 +946,7 @@ function computePcOperationalReadiness() {
 
   return {
     collection_targets: pcLedger?.getActiveCollectionTargetSummary() || null,
+    collection_capacity: collectionCapacity,
     required_source_keys: requiredSources.map((source) => source.key).sort(),
     source_readiness: sourceReadiness,
     all_sources_ready: allSourcesReady,

@@ -2,14 +2,13 @@
 
 이 디렉터리는 현재 `runner.mjs`를 AWS Ubuntu 24.04에서 실행하기 위한 설치·환경·systemd·Cloudflare Tunnel·헬스체크 파일만 담는다.
 
-legacy 검색의 승인된 러너 대상은 다음 4곳이다.
+검색과 PC 디렉터리의 승인된 운영 대상은 다음 3곳이다.
 
+- 번개장터: `bunjang`
 - 중고나라: `joonggonara`
-- 헬로마켓: `hellomarket`
-- 리싱크몰: `rethinkmall`
 - eBay: `ebay` (공식 Browse API)
 
-PC 디렉터리의 운영 대상은 중고나라·번개장터·다나와 장터·헬로마켓·리씽크몰·eBay·쿨엔조이이다. 다나와는 11개 부품군별 공개 카테고리 목록을, 나머지 검색형 사이트는 매시간 부품군 검색과 하루 단위 전체 제품 master 순회를 사이트별 기존 스크립트로 수행한다. 리씽크몰은 리퍼비시 시장군, eBay는 해외 중고 시장군으로 분리한다. 분류와 `market_pool` 분리가 끝난 projection만 공개한다. 개별 사이트가 HTTP 차단이나 응답 변경으로 실패하면 우회하지 않고 해당 source만 격리하며 다른 source와 이전 publication은 유지한다.
+중고나라와 번개장터는 매시간 11개 부품군 검색과 하루 단위 전체 제품 master 순회를 수행한다. eBay는 공식 Browse API로 부품군 검색과 정확 모델 순회를 수행하며 해외 중고 시장군으로 분리한다. 분류와 `market_pool` 분리가 끝난 projection만 공개한다. 비활성 소스는 스케줄 이벤트·수집 대상·공개 사이트 목록에서 제외된다. 개별 운영 소스가 HTTP 차단이나 응답 변경으로 실패하면 우회하지 않고 해당 source만 격리하며 다른 source와 이전 publication은 유지한다.
 
 공개 PC 화면은 사전수집으로 완성된 catalog·listing·stats projection만 조회하며 페이지 요청 중 원 사이트를 호출하지 않는다. 좌측 필터와 사이트별 매물 결과, 현재 ACTIVE·RESERVED 평균·중앙값, SOLD 직전 마지막 표시가격 평균·중앙값, 최근 30일 그래프는 동일 publication 범위에서 응답한다. RESERVED·SOLD 표시가격은 실제 체결가가 아니며, 출처가 구조적으로 제공한 확인 체결금액만 별도 통계로 표시한다.
 
@@ -85,6 +84,8 @@ sudo bash /opt/used-market-runner/aws-runner/configure-ubuntu24.sh
 - `D1_BACKGROUND_MIRROR_ENABLED`: 기본 `false`. `true`일 때만 수집·상태 확인 결과를 D1에 연속 복제
 - `D1_STATS_IMPORT_URL`: PC 전환 시 필수. checksum·row count가 포함된 완성 통계 publication을 받는 `/admin/import-product-stats`
 - `PC_STATS_PRODUCT_IDS`: 선택 사항. 쉼표로 구분한 canonical product ID만 다시 계산하고 같은 버전의 기존 활성 통계와 병합
+- `PC_SOURCE_TARGETS_PER_RUN`: 사이트별 한 번의 수집 배치 크기. 기본 `80`, 현재 최소 `71`; 전체 일일 모델 순회에 부족하면 설정·health가 실패한다.
+- `PC_SOURCE_TARGET_CONCURRENCY`: 사이트 내부 동시 요청 수. 기본 `6`, 허용 범위 `1~8`
 - `CLOUDFLARE_MANUAL_RUN_TOKEN`: 선택한 import API의 Bearer 토큰
 - `Cloudflare Tunnel token`: Dashboard에서 복사한 Tunnel 토큰
 
@@ -105,6 +106,14 @@ systemctl status used-market-tunnel.service --no-pager
 ## 3.1 반복 배포
 
 기존 서버에 새 release를 올릴 때도 설치 스크립트를 사용한다. Tunnel 토큰이 이미 있으면 스크립트가 `runner → tunnel` 순서로 재시작하고 로컬·외부 health를 필수 검증한다.
+
+구버전 기본값처럼 기존 `PC_SOURCE_TARGETS_PER_RUN`이 `71` 미만이면 자동으로 덮어쓰지 않고 설치를 중단한다. 운영자가 처리량 변경을 승인한 뒤 다음처럼 명시적으로 올린다.
+
+```bash
+sudo env PC_SOURCE_TARGETS_PER_RUN_OVERRIDE=80 PC_SOURCE_TARGET_CONCURRENCY_OVERRIDE=6 \
+  RUNNER_PUBLIC_URL=https://runner.example.com \
+  bash aws-runner/install-ubuntu24.sh /home/ubuntu/used-market-release
+```
 
 D1-first 운영에서 AWS-first로 처음 전환할 때는 Worker를 먼저 배포해 `/api/pc/listings`와 가격 통계가 `x-search-data-source: aws-runner`로 응답하는지 확인한 뒤 AWS 러너를 배포한다. 반대 순서로 진행하면 기존 Worker가 자동 mirror가 멈춘 D1 매물을 계속 읽을 수 있다.
 
@@ -141,13 +150,15 @@ sudo -u usedrunner node --env-file=/etc/used-market-runner/runner.env /opt/used-
 sudo systemctl start used-market-runner.service
 ```
 
-PC 사전수집·공개 전환에 포함할 source는 registry의 운영자 승인 기록과 `runtime_status:"ENABLED"`를 갖춰야 한다. 다나와는 내장 카테고리 adapter를 사용하므로 별도 URL 설정이 필요 없다. 검색 URL이 필요한 쿨엔조이는 허용 host와 `{query}` 자리표시자가 고정된 `PC_SPECIALIST_SEARCH_URLS_JSON`만 사용할 수 있다. source 실패 시 이전 데이터 보존, backoff, 격리 기록을 남긴다.
+PC 사전수집·공개 전환에 포함할 source는 registry의 운영자 승인 기록, `directory_source:true`, `runtime_status:"ENABLED"`를 모두 갖춰야 한다. 현재 비활성 소스의 과거 adapter나 설정값이 남아 있어도 스케줄 이벤트와 공개 projection에는 포함되지 않는다. source 실패 시 이전 데이터 보존, backoff, 격리 기록을 남긴다.
 
-collection target은 `HOURLY_CATEGORY`와 `DAILY_MASTER`로 나뉜다. 전자는 모든 11개 부품군을 매시간 확인하고, 후자는 GPU·CPU 정확 모델과 RAM 세대·용량·제조사, 저장장치 용량·제조사 등 versioned master 전체를 24시간 간격으로 순회한다. `PC_SOURCE_TARGETS_PER_RUN`은 한 사이트를 한 번에 과도하게 호출하지 않도록 순회 배치를 제한한다.
+collection target은 `HOURLY_CATEGORY`와 `DAILY_MASTER`로 나뉜다. 전자는 모든 11개 부품군을 매시간 확인하고, 후자는 GPU·CPU 정확 모델과 RAM 세대·용량·제조사, 저장장치 용량·제조사 등 versioned master 전체를 24시간 간격으로 순회한다. `PC_SOURCE_TARGETS_PER_RUN`은 한 사이트를 한 번에 과도하게 호출하지 않도록 배치를 제한한다. `/health`의 `pc_parts.collection_capacity`는 현재 target set과 사이트별 실행 횟수로 전체 순회 가능 여부를 계산하며, 기본값 `80`은 현재 운영 소스 전체를 충족한다.
+
+실패한 개별 target은 다음 소스 실행부터 지수 백오프로 재시도한다. `/health`의 `source_readiness[].target_coverage`는 성공 target 수, 실패 target 수, 2회 주기 이상 성공하지 못한 stale target 수를 공개하며, `--require-pc-continuous`는 stale target이 남아 있으면 통과하지 않는다.
 
 가격 통계 publication은 D1에 여러 batch로 staging한 뒤 활성 포인터를 교체한다. 데이터가 커져도 일반 마켓 요청의 30초 제한에 끊기지 않도록 `PC_STATS_PUBLICATION_TIMEOUT_MS`를 별도 사용하며 기본값은 15분이다.
 
-다나와 11개 부품군의 실제 목록 수집 진단은 다음 명령으로만 실행한다. 결정적 테스트에는 포함하지 않는다.
+현재 비활성인 다나와 adapter의 실제 목록 수집 진단은 다음 명령으로만 실행한다. 운영 스케줄이나 결정적 테스트에는 포함하지 않는다.
 
 ```bash
 npm run test:pc:live-specialist
@@ -173,7 +184,7 @@ npm run pc:reclassify -- --db C:\path\to\search-index.sqlite --normalization-ver
 
 ## 5. 헬스체크
 
-로컬 러너, 승인된 4개 대상 사이트와 SQLite 색인 활성 상태를 확인한다.
+로컬 러너, 승인된 3개 대상 사이트와 SQLite 색인 활성 상태를 확인한다.
 
 ```bash
 bash /opt/used-market-runner/aws-runner/health-check.sh
@@ -186,7 +197,14 @@ RUNNER_PUBLIC_URL=https://runner.example.com \
   bash /opt/used-market-runner/aws-runner/health-check.sh --require-public
 ```
 
-실제 수집 작업 1개까지 검증하려면 토큰을 환경변수로 주고 실행한다. 이 명령은 중고나라·헬로마켓·리싱크몰·eBay를 실제로 요청하므로 점검할 때만 사용한다.
+스케줄러가 켜져 있고 모든 운영 소스의 최근 수집과 전체 target 처리량이 정상인지 확인한다.
+
+```bash
+RUNNER_PUBLIC_URL=https://runner.example.com \
+  bash /opt/used-market-runner/aws-runner/health-check.sh --require-public --require-pc-continuous
+```
+
+실제 수집 작업 1개까지 검증하려면 토큰을 환경변수로 주고 실행한다. 이 명령은 번개장터·중고나라·eBay를 실제로 요청하므로 점검할 때만 사용한다.
 
 ```bash
 RUNNER_TOKEN='<CLOUDFLARE_RUNNER_TOKEN>' \
@@ -200,10 +218,10 @@ journalctl -u used-market-runner.service -n 100 --no-pager
 journalctl -u used-market-tunnel.service -n 100 --no-pager
 ```
 
-공개 URL이 로컬 `/health`와 같은 JSON을 반환해야 한다. `target_sites`는 다음 4개와 정확히 같아야 한다.
+공개 URL이 로컬 `/health`와 같은 JSON을 반환해야 한다. `target_sites`는 다음 3개와 정확히 같아야 한다.
 
 ```json
-["ebay", "hellomarket", "joonggonara", "rethinkmall"]
+["bunjang", "joonggonara", "ebay"]
 ```
 
 ## 6. 운영 점검표
@@ -213,7 +231,8 @@ journalctl -u used-market-tunnel.service -n 100 --no-pager
 - [ ] Worker `RUNNER_TOKEN`과 AWS `CLOUDFLARE_RUNNER_TOKEN`이 동일하다.
 - [ ] `used-market-runner.service`와 `used-market-tunnel.service`가 active다.
 - [ ] 두 서비스가 enable 상태이며 로컬·공개 `/health`의 `process_instance.id`가 같다.
-- [ ] `/health`의 대상 사이트가 승인된 4개이고 `search_index.enabled`가 `true`다.
+- [ ] `/health`의 대상 사이트가 승인된 3개이고 `search_index.enabled`가 `true`다.
+- [ ] `health-check.sh --require-pc-continuous`가 통과하고 `collection_capacity.all_sources_sufficient`가 `true`다.
 - [ ] AWS 여유 디스크가 5GB 이상이다. 미만이면 배포 전에 EBS를 확장한다.
 - [ ] 현재 운영 모드는 `cache_first`이며 stale 비율·갱신 지연·자원 경고를 모니터링한다.
 - [ ] 연속 D1 매물 mirror와 매물 fallback은 각각 `D1_BACKGROUND_MIRROR_ENABLED=false`, `D1_LISTING_FALLBACK_ENABLED=false`다.
@@ -224,7 +243,7 @@ journalctl -u used-market-tunnel.service -n 100 --no-pager
 
 | 파일 | 역할 |
 |---|---|
-| `runner.mjs` | 승인된 4개 사이트 제한 병렬 수집·캐시 우선 검색 HTTP 서버 |
+| `runner.mjs` | 승인된 3개 사이트 제한 병렬 수집·캐시 우선 검색 HTTP 서버 |
 | `search-index.mjs` | SQLite WAL·FTS5 색인, 갱신·보관·백업·비교 지표 |
 | `pc-parts-ledger.mjs` | 불변 원본·관측·상태·제품 master·30일 가격 통계 원장 |
 | `pc-shadow-pipeline.mjs` | 분류·master match·시장군 분리 후 shadow dual-write |

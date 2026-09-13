@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { SERIES, money, metricValue, metricIsConsistent, buildTotals, compatibility, groupProducts, validateBuild, dailySeries, percentChange, overviewIndex, priceDateRange, shiftDate, sourceStats, coherentStats, modelPageItems } from '../web-backend/public/pc-tools-core.mjs';
+import { createPriceStore } from '../web-backend/public/pc-tools-data.mjs';
 import { pcCatalogResponse } from '../cloudflare/pc-directory-http.mjs';
 const p = (id, category, name, specs = {}) => ({ canonical_product_id: id, category_code: category, canonical_display_name: name, key_specs: specs });
 const cpu = p('cpu', 'CPU', 'CPU 5600', { socket: 'AM4' });
@@ -95,4 +96,40 @@ const catalog = pcCatalogResponse();
 assert.ok(catalog.tools_catalog.products.some(p => p.category_code === 'CASE'));
 assert.ok(catalog.tools_catalog.products.some(p => p.category_code === 'COOLING'));
 assert.equal(catalog.categories.some(c => c.code === 'CASE'), false, 'builder extension must not alter current marketplace search scope');
+
+const originalFetch = globalThis.fetch;
+let requestedStatsUrl = '';
+try {
+  globalThis.fetch = async input => {
+    requestedStatsUrl = String(input);
+    return new Response(JSON.stringify({
+      status: 'success',
+      data: {
+        canonical_product_id: 'cpu',
+        methodology: { days: 30, market_pool: 'KR_C2C_USED', condition: 'USED_WORKING', currency: 'KRW' },
+        window: { from: '2026-08-10', to: '2026-09-08' },
+        as_of: '2026-09-08',
+        active: { sample_count: 5, min: 90, max: 110, mean: 100, median: 100 },
+        sold: { sample_count: 3, min: 70, max: 90, mean: 80, median: 80 },
+        confirmed_transactions: { sample_count: 0, min: null, max: null, mean: null, median: null },
+        daily: [
+          { date: '2026-09-07', active: { sample_count: 5, min: 90, max: 100, mean: 95 } },
+          { date: '2026-09-08', active: { sample_count: 5, min: 100, max: 110, mean: 105 } }
+        ],
+        by_source: []
+      }
+    }), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  const store = createPriceStore(() => {});
+  await store.load([cpu], 30);
+  const loaded = store.get('cpu', 30);
+  assert.equal(loaded.state, 'ready');
+  assert.match(requestedStatsUrl, /\/api\/products\/cpu\/price-stats\?days=30&market_pool=KR_C2C_USED&condition=USED_WORKING&currency=KRW/u);
+  assert.equal(buildTotals([{ id: 'cpu', quantity: 2 }], entry => store.get(entry.id, 30).data).active.amount, 200,
+    'the builder total must consume the same published price-stat response used by the UI');
+  assert.equal(dailySeries(loaded.data, 'active', 30).at(-1).value, 105,
+    'price analysis must render the published daily series from the shared price store');
+} finally {
+  globalThis.fetch = originalFetch;
+}
 console.log('PC tools: grouping, independent prices, partial sums, quantity, compatibility, storage validation and chart gaps passed');

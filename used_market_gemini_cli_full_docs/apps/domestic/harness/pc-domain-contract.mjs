@@ -465,6 +465,31 @@ assert.deepEqual(
   ["fixture:gpu", "fixture:cpu"],
   "the daily master target becomes due only after its own 24-hour interval"
 );
+ledger.updateSourceTargetRuntime({
+  sourceId: "joonggonara", targetId: "fixture:cpu", startedAt: "2026-08-30T00:00:00.000Z",
+  error: "temporary upstream failure"
+});
+assert.equal(
+  ledger.listDueCollectionTargets("joonggonara", "2026-08-30T00:54:59.000Z")
+    .some((target) => target.target_id === "fixture:cpu"),
+  false,
+  "a failed daily target must still respect the bounded hourly retry guard"
+);
+assert.equal(
+  ledger.listDueCollectionTargets("joonggonara", "2026-08-30T00:55:01.000Z")
+    .some((target) => target.target_id === "fixture:cpu"),
+  true,
+  "a failed daily target must retry on the next source window instead of waiting another day"
+);
+assert.deepEqual(ledger.getSourceTargetCoverage("joonggonara", "2026-08-30T00:55:01.000Z"), {
+  target_count: 2,
+  succeeded_target_count: 2,
+  never_succeeded_target_count: 0,
+  failed_target_count: 1,
+  stale_target_count: 1,
+  success_ratio: 1,
+  coverage_ready: false
+}, "target coverage must expose a persistently stale subset even when the source has successful crawls");
 const fairTargetDb = new DatabaseSync(":memory:");
 const fairTargetLedger = new PcPartsLedger({ db: fairTargetDb, now: () => new Date("2026-09-10T12:00:00.000Z") });
 fairTargetLedger.migrate();
@@ -586,6 +611,17 @@ assert.throws(() => db.prepare("UPDATE raw_listings SET title = 'tampered' WHERE
 now += HOUR_MS;
 const unchanged = ledger.recordObservation({ ...base, observedAt: new Date(now).toISOString() });
 assert.equal(unchanged.snapshotCreated, false, "unchanged observations must not duplicate snapshots");
+const rawCountBeforeVolatileRefresh = Number(db.prepare("SELECT COUNT(*) AS count FROM raw_listings").get().count);
+now += HOUR_MS;
+const volatileRefresh = ledger.recordObservation({
+  ...base,
+  observedAt: new Date(now).toISOString(),
+  rawPayload: { ...base.rawPayload, updated_at: new Date(now).toISOString(), collected_at: new Date(now).toISOString() }
+});
+assert.equal(volatileRefresh.snapshotCreated, false,
+  "collector timestamps alone must not create a new listing state");
+assert.equal(Number(db.prepare("SELECT COUNT(*) AS count FROM raw_listings").get().count), rawCountBeforeVolatileRefresh,
+  "collector timestamps alone must not create immutable raw revisions");
 
 for (let attempt = 0; attempt < 3; attempt += 1) {
   now += 6 * HOUR_MS;
@@ -692,6 +728,12 @@ const storedKrStats = ledger.getStoredDailyPriceStats({
   parserVersion: "pc-parser-v1", ruleVersion: "pc-rules-v1", filterVersion: "pc-filter-v1"
 });
 assert.equal(storedKrStats.daily.length, 30, "stored price stats keep the daily chart window");
+assert.equal(Number(db.prepare("SELECT COUNT(*) AS count FROM daily_price_stats WHERE sample_count = 0").get().count), 0,
+  "empty chart dates are represented by one compact coverage window, not millions of empty aggregate rows");
+assert.equal(Number(db.prepare("SELECT COUNT(*) AS count FROM daily_source_price_stats WHERE sample_count = 0").get().count), 0,
+  "sources without a sample must not create empty per-source aggregate rows");
+assert.equal(Number(db.prepare("SELECT COUNT(*) AS count FROM daily_price_stat_windows").get().count), 1,
+  "stored statistics retain a compact date coverage window for chart gaps");
 assert.equal(storedKrStats.sold.sample_count, krStats.sold.sample_count,
   "stored price stats reuse precomputed daily rows instead of dropping samples");
 assert.ok(storedKrStats.daily.filter((row) => row.active.sample_count === 0)
@@ -1543,6 +1585,13 @@ const firstObservedSold = ledger.recordObservation({
 });
 assert.equal(firstObservedSold.soldLastAskPrice, 430_000,
   "a structured SOLD row may use its still-visible asking price without claiming a transaction price");
+
+const compacted = ledger.compactStorage({ asOf: new Date(now + 6 * HOUR_MS) });
+assert.equal(compacted.stats_retention_days, 730);
+assert.equal(Number(db.prepare("SELECT COUNT(*) AS count FROM daily_price_stats WHERE sample_count = 0").get().count), 0);
+assert.equal(Number(db.prepare("SELECT COUNT(*) AS count FROM daily_source_price_stats WHERE sample_count = 0").get().count), 0);
+assert.equal(ledger.runIntegrityAudit(new Date(now + 6 * HOUR_MS)).ok, true,
+  "storage compaction must preserve ledger integrity and traceability");
 
 ledger.close();
 db.close();

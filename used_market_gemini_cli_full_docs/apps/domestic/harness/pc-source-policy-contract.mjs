@@ -8,6 +8,7 @@ import {
   PC_SOURCE_REGISTRY,
   getPcSource,
   getSourceRuntimeDefaults,
+  listSourceCadenceEvents,
   operatorAttestedSourceGovernance,
   runDueSourceCollections,
   runSourceCollection,
@@ -73,7 +74,7 @@ assert.equal(validateSourceActivation({ ...deniedSource, policy_status: "APPROVE
 }, activationClock).reason, "POLICY_DENIED", "a cloned source object cannot override canonical policy");
 
 const operatorAttestedDirectorySources = [
-  "joonggonara", "bunjang", "danawa", "hellomarket", "coolenjoy"
+  "joonggonara", "bunjang"
 ];
 for (const key of operatorAttestedDirectorySources) {
   const source = getPcSource(key);
@@ -115,27 +116,31 @@ assert.equal(getPcSource("daangn").policy_status, "DENIED");
 assert.equal(getPcSource("daangn").policy_basis_url, "https://www.daangn.com/robots.txt");
 assert.equal(OPERATIONAL_TARGET_SITES.includes("daangn"), false);
 assert.equal(getPcSource("danawa").policy_status, "APPROVED");
-assert.equal(getPcSource("danawa").runtime_status, "ENABLED");
-assert.equal(getPcSource("danawa").directory_source, true);
+assert.equal(getPcSource("danawa").runtime_status, "DISABLED");
+assert.equal(getPcSource("danawa").directory_source, false);
 assert.equal(OPERATIONAL_TARGET_SITES.includes("danawa"), false, "specialist collection must not re-enable foreground live search");
-assert.equal(OPERATIONAL_PC_DIRECTORY_SITES.includes("danawa"), true);
+assert.equal(OPERATIONAL_PC_DIRECTORY_SITES.includes("danawa"), false);
 assert.equal(getPcSource("joonggonara").directory_source, true,
   "approved Joonggonara collection must feed the precollected PC directory");
-assert.equal(getPcSource("hellomarket").directory_source, true,
-  "approved Hellomarket collection must feed the precollected PC directory");
+assert.equal(getPcSource("hellomarket").directory_source, false,
+  "Hellomarket remains registered for historical evidence but is not collected");
 assert.equal(getPcSource("hellomarket").policy_status, "APPROVED");
+assert.equal(getPcSource("hellomarket").runtime_status, "DISABLED");
 assert.equal(getPcSource("hellomarket").policy_basis_url, "https://hellomarket.com/terms.hm");
 assert.equal(OPERATIONAL_TARGET_SITES.includes("hellomarket"), false);
 assert.equal(getPcSource("rethinkmall").public_search, false);
 assert.equal(getPcSource("rethinkmall").directory_source, false);
+assert.equal(getPcSource("rethinkmall").runtime_status, "DISABLED");
 assert.equal(OPERATIONAL_TARGET_SITES.includes("rethinkmall"), false,
   "complete-system retail must not appear in standalone PC-parts search");
 assert.equal(OPERATIONAL_PC_DIRECTORY_SITES.includes("rethinkmall"), false);
 assert.equal(getPcSource("bunjang").directory_source, true,
   "approved Bunjang collection must feed the precollected PC directory");
 assert.deepEqual(OPERATIONAL_PC_DIRECTORY_SITES,
-  ["joonggonara", "bunjang", "danawa", "hellomarket", "ebay", "coolenjoy"]);
+  ["joonggonara", "bunjang", "ebay"]);
 assert.equal(OPERATIONAL_PC_DIRECTORY_SITES.includes("bunjang"), true);
+assert.equal(getPcSource("ebay").access.strategy, "official_browse_api");
+assert.equal(getPcSource("ebay").access.api_only_required, true);
 const collectionTargetSet = pcCollectionTargetSetV2();
 const specialistTargets = collectionTargetSet.targets.filter((target) => target.sourceKeys.includes("danawa"));
 const marketplaceTargets = collectionTargetSet.targets.filter((target) => target.sourceKeys.includes("joonggonara"));
@@ -144,10 +149,10 @@ const bunjangTargets = collectionTargetSet.targets.filter((target) => target.sou
 const rethinkmallTargets = collectionTargetSet.targets.filter((target) => target.sourceKeys.includes("rethinkmall"));
 const hourlyMarketplaceTargets = marketplaceTargets.filter((target) => target.cadenceClass === "HOURLY_CATEGORY");
 const dailyMarketplaceTargets = marketplaceTargets.filter((target) => target.cadenceClass === "DAILY_MASTER");
-assert.equal(specialistTargets.length, 11);
+assert.equal(specialistTargets.length, 0);
 assert.equal(hourlyMarketplaceTargets.length, 19);
-assert.equal(hellomarketTargets.length, marketplaceTargets.length,
-  "approved Hellomarket receives the same full PC master sweep as other search marketplaces");
+assert.equal(hellomarketTargets.length, 0,
+  "disabled Hellomarket must not receive collection targets");
 assert.equal(bunjangTargets.length, marketplaceTargets.length,
   "approved Bunjang receives the same full PC master sweep as other search marketplaces");
 assert.equal(rethinkmallTargets.length, 0,
@@ -160,7 +165,6 @@ assert.deepEqual(
   "daily target generation must cover the complete master and every public PC product"
 );
 assert.ok(dailyMarketplaceTargets.every((target) => target.minimumIntervalMinutes === 24 * 60));
-assert.deepEqual([...new Set(specialistTargets.map((target) => target.categoryCode))].sort(), [...PC_PART_CATEGORY_CODES].sort());
 assert.deepEqual([...new Set(marketplaceTargets.map((target) => target.categoryCode))].sort(), [...PC_PART_CATEGORY_CODES].sort());
 for (const sourceKey of OPERATIONAL_PC_DIRECTORY_SITES) {
   const sourceCategories = new Set(collectionTargetSet.targets
@@ -193,8 +197,18 @@ assert.equal(bunjangCatalogRows[0].source_category_code, "600700001");
 assert.equal(Object.hasOwn(bunjangCatalogRows[0].raw_payload, "uid"), false,
   "the public partner catalog parser must not retain the seller shop identifier");
 assert.equal(getPcSource("coolenjoy").policy_status, "APPROVED");
-assert.equal(getPcSource("coolenjoy").runtime_status, "ENABLED");
+assert.equal(getPcSource("coolenjoy").runtime_status, "DISABLED");
+assert.equal(getPcSource("coolenjoy").directory_source, false);
 assert.equal(OPERATIONAL_TARGET_SITES.includes("coolenjoy"), false);
+assert.equal(sourceRuntimeForScheduler("coolenjoy", {
+  persisted: { runtime_status: "ENABLED", failure_count: 0 }
+}).runtime_status, "DISABLED", "registry retirement must override stale persisted ENABLED state");
+assert.equal(listSourceCadenceEvents({
+  after: "2026-08-29T00:51:59.000Z",
+  through: "2026-08-29T00:52:01.000Z",
+  jitterBySource: { coolenjoy: 0 }
+}).some((event) => event.source_key === "coolenjoy"), false,
+"disabled sources must not keep generating scheduler no-op events");
 assert.equal(validateSourceActivation("joonggonara", {
   policy_reviewed_at: "2026-08-29T00:00:00.000Z",
   activation_checked_at: "2026-08-29T01:00:00.000Z",
@@ -360,8 +374,8 @@ const disabledResults = await runDueSourceCollections({
   jitterBySource: { coolenjoy: 0 }
 });
 assert.equal(disabledCalls, 0);
-assert.equal(disabledResults[0]?.reason, "POLICY_REVIEW_MISSING",
-  "an approved source still must not run before runtime governance and live-canary evidence exist");
+assert.deepEqual(disabledResults, [],
+  "retired sources must not produce scheduler events or invoke adapters");
 
 let catchupCalls = 0;
 const catchupAdapter = createSourceAdapter({
@@ -420,10 +434,10 @@ const pagedDanawa = await collectDanawaCategoryListings({
 assert.equal(pagedDanawaCalls, 2, "Danawa collection must continue through reported result pages");
 assert.deepEqual(pagedDanawa.items.map((item) => item.source_listing_id), ["52439768", "52439769"]);
 const noopAdapter = createSourceAdapter({
-  sourceKey: "danawa",
+  sourceKey: "ebay",
   async collectIncremental(input) {
     return {
-      source_key: "danawa", mode: "incremental", collected_at: input.now,
+      source_key: "ebay", mode: "incremental", collected_at: input.now,
       items: [], next_cursor: null, exhausted: false,
       metrics: {
         request_count: 0, request_failure_count: 0, parsed_count: 0,
@@ -436,11 +450,11 @@ const noopAdapter = createSourceAdapter({
 assert.equal((await noopAdapter.collectIncremental({ now: "2026-08-30T00:00:00.000Z" })).items.length, 0,
   "a scheduled source with no due targets is a valid no-op");
 const noopResult = await runSourceCollection({
-  sourceKey: "danawa", adapter: noopAdapter, runtime: getSourceRuntimeDefaults("danawa"),
+  sourceKey: "ebay", adapter: noopAdapter, runtime: getSourceRuntimeDefaults("ebay"),
   governance: {
     policy_reviewed_at: "2026-08-29T00:00:00.000Z",
     activation_checked_at: "2026-08-29T01:00:00.000Z",
-    approved_access_mode: getPcSource("danawa").access.strategy,
+    approved_access_mode: getPcSource("ebay").access.strategy,
     live_canary: liveCanary,
     operator_enabled: true
   },

@@ -89,9 +89,9 @@ export const PC_SOURCE_REGISTRY = Object.freeze([
     market_pool: "KR_C2C_USED",
     market_pools: ["KR_C2C_USED", "KR_DEALER_USED"],
     policy_status: "APPROVED",
-    runtime_status: "ENABLED",
+    runtime_status: "DISABLED",
     public_search: false,
-    directory_source: true,
+    directory_source: false,
     directory_order: 1,
     policy_reviewed_at: "2026-08-31",
     policy_basis_url: "https://www.danawa.com/info/provision.html",
@@ -109,10 +109,10 @@ export const PC_SOURCE_REGISTRY = Object.freeze([
     market_pool: "KR_C2C_USED",
     market_pools: ["KR_C2C_USED", "KR_DEALER_USED"],
     policy_status: "APPROVED",
-    runtime_status: "ENABLED",
+    runtime_status: "DISABLED",
     public_search: false,
     public_search_order: 3,
-    directory_source: true,
+    directory_source: false,
     directory_order: 4,
     policy_reviewed_at: "2026-08-31",
     policy_basis_url: "https://hellomarket.com/terms.hm",
@@ -129,7 +129,7 @@ export const PC_SOURCE_REGISTRY = Object.freeze([
     name: "리씽크몰",
     market_pool: "KR_REFURB_RETAIL",
     policy_status: "APPROVED",
-    runtime_status: "ENABLED",
+    runtime_status: "DISABLED",
     public_search: false,
     public_search_order: 4,
     directory_source: false,
@@ -154,16 +154,16 @@ export const PC_SOURCE_REGISTRY = Object.freeze([
     directory_source: true,
     directory_order: 6,
     cadence: { timezone: "Asia/Seoul", kst_minutes: [44], jitter_max_seconds: MAX_JITTER_SECONDS },
-    access: { strategy: "official_browse_api", adapter_kind: "existing_site_script", api_only_required: false }
+    access: { strategy: "official_browse_api", adapter_kind: "existing_site_script", api_only_required: true }
   }),
   source({
     key: "coolenjoy",
     name: "쿨엔조이",
     market_pool: "KR_C2C_USED",
     policy_status: "APPROVED",
-    runtime_status: "ENABLED",
+    runtime_status: "DISABLED",
     public_search: false,
-    directory_source: true,
+    directory_source: false,
     directory_order: 8,
     policy_reviewed_at: "2026-08-31",
     policy_basis_url: "https://coolenjoy.net/robots.txt",
@@ -237,9 +237,12 @@ export function getSourceRuntimeDefaults(sourceKey) {
 
 export function sourceRuntimeForScheduler(sourceKey, { persisted = null, governedRuntimeStatus = null } = {}) {
   const defaults = getSourceRuntimeDefaults(sourceKey);
+  const runtimeStatus = defaults.runtime_status === "ENABLED"
+    ? (persisted?.runtime_status || governedRuntimeStatus || defaults.runtime_status)
+    : defaults.runtime_status;
   return {
     ...defaults,
-    runtime_status: persisted?.runtime_status || governedRuntimeStatus || defaults.runtime_status,
+    runtime_status: runtimeStatus,
     consecutive_failures: Number(persisted?.failure_count || 0),
     backoff_until: persisted?.backoff_until || null,
     quarantine_until: persisted?.quarantine_until || null,
@@ -355,6 +358,7 @@ export function listSourceCadenceEvents({ after, through, jitterBySource = {} })
   for (let baseMs = earliestBase; baseMs <= latestBase; baseMs += 60_000) {
     const baseDate = new Date(baseMs);
     for (const registered of PC_SOURCE_REGISTRY) {
+      if (registered.runtime_status !== "ENABLED") continue;
       if (!isScheduledKstMinute(baseDate, registered.cadence.kst_minutes)) continue;
       const suppliedJitter = Object.prototype.hasOwnProperty.call(jitterBySource, registered.key)
         ? jitterBySource[registered.key]

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import { pcCollectionTargetSetV2 } from "../cloudflare/pc-directory-http.mjs";
+import { pcCollectionCapacityPlan, pcCollectionTargetSetV2 } from "../cloudflare/pc-directory-http.mjs";
 import { OPERATIONAL_PC_DIRECTORY_SITES } from "../cloudflare/target-sites.mjs";
 import { PC_PART_CATEGORY_CODES } from "../collector/logic/pc-specialist-targets.mjs";
 import { PC_SOURCE_REGISTRY, listSourceCadenceEvents } from "../collector/logic/pc-source-registry.mjs";
@@ -13,13 +13,23 @@ const categorySet = new Set(PC_PART_CATEGORY_CODES);
 const operationalSites = new Set(OPERATIONAL_PC_DIRECTORY_SITES);
 const publicProducts = publicPcProducts();
 
+const defaultCapacity = pcCollectionCapacityPlan(80);
+assert.equal(defaultCapacity.all_sources_sufficient, true,
+  "the default per-run budget must cover hourly searches and the full daily model sweep");
+assert.equal(defaultCapacity.configured_targets_per_run, 80);
+assert.ok(defaultCapacity.sources.every((source) => source.minimum_targets_per_run <= 80));
+const legacyLowCapacity = pcCollectionCapacityPlan(12);
+assert.equal(legacyLowCapacity.all_sources_sufficient, false,
+  "an intentionally preserved low legacy limit must be visible as insufficient instead of silently starving daily targets");
+assert.ok(legacyLowCapacity.sources.some((source) => source.daily_capacity_per_day < source.daily_target_count));
+
 assert.equal(new Set(targetIds).size, targetIds.length, "collection target ids must be unique");
 assert.ok(targets.length > PC_PART_CATEGORY_CODES.length, "the active target set must include category and model batches");
 assert.equal(new Set(targets.map((target) => target.categoryCode)).size, categorySet.size,
   "every PC part category must have an active collection target");
 assert.doesNotMatch(JSON.stringify(targetSet), /quasarzone/iu, "retired Quasarzone must not be an active collection target");
-assert.equal(targetSet.targetSetVersion, "pc-targets:2:full-master-v9");
-assert.ok(targetSet.targets.every((target) => /:(?:category|market|master)-v9:/u.test(target.targetId)),
+assert.equal(targetSet.targetSetVersion, "pc-targets:2:full-master-v10");
+assert.ok(targetSet.targets.every((target) => /:(?:category|market|master)-v10:/u.test(target.targetId)),
   "a new collection target set must own new target ids instead of reusing prior-set ids");
 for (const product of publicProducts) {
   assert.ok(targets.some((target) => target.canonicalProductId === product.id),

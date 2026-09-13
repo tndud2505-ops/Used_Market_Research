@@ -13,7 +13,7 @@ export function drawChart(container, series, { index = false, label = '가격 �
   if (!points.length) {
     const empty = document.createElement('p');
     empty.className = 'tools-empty';
-    empty.textContent = '가격 기록 없음';
+    empty.textContent = '가격 자료 없음';
     container.append(empty);
     return;
   }

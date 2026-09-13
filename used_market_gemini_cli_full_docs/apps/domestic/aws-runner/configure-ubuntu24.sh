@@ -107,6 +107,28 @@ public_url="${public_url_input:-$existing_public_url}"
 public_url="${public_url%/}"
 [[ "$public_url" =~ ^https://[^/]+$ ]] || fail 'RUNNER_PUBLIC_URL은 경로 없는 https:// origin이어야 합니다.'
 
+if [[ "$existing_pc_source_targets_per_run" =~ ^[0-9]+$ ]] &&
+  (( existing_pc_source_targets_per_run >= 71 && existing_pc_source_targets_per_run <= 128 )); then
+  pc_source_targets_per_run_default="$existing_pc_source_targets_per_run"
+else
+  pc_source_targets_per_run_default=80
+  if [[ -n "$existing_pc_source_targets_per_run" ]]; then
+    printf '기존 PC_SOURCE_TARGETS_PER_RUN=%s 값은 현재 전체 target set에 부족하여 기본값 80을 제안합니다.\n' "$existing_pc_source_targets_per_run"
+  fi
+fi
+read -r -p "PC_SOURCE_TARGETS_PER_RUN [${pc_source_targets_per_run_default}]: " pc_source_targets_per_run_input
+pc_source_targets_per_run="${pc_source_targets_per_run_input:-$pc_source_targets_per_run_default}"
+if [[ ! "$pc_source_targets_per_run" =~ ^[0-9]+$ ]] || (( pc_source_targets_per_run < 71 || pc_source_targets_per_run > 128 )); then
+  fail 'PC_SOURCE_TARGETS_PER_RUN은 71~128 정수여야 합니다. 현재 전체 모델 순회 권장값은 80입니다.'
+fi
+
+pc_source_target_concurrency_default="${existing_pc_source_target_concurrency:-6}"
+read -r -p "PC_SOURCE_TARGET_CONCURRENCY [${pc_source_target_concurrency_default}]: " pc_source_target_concurrency_input
+pc_source_target_concurrency="${pc_source_target_concurrency_input:-$pc_source_target_concurrency_default}"
+if [[ ! "$pc_source_target_concurrency" =~ ^[0-9]+$ ]] || (( pc_source_target_concurrency < 1 || pc_source_target_concurrency > 8 )); then
+  fail 'PC_SOURCE_TARGET_CONCURRENCY는 1~8 정수여야 합니다.'
+fi
+
 chromium_path="${existing_chromium_path:-/usr/bin/chromium}"
 node_options="${existing_node_options:---max-old-space-size=2048}"
 search_cache_ttl="${existing_search_cache_ttl:-300000}"
@@ -116,15 +138,7 @@ index_dir="${existing_index_dir:-/var/lib/used-market-runner}"
 index_path="${existing_index_path:-/var/lib/used-market-runner/search-index.sqlite}"
 pc_shadow_write="${existing_pc_shadow_write:-true}"
 pc_scheduler="${existing_pc_scheduler:-false}"
-pc_source_targets_per_run="${existing_pc_source_targets_per_run:-80}"
-pc_source_target_concurrency="${existing_pc_source_target_concurrency:-6}"
 pc_hellomarket_detail_limit="${existing_pc_hellomarket_detail_limit:-40}"
-if [[ ! "$pc_source_targets_per_run" =~ ^[0-9]+$ ]] || (( pc_source_targets_per_run < 4 || pc_source_targets_per_run > 128 )); then
-  pc_source_targets_per_run=80
-fi
-if [[ ! "$pc_source_target_concurrency" =~ ^[0-9]+$ ]] || (( pc_source_target_concurrency < 1 || pc_source_target_concurrency > 8 )); then
-  pc_source_target_concurrency=6
-fi
 pc_source_governance="${existing_pc_source_governance:-{}}"
 pc_specialist_urls="${existing_pc_specialist_urls:-{}}"
 d1_background_mirror="${existing_d1_background_mirror:-false}"

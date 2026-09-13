@@ -12,6 +12,8 @@ RUNNER_ENV_DIR="${RUNNER_ENV_DIR:-/etc/used-market-runner}"
 RUNNER_ENV_FILE="${RUNNER_ENV_FILE:-${RUNNER_ENV_DIR}/runner.env}"
 TUNNEL_ENV_DIR="${TUNNEL_ENV_DIR:-/etc/cloudflared}"
 TUNNEL_TOKEN_FILE="${TUNNEL_TOKEN_FILE:-${TUNNEL_ENV_DIR}/used-market-runner.token}"
+PC_SOURCE_TARGETS_PER_RUN_OVERRIDE="${PC_SOURCE_TARGETS_PER_RUN_OVERRIDE:-}"
+PC_SOURCE_TARGET_CONCURRENCY_OVERRIDE="${PC_SOURCE_TARGET_CONCURRENCY_OVERRIDE:-}"
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 SOURCE_ROOT="${1:-$(cd -- "${SCRIPT_DIR}/.." && pwd)}"
@@ -37,6 +39,19 @@ fi
 
 if [[ ! -f "${SOURCE_ROOT}/aws-runner/runner.mjs" ]]; then
   fail "runner.mjs를 찾을 수 없습니다: ${SOURCE_ROOT}/aws-runner/runner.mjs"
+fi
+
+if [[ -n "$PC_SOURCE_TARGETS_PER_RUN_OVERRIDE" ]] && {
+  [[ ! "$PC_SOURCE_TARGETS_PER_RUN_OVERRIDE" =~ ^[0-9]+$ ]] ||
+  (( PC_SOURCE_TARGETS_PER_RUN_OVERRIDE < 71 || PC_SOURCE_TARGETS_PER_RUN_OVERRIDE > 128 ));
+}; then
+  fail 'PC_SOURCE_TARGETS_PER_RUN_OVERRIDE는 71~128 정수여야 합니다.'
+fi
+if [[ -n "$PC_SOURCE_TARGET_CONCURRENCY_OVERRIDE" ]] && {
+  [[ ! "$PC_SOURCE_TARGET_CONCURRENCY_OVERRIDE" =~ ^[0-9]+$ ]] ||
+  (( PC_SOURCE_TARGET_CONCURRENCY_OVERRIDE < 1 || PC_SOURCE_TARGET_CONCURRENCY_OVERRIDE > 8 ));
+}; then
+  fail 'PC_SOURCE_TARGET_CONCURRENCY_OVERRIDE는 1~8 정수여야 합니다.'
 fi
 
 for required_file in \
@@ -215,14 +230,6 @@ NODE_OPTIONS=--max-old-space-size=2048
 EOF
 fi
 
-read_env_value() {
-  local key="$1"
-  awk -F= -v wanted="$key" '
-    { sub(/\r$/, "") }
-    $1 == wanted { sub(/^[^=]*=/, ""); print; exit }
-  ' "$RUNNER_ENV_FILE"
-}
-
 set_env_value() {
   local key="$1"
   local value="$2"
@@ -239,7 +246,7 @@ set_env_value() {
   rm -f -- "$temp_file"
 }
 
-# 비밀값은 그대로 두고 검색 색인 운영값만 반복 배포 가능하게 맞춘다.
+# 비밀값은 그대로 두고 검색 색인 운영값을 맞추되, 명시된 수집 처리량은 보존한다.
 set_env_value RUNNER_SEARCH_CACHE_TTL_MS 300000
 set_env_value RUNNER_INDEX_ENABLED true
 if ! grep -q '^RUNNER_INDEX_MODE=' "$RUNNER_ENV_FILE"; then
@@ -251,12 +258,14 @@ set_env_value PC_PARTS_SHADOW_WRITE_ENABLED true
 if ! grep -q '^PC_PARTS_SCHEDULER_ENABLED=' "$RUNNER_ENV_FILE"; then
   set_env_value PC_PARTS_SCHEDULER_ENABLED false
 fi
-current_pc_source_targets_per_run="$(read_env_value PC_SOURCE_TARGETS_PER_RUN)"
-if [[ -z "$current_pc_source_targets_per_run" || "$current_pc_source_targets_per_run" == "12" ]]; then
+if [[ -n "$PC_SOURCE_TARGETS_PER_RUN_OVERRIDE" ]]; then
+  set_env_value PC_SOURCE_TARGETS_PER_RUN "$PC_SOURCE_TARGETS_PER_RUN_OVERRIDE"
+elif ! grep -q '^PC_SOURCE_TARGETS_PER_RUN=' "$RUNNER_ENV_FILE"; then
   set_env_value PC_SOURCE_TARGETS_PER_RUN 80
 fi
-current_pc_source_target_concurrency="$(read_env_value PC_SOURCE_TARGET_CONCURRENCY)"
-if [[ -z "$current_pc_source_target_concurrency" || "$current_pc_source_target_concurrency" == "2" ]]; then
+if [[ -n "$PC_SOURCE_TARGET_CONCURRENCY_OVERRIDE" ]]; then
+  set_env_value PC_SOURCE_TARGET_CONCURRENCY "$PC_SOURCE_TARGET_CONCURRENCY_OVERRIDE"
+elif ! grep -q '^PC_SOURCE_TARGET_CONCURRENCY=' "$RUNNER_ENV_FILE"; then
   set_env_value PC_SOURCE_TARGET_CONCURRENCY 6
 fi
 if ! grep -q '^PC_HELLOMARKET_DETAIL_LIMIT=' "$RUNNER_ENV_FILE"; then
@@ -272,6 +281,12 @@ if ! grep -q '^D1_BACKGROUND_MIRROR_ENABLED=' "$RUNNER_ENV_FILE"; then
   set_env_value D1_BACKGROUND_MIRROR_ENABLED false
 fi
 set_env_value NODE_OPTIONS --max-old-space-size=2048
+
+configured_pc_source_targets_per_run="$(awk -F= '$1 == "PC_SOURCE_TARGETS_PER_RUN" { sub(/\r$/, "", $2); print $2; exit }' "$RUNNER_ENV_FILE")"
+if [[ ! "$configured_pc_source_targets_per_run" =~ ^[0-9]+$ ]] ||
+  (( configured_pc_source_targets_per_run < 71 || configured_pc_source_targets_per_run > 128 )); then
+  fail '기존 PC_SOURCE_TARGETS_PER_RUN이 현재 전체 target set을 감당하지 못합니다. 명시적으로 PC_SOURCE_TARGETS_PER_RUN_OVERRIDE=80을 지정해 다시 설치하세요.'
+fi
 
 chown root:"$RUNNER_USER" "$RUNNER_ENV_FILE"
 chmod 0640 "$RUNNER_ENV_FILE"

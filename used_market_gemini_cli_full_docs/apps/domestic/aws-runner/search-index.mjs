@@ -1899,12 +1899,23 @@ export class SearchIndex {
       const escaped = destination.replaceAll("'", "''");
       this.db.exec(`VACUUM INTO '${escaped}'`);
     }
-    const backups = readdirSync(this.backupDir)
-      .filter((name) => /^search-index-\d{4}-\d{2}-\d{2}\.sqlite$/.test(name))
-      .map((name) => ({ name, path: path.join(this.backupDir, name), modified: statSync(path.join(this.backupDir, name)).mtimeMs }))
-      .sort((left, right) => right.modified - left.modified);
-    for (const backup of backups.slice(3)) unlinkSync(backup.path);
+    this.pruneBackups();
     return destination;
+  }
+
+  pruneBackups(maxBackups = 3) {
+    if (!this.backupDir || !existsSync(this.backupDir)) return [];
+    const keep = Math.max(1, Number(maxBackups) || 3);
+    const backups = readdirSync(this.backupDir)
+      .filter((name) => /^search-index(?:-|$).*\.sqlite$/u.test(name))
+      .map((name) => ({ name, path: path.join(this.backupDir, name), modified: statSync(path.join(this.backupDir, name)).mtimeMs }))
+      .sort((left, right) => right.modified - left.modified || right.name.localeCompare(left.name));
+    const removed = [];
+    for (const backup of backups.slice(keep)) {
+      unlinkSync(backup.path);
+      removed.push(backup.path);
+    }
+    return removed;
   }
 
   recentMigrationBackupExists(fromVersion, maxAgeMs = DAY_MS) {
@@ -1925,11 +1936,7 @@ export class SearchIndex {
     const escaped = destination.replaceAll("'", "''");
     this.db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
     this.db.exec(`VACUUM INTO '${escaped}'`);
-    const backups = readdirSync(this.backupDir)
-      .filter((name) => /^search-index-pre-migration-v\d+-.*\.sqlite$/u.test(name))
-      .map((name) => ({ path: path.join(this.backupDir, name), modified: statSync(path.join(this.backupDir, name)).mtimeMs }))
-      .sort((left, right) => right.modified - left.modified);
-    for (const backup of backups.slice(3)) unlinkSync(backup.path);
+    this.pruneBackups();
     return destination;
   }
 

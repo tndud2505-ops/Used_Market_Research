@@ -101,10 +101,10 @@ async function checkPublicSite(baseUrl) {
     throw new Error(`${baseUrl}/ returned HTTP ${homeResponse.status}`);
   }
   const home = await homeResponse.text();
-  if (!home.includes('<title>PC 부품 가격 분석 | USED PICK</title>')
+  if (!home.includes('<title>중고 PC·컴퓨터 부품 검색 | 중고 시세 비교 | USED PICK</title>')
     || !home.includes('DAN-gvTVDnxVn9S3leR5')
     || /link\.coupang\.com|ads-partners\.coupang\.com|data-coupang/u.test(home)) {
-    throw new Error(`${baseUrl}/ did not return the price-analysis home shell`);
+    throw new Error(`${baseUrl}/ did not return the listing home shell`);
   }
   for (const [name, expected] of [
     ['content-security-policy', /default-src/u],
@@ -114,12 +114,12 @@ async function checkPublicSite(baseUrl) {
     if (!expected.test(homeResponse.headers.get(name) || '')) throw new Error(`${baseUrl}/ missing ${name}`);
   }
 
-  const listingResponse = await fetch(`${baseUrl}/index.html?release_check=${Date.now()}`);
-  if (!listingResponse.ok) throw new Error(`${baseUrl}/index.html returned HTTP ${listingResponse.status}`);
-  const listing = await listingResponse.text();
-  if (!listing.includes('<title>중고 PC·컴퓨터 부품 검색 | 중고 시세 비교 | USED PICK</title>')
-    || !listing.includes('DAN-gvTVDnxVn9S3leR5')) {
-    throw new Error(`${baseUrl}/index.html did not return the listing shell`);
+  const analysisResponse = await fetch(`${baseUrl}/price-analysis.html?release_check=${Date.now()}`);
+  if (!analysisResponse.ok) throw new Error(`${baseUrl}/price-analysis.html returned HTTP ${analysisResponse.status}`);
+  const analysis = await analysisResponse.text();
+  if (!analysis.includes('<title>PC 부품 가격 분석 | USED PICK</title>')
+    || !analysis.includes('DAN-gvTVDnxVn9S3leR5')) {
+    throw new Error(`${baseUrl}/price-analysis.html did not return the price-analysis shell`);
   }
   const adfitResponse = await fetch(`${baseUrl}/adfit.js?release_check=${Date.now()}`);
   const adfit = adfitResponse.ok ? await adfitResponse.text() : '';

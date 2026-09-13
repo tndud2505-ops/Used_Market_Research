@@ -14,6 +14,8 @@ import { categoryCatalogForApi } from '../../market/logic/category-catalog.js';
 import { pcPartsCatalogForApi } from '../../../market/logic/pc-parts-catalog.mjs';
 // @ts-ignore shared runtime ESM module is loaded from the application root
 import { pcCatalogResponse, pcProductsResponse } from '../../../cloudflare/pc-directory-http.mjs';
+// @ts-ignore shared runtime ESM module is loaded from the application root
+import { parsePriceStatsRequest, priceStatsResponse } from '../../../aws-runner/pc-price-stats-http.mjs';
 // Public catalog APIs expose only the seven supported PC-part categories.
 // @ts-ignore shared runtime ESM module is loaded from the application root
 import { publicPcCatalogForApi, publicPcFacetsForApi, publicPcModelsForApi } from '../../../market/logic/pc-public-catalog.mjs';
@@ -43,7 +45,6 @@ import {
 } from './dto.js';
 
 let serverStartTime = Date.now();
-const PUBLIC_CATEGORY_SITES = ['joonggonara', 'bunjang', 'hellomarket', 'rethinkmall'] as const;
 type PcCategorySeo = {
   label: string;
   title: string;
@@ -106,25 +107,12 @@ const PC_CATEGORY_SEO: Record<string, PcCategorySeo> = Object.freeze({
 
 function publicCategoryCatalog() {
   const catalog = categoryCatalogForApi();
-  const sitePlans = Object.fromEntries(PUBLIC_CATEGORY_SITES.map((site) => [site, {
+  const sitePlans = Object.fromEntries(OPERATIONAL_PC_DIRECTORY_SITES.map((site: string) => [site, {
     ...((catalog.site_plans as Record<string, Record<string, unknown>>)[site] || {})
   }]));
-  const sourceBindings = Object.fromEntries(PUBLIC_CATEGORY_SITES.map((site) => [site, {
+  const sourceBindings = Object.fromEntries(OPERATIONAL_PC_DIRECTORY_SITES.map((site: string) => [site, {
     ...((catalog.source_bindings as Record<string, Record<string, unknown>>)[site] || {})
   }]));
-  for (const site of ['hellomarket', 'rethinkmall'] as const) {
-    sitePlans[site] = Object.fromEntries(catalog.categories
-      .filter((category) => category.id !== 'all')
-      .map((category) => [category.id, {
-        requestedCategoryId: category.id,
-        resolvedCategoryId: null,
-        strategy: 'keyword',
-        binding: null,
-        availability: 'unavailable',
-        selectable: false
-      }]));
-    sourceBindings[site] = {};
-  }
   return {
     ...catalog,
     pc_parts: pcPartsCatalogForApi(),
@@ -561,34 +549,41 @@ export function createServer(
           throw new ApiError(404, 'Not found', `Unsupported method: ${req.method ?? 'unknown'}`);
         }
         const originUrl = String(process.env.CLOUDFLARE_ORIGIN_URL || '').trim();
-        const canonicalProductId = decodeURIComponent(pathname.split('/')[3] || '');
-        const daysValue = Number(urlObj.searchParams.get('days') || 30);
-        const days = Number.isInteger(daysValue) && daysValue > 0 ? daysValue : 30;
-        const marketPool = urlObj.searchParams.get('market_pool') || 'KR_C2C_USED';
-        const condition = urlObj.searchParams.get('condition') || 'USED_WORKING';
-        const currency = urlObj.searchParams.get('currency') || 'KRW';
-        const localStats = resolvedOptions.getPcPriceStats?.({
-          canonicalProductId, marketPool, condition, currency, days,
-          asOf: urlObj.searchParams.get('as_of') || undefined
+        let priceQuery;
+        try {
+          priceQuery = parsePriceStatsRequest(urlObj);
+        } catch (error) {
+          throw new ApiError(400, 'Invalid price stats request', error instanceof Error ? error.message : String(error));
+        }
+        const normalizePriceStats = (stats: Record<string, unknown>) => ({
+          ...priceStatsResponse(priceQuery, stats),
+          ...(stats.availability ? { availability: stats.availability } : {})
         });
-        if (localStats) return sendJson(200, { status: 'success', data: localStats });
-        const emptyStats = (reason: string) => ({
-          status: 'success',
-          data: {
-            canonical_product_id: canonicalProductId,
+        const localStats = resolvedOptions.getPcPriceStats?.({
+          canonicalProductId: priceQuery.canonicalProductId,
+          marketPool: priceQuery.marketPool,
+          condition: priceQuery.condition,
+          currency: priceQuery.currency,
+          days: priceQuery.days,
+          asOf: priceQuery.asOf
+        });
+        if (localStats) return sendJson(200, { status: 'success', data: normalizePriceStats(localStats) });
+        const emptyStats = (reason: string) => {
+          const stats = {
             active: { sample_count: 0, median: null, mean: null },
             sold: { sample_count: 0, median: null, mean: null, disclosure: '실제 거래가격이 아니라 판매완료 직전 마지막 표시가격입니다.' },
             confirmed_transactions: { sample_count: 0, median: null, mean: null },
             by_source: [],
             by_manufacturer: [],
             daily: [],
-            reference_price: { amount: null, currency, label: '최근 30일 판매완료 중앙값' },
+            reference_price: { amount: null, currency: priceQuery.currency, label: '최근 30일 판매완료 중앙값' },
             confidence: { level: '자료 부족', reasons: ['공개된 30일 표본이 없습니다.'] },
             exclusions: { total: 0, reasons: {} },
             availability: { status: 'unavailable', reason },
             as_of: new Date().toISOString()
-          }
-        });
+          };
+          return { status: 'success', data: normalizePriceStats(stats) };
+        };
         if (!/^https:\/\//u.test(originUrl)) return sendJson(200, emptyStats('LOCAL_PUBLICATION_NOT_CONFIGURED'));
         try {
           const target = new URL(`${pathname}${urlObj.search}`, originUrl);
@@ -1787,7 +1782,7 @@ async function serveStaticAsset(
   const defaultPublic = resolve(process.cwd(), 'web-backend/public');
   const domesticPublic = resolve(process.cwd(), 'used_market_gemini_cli_full_docs/apps/domestic/web-backend/public');
   const publicRoot = existsSync(defaultPublic) ? defaultPublic : domesticPublic;
-  const requestedPath = pathname === '/' ? '/price-analysis.html' : pathname;
+  const requestedPath = pathname === '/' ? '/index.html' : pathname;
   const filePath = resolve(publicRoot, `.${requestedPath}`);
   if (filePath !== publicRoot && !filePath.startsWith(`${publicRoot}\\`) && !filePath.startsWith(`${publicRoot}/`)) {
     throw new ApiError(403, 'Forbidden');
