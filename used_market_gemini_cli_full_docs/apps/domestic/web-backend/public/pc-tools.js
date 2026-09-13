@@ -162,7 +162,10 @@ function renderModelTable() {
     const name = el('td', 'model-name');
     const toggle = action('', 'expand', { key: group.key, id }, 'model-toggle');
     toggle.append(el('span', '', open ? '⌄' : '›'), document.createTextNode(group.label));
-    toggle.setAttribute('aria-expanded', String(open)); name.append(toggle);
+    toggle.setAttribute('aria-expanded', String(open));
+    const link = el('a', 'model-source-link', '원문 검색');
+    link.href = `/?category_code=${encodeURIComponent(product.category_code)}&model_id=${encodeURIComponent(id)}`;
+    name.append(toggle, link);
     if (group.products.length > 1) name.append(el('small', '', `세부 모델 ${group.products.length}개`));
     else if (['FACET', 'BROWSE_FACET'].includes(specOf(product).directory_node_type)) name.title = '제조사·규격별 그룹';
     row.append(name);
@@ -184,9 +187,6 @@ function renderModelTable() {
         const detail = el('tr', 'tools-subrow'), td = el('td'); td.colSpan = visibleSeries.length + 2;
         const specs = Object.entries(specOf(product)).filter(([key, value]) => ['socket', 'exact_model', 'memory_generation', 'form_factor', 'interface', 'protocol', 'rated_wattage', 'gpu_model', 'cpu_model', 'module_capacity_gb', 'module_count'].includes(key) && value != null);
         if (specs.length) td.append(el('small', '', specs.map(([, v]) => `${v}`).join(' · ')));
-        if (!['CASE', 'COOLING'].includes(product.category_code)) {
-          const link = el('a', '', '원문 매물 보기'); link.href = `/?category_code=${encodeURIComponent(product.category_code)}&model_id=${encodeURIComponent(id)}`; td.append(link);
-        }
         if (!td.children.length) td.append(el('span', '', '세부 자료 없음'));
         detail.append(td); body.append(detail);
       }
@@ -217,6 +217,11 @@ function appendDetailRow(body, p, manufacturer, visibleSeries) {
   const row = el('tr', `tools-subrow${state.selectedId === id && state.selectedManufacturer === manufacturer ? ' is-selected' : ''}`);
   const name = el('td', 'model-name', manufacturer || nameOf(p));
   if (manufacturer) name.title = '제조사별 평균 · 개별 제품 통계 아님';
+  else {
+    const link = el('a', 'model-source-link', '원문 검색');
+    link.href = `/?category_code=${encodeURIComponent(p.category_code)}&model_id=${encodeURIComponent(id)}`;
+    name.append(el('br'), link);
+  }
   row.append(name); visibleSeries.forEach(s => row.append(priceCell(data, s.key, record)));
   const control = el('td'); control.append(action(builder ? chosen(id, manufacturer) ? '선택됨' : '선택' : '분석', builder ? 'choose' : 'analyze', { id, manufacturer }));
   row.append(control); body.append(row);

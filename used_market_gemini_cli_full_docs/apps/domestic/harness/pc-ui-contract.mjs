@@ -29,8 +29,8 @@ assert.ok(analysisHtml.indexOf('id="analysis-categories"') < analysisHtml.indexO
   "analysis component tabs must lead directly into the model filters");
 assert.ok(analysisHtml.indexOf('id="chart-title"') < analysisHtml.indexOf('id="tools-summary"'),
   "selected-model prices must sit beside the model name");
-requireText(analysisHtml, 'class="tools-source-label">사이트</span>',
-  "analysis source tabs need the same short label as the listing page");
+assert.equal(analysisHtml.includes('tools-source-label'), false,
+  "analysis source tabs stand alone without a redundant site label");
 assert.equal(analysisHtml.includes('id="overview-button"'), false, "overall trend must be removed");
 assert.equal(analysisHtml.includes('id="chart-mode"'), false, "price analysis must remain in amount mode");
 requireText(toolsScript, "const sourceOrder = ['ebay', 'joonggonara', 'bunjang']",
@@ -42,7 +42,6 @@ assert.equal(toolsScript.includes('state.overview'), false, "removed overall-tre
 assert.equal(toolsScript.includes("target.id === 'chart-mode'"), false, "removed index-mode control must not retain an event path");
 requireText(toolsChart, "empty.textContent = '가격 자료 없음'", "a source without evidence needs an honest empty state");
 requireText(toolsStyles, 'width:min(1536px,100%)', "tool pages must share the listing page container width");
-requireText(toolsStyles, '.tools-source-label', "analysis sites must use a flat labelled tab row");
 
 const categoryIndex = html.indexOf('id="category-select"');
 const modelIndex = html.indexOf('id="model-select"');

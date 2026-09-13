@@ -12,6 +12,9 @@
 .pc-tools[data-page=builder] .tools-controls label { min-width:0; }
 .pc-tools[data-page=builder] .tools-controls select { max-width:140px; }
 .pc-tools table { table-layout:fixed; }
+.model-source-link { margin-left:8px; font-size:11px; font-weight:400; color:var(--accent-strong); text-decoration:none; white-space:nowrap; }
+.model-source-link:hover { text-decoration:underline; text-underline-offset:3px; }
+.tools-subrow .model-source-link { margin-left:0; }
 .pc-tools th { height:40px; background:#fafaf8; }
 .pc-tools td { height:52px; overflow-wrap:anywhere; }
 .pc-tools td.model-name { min-width:0; }
