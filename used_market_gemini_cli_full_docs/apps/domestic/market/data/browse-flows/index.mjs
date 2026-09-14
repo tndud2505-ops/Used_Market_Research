@@ -14,6 +14,18 @@ const FALLBACK_FLOW = Object.freeze({
   EXPANSION_CARD: [{ key: "subtype", label: "용도" }],
   ODD: [{ key: "media_family", label: "미디어" }],
 });
+const HDD_CAPACITY_LABELS = Object.freeze({
+  LE_1_TB: "1TB 이하",
+  GT_1_TB_LE_2_TB: "1TB 초과~2TB",
+  GT_2_TB_LE_4_TB: "2TB 초과~4TB",
+  GT_4_TB_LE_6_TB: "4TB 초과~6TB",
+  GT_6_TB_LE_8_TB: "6TB 초과~8TB",
+  GT_8_TB_LE_12_TB: "8TB 초과~12TB",
+  GT_12_TB_LE_16_TB: "12TB 초과~16TB",
+  GT_16_TB_LE_20_TB: "16TB 초과~20TB",
+  GT_20_TB_LE_24_TB: "20TB 초과~24TB",
+  GT_24_TB: "24TB 초과"
+});
 
 function normalizeText(value) {
   return String(value ?? "").normalize("NFKC").trim();
@@ -34,7 +46,14 @@ function productNode(product) {
 }
 
 function browseProducts(category, products = PC_PRODUCT_MASTER_V2) {
-  let records = (Array.isArray(products) ? products : []).filter((product) => same(product?.category, category) && productNode(product));
+  const categoryRecords = (Array.isArray(products) ? products : []).filter((product) => same(product?.category, category));
+  let records = categoryRecords.filter(productNode);
+  if (records.length === 0) {
+    records = categoryRecords.filter((product) => same(
+      product?.browse_facets?.directory_node_type ?? product?.spec?.directory_node_type,
+      "BROWSE_BUCKET"
+    ));
+  }
   if (["GPU", "CPU"].includes(category)) {
     records = records.filter((product) => same(product?.browse_facets?.market_segment ?? product?.spec?.market_segment, "DESKTOP"));
   }
@@ -105,7 +124,10 @@ function genericFacets(category, products, selection = {}) {
     const counts = new Map();
     scoped.forEach((product) => values(facetValue(product, step.key)).forEach((value) => {
       const key = value.toUpperCase();
-      if (!counts.has(key)) counts.set(key, { value, label: value, count: 0 });
+      const label = category === "HDD" && step.key === "capacity_bucket"
+        ? HDD_CAPACITY_LABELS[value] || value
+        : value;
+      if (!counts.has(key)) counts.set(key, { value, label, count: 0 });
       counts.get(key).count += 1;
     }));
     result[step.key] = [...counts.values()];

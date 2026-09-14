@@ -11,7 +11,7 @@ import {
   searchD1
 } from "./free-tier.mjs";
 import { pcCatalogResponse, pcCollectionTargetSetV2, pcProductsResponse } from "./pc-directory-http.mjs";
-import { publicPcCatalogForApi, publicPcFacetsForApi, publicPcModelsForApi } from "../market/logic/pc-public-catalog.mjs";
+import { publicPcCatalogForApi, publicPcFacetsForApi, publicPcModelsForApi, publicPcProductById } from "../market/logic/pc-public-catalog.mjs";
 import {
   FREE_COLLECTION_EXCLUDED_SITES,
   FREE_COLLECTION_SITES,
@@ -27,6 +27,7 @@ import {
 import { parsePriceStatsRequest, priceStatsResponse } from "../aws-runner/pc-price-stats-http.mjs";
 import { publishProductStats, readPublishedProductStats } from "./public-product-stats.mjs";
 import { getPcSource } from "../collector/logic/pc-source-registry.mjs";
+import { resolvePcCanonicalIdV3 } from "../market/data/pc-product-master-v2.mjs";
 import {
   issueMonetizationEventToken,
   purgeMonetizationMetrics,
@@ -47,7 +48,7 @@ const DEFAULT_RUNNER_TIMEOUT_MS = 15_000;
 const DEFAULT_RUNNER_MAX_ATTEMPTS = 3;
 const DEFAULT_RUNNER_RETRY_DELAY_MS = 250;
 const MAX_RUNNER_REQUEST_BYTES = 1_048_576;
-const MAX_STATS_PUBLICATION_BYTES = 16_777_216;
+const MAX_STATS_PUBLICATION_BYTES = 33_554_432;
 const MAX_RUNNER_RESPONSE_BYTES = 4_194_304;
 const MAX_IMPORTED_LISTINGS = 500;
 const PC_LISTING_COLLECTION_MANIFEST_VERSION = "pc-listing-collection-v1";
@@ -316,14 +317,51 @@ async function serveProductPriceStats(request, env) {
   } catch (error) {
     return json(400, { status: "error", error: error instanceof Error ? error.message : String(error) });
   }
+  const requestedCanonicalProductId = query.canonicalProductId;
+  const requestedProduct = publicPcProductById(requestedCanonicalProductId);
+  if (requestedProduct?.category === "MOTHERBOARD" && requestedProduct.spec?.directory_node_type !== "PRODUCT") {
+    const emptyFacetStats = {
+        active: { sample_count: 0, median: null, mean: null },
+        sold: { sample_count: 0, median: null, mean: null },
+        confirmed_transactions: { sample_count: 0, median: null, mean: null },
+        by_source: [], by_manufacturer: [], daily: [],
+        reference_price: { amount: null, currency: query.currency, label: "최근 30일 판매완료 중앙값" },
+        availability: { status: "unavailable", reason: "EXACT_MODEL_REQUIRED" },
+        exclusions: { total: 0, reasons: {} }, as_of: new Date().toISOString()
+      };
+    return json(200, {
+      status: "success",
+      data: { ...priceStatsResponse(query, emptyFacetStats), availability: emptyFacetStats.availability }
+    });
+  }
+  const legacyResolution = resolvePcCanonicalIdV3(requestedCanonicalProductId);
+  let lookupCanonicalProductIds = [requestedCanonicalProductId];
+  if (legacyResolution.status === "alias") {
+    query = { ...query, canonicalProductId: legacyResolution.canonicalProductIds[0] };
+    lookupCanonicalProductIds = [legacyResolution.canonicalProductIds[0], requestedCanonicalProductId];
+  } else if (legacyResolution.status === "ambiguous") {
+    return json(503, {
+      status: "error",
+      error: "LEGACY_CANONICAL_ID_AMBIGUOUS",
+      requested_canonical_product_id: legacyResolution.requestedId,
+      successor_canonical_product_ids: legacyResolution.canonicalProductIds
+    });
+  }
   if (query.isHistorical || query.days !== 30) {
     return json(503, { status: "error", error: "Historical price statistics require the AWS ledger" });
   }
   if (!hasD1(env)) return json(503, { status: "error", error: "Public price statistics are unavailable" });
   try {
-    const stats = await readPublishedProductStats(env.DB, query);
-    const publicationAsOf = stats ? await publishedStatsAsOf(env.DB, query) : null;
-    const projectionRows = await currentProjectionRows(env.DB, query);
+    let stats = null;
+    let publicationAsOf = null;
+    let projectionRows = [];
+    for (const canonicalProductId of lookupCanonicalProductIds) {
+      const lookupQuery = { ...query, canonicalProductId };
+      stats = await readPublishedProductStats(env.DB, lookupQuery);
+      publicationAsOf = stats ? await publishedStatsAsOf(env.DB, lookupQuery) : null;
+      projectionRows = await currentProjectionRows(env.DB, lookupQuery);
+      if (stats || projectionRows.length > 0) break;
+    }
     if (!stats && projectionRows.length === 0) return json(404, { status: "error", error: "Price statistics not found" });
     const baseStats = stats ? { ...stats, as_of: stats.as_of || publicationAsOf } : {
       active: currentProjectionSummary([]),
@@ -1375,6 +1413,11 @@ export default {
 
     const isPriceStatsPath = /^\/api\/products\/[^/]+\/price-stats$/u.test(url.pathname);
     if (request.method === "GET" && isPriceStatsPath) {
+      const requestedProductId = decodeURIComponent(url.pathname.split("/")[3] || "");
+      const requestedProduct = publicPcProductById(requestedProductId);
+      if (requestedProduct?.category === "MOTHERBOARD" && requestedProduct.spec?.directory_node_type !== "PRODUCT") {
+        return serveProductPriceStats(request, env);
+      }
       return fetchThroughPcReadCache(request, env,
         (statsRequest) => readPriceStatsFromPreferredStore(statsRequest, env, url.pathname));
     }

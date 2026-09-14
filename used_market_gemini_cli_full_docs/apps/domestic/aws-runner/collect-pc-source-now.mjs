@@ -17,6 +17,7 @@ import { SearchIndex } from "./search-index.mjs";
 import { PcPartsLedger } from "./pc-parts-ledger.mjs";
 import { PcShadowPipeline } from "./pc-shadow-pipeline.mjs";
 import { filterCollectionTargets } from "./pc-source-coverage-core.mjs";
+import { ebayTargetForCategory } from "../collector/logic/pc-specialist-targets.mjs";
 
 const sourceKey = String(process.env.PC_COLLECT_SOURCE || "").trim().toLowerCase();
 const operationalSourceKeys = PC_SOURCE_REGISTRY
@@ -118,9 +119,12 @@ async function collectTargetItems(target) {
     if (!response.ok) throw new Error(`SPECIALIST_HTTP_${response.status}:${sourceKey}`);
     return parser(await response.text()).slice(0, collectLimit).map((item) => ({ ...item, site: sourceKey }));
   }
+  const collectionQuery = sourceKey === "ebay" && !target.canonical_product_id
+    ? (ebayTargetForCategory(target.category_code)?.query || target.query_text)
+    : target.query_text;
   return collectOne(
-    sourceKey, target.query_text, sourceKey === "ebay" ? target.category_code : "pc", collectLimit,
-    target.query_text, "recent", { min: null, max: null }
+    sourceKey, collectionQuery, sourceKey === "ebay" ? target.category_code : "pc", collectLimit,
+    collectionQuery, "recent", { min: null, max: null }
   );
 }
 

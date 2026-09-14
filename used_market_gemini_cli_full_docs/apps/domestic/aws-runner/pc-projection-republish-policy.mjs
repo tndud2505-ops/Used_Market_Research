@@ -365,8 +365,10 @@ export function buildPcProjectionReconciliation({
     local_missing_count: local.missing.length,
     authoritative: authority,
     d1_stale: d1.stale,
+    d1_missing: d1.missing,
     d1_upserts: d1.upserts,
     local_stale: local.stale,
+    local_missing: local.missing,
     local_upserts: local.upserts
   };
 }

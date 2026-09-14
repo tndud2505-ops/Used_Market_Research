@@ -1146,10 +1146,10 @@ assert.deepEqual(ramComparablePrices, [
   { price_scope: "UNIT", quantity: 2, unit_price: 45_000, total_price: 90_000 }
 ], "RAM total-lot and per-module prices must normalize to the same comparable unit price");
 const directoryFacetFixtures = [
-  ["MOTHERBOARD", "MSI MAG B650M 박격포 WIFI 메인보드", "motherboard:platform:amd:msi", "MSI"],
-  ["SSD", "삼성 980 PRO M.2 NVMe SSD 1TB", "ssd:samsung:capacity-bucket:960-gb-1-tb", "Samsung"],
-  ["HDD", "WD Blue HDD 4TB 하드디스크", "hdd:western-digital:capacity-bucket:3-4-tb", "Western Digital"],
-  ["PSU", "시소닉 VERTEX GX-850 ATX 3.0 파워", "psu:facet:atx:seasonic", "Seasonic"],
+  ["MOTHERBOARD", "MSI B650 메인보드", "motherboard:platform:amd:msi", "MSI"],
+  ["SSD", "삼성 980 PRO M.2 NVMe SSD 1TB", "ssd:samsung:capacity-bucket:513-gb-1-tb", "Samsung"],
+  ["HDD", "WD Blue HDD 4TB 하드디스크", "hdd:western-digital:capacity-bucket:gt-2-tb-le-4-tb", "Western Digital"],
+  ["PSU", "시소닉 VERTEX GX-850 ATX 3.0 파워", "psu:seasonic:watts-bucket:751-850", "Seasonic"],
   ["COOLING", "녹투아 NH-D15 CPU 공랭 쿨러", "cooling:facet:air-cpu:noctua", "Noctua"],
   ["CASE", "Fractal Design North PC 케이스", "case:facet:mid-tower:fractal-design", "Fractal Design"],
   ["EXPANSION_CARD", "ASUS XG-C100C PCIe x16 랜카드 확장카드", "expansion:facet:network:asus", "ASUS"],
@@ -1172,11 +1172,26 @@ for (const [categoryCode, title, canonicalProductId, manufacturer] of directoryF
     JOIN listing_items li ON li.normalized_listing_id = n.id
     WHERE s.source_id = 'joonggonara' AND s.source_listing_id = ?
     ORDER BY n.id DESC LIMIT 1`).get(`facet-${categoryCode.toLowerCase()}`);
-  assert.equal(aggregationIdentity.exact_product, 1,
-    `${categoryCode} uniquely matched directory groups must enter their labelled group statistics`);
+  assert.equal(aggregationIdentity.exact_product, categoryCode === "MOTHERBOARD" ? 0 : 1,
+    `${categoryCode} aggregation identity policy`);
   assert.equal(aggregationIdentity.exact_sku, 0,
     `${categoryCode} directory groups remain distinct from exact SKUs`);
+  if (categoryCode === "MOTHERBOARD") {
+    assert.equal(facetProjection.price_eligible, true, "unconfirmed motherboard remains searchable with its listing price");
+    assert.equal(facetProjection.statistics_eligible, false, "unconfirmed motherboard cannot enter reference statistics");
+    assert.ok(facetProjection.statistics_exclusion_reasons.includes("EXACT_MODEL_REQUIRED"));
+    assert.equal(facetProjection.reference_price, null);
+  }
 }
+const exactMotherboardProjection = pipeline.recordItem({
+  item_id: "joonggonara:exact-motherboard", site: "joonggonara",
+  title: "MSI MAG B650M 박격포 WIFI 메인보드", price: 100_000, currency: "KRW",
+  url: "https://web.joongna.com/product/exact-motherboard", status: "ACTIVE"
+}, new Date(now).toISOString());
+assert.equal(exactMotherboardProjection.canonical_product_id, "motherboard:msi:mag-b650m-mortar-wifi");
+assert.equal(exactMotherboardProjection.statistics_eligible, true);
+assert.equal(db.prepare(`SELECT exact_product FROM normalized_listings n JOIN listing_snapshots s ON s.id = n.snapshot_id
+  WHERE s.source_listing_id = 'exact-motherboard' ORDER BY n.id DESC LIMIT 1`).get().exact_product, 1);
 const structuredCaseProjection = pipeline.recordItem({
   item_id: "danawa:structured-case-1", source_listing_id: "structured-case-1", site: "danawa",
   requested_category_code: "CASE", source_category_code: "1:8",
@@ -1194,7 +1209,7 @@ const structuredPsuProjection = pipeline.recordItem({
   price: 35_000, currency: "KRW", url: "https://dmall.danawa.com/v3/?controller=sale&methods=blog&seq=999993",
   status: "ACTIVE"
 }, new Date(now).toISOString());
-assert.equal(structuredPsuProjection.canonical_product_id, "psu:facet:atx:micronics");
+assert.equal(structuredPsuProjection.canonical_product_id, "psu:micronics:watts-bucket:501-650");
 assert.equal(structuredPsuProjection.canonical_manufacturer, "Micronics");
 const structuredMotherboardProjection = pipeline.recordItem({
   item_id: "danawa:structured-motherboard-1", source_listing_id: "structured-motherboard-1", site: "danawa",
@@ -1367,13 +1382,17 @@ const reclassificationVersions = {
   normalizationVersion: 2,
   parserVersion: "pc-parser-v2",
   ruleVersion: "pc-rules-v1",
-  filterVersion: "pc-filter-v1"
+  filterVersion: "pc-filter-v1",
+  modelVersion: "pc-master-v4"
 };
 const reclassificationDryRun = reclassifyPcSnapshots({
   ledger, pipeline, versions: reclassificationVersions, limit: 3
 });
 assert.equal(reclassificationDryRun.mode, "dry-run");
 assert.equal(reclassificationDryRun.eligible, 3);
+assert.equal(reclassificationDryRun.model_version, "pc-master-v4");
+assert.equal(typeof reclassificationDryRun.motherboard_dry_run.unidentified_count, "number");
+assert.equal(reclassificationDryRun.motherboard_dry_run.next_facet_statistics_member_count, 0);
 assert.equal(db.prepare("SELECT COUNT(*) AS count FROM normalized_listings WHERE normalization_version = 2").get().count, 0);
 const reclassificationApply = reclassifyPcSnapshots({
   ledger, pipeline, versions: reclassificationVersions, apply: true, limit: 3
@@ -1586,11 +1605,26 @@ const firstObservedSold = ledger.recordObservation({
 assert.equal(firstObservedSold.soldLastAskPrice, 430_000,
   "a structured SOLD row may use its still-visible asking price without claiming a transaction price");
 
-const compacted = ledger.compactStorage({ asOf: new Date(now + 6 * HOUR_MS) });
+const snapshotCountBeforeCompaction = Number(db.prepare("SELECT COUNT(*) AS count FROM listing_snapshots").get().count);
+const listingIdentityCountBeforeCompaction = Number(db.prepare(`SELECT COUNT(*) AS count FROM (
+  SELECT source_id, source_listing_id FROM listing_snapshots GROUP BY source_id, source_listing_id
+)`).get().count);
+const compacted = ledger.compactStorage({
+  asOf: new Date(now + 2 * DAY_MS),
+  observationRetentionDays: 1,
+  pruneObservationDetails: true
+});
 assert.equal(compacted.stats_retention_days, 730);
+assert.equal(compacted.observation_snapshots_removed > 0, true,
+  "completed-day observation detail must be removed after aggregate statistics are retained");
+assert.equal(Number(db.prepare("SELECT COUNT(*) AS count FROM listing_snapshots").get().count) < snapshotCountBeforeCompaction, true);
+assert.equal(Number(db.prepare(`SELECT COUNT(*) AS count FROM (
+  SELECT source_id, source_listing_id FROM listing_snapshots GROUP BY source_id, source_listing_id
+)`).get().count), listingIdentityCountBeforeCompaction,
+"the latest snapshot for every listing identity must remain available");
 assert.equal(Number(db.prepare("SELECT COUNT(*) AS count FROM daily_price_stats WHERE sample_count = 0").get().count), 0);
 assert.equal(Number(db.prepare("SELECT COUNT(*) AS count FROM daily_source_price_stats WHERE sample_count = 0").get().count), 0);
-assert.equal(ledger.runIntegrityAudit(new Date(now + 6 * HOUR_MS)).ok, true,
+assert.equal(ledger.runIntegrityAudit(new Date(now + 2 * DAY_MS)).ok, true,
   "storage compaction must preserve ledger integrity and traceability");
 
 ledger.close();

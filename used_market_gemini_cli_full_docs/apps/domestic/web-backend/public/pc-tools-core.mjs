@@ -151,9 +151,10 @@ export function buildTotals(entries, getStats) {
     let sum = 0, covered = 0;
     for (const entry of entries) {
       const value = metricValue(getStats(entry)?.[key]);
-      if (value != null) { sum += value * entry.quantity; covered++; }
+      if (value != null) { sum += value * entry.quantity; covered += entry.quantity; }
     }
-    return [key, { amount: covered ? sum : null, covered, total: entries.length, complete: entries.length > 0 && covered === entries.length }];
+    const total = entries.reduce((count, entry) => count + entry.quantity, 0);
+    return [key, { amount: covered ? sum : null, covered, total, complete: total > 0 && covered === total }];
   }));
 }
 export function compatibility(entries, products) {
@@ -188,6 +189,14 @@ export function validateBuild(input, products, categories) {
     const manufacturer = typeof e.manufacturer === 'string' ? e.manufacturer.trim() : '';
     if (manufacturer.length > 120) throw new Error('제조사 값이 너무 깁니다.');
     return { id: e.id, quantity, manufacturer, category };
+  });
+}
+export function compactBuild(input, products, categories) {
+  return validateBuild(input, products, categories).map(({ id, quantity, manufacturer }) => {
+    const entry = { id };
+    if (quantity !== 1) entry.quantity = quantity;
+    if (manufacturer) entry.manufacturer = manufacturer;
+    return entry;
   });
 }
 export function dailySeries(data, key, days = 30) {

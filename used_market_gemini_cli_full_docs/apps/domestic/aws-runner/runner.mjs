@@ -35,6 +35,7 @@ import {
   pcProductsResponse
 } from "../cloudflare/pc-directory-http.mjs";
 import { publicPcModelsForApi } from "../market/logic/pc-public-catalog.mjs";
+import { resolvePcCanonicalIdV3 } from "../market/data/pc-product-master-v2.mjs";
 import {
   decodePcListingsCursor,
   encodePcListingsCursor,
@@ -56,6 +57,7 @@ import {
   createSourceAdapter,
   filterIncrementalListings
 } from "../collector/logic/pc-source-adapters.mjs";
+import { ebayTargetForCategory } from "../collector/logic/pc-specialist-targets.mjs";
 
 const PORT = Number.parseInt(process.env.RUNNER_PORT || "8787", 10);
 const RUNNER_TOKEN = process.env.CLOUDFLARE_RUNNER_TOKEN || process.env.RUNNER_TOKEN || "";
@@ -128,7 +130,7 @@ const PC_SHADOW_READY_MS = 7 * 24 * 60 * 60 * 1000;
 const PC_PUBLICATION_RECENT_MS = 26 * 60 * 60 * 1000;
 const PC_RECHECK_LIMIT_PER_RUN = 20;
 const PC_SOURCE_TARGETS_PER_RUN = Math.min(128, Math.max(4,
-  Number.parseInt(process.env.PC_SOURCE_TARGETS_PER_RUN || "80", 10) || 80));
+  Number.parseInt(process.env.PC_SOURCE_TARGETS_PER_RUN || "85", 10) || 85));
 const PC_SOURCE_TARGET_CONCURRENCY = Math.min(8, Math.max(1,
   Number.parseInt(process.env.PC_SOURCE_TARGET_CONCURRENCY || "6", 10) || 6));
 const PC_HELLOMARKET_DETAIL_LIMIT = Math.min(120, Math.max(0,
@@ -696,8 +698,15 @@ async function publishPcProductStats() {
   if (publication?.published !== true || !publication?.publication_id || !publication?.published_at) {
     throw new Error("PC_STATS_PUBLISHER_RESULT_INVALID");
   }
+  const storageCompactionBackup = searchIndex?.createBackup();
+  if (!storageCompactionBackup) throw new Error("PC_STORAGE_COMPACTION_BACKUP_REQUIRED");
+  const storageCompaction = pcLedger.compactStorage({
+    asOf: new Date(publication.published_at),
+    observationRetentionDays: 1,
+    pruneObservationDetails: true
+  });
   pcPublicationLastSucceededAt = publication.published_at;
-  return publication;
+  return { ...publication, storage_compaction_backup: storageCompactionBackup, storage_compaction: storageCompaction };
 }
 
 async function collectJob(jobName) {
@@ -1448,11 +1457,14 @@ function pcSourceAdapter(sourceKey) {
       };
       const collectTarget = async (target) => {
         throwIfAborted(input.signal);
+        const collectionQuery = sourceKey === "ebay" && !target.canonical_product_id
+          ? (ebayTargetForCategory(target.category_code)?.query || target.query_text)
+          : target.query_text;
         const collected = SPECIALIST_FIXTURE_PARSERS[sourceKey]
           ? await collectSpecialistSource(sourceKey, target, input.signal)
-          : await collectOne(sourceKey, target.query_text, sourceKey === "ebay" ? target.category_code : "pc",
+          : await collectOne(sourceKey, collectionQuery, sourceKey === "ebay" ? target.category_code : "pc",
             sourceKey === "ebay" ? 40 : 80,
-            target.query_text, "recent", { min: null, max: null });
+            collectionQuery, "recent", { min: null, max: null });
         const items = Array.isArray(collected) ? collected : collected.items;
         const diagnostics = Array.isArray(collected?.diagnostics) ? collected.diagnostics : [];
         return { target, items, diagnostics, request_count: Math.max(1, diagnostics.length) };
@@ -2167,7 +2179,19 @@ const server = http.createServer(async (req, res) => {
     markPcPublicRead();
     if (!searchIndex) return json(res, 503, { status: "error", error: "PC listing projection is unavailable" });
     try {
-      const query = parsePcListingsRequest(url, { allowedSites: PC_DIRECTORY_SITES });
+      let query = parsePcListingsRequest(url, { allowedSites: PC_DIRECTORY_SITES });
+      const legacyResolution = query.canonicalProductId ? resolvePcCanonicalIdV3(query.canonicalProductId) : null;
+      if (legacyResolution?.status === "alias") {
+        query = { ...query, canonicalProductId: "", canonicalProductIds: [
+          legacyResolution.requestedId,
+          ...legacyResolution.canonicalProductIds
+        ] };
+      } else if (legacyResolution?.status === "ambiguous") {
+        query = { ...query, canonicalProductId: "", canonicalProductIds: [
+          legacyResolution.requestedId,
+          ...legacyResolution.canonicalProductIds
+        ] };
+      }
       const catalogModels = query.catalogScope
         ? publicPcModelsForApi({
           category: query.catalogScope.categoryCode,
@@ -2183,9 +2207,9 @@ const server = http.createServer(async (req, res) => {
       const result = searchIndex.browsePcListings({
         ...query,
         categoryCode: categoryOnlyCatalogScope ? query.catalogScope.categoryCode : "",
-        canonicalProductIds: categoryOnlyCatalogScope
+        canonicalProductIds: query.canonicalProductIds || (categoryOnlyCatalogScope
           ? null
-          : catalogModels?.map((model) => model.canonical_product_id) ?? null,
+          : catalogModels?.map((model) => model.canonical_product_id) ?? null),
         asOf,
         after: cursorState?.after || null
       });
@@ -2233,6 +2257,17 @@ const server = http.createServer(async (req, res) => {
     } catch (error) {
       return json(res, 400, { status: "error", error: error instanceof Error ? error.message : String(error) });
     }
+    const legacyResolution = resolvePcCanonicalIdV3(query.canonicalProductId);
+    if (legacyResolution.status === "alias") {
+      query = { ...query, canonicalProductId: legacyResolution.canonicalProductIds[0] };
+    } else if (legacyResolution.status === "ambiguous") {
+      return json(res, 503, {
+        status: "error",
+        error: "LEGACY_CANONICAL_ID_AMBIGUOUS",
+        requested_canonical_product_id: legacyResolution.requestedId,
+        successor_canonical_product_ids: legacyResolution.canonicalProductIds
+      });
+    }
     if (!pcLedger.getCanonicalProduct(query.canonicalProductId)) {
       return json(res, 404, { status: "error", error: "Canonical product not found" });
     }
@@ -2252,6 +2287,7 @@ const server = http.createServer(async (req, res) => {
         condition: query.condition,
         currency: query.currency,
         asOf,
+        requireAsOfCoverage: query.isHistorical,
         ...priceVersionOptions
       });
       return json(res, 200, {

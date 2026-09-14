@@ -41,27 +41,8 @@ const FACETS = Object.freeze({
   ]
 });
 
-const SUPPLEMENTAL_PRODUCTS = Object.freeze([
-  { id: "motherboard:amd:b650m-mortar", name: "MSI MAG B650M MORTAR WIFI", category: "MOTHERBOARD", manufacturer: "MSI", brand: "MAG", group: "motherboard:amd:b650", aliases: ["B650M 박격포 WIFI"], spec: { socket: "AM5", chipset: "B650", exact_model: "B650M MORTAR WIFI", form_factor: "M-ATX", memory_generation: "DDR5", wifi_variant: "WIFI" } },
-  { id: "motherboard:intel:b760m-a-d4", name: "ASUS TUF GAMING B760M-A D4", category: "MOTHERBOARD", manufacturer: "ASUS", brand: "TUF Gaming", group: "motherboard:intel:b760", aliases: ["B760M-A D4"], spec: { socket: "LGA1700", chipset: "B760", exact_model: "B760M-A D4", form_factor: "M-ATX", memory_generation: "DDR4", wifi_variant: "NONE" } },
-  { id: "ssd:samsung:990-pro-1tb", name: "Samsung 990 PRO 1TB", category: "SSD", manufacturer: "Samsung", brand: "Samsung", group: "ssd:samsung:990-pro", aliases: ["990 PRO 1TB"], spec: { exact_model: "990 PRO", marketed_capacity_gb: 1000, form_factor: "M.2 2280", interface: "PCIe", protocol: "NVMe" } },
-  { id: "ssd:samsung:990-pro-2tb", name: "Samsung 990 PRO 2TB", category: "SSD", manufacturer: "Samsung", brand: "Samsung", group: "ssd:samsung:990-pro", aliases: ["990 PRO 2TB"], spec: { exact_model: "990 PRO", marketed_capacity_gb: 2000, form_factor: "M.2 2280", interface: "PCIe", protocol: "NVMe" } },
-  { id: "ssd:samsung:m2-sata-1tb", name: "Samsung M.2 SATA 1TB", category: "SSD", manufacturer: "Samsung", brand: "Samsung", group: "ssd:samsung:m2-sata", aliases: ["M.2 SATA 1TB"], spec: { exact_model: "M.2 SATA", marketed_capacity_gb: 1000, form_factor: "M.2 2280", interface: "SATA", protocol: "AHCI" } },
-  { id: "hdd:seagate:st16000dm001", name: "Seagate ST16000DM001 16TB", category: "HDD", manufacturer: "Seagate", brand: "Seagate", group: "hdd:seagate:st16000dm001", aliases: ["ST16000DM001 16TB"], spec: { exact_model: "ST16000DM001", marketed_capacity_gb: 16000, purpose: "DESKTOP_PC", form_factor: "3.5-inch", interface: "SATA" } },
-  { id: "psu:micronics:classic-ii-500", name: "Micronics Classic II 500W", category: "PSU", manufacturer: "Micronics", brand: "Classic II", group: "psu:micronics:classic-ii-500", aliases: ["Classic II 500W", "클래식2 500W"], spec: { exact_model: "Classic II 500W", rated_wattage: 500, watts: 500, watts_bucket: "LE_500", form_factor: "ATX" } },
-  { id: "psu:micronics:classic-ii-600", name: "Micronics Classic II 600W", category: "PSU", manufacturer: "Micronics", brand: "Classic II", group: "psu:micronics:classic-ii-600", aliases: ["Classic II 600W", "클래식2 600W"], spec: { exact_model: "Classic II 600W", rated_wattage: 600, watts: 600, watts_bucket: "550_650", form_factor: "ATX" } },
-  { id: "psu:fsp:hydro-pro-600", name: "FSP HYDRO PRO 600W", category: "PSU", manufacturer: "FSP", brand: "HYDRO PRO", group: "psu:fsp:hydro-pro-600", aliases: ["HYDRO PRO 600W", "하이드로 프로 600W"], spec: { exact_model: "HYDRO PRO 600W", rated_wattage: 600, watts: 600, watts_bucket: "550_650", form_factor: "ATX" } },
-  { id: "psu:micronics:classic-ii-700", name: "Micronics Classic II 700W", category: "PSU", manufacturer: "Micronics", brand: "Classic II", group: "psu:micronics:classic-ii-700", aliases: ["Classic II 700W", "클래식2 700W"], spec: { exact_model: "Classic II 700W", rated_wattage: 700, watts: 700, watts_bucket: "700_750", form_factor: "ATX" } },
-  { id: "psu:seasonic:focus-gold-gx-750", name: "Seasonic FOCUS GOLD GX-750", category: "PSU", manufacturer: "Seasonic", brand: "FOCUS GOLD", group: "psu:seasonic:focus-gold-750", aliases: ["FOCUS GOLD GX-750", "포커스 골드 750W"], spec: { exact_model: "FOCUS GOLD GX-750", rated_wattage: 750, watts: 750, watts_bucket: "700_750", form_factor: "ATX" } },
-  { id: "psu:seasonic:vertex-gx-850", name: "Seasonic VERTEX GX-850 850W", category: "PSU", manufacturer: "Seasonic", brand: "Seasonic", group: "psu:seasonic:gx-850", aliases: ["VERTEX GX-850 850W"], spec: { exact_model: "VERTEX GX-850", rated_wattage: 850, form_factor: "ATX", atx_or_sfx_version: "ATX 3.0" } },
-  { id: "psu:super-flower:leadex-iii-850", name: "SuperFlower LEADEX III GOLD 850W", category: "PSU", manufacturer: "Super Flower", brand: "LEADEX III", group: "psu:super-flower:leadex-iii-850", aliases: ["LEADEX III GOLD 850W", "리덱스 3 850W"], spec: { exact_model: "LEADEX III GOLD 850W", rated_wattage: 850, watts: 850, watts_bucket: "800_850", form_factor: "ATX" } },
-  { id: "psu:seasonic:focus-gold-gx-1000", name: "Seasonic FOCUS GOLD GX-1000", category: "PSU", manufacturer: "Seasonic", brand: "FOCUS GOLD", group: "psu:seasonic:focus-gold-1000", aliases: ["FOCUS GOLD GX-1000", "포커스 골드 1000W"], spec: { exact_model: "FOCUS GOLD GX-1000", rated_wattage: 1000, watts: 1000, watts_bucket: "900_1000", form_factor: "ATX" } },
-  { id: "psu:corsair:rm1000x", name: "Corsair RM1000x 80PLUS Gold", category: "PSU", manufacturer: "Corsair", brand: "RMx", group: "psu:corsair:rm1000x", aliases: ["Corsair RM1000x", "커세어 RM1000x"], spec: { exact_model: "RM1000x", rated_wattage: 1000, watts: 1000, watts_bucket: "900_1000", form_factor: "ATX" } }
-]);
-
 const PUBLIC_PRODUCTS = Object.freeze([
-  ...PC_PRODUCT_MASTER_V2.filter((product) => PUBLIC_PC_CATEGORY_CODES.includes(product.category)),
-  ...SUPPLEMENTAL_PRODUCTS
+  ...PC_PRODUCT_MASTER_V2.filter((product) => PUBLIC_PC_CATEGORY_CODES.includes(product.category))
 ].reduce((products, product) => {
   if (!products.some((candidate) => candidate.id === product.id)) products.push(product);
   return products;
@@ -73,6 +54,85 @@ function normalize(value) {
 
 function compact(value) {
   return normalize(value).toUpperCase().replace(/[^0-9A-Z가-힣]+/gu, "");
+}
+
+const MOTHERBOARD_MANUFACTURERS = Object.freeze([
+  ["ASUS", /(?:\bASUS\b|에이수스|아수스)/iu],
+  ["GIGABYTE", /(?:\bGIGABYTE\b|기가바이트)/iu],
+  ["MSI", /\bMSI\b/iu],
+  ["ASRock", /(?:\bASRock\b|애즈락|아스락)/iu],
+  ["Biostar", /(?:\bBiostar\b|바이오스타)/iu]
+]);
+
+function motherboardMatchText(value) {
+  return ` ${normalize(value).toUpperCase().replace(/[^0-9A-Z가-힣]+/gu, " ").replace(/\s+/gu, " ").trim()} `;
+}
+
+function motherboardPlatform(text) {
+  const amd = /\b(?:A320|B350|X370|B450|X470|A520|B550|X570|A620|B650|X670|B840|B850|X870)(?:M|I|E)?\b/iu.test(text);
+  const intel = /\b(?:H110|B150|Z170|B250|Z270|B360|B365|Z370|Z390|B460|Z490|B560|Z590|H610|B660|Z690|B760|Z790|B860|Z890)(?:M|I|E)?\b/iu.test(text);
+  return amd === intel ? null : (amd ? "AMD" : "Intel");
+}
+
+export function resolveExactMotherboardProduct(value) {
+  const sourceText = normalize(value);
+  const text = motherboardMatchText(sourceText);
+  const manufacturers = [...new Set(MOTHERBOARD_MANUFACTURERS
+    .filter(([, pattern]) => pattern.test(sourceText))
+    .map(([manufacturer]) => manufacturer))];
+  if (manufacturers.length > 1) return { product: null, reason: "MANUFACTURER_CONFLICT", manufacturer: null, platform_vendor: motherboardPlatform(text) };
+  if (/(?:랜덤\s*(?:발송|출고)|무작위|복수\s*선택|택\s*1|옵션\s*(?:선택|상품)|중\s*하나)/iu.test(sourceText)) {
+    return { product: null, reason: "EXACT_MODEL_REQUIRED", manufacturer: manufacturers[0] || null, platform_vendor: motherboardPlatform(text) };
+  }
+  const candidates = PUBLIC_PRODUCTS
+    .filter((product) => product.category === "MOTHERBOARD" && productSpec(product).directory_node_type === "PRODUCT")
+    .filter((product) => !manufacturers[0] || product.manufacturer === manufacturers[0])
+    .map((product) => ({
+      product,
+      score: Math.max(0, ...[product.name, ...(product.aliases || [])].map((alias) => {
+        const normalizedAlias = motherboardMatchText(alias).trim();
+        return text.includes(` ${normalizedAlias} `) ? normalizedAlias.length : 0;
+      }))
+    }))
+    .filter(({ product, score }) => {
+      if (!score) return false;
+      const spec = productSpec(product);
+      const official = motherboardMatchText(spec.official_model || product.name);
+      const revisionMatch = sourceText.match(/(?:\bREV(?:ISION)?\b|리비전)\s*(\d+(?:\.\d+)+)/iu);
+      const hasWifiVariant = /\b(?:(?:WIFI|WI FI)(?:\s*[67](?:E)?)?|AX)\b/u;
+      if (hasWifiVariant.test(text) && spec.wifi === false && !hasWifiVariant.test(official)) return false;
+      if (/\bDDR[345]\b/u.test(text) && !text.includes(` ${String(spec.memory_generation || "").toUpperCase()} `)) return false;
+      if (["D3", "D4", "D5", "II", "V2", "ICE"].some((token) => text.includes(` ${token} `) && !official.includes(` ${token} `))) return false;
+      if (spec.revision_required && !revisionMatch) return false;
+      if (revisionMatch && !spec.revision) return false;
+      if (revisionMatch && Array.isArray(spec.verified_revisions) && spec.verified_revisions.length
+        && !spec.verified_revisions.includes(revisionMatch[1])) return false;
+      return true;
+    })
+    .sort((left, right) => right.score - left.score);
+  const winner = candidates[0];
+  if (!winner || (candidates[1] && candidates[1].score === winner.score)) {
+    return { product: null, reason: "EXACT_MODEL_REQUIRED", manufacturer: manufacturers[0] || null, platform_vendor: motherboardPlatform(text) };
+  }
+  return {
+    product: winner.product,
+    reason: null,
+    manufacturer: winner.product.manufacturer,
+    platform_vendor: productSpec(winner.product).platform_vendor
+  };
+}
+
+export function resolveMotherboardDirectoryNode(value) {
+  const exact = resolveExactMotherboardProduct(value);
+  if (exact.product) return exact;
+  const facet = exact.manufacturer && exact.platform_vendor
+    ? PUBLIC_PRODUCTS.find((product) => product.id === `motherboard:platform:${exact.platform_vendor.toLowerCase()}:${slugForId(exact.manufacturer)}`) || null
+    : null;
+  return { ...exact, product: facet, exact_product: false };
+}
+
+function slugForId(value) {
+  return normalize(value).toLowerCase().replace(/[^a-z0-9]+/gu, "-").replace(/^-|-$/gu, "");
 }
 
 function values(value) {
@@ -116,10 +176,10 @@ function productCapacityNumbers(product) {
     for (const ex of spec.capacity_examples_gb) numbers.push(Number(ex));
   }
   const bucketValues = {
-    LE_256_GB: [256], '480_512_GB': [500], '960_GB_1_TB': [1000],
-    '1_92_2_TB': [2000], '3_84_4_TB': [4000], '7_68_8_TB': [8000], GT_8_TB: [16000],
-    LE_1_TB: [1000], '2_TB': [2000], '3_4_TB': [4000], '5_6_TB': [6000], '8_TB': [8000],
-    '10_12_TB': [12000], '14_16_TB': [16000], '18_20_TB': [20000], '22_24_TB': [24000], GE_26_TB: [26000]
+    LE_256_GB: [256], '257_512_GB': [512], '513_GB_1_TB': [1000],
+    GT_1_TB_LE_2_TB: [2000], GT_2_TB_LE_4_TB: [4000], GT_4_TB_LE_8_TB: [8000], GT_8_TB: [16000],
+    LE_1_TB: [1000], GT_4_TB_LE_6_TB: [6000], GT_6_TB_LE_8_TB: [8000], GT_8_TB_LE_12_TB: [12000],
+    GT_12_TB_LE_16_TB: [16000], GT_16_TB_LE_20_TB: [20000], GT_20_TB_LE_24_TB: [24000], GT_24_TB: [26000]
   };
   if (spec.capacity_bucket && bucketValues[spec.capacity_bucket]) {
     numbers.push(...bucketValues[spec.capacity_bucket]);
@@ -135,7 +195,7 @@ function publicFacetValues(product, key) {
     case "family": return values(spec.family);
     case "generation": return values(spec.generation || spec.memory_generation || spec.family);
     case "suffix": return values(spec.suffix);
-    case "model": return values(modelValue(product));
+    case "model": return values([modelValue(product), ...(product.aliases || [])]);
     case "gpu_model": return values(spec.gpu_model || (product.category === "GPU" ? modelValue(product) : ""));
     case "board_brand": return values(spec.board_manufacturer || product.board_brand || product.brand);
     case "usage": {
@@ -149,7 +209,12 @@ function publicFacetValues(product, key) {
     case "socket": return values(spec.socket);
     case "chipset": return values(spec.chipset || first(modelValue(product).match(/\b([ABHXZ]\d{3})M?/iu)?.[1]));
     case "form_factor": return values(spec.form_factor);
-    case "form_interface": return values(spec.form_factor && spec.interface ? `${spec.form_factor} ${spec.interface}` : spec.form_factor || spec.interface);
+    case "form_interface": {
+      const forms = values(spec.form_factor);
+      const interfaces = values(spec.interface);
+      if (forms.length && interfaces.length) return forms.flatMap((form) => interfaces.map((connection) => `${form} ${connection}`));
+      return forms.length ? forms : interfaces;
+    }
     case "interface": return values(spec.interface);
     case "protocol": return values(spec.protocol);
     case "capacity": return capacityValues(product);
@@ -239,16 +304,20 @@ function optionLabel(key, value) {
   }
   if (key === "module_capacity_gb" || key === "vram_gb") return `${value}GB`;
   if (key === "watts_bucket") {
-    return ({ LE_500: "500W 이하", "550_650": "550~650W", "700_750": "700~750W", "800_850": "800~850W", "900_1000": "900~1000W", "1100_1200": "1100~1200W", GT_1200: "1200W 초과" })[value] || value;
+    return ({ LE_500: "500W 이하", "501_650": "501~650W", "651_750": "651~750W", "751_850": "751~850W", "851_1000": "851~1000W", "1001_1200": "1001~1200W", GT_1200: "1200W 초과" })[value] || value;
   }
   if (key === "capacity_bucket") {
-    return ({ LE_256_GB: "256GB 이하", "480_512_GB": "480~512GB", "960_GB_1_TB": "960GB~1TB", "1_92_2_TB": "1.92~2TB", "3_84_4_TB": "3.84~4TB", "7_68_8_TB": "7.68~8TB", GT_8_TB: "8TB 초과", LE_1_TB: "1TB 이하", "2_TB": "2TB", "3_4_TB": "3~4TB", "5_6_TB": "5~6TB", "8_TB": "8TB", "10_12_TB": "10~12TB", "14_16_TB": "14~16TB", "18_20_TB": "18~20TB", "22_24_TB": "22~24TB", GE_26_TB: "26TB 이상" })[value] || value;
+    return ({ LE_256_GB: "256GB 이하", "257_512_GB": "257~512GB", "513_GB_1_TB": "513GB~1TB", GT_1_TB_LE_2_TB: "1TB 초과~2TB", GT_2_TB_LE_4_TB: "2TB 초과~4TB", GT_4_TB_LE_6_TB: "4TB 초과~6TB", GT_4_TB_LE_8_TB: "4TB 초과~8TB", GT_6_TB_LE_8_TB: "6TB 초과~8TB", GT_8_TB_LE_12_TB: "8TB 초과~12TB", GT_12_TB_LE_16_TB: "12TB 초과~16TB", GT_16_TB_LE_20_TB: "16TB 초과~20TB", GT_20_TB_LE_24_TB: "20TB 초과~24TB", GT_8_TB: "8TB 초과", LE_1_TB: "1TB 이하", GT_24_TB: "24TB 초과" })[value] || value;
   }
   return value;
 }
 
 export function publicPcProducts() {
   return PUBLIC_PRODUCTS;
+}
+
+export function publicPcProductById(canonicalProductId) {
+  return PUBLIC_PRODUCTS.find((product) => product.id === normalize(canonicalProductId)) || null;
 }
 
 export function publicPcFacetDefinitions(category) {

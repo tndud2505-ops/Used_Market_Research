@@ -969,7 +969,9 @@ export function enrichPcWebItem<T extends Record<string, unknown>>(item: T): T &
     currency: readString(item.currency, 'KRW'),
     seller_type: readString(item.seller_type, '')
   }) as Record<string, any>;
-  const product = resolvePcWebProduct(classified, item);
+  const publicProductId = String(publicClassified.canonical_product_id || '');
+  const product = PC_PRODUCT_MASTER.find((candidate) => candidate.id === publicProductId)
+    || (String(publicClassified.category_code) === 'MOTHERBOARD' ? null : resolvePcWebProduct(classified, item));
   const exclusions = Array.from(new Set<string>([
     ...(Array.isArray(classified.exclusion_reasons) ? classified.exclusion_reasons.map(String) : []),
     ...(Array.isArray(publicClassified.statistics_exclusion_reasons) ? publicClassified.statistics_exclusion_reasons.map(String) : []),
@@ -981,7 +983,8 @@ export function enrichPcWebItem<T extends Record<string, unknown>>(item: T): T &
   });
   const source = (PC_SOURCE_REGISTRY as Array<Record<string, any>>).find((candidate) => candidate.key === item.site);
   const publicCategory = String(publicClassified.category_code || 'UNSUPPORTED_CATEGORY');
-  const priceEligible = publicClassified.statistics_eligible === true && Boolean(product) && lifecycleStatus === 'ACTIVE';
+  const priceEligible = classified.price_eligible === true && Boolean(product) && lifecycleStatus === 'ACTIVE';
+  const statisticsEligible = publicClassified.statistics_eligible === true && Boolean(product) && lifecycleStatus === 'ACTIVE';
   return {
     ...item,
     canonical_product_id: product?.id ?? null,
@@ -999,10 +1002,10 @@ export function enrichPcWebItem<T extends Record<string, unknown>>(item: T): T &
     model_confidence: Number(publicClassified.model_confidence || 0),
     quantity_confidence: Number(publicClassified.quantity_confidence || 0),
     price_scope_confidence: Number(publicClassified.price_scope_confidence || 0),
-    statistics_eligible: priceEligible,
+    statistics_eligible: statisticsEligible,
     statistics_exclusion_reasons: exclusions,
-    parser_version: publicClassified.parser_version || 'pc-parser-public-v1',
-    rule_version: publicClassified.rule_version || 'pc-rules-public-v1',
+    parser_version: publicClassified.parser_version || 'pc-parser-public-v2',
+    rule_version: publicClassified.rule_version || 'pc-rules-public-v2',
     pc_category_code: publicCategory,
     public_classification: publicClassified,
     quantity: Number.isInteger(classified.quantity) ? classified.quantity : null,
@@ -1013,6 +1016,7 @@ export function enrichPcWebItem<T extends Record<string, unknown>>(item: T): T &
     confidence: classified.confidence || {},
     evidence: Array.isArray(classified.evidence) ? classified.evidence : [],
     price_eligible: priceEligible,
+    directory_node_type: product?.spec?.directory_node_type ?? null,
     exclusion_reasons: exclusions,
     good_listing_eligible: false,
     reference_price: null

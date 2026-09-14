@@ -780,7 +780,7 @@ async function collectBunjangKeyword(keyword, categoryId, limit, queryKeyword = 
 async function collectBunjang(keyword, categoryId, limit, queryKeyword = "", sortMode = "price_asc", priceRange = { min: null, max: null }) {
   const categoryIds = sourceCategoryIds("bunjang", categoryId);
   if (categoryIds.length > 0) {
-    if (queryKeyword) return collectBunjangKeyword(queryKeyword, categoryId, limit, queryKeyword, sortMode, priceRange);
+    if (queryKeyword) return collectBunjangKeyword(keyword, categoryId, limit, queryKeyword, sortMode, priceRange);
     const fetchLimit = sourceFetchLimit(limit, categoryId, queryKeyword);
     const settled = await Promise.allSettled(categoryIds.map((sourceCategoryId) => (
       collectBunjangCategory(sourceCategoryId, categoryId, fetchLimit, sortMode)

@@ -23,6 +23,7 @@ export interface LocalPcStatsQuery {
   condition: string;
   currency: string;
   days: number;
+  asOf?: string;
 }
 
 interface PublicationFiles {
@@ -208,18 +209,24 @@ export function createLocalPcPublicationReader() {
     };
   };
 
-  const getPriceStats = ({ canonicalProductId, marketPool, condition, currency, days }: LocalPcStatsQuery): JsonRecord | null => {
+  const getPriceStats = ({ canonicalProductId, marketPool, condition, currency, days, asOf }: LocalPcStatsQuery): JsonRecord | null => {
     const files = publicationFiles();
     if (!files) return null;
     const publication = readPublication(files.statsPath);
     const rows = Array.isArray(publication?.rows) ? publication.rows : [];
-    const row = rows.find((candidate: JsonRecord) => (
+    const requestedDate = normalize(asOf).slice(0, 10);
+    const row = rows.find((candidate: JsonRecord) => {
+      const stats = candidate.stats_json && typeof candidate.stats_json === 'object' ? candidate.stats_json : {};
+      const publishedDate = normalize(candidate.as_of || stats.as_of || stats.window?.to || publication?.as_of || files.asOf).slice(0, 10);
+      return (
       same(candidate.canonical_product_id, canonicalProductId)
       && same(candidate.market_pool, marketPool)
       && same(candidate.condition_code, condition)
       && same(candidate.currency, currency)
       && Number(candidate.days || days) === days
-    ));
+      && (!requestedDate || publishedDate === requestedDate)
+      );
+    });
     const stats = row?.stats_json;
     return stats && typeof stats === 'object' ? { ...stats, canonical_product_id: canonicalProductId } : null;
   };

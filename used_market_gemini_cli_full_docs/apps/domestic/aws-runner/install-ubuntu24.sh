@@ -43,9 +43,9 @@ fi
 
 if [[ -n "$PC_SOURCE_TARGETS_PER_RUN_OVERRIDE" ]] && {
   [[ ! "$PC_SOURCE_TARGETS_PER_RUN_OVERRIDE" =~ ^[0-9]+$ ]] ||
-  (( PC_SOURCE_TARGETS_PER_RUN_OVERRIDE < 71 || PC_SOURCE_TARGETS_PER_RUN_OVERRIDE > 128 ));
+  (( PC_SOURCE_TARGETS_PER_RUN_OVERRIDE < 81 || PC_SOURCE_TARGETS_PER_RUN_OVERRIDE > 128 ));
 }; then
-  fail 'PC_SOURCE_TARGETS_PER_RUN_OVERRIDE는 71~128 정수여야 합니다.'
+  fail 'PC_SOURCE_TARGETS_PER_RUN_OVERRIDE는 81~128 정수여야 합니다.'
 fi
 if [[ -n "$PC_SOURCE_TARGET_CONCURRENCY_OVERRIDE" ]] && {
   [[ ! "$PC_SOURCE_TARGET_CONCURRENCY_OVERRIDE" =~ ^[0-9]+$ ]] ||
@@ -215,7 +215,7 @@ RUNNER_INDEX_DIR=/var/lib/used-market-runner
 RUNNER_INDEX_PATH=/var/lib/used-market-runner/search-index.sqlite
 PC_PARTS_SHADOW_WRITE_ENABLED=true
 PC_PARTS_SCHEDULER_ENABLED=false
-PC_SOURCE_TARGETS_PER_RUN=80
+PC_SOURCE_TARGETS_PER_RUN=85
 PC_SOURCE_TARGET_CONCURRENCY=6
 PC_HELLOMARKET_DETAIL_LIMIT=40
 PC_SOURCE_GOVERNANCE_JSON={}
@@ -261,7 +261,7 @@ fi
 if [[ -n "$PC_SOURCE_TARGETS_PER_RUN_OVERRIDE" ]]; then
   set_env_value PC_SOURCE_TARGETS_PER_RUN "$PC_SOURCE_TARGETS_PER_RUN_OVERRIDE"
 elif ! grep -q '^PC_SOURCE_TARGETS_PER_RUN=' "$RUNNER_ENV_FILE"; then
-  set_env_value PC_SOURCE_TARGETS_PER_RUN 80
+  set_env_value PC_SOURCE_TARGETS_PER_RUN 85
 fi
 if [[ -n "$PC_SOURCE_TARGET_CONCURRENCY_OVERRIDE" ]]; then
   set_env_value PC_SOURCE_TARGET_CONCURRENCY "$PC_SOURCE_TARGET_CONCURRENCY_OVERRIDE"
@@ -284,8 +284,8 @@ set_env_value NODE_OPTIONS --max-old-space-size=2048
 
 configured_pc_source_targets_per_run="$(awk -F= '$1 == "PC_SOURCE_TARGETS_PER_RUN" { sub(/\r$/, "", $2); print $2; exit }' "$RUNNER_ENV_FILE")"
 if [[ ! "$configured_pc_source_targets_per_run" =~ ^[0-9]+$ ]] ||
-  (( configured_pc_source_targets_per_run < 71 || configured_pc_source_targets_per_run > 128 )); then
-  fail '기존 PC_SOURCE_TARGETS_PER_RUN이 현재 전체 target set을 감당하지 못합니다. 명시적으로 PC_SOURCE_TARGETS_PER_RUN_OVERRIDE=80을 지정해 다시 설치하세요.'
+  (( configured_pc_source_targets_per_run < 81 || configured_pc_source_targets_per_run > 128 )); then
+  fail '기존 PC_SOURCE_TARGETS_PER_RUN이 현재 전체 target set을 감당하지 못합니다. 명시적으로 PC_SOURCE_TARGETS_PER_RUN_OVERRIDE=85를 지정해 다시 설치하세요.'
 fi
 
 chown root:"$RUNNER_USER" "$RUNNER_ENV_FILE"
@@ -318,6 +318,7 @@ node "$APP_ROOT/aws-runner/migration-smoke.mjs" "$migration_smoke_dir/search-ind
 rm -rf -- "$migration_smoke_dir"
 node --check "$APP_ROOT/aws-runner/pc-parts-ledger.mjs"
 node --check "$APP_ROOT/aws-runner/pc-shadow-pipeline.mjs"
+node --check "$APP_ROOT/aws-runner/compact-pc-storage.mjs"
 node --check "$APP_ROOT/aws-runner/backfill-legacy-inactive.mjs"
 node --check "$APP_ROOT/collector/logic/pc-source-registry.mjs"
 node --check "$APP_ROOT/collector/logic/pc-source-adapters.mjs"

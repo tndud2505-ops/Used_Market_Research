@@ -9,7 +9,7 @@ function canonicalRows(rows) {
       stats_json: typeof row.stats_json === "string" ? row.stats_json : JSON.stringify(row.stats_json),
       as_of: String(row.as_of)
     }))
-    .sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
+    .sort((left, right) => statsPublicationKey(left).localeCompare(statsPublicationKey(right)));
 }
 
 export function statsPublicationKey(row) {
@@ -172,8 +172,27 @@ export async function publishProductStats(db, input) {
     actualKeys = rows.map(statsPublicationKey).sort();
   }
 
-  if (Number(previous?.expected_row_count || 0) > actualRowCount) {
-    throw new Error("publication scope shrink requires an explicit schema migration");
+  const actualKeySet = new Set(actualKeys);
+  const removedActiveScopeKeys = previousRows
+    .map(statsPublicationKey)
+    .filter((key) => !actualKeySet.has(key));
+  let scopeSchemaMigrationApplied = false;
+  if (removedActiveScopeKeys.length > 0 || Number(previous?.expected_row_count || 0) > actualRowCount) {
+    const migration = input.scope_schema_migration;
+    const reviewedAt = String(migration?.reviewed_at || "");
+    const reason = String(migration?.reason || "").trim();
+    scopeSchemaMigrationApplied = Boolean(previous?.publication_id)
+      && migration && typeof migration === "object" && !Array.isArray(migration)
+      && String(migration.previous_publication_id || "") === String(previous.publication_id)
+      && String(migration.previous_checksum || "") === String(previous.checksum)
+      && Number(migration.expected_removed_scope_count) === removedActiveScopeKeys.length
+      && Number.isFinite(Date.parse(reviewedAt))
+      && reason.length >= 20 && reason.length <= 500;
+    if (!scopeSchemaMigrationApplied) {
+      throw new Error(Number(previous?.expected_row_count || 0) > actualRowCount
+        ? "publication scope shrink requires an explicit schema migration"
+        : "publication cannot omit an active scope key without an explicit schema migration");
+    }
   }
   const previousNonEmptyScopeCount = Number(previous?.expected_non_empty_scope_count || 0);
   let sampleDropAcknowledged = false;
@@ -197,12 +216,6 @@ export async function publishProductStats(db, input) {
       && reason.length >= 20 && reason.length <= 500;
     if (!sampleDropAcknowledged) {
       throw new Error("publication sampled scope count dropped by more than 50 percent");
-    }
-  }
-  if (previous?.publication_id) {
-    const actualKeySet = new Set(actualKeys);
-    if (previousRows.some((row) => !actualKeySet.has(statsPublicationKey(row)))) {
-      throw new Error("publication cannot omit an active scope key without an explicit schema migration");
     }
   }
   const publicationStatement = db.prepare(`INSERT INTO public_stats_publications (
@@ -249,6 +262,8 @@ export async function publishProductStats(db, input) {
       overwritten_row_count: overwrittenRowCount,
       merged_with_active: mergeWithActive && Boolean(previous?.publication_id),
       sample_drop_acknowledged: sampleDropAcknowledged,
+      scope_schema_migration_applied: scopeSchemaMigrationApplied,
+      removed_scope_count: removedActiveScopeKeys.length,
       active: true
     };
   } catch (error) {

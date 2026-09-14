@@ -349,6 +349,15 @@ function productCategory(product) {
   return normalizeText(category).toUpperCase();
 }
 
+function productDirectoryNodeType(product) {
+  return normalizeText(firstDefined(product?.directory_node_type, product?.key_specs?.directory_node_type,
+    product?.spec?.directory_node_type, product?.browse_facets?.directory_node_type)).toUpperCase();
+}
+
+function isSelectableModel(product) {
+  return productCategory(product) !== "MOTHERBOARD" || productDirectoryNodeType(product) === "PRODUCT";
+}
+
 function productManufacturer(product) {
   const maker = firstDefined(product?.manufacturer, product?.brand, product?.board_manufacturer, product?.key_specs?.board_manufacturer);
   if (maker && typeof maker === "object") return normalizeText(firstDefined(maker.display_name, maker.name, maker.code));
@@ -551,17 +560,19 @@ function catalogCategoryProducts(category) {
 function facetOptionLabel(key, value) {
   if (key === "suffix" && value === "NONE") return "일반";
   const capacityLabels = {
-    LE_256_GB: "256GB 이하", "480_512_GB": "480~512GB", "960_GB_1_TB": "960GB~1TB",
-    "1_92_2_TB": "1.92~2TB", "3_84_4_TB": "3.84~4TB", "7_68_8_TB": "7.68~8TB", GT_8_TB: "8TB 초과",
-    LE_1_TB: "1TB 이하", "2_TB": "2TB", "3_4_TB": "3~4TB", "5_6_TB": "5~6TB", "8_TB": "8TB",
-    "10_12_TB": "10~12TB", "14_16_TB": "14~16TB", "18_20_TB": "18~20TB", "22_24_TB": "22~24TB", GE_26_TB: "26TB 이상",
+    LE_256_GB: "256GB 이하", "257_512_GB": "257~512GB", "513_GB_1_TB": "513GB~1TB",
+    GT_1_TB_LE_2_TB: "1TB 초과~2TB", GT_2_TB_LE_4_TB: "2TB 초과~4TB", GT_4_TB_LE_8_TB: "4TB 초과~8TB", GT_8_TB: "8TB 초과",
+    LE_1_TB: "1TB 이하", GT_1_TB_LE_2_TB: "1TB 초과~2TB", GT_2_TB_LE_4_TB: "2TB 초과~4TB",
+    GT_4_TB_LE_6_TB: "4TB 초과~6TB", GT_6_TB_LE_8_TB: "6TB 초과~8TB", GT_8_TB_LE_12_TB: "8TB 초과~12TB",
+    GT_12_TB_LE_16_TB: "12TB 초과~16TB", GT_16_TB_LE_20_TB: "16TB 초과~20TB",
+    GT_20_TB_LE_24_TB: "20TB 초과~24TB", GT_24_TB: "24TB 초과",
   };
   const rangeLabels = {
     GE_500GB: "500GB 이상", GE_1TB: "1TB 이상", GE_2TB: "2TB 이상", GE_4TB: "4TB 이상", GE_8TB: "8TB 이상", GE_10TB: "10TB 이상", GE_16TB: "16TB 이상",
     LE_500GB: "500GB 이하", LE_1TB: "1TB 이하", LE_2TB: "2TB 이하", LE_4TB: "4TB 이하",
   };
   if (rangeLabels[value]) return rangeLabels[value];
-  const wattsLabels = { LE_500: "500W 이하", "550_650": "550~650W", "700_750": "700~750W", "800_850": "800~850W", "900_1000": "900~1000W", "1100_1200": "1100~1200W", GT_1200: "1200W 초과" };
+  const wattsLabels = { LE_500: "500W 이하", "501_650": "501~650W", "651_750": "651~750W", "751_850": "751~850W", "851_1000": "851~1000W", "1001_1200": "1001~1200W", GT_1200: "1200W 초과" };
   const usageLabels = { LAPTOP: "노트북", CONSUMER_DESKTOP: "데스크탑", DESKTOP: "데스크탑" };
   if (key === "usage") return usageLabels[value] || value;
   if (["module_capacity_gb", "vram_gb"].includes(key)) return `${value}GB`;
@@ -765,10 +776,10 @@ function productCapacityNumbers(product) {
     for (const ex of specs.capacity_examples_gb) numbers.push(Number(ex));
   }
   const bucketValues = {
-    LE_256_GB: [256], "480_512_GB": [500], "960_GB_1_TB": [1000],
-    "1_92_2_TB": [2000], "3_84_4_TB": [4000], "7_68_8_TB": [8000], GT_8_TB: [16000],
-    LE_1_TB: [1000], "2_TB": [2000], "3_4_TB": [4000], "5_6_TB": [6000], "8_TB": [8000],
-    "10_12_TB": [12000], "14_16_TB": [16000], "18_20_TB": [20000], "22_24_TB": [24000], GE_26_TB: [26000],
+    LE_256_GB: [256], "257_512_GB": [512], "513_GB_1_TB": [1000],
+    GT_1_TB_LE_2_TB: [2000], GT_2_TB_LE_4_TB: [4000], GT_4_TB_LE_8_TB: [8000], GT_8_TB: [16000],
+    LE_1_TB: [1000], GT_4_TB_LE_6_TB: [6000], GT_6_TB_LE_8_TB: [8000], GT_8_TB_LE_12_TB: [12000],
+    GT_12_TB_LE_16_TB: [16000], GT_16_TB_LE_20_TB: [20000], GT_20_TB_LE_24_TB: [24000], GT_24_TB: [26000],
   };
   if (specs.capacity_bucket && bucketValues[specs.capacity_bucket]) {
     numbers.push(...bucketValues[specs.capacity_bucket]);
@@ -817,10 +828,12 @@ function facetOptionsForStep(category, step) {
       { value: "GE_4TB", label: "4TB 이상" },
       { value: "LE_500GB", label: "500GB 이하" },
       { value: "LE_1TB", label: "1TB 이하" },
-      { value: "480_512_GB", label: "480~512GB" },
-      { value: "960_GB_1_TB", label: "960GB~1TB" },
-      { value: "1_92_2_TB", label: "1.92~2TB" },
-      { value: "3_84_4_TB", label: "3.84~4TB" },
+      { value: "257_512_GB", label: "257~512GB" },
+      { value: "513_GB_1_TB", label: "513GB~1TB" },
+      { value: "GT_1_TB_LE_2_TB", label: "1TB 초과~2TB" },
+      { value: "GT_2_TB_LE_4_TB", label: "2TB 초과~4TB" },
+      { value: "GT_4_TB_LE_8_TB", label: "4TB 초과~8TB" },
+      { value: "GT_8_TB", label: "8TB 초과" },
     ];
   }
   if (category === "HDD" && step.key === "capacity") {
@@ -832,11 +845,15 @@ function facetOptionsForStep(category, step) {
       { value: "GE_16TB", label: "16TB 이상" },
       { value: "LE_1TB", label: "1TB 이하" },
       { value: "LE_2TB", label: "2TB 이하" },
-      { value: "2_TB", label: "2TB" },
-      { value: "3_4_TB", label: "3~4TB" },
-      { value: "8_TB", label: "8TB" },
-      { value: "10_12_TB", label: "10~12TB" },
-      { value: "14_16_TB", label: "14~16TB" },
+      { value: "GT_1_TB_LE_2_TB", label: "1TB 초과~2TB" },
+      { value: "GT_2_TB_LE_4_TB", label: "2TB 초과~4TB" },
+      { value: "GT_4_TB_LE_6_TB", label: "4TB 초과~6TB" },
+      { value: "GT_6_TB_LE_8_TB", label: "6TB 초과~8TB" },
+      { value: "GT_8_TB_LE_12_TB", label: "8TB 초과~12TB" },
+      { value: "GT_12_TB_LE_16_TB", label: "12TB 초과~16TB" },
+      { value: "GT_16_TB_LE_20_TB", label: "16TB 초과~20TB" },
+      { value: "GT_20_TB_LE_24_TB", label: "20TB 초과~24TB" },
+      { value: "GT_24_TB", label: "24TB 초과" },
     ];
   }
   const schema = state.facetSchema?.[category] || state.facetSchema?.[category.toLowerCase()];
@@ -1269,22 +1286,21 @@ function productSpecText(product) {
 
 function renderProducts() {
   const selectedId = state.selectedProduct ? productId(state.selectedProduct) : "";
-  const total = Number.isFinite(Number(state.productTotal)) && Number(state.productTotal) >= state.products.length
-    ? Number(state.productTotal)
-    : state.products.length;
+  const selectableProducts = state.products.filter(isSelectableModel);
+  const total = selectableProducts.length;
   dom.modelSelect.replaceChildren();
   const placeholder = createElement("option", "", total
     ? `전체 모델 · ${total.toLocaleString("ko-KR")}개`
     : "검색된 모델 없음");
   placeholder.value = "";
   dom.modelSelect.append(placeholder);
-  state.products.forEach((product) => {
+  selectableProducts.forEach((product) => {
     const option = createElement("option", "", `${productName(product)} · ${productSpecText(product)}`);
     option.value = productId(product);
     option.selected = option.value === selectedId;
     dom.modelSelect.append(option);
   });
-  dom.modelSelect.disabled = state.products.length === 0;
+  dom.modelSelect.disabled = selectableProducts.length === 0;
   if (!selectedId) dom.modelSelect.value = "";
   if (!state.selectedProduct) dom.listingSection.hidden = total === 0;
   updateMatchedModelButton();
@@ -1312,8 +1328,9 @@ function filterSeedProducts() {
 }
 
 function openSingleSearchResult() {
-  if (state.productTotal !== 1 || state.products.length !== 1) return false;
-  selectProduct(state.products[0]);
+  const selectableProducts = state.products.filter(isSelectableModel);
+  if (selectableProducts.length !== 1) return false;
+  selectProduct(selectableProducts[0]);
   return true;
 }
 
@@ -1830,8 +1847,11 @@ function renderListings() {
     const meta = createElement("div", "listing-meta");
     const canonicalModel = normalizeText(listing.canonical_display_name);
     const canonicalProductId = normalizeText(listing.canonical_product_id);
-    if (!state.selectedProduct && canonicalModel) {
-      if (canonicalProductId) {
+    const listingNodeType = normalizeText(firstDefined(listing.directory_node_type,
+      listingProduct?.key_specs?.directory_node_type)).toUpperCase();
+    const exactMotherboardModel = state.categoryCode !== "MOTHERBOARD" || listingNodeType === "PRODUCT";
+    if (!state.selectedProduct && (canonicalModel || state.categoryCode === "MOTHERBOARD")) {
+      if (canonicalProductId && exactMotherboardModel) {
         const modelAction = createElement("button", "listing-model listing-model-action", canonicalModel);
         modelAction.type = "button";
         modelAction.setAttribute("aria-label", `${canonicalModel} 가격 인사이트 보기`);
@@ -1846,7 +1866,12 @@ function renderListings() {
         });
         meta.append(modelAction);
       } else {
-        meta.append(createElement("span", "listing-model", canonicalModel));
+        const boardSpec = listing.public_classification || listingProduct?.key_specs || {};
+        const unresolvedLabel = state.categoryCode === "MOTHERBOARD"
+          ? ["모델 미확인", firstDefined(listing.canonical_manufacturer, listing.manufacturer, listingProduct?.brand), boardSpec.chipset]
+            .map(normalizeText).filter(Boolean).join(" · ")
+          : canonicalModel;
+        meta.append(createElement("span", "listing-model", unresolvedLabel));
       }
     }
     meta.append(source);

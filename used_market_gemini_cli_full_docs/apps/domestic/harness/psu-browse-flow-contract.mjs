@@ -54,9 +54,9 @@ assert.deepEqual(PSU_MODEL_METADATA_FIELDS_V1, ["manufacturer", "atx_spec", "for
 assert.equal(PSU_BROWSE_FLOW_V1.steps.some(({ key }) => ["atx_spec", "form_factor", "efficiency", "manufacturer"].includes(key)), false);
 
 assert.equal(psuWattsBucketV1(500), "LE_500");
-assert.equal(psuWattsBucketV1("550W"), "550_650");
-assert.equal(psuWattsBucketV1("ATX 3.0 850W"), "800_850");
-assert.equal(psuWattsBucketV1("1200W"), "1100_1200");
+assert.equal(psuWattsBucketV1("550W"), "501_650");
+assert.equal(psuWattsBucketV1("ATX 3.0 850W"), "751_850");
+assert.equal(psuWattsBucketV1("1200W"), "1001_1200");
 assert.equal(psuWattsBucketV1("1600W"), "GT_1200");
 assert.equal(psuWattsBucketV1("not a wattage"), null);
 
@@ -65,27 +65,27 @@ assert.equal(models.length, 6);
 assert.ok(models.every(({ category, spec }) => category === "PSU" && spec.directory_node_type === "PRODUCT"));
 
 const initial = psuBrowseFacetsForMaster(fixtureMaster);
-assert.deepEqual(initial.available_facets.watts_bucket.map(({ value }) => value), ["LE_500", "550_650", "800_850", "1100_1200", "GT_1200"]);
-assert.deepEqual(initial.available_facets.watts_bucket.map(({ label }) => label), ["500W 이하", "550~650W", "800~850W", "1100~1200W", "1200W 초과"]);
+assert.deepEqual(initial.available_facets.watts_bucket.map(({ value }) => value), ["LE_500", "501_650", "751_850", "1001_1200", "GT_1200"]);
+assert.deepEqual(initial.available_facets.watts_bucket.map(({ label }) => label), ["500W 이하", "501~650W", "751~850W", "1001~1200W", "1200W 초과"]);
 assert.equal(initial.model_count, 6);
-assert.equal(initial.available_facets.watts_bucket.some(({ value }) => value === "700_750"), false);
-assert.equal(initial.available_facets.watts_bucket.some(({ value }) => value === "900_1000"), false);
+assert.equal(initial.available_facets.watts_bucket.some(({ value }) => value === "651_750"), false);
+assert.equal(initial.available_facets.watts_bucket.some(({ value }) => value === "851_1000"), false);
 
-const eightHundred = psuBrowseFacetsForMaster(fixtureMaster, { watts_bucket: "800_850" });
+const eightHundred = psuBrowseFacetsForMaster(fixtureMaster, { watts_bucket: "751_850" });
 assert.equal(eightHundred.model_count, 2);
 assert.deepEqual(eightHundred.model_ids, ["psu:asus:rog-850", "psu:seasonic:vertex-gx850"]);
 assert.deepEqual(eightHundred.available_facets.watts_bucket.map(({ value }) => value), initial.available_facets.watts_bucket.map(({ value }) => value));
 
-const unknown = psuBrowseFacetsForMaster(fixtureMaster, { watts_bucket: "700_750" });
+const unknown = psuBrowseFacetsForMaster(fixtureMaster, { watts_bucket: "651_750" });
 assert.equal(unknown.model_count, 0);
-assert.equal(unknown.available_facets.watts_bucket.some(({ value }) => value === "700_750"), false);
+assert.equal(unknown.available_facets.watts_bucket.some(({ value }) => value === "651_750"), false);
 
 assert.deepEqual(psuModelMetadata(fixtureMaster[2]), {
   canonical_product_id: "psu:seasonic:vertex-gx850",
   canonical_display_name: "Seasonic VERTEX GX-850",
   manufacturer: "Seasonic",
   watts: 850,
-  watts_bucket: "800_850",
+  watts_bucket: "751_850",
   atx_spec: "ATX 3.0",
   form_factor: "ATX",
   efficiency: "80 PLUS Gold",
@@ -93,14 +93,14 @@ assert.deepEqual(psuModelMetadata(fixtureMaster[2]), {
 });
 assert.equal(psuModelMetadata({ category: "GPU" }), null);
 
-const api = psuBrowseFlowForApiV1(fixtureMaster, { watts_bucket: "800_850" });
+const api = psuBrowseFlowForApiV1(fixtureMaster, { watts_bucket: "751_850" });
 assert.equal(api.category_code, "PSU");
 assert.equal(api.version, 1);
 assert.equal(api.product_count, 2);
 assert.deepEqual(api.defaults, {});
 assert.deepEqual(api.available_facets.watts_bucket.map(({ value }) => value), initial.available_facets.watts_bucket.map(({ value }) => value));
 
-// The real V2 master is the source of truth: the flow may expose zero or more
+// The real V3 master is the source of truth: the flow may expose zero or more
 // current PSU models, but it must never add a bucket absent from those rows.
 const realProducts = PC_PRODUCT_MASTER_V2.filter(({ category }) => category === "PSU");
 const real = psuBrowseFacetsForMaster(PC_PRODUCT_MASTER_V2);
@@ -110,5 +110,4 @@ assert.ok(real.available_facets.watts_bucket.every(({ value }) => realBuckets.ha
 assert.equal(realProducts.length >= real.model_count, true);
 assert.ok(Object.keys(PSU_WATTS_BUCKET_LABELS_V1).length === PSU_WATTS_BUCKET_ORDER_V1.length);
 
-console.log(`psu-browse-flow-contract: ok (${models.length} fixture PSU products, ${real.model_count} V2 master products)`);
-
+console.log(`psu-browse-flow-contract: ok (${models.length} fixture PSU products, ${real.model_count} V3 master products)`);

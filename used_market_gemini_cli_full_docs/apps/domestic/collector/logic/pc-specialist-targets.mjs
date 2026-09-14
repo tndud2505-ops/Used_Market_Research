@@ -59,14 +59,25 @@ export function assertEbayPcCategoryCoverage() {
 export function pcCategoryTitleMatches(categoryCode, value) {
   const text = String(value || "").normalize("NFKC");
   const category = String(categoryCode || "").trim().toUpperCase();
+  const forbidden = {
+    SSD: /(?:(?:heatsink|heat\s*sink|히트\s*싱크|방열판|케이블|cable).{0,16}(?:only|만)|(?:only|만).{0,16}(?:heatsink|heat\s*sink|히트\s*싱크|방열판|케이블|cable)|외장\s*(?:케이스|인클로저)|외장.{0,8}(?:SSD|HDD|NVMe|M\.2).{0,8}(?:케이스|인클로저)|external\s*(?:case|enclosure))/iu,
+    HDD: /(?:외장\s*(?:케이스|인클로저)|외장.{0,8}(?:HDD|하드\s*디스크).{0,8}(?:케이스|인클로저|도킹\s*스테이션)|(?:HDD|하드\s*디스크).{0,8}외장.{0,8}(?:케이스|인클로저|도킹\s*스테이션)|external\s*(?:case|enclosure)|도킹\s*스테이션|dock(?:ing)?\s*station|케이블|cable).{0,16}(?:only|만)?/iu,
+    PSU: /(?:server\s*power\s*supply|서버\s*(?:용\s*)?파워|파워\s*(?:서플라이)?\s*케이블|PSU\s*cable|power\s*supply\s*cable|케이블\s*(?:only|만)|cable\s*only)/iu
+  };
+  if (forbidden[category]?.test(text)) {
+    const describedPsuCableState = category === "PSU"
+      && /\d{3,4}\s*W\b/iu.test(text)
+      && /케이블.{0,10}(?:포함|미포함|없음|누락|완비|있음)|(?:포함|미포함|없음|누락|완비|있음).{0,10}케이블/iu.test(text);
+    if (!describedPsuCableState) return false;
+  }
   const rules = {
     GPU: /(?:\b(?:RTX|GTX)\s*\d{3,4}\b|\bRX\s*\d{3,4}(?:\s*XT[X]?)?\b|\b(?:GeForce|Radeon|GPU)\b|graphics?\s*(?:video\s*)?card|그래픽\s*카드)/iu,
     CPU: /(?:\bRyzen\s*[3579]?\s*\d{4,5}[A-Z0-9]*\b|\bCore\s*(?:Ultra\s*)?[3579]?[- ]?\d{4,5}[A-Z0-9]*\b|\bi[3579][ -]?\d{4,5}[A-Z0-9]*\b|\bCPU\b|processor|프로세서|시피유)/iu,
     RAM: /(?:\bDDR[345]\b|\b(?:SO|U|R)?DIMM\b|\bPC[345]-?\d{4,5}\b|(?:memory|메모리).{0,24}\d+\s*(?:GB|기가)|\d+\s*(?:GB|기가).{0,24}(?:RAM|램|memory|메모리))/iu,
     MOTHERBOARD: /(?:mother\s*board|main\s*board|메인\s*보드|\b[ABHXZ]\d{3}[A-Z0-9-]*\b)/iu,
-    SSD: /(?:\bSSD\b|solid\s*state\s*drive|\bNVMe\b|\bPM\d{3,4}[A-Z0-9-]*\b)/iu,
-    HDD: /(?:\bHDD\b|hard\s*(?:disk|disc)\s*drive|하드\s*디스크)/iu,
-    PSU: /(?:\bPSU\b|power\s*supply|파워\s*(?:서플라이)?|\b80\s*PLUS\b)/iu,
+    SSD: /(?:\bSSD\b|solid\s*state\s*drive|\bNVMe\b|\b(?:PM|SM)\d[A-Z0-9-]+\b|\b(?:8[67]0|9(?:70|80|90))\s*(?:EVO(?:\s*PLUS)?|QVO|PRO)\b|(?:Samsung|삼성).{0,20}\b(?:870|980)\b|(?:SK\s*hynix|하이닉스).{0,20}\bP(?:31|41)\b|\bSN\d{3,4}X?\b)/iu,
+    HDD: /(?:\bHDD\b|hard\s*(?:disk|disc)\s*drive|하드\s*디스크|(?:\bWD\b|Western\s*Digital)\s*(?:Blue|Black|Red(?:\s*Plus)?|Purple|Gold)\b|\b(?:IronWolf|Barracuda|Exos|Ultrastar|ST[A-Z0-9]{8,}|N300|X300)\b|아이언울프|바라쿠다)/iu,
+    PSU: /(?:\bPSU\b|power\s*supply|파워\s*(?:서플라이)?|\b80\s*PLUS\b|\b(?:RM|HX|AX|TX|CX|CV|SF)\d{3,4}(?:X|I|M)?\b|\bGX[- ]?\d{3,4}\b|(?:Classic\s*II|클래식\s*2|HYDRO\s*PRO|하이드로\s*프로|LEADEX|리덱스).{0,20}\d{3,4}\s*W?\b)/iu,
     COOLING: /(?:CPU\s*(?:cooler|fan)|\bAIO\b|water\s*cooling|heat\s*sink|case\s*fan|쿨러|수(?:냉|랭)|공랭|쿨링\s*팬)/iu,
     CASE: /(?:computer\s*case|PC\s*case|desktop\s*case|chassis|컴퓨터\s*케이스|PC\s*케이스|케이스)/iu,
     EXPANSION_CARD: /(?:PCIe?[- ]?(?:x\d+\s*)?(?:network|sound|capture|USB|M\.2|RAID|HBA)?\s*card|network\s*card|sound\s*card|capture\s*card|RAID\s*controller|\bHBA\b|랜\s*카드|사운드\s*카드|캡처\s*(?:카드|보드)|확장\s*카드)/iu,

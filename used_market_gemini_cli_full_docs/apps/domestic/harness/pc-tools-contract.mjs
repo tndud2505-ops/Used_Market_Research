@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { SERIES, money, metricValue, metricIsConsistent, buildTotals, compatibility, groupProducts, validateBuild, dailySeries, percentChange, overviewIndex, priceDateRange, shiftDate, sourceStats, coherentStats, modelPageItems } from '../web-backend/public/pc-tools-core.mjs';
+import { SERIES, money, metricValue, metricIsConsistent, buildTotals, compactBuild, compatibility, groupProducts, validateBuild, dailySeries, percentChange, overviewIndex, priceDateRange, shiftDate, sourceStats, coherentStats, modelPageItems } from '../web-backend/public/pc-tools-core.mjs';
 import { createPriceStore } from '../web-backend/public/pc-tools-data.mjs';
 import { pcCatalogResponse } from '../cloudflare/pc-directory-http.mjs';
 const p = (id, category, name, specs = {}) => ({ canonical_product_id: id, category_code: category, canonical_display_name: name, key_specs: specs });
@@ -22,9 +22,15 @@ assert.equal(SERIES.find((series) => series.key === 'active').label, '판매중 
 assert.equal(money(1234.5, 'USD'), '$1,234.50');
 const totals = buildTotals(entries, e => ({ active: { mean: e.id === 'cpu' ? 100 : 50, sample_count: 5 }, sold: e.id === 'cpu' ? { mean: 80, sample_count: 5 } : null }));
 assert.equal(totals.active.amount, 200);
+assert.equal(totals.active.covered, 3, 'price coverage must count selected quantities');
+assert.equal(totals.active.total, 3, 'total coverage must count selected quantities');
 assert.equal(totals.sold.amount, 80);
+assert.equal(totals.sold.covered, 1, 'partial sold coverage must count only priced quantities');
+assert.equal(totals.sold.total, 3);
 assert.equal(totals.sold.complete, false);
 assert.equal(totals.confirmed_transactions.amount, null);
+assert.deepEqual(compactBuild([{ id: 'cpu', quantity: 1, manufacturer: '', category: 'CPU' }, { id: 'board', quantity: 2, manufacturer: ' ASUS ', category: 'MOTHERBOARD' }], products, categories), [{ id: 'cpu' }, { id: 'board', quantity: 2, manufacturer: 'ASUS' }],
+  'persisted builds must retain only validated fields needed to restore the selection');
 assert.equal(compatibility([...entries, { id: 'ram' }], products).checks.filter(c => c.status === 'conflict').length, 2);
 assert.throws(() => validateBuild([{ id: 'unknown' }], products, categories));
 assert.throws(() => validateBuild([{ id: 'cpu', quantity: 0 }], products, categories));

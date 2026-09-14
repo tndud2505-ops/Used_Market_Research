@@ -1,11 +1,17 @@
 import path from "node:path";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
-import { SearchIndex } from "./search-index.mjs";
 import { PcPartsLedger } from "./pc-parts-ledger.mjs";
 import { PcShadowPipeline } from "./pc-shadow-pipeline.mjs";
 import { PC_PART_CATEGORY_CODES, danawaTargetsForCategory } from "../collector/logic/pc-specialist-targets.mjs";
+import { PC_SOURCE_REGISTRY } from "../collector/logic/pc-source-registry.mjs";
+
+const KNOWN_SOURCE_KEYS = new Set(PC_SOURCE_REGISTRY.map((source) => source.key));
+
+function parseJson(value, fallback) {
+  try { return JSON.parse(String(value ?? "")); } catch { return fallback; }
+}
 
 function option(argv, name) {
   const index = argv.indexOf(name);
@@ -16,6 +22,18 @@ function requiredOption(argv, name) {
   const value = String(option(argv, name) || "").trim();
   if (!value || value.startsWith("--")) throw new Error(`Missing required option: ${name}`);
   return value;
+}
+
+function createRecoveryBackup(db, filePath) {
+  const backupDir = path.join(path.dirname(filePath), "backups");
+  mkdirSync(backupDir, { recursive: true });
+  const destination = path.join(backupDir,
+    `search-index-pre-reclassification-${new Date().toISOString().replace(/[:.]/gu, "-")}.sqlite`);
+  db.exec(`VACUUM INTO '${destination.replaceAll("'", "''")}'`);
+  if (!existsSync(destination) || statSync(destination).size <= 0) {
+    throw new Error("A non-empty recovery backup is required before reclassification");
+  }
+  return destination;
 }
 
 function danawaStructuredCategory(raw) {
@@ -108,11 +126,69 @@ export function reclassifyPcSnapshots({ ledger, pipeline, versions, versionKey =
     WHERE s.id > ? ORDER BY s.id LIMIT ?`);
   const alreadyInserted = ledger.db.prepare(`SELECT 1 AS present FROM normalized_listings
     WHERE snapshot_id = ? AND normalization_version = ?`);
+  const existingTargetCount = Number(ledger.db.prepare(`SELECT COUNT(*) AS value FROM normalized_listings
+    WHERE normalization_version = ?`).get(versions.normalizationVersion)?.value || 0);
+  const latestNormalization = ledger.db.prepare(`SELECT * FROM normalized_listings
+    WHERE snapshot_id = ? ORDER BY normalization_version DESC, id DESC LIMIT 1`);
+  const normalizationItems = ledger.db.prepare(`SELECT * FROM listing_items
+    WHERE normalized_listing_id = ? ORDER BY item_index`);
+  const preserveHistoricalNormalization = (snapshotId) => {
+    const previous = latestNormalization.get(snapshotId);
+    if (!previous) throw new Error(`HISTORICAL_SOURCE_NORMALIZATION_MISSING:${snapshotId}`);
+    const historicalReason = "HISTORICAL_INACTIVE_SOURCE";
+    return {
+      normalizationVersion: versions.normalizationVersion,
+      canonicalProductId: previous.canonical_product_id,
+      canonicalDisplayName: previous.canonical_display_name,
+      categoryCode: previous.category_code,
+      marketSegment: previous.market_segment,
+      listingType: previous.listing_type,
+      conditionGroup: previous.condition_group,
+      specGroupId: previous.spec_group_id,
+      classificationConfidence: previous.classification_confidence,
+      modelConfidence: previous.model_confidence,
+      quantityConfidence: previous.quantity_confidence,
+      priceScopeConfidence: previous.price_scope_confidence,
+      statisticsEligible: false,
+      statisticsExclusionReasons: [...new Set([
+        ...parseJson(previous.statistics_exclusion_reasons_json, []), historicalReason
+      ])],
+      listingKind: previous.listing_kind,
+      quantity: previous.quantity,
+      priceScope: previous.price_scope,
+      conditionCode: previous.condition_code,
+      marketPool: previous.market_pool,
+      exactProduct: previous.exact_product === 1,
+      priceEligible: false,
+      exclusionReasons: [...new Set([...parseJson(previous.exclusion_reasons_json, []), historicalReason])],
+      confidence: parseJson(previous.confidence_json, {}),
+      evidence: parseJson(previous.evidence_json, {}),
+      items: normalizationItems.all(previous.id).map((item) => ({
+        canonicalProductId: item.canonical_product_id,
+        quantity: item.quantity,
+        unitPrice: item.unit_price,
+        totalPrice: item.total_price,
+        spec: parseJson(item.spec_json, {})
+      }))
+    };
+  };
   let afterId = 0;
   let scanned = 0;
   let eligible = 0;
   let inserted = 0;
   let skipped = 0;
+  let historicalInactiveSource = 0;
+  const motherboardAudit = {
+    scanned: 0,
+    exact_model_matches: {},
+    exact_model_match_count: 0,
+    unidentified_count: 0,
+    variant_or_manufacturer_conflict_count: 0,
+    accessory_or_bundle_blocked_count: 0,
+    previous_facet_statistics_member_count: 0,
+    next_facet_statistics_member_count: 0,
+    next_exact_statistics_member_count: 0
+  };
 
   while (scanned < limit) {
     const rows = readBatch.all(afterId, Math.min(batchSize, limit - scanned));
@@ -120,12 +196,40 @@ export function reclassifyPcSnapshots({ ledger, pipeline, versions, versionKey =
     for (const row of rows) {
       afterId = Number(row.snapshot_id);
       scanned += 1;
-      if (alreadyInserted.get(row.snapshot_id, versions.normalizationVersion)) {
+      if (existingTargetCount > 0 && alreadyInserted.get(row.snapshot_id, versions.normalizationVersion)) {
         skipped += 1;
         continue;
       }
       const item = snapshotItem(row);
-      const result = pipeline.normalizeItem(item, row.observed_at, versions);
+      const result = KNOWN_SOURCE_KEYS.has(row.source_id)
+        ? pipeline.normalizeItem(item, row.observed_at, versions, { reclassification: true })
+        : { normalized: preserveHistoricalNormalization(row.snapshot_id) };
+      const previous = latestNormalization.get(row.snapshot_id);
+      const next = result.normalized;
+      if (previous?.category_code === "MOTHERBOARD" || next.categoryCode === "MOTHERBOARD") {
+        motherboardAudit.scanned += 1;
+        const reasons = [...(next.statisticsExclusionReasons || []), ...(next.exclusionReasons || [])];
+        const exactId = next.exactProduct === true && String(next.canonicalProductId || "").startsWith("motherboard:")
+          ? next.canonicalProductId : null;
+        if (exactId) {
+          motherboardAudit.exact_model_matches[exactId] = (motherboardAudit.exact_model_matches[exactId] || 0) + 1;
+          motherboardAudit.exact_model_match_count += 1;
+        } else motherboardAudit.unidentified_count += 1;
+        if (reasons.some((reason) => ["MANUFACTURER_CONFLICT", "EXACT_MODEL_REQUIRED"].includes(reason))) {
+          motherboardAudit.variant_or_manufacturer_conflict_count += 1;
+        }
+        if (["ACCESSORY_ONLY", "COMPONENT_BUNDLE", "OPTION_AD", "FULL_SYSTEM"].includes(next.listingKind)) {
+          motherboardAudit.accessory_or_bundle_blocked_count += 1;
+        }
+        if (previous?.statistics_eligible === 1 && String(previous.canonical_product_id || "").startsWith("motherboard:platform:")) {
+          motherboardAudit.previous_facet_statistics_member_count += 1;
+        }
+        if (next.statisticsEligible === true && String(next.canonicalProductId || "").startsWith("motherboard:platform:")) {
+          motherboardAudit.next_facet_statistics_member_count += 1;
+        }
+        if (next.statisticsEligible === true && exactId) motherboardAudit.next_exact_statistics_member_count += 1;
+      }
+      if (!KNOWN_SOURCE_KEYS.has(row.source_id)) historicalInactiveSource += 1;
       eligible += 1;
       if (apply) {
         ledger.insertNormalization(row.snapshot_id, result.normalized, row.price_value, row.currency, versions);
@@ -140,10 +244,13 @@ export function reclassifyPcSnapshots({ ledger, pipeline, versions, versionKey =
     parser_version: versions.parserVersion,
     rule_version: versions.ruleVersion,
     filter_version: versions.filterVersion,
+    model_version: versions.modelVersion || null,
     scanned,
     eligible,
     inserted,
-    skipped
+    skipped,
+    historical_inactive_source: historicalInactiveSource,
+    motherboard_dry_run: motherboardAudit
   };
 }
 
@@ -158,8 +265,12 @@ async function main(argv) {
     normalizationVersion: Number(requiredOption(argv, "--normalization-version")),
     parserVersion: requiredOption(argv, "--parser-version"),
     ruleVersion: requiredOption(argv, "--rule-version"),
-    filterVersion: requiredOption(argv, "--filter-version")
+    filterVersion: requiredOption(argv, "--filter-version"),
+    modelVersion: requiredOption(argv, "--model-version")
   };
+  if (!/^pc-master-v[0-9]+(?:-[a-z0-9-]+)?$/iu.test(versions.modelVersion)) {
+    throw new Error("--model-version must be a scoped pc-master version label");
+  }
   const versionKey = String(option(argv, "--version-key") || `pc-normalization-v${versions.normalizationVersion}`).trim();
   if (!/^pc-normalization-v[0-9]+(?:-[a-z0-9-]+)?$/iu.test(versionKey)) {
     throw new Error("--version-key must be a scoped pc-normalization version key");
@@ -181,24 +292,24 @@ async function main(argv) {
     return;
   }
 
-  const index = new SearchIndex({ filePath, backupDir: path.join(path.dirname(filePath), "backups") });
+  const db = new DatabaseSync(filePath);
+  const ledger = new PcPartsLedger({ db });
   try {
-    const backup = index.createBackup();
-    if (!backup) throw new Error("A recovery backup is required before reclassification");
-    const ledger = new PcPartsLedger({ db: index.db });
+    const backup = createRecoveryBackup(db, filePath);
+    ledger.migrate();
     const pipeline = new PcShadowPipeline({ ledger });
-    index.db.exec("BEGIN IMMEDIATE");
+    db.exec("BEGIN IMMEDIATE");
     try {
       const result = reclassifyPcSnapshots({ ledger, pipeline, versions, versionKey, apply: true, limit });
       const audit = ledger.runIntegrityAudit();
-      index.db.exec("COMMIT");
+      db.exec("COMMIT");
       console.log(JSON.stringify({ ...result, backup, integrity_audit: audit }, null, 2));
     } catch (error) {
-      index.db.exec("ROLLBACK");
+      db.exec("ROLLBACK");
       throw error;
     }
   } finally {
-    index.close();
+    db.close();
   }
 }
 

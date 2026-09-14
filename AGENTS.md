@@ -7,3 +7,4 @@ Read `README.md` and `used_market_gemini_cli_full_docs/SETUP.md` first.
 - Never commit `.env`, credentials, tokens, private keys, browser profiles, generated results, backups, HAR files, or deployment probe output.
 - Run the deterministic tests before committing. Run `scripts/verify.ps1` or `scripts/verify.sh` when a change affects repository packaging.
 - Treat live marketplace tests and production deployments as explicit operator actions; deterministic tests must not require production credentials.
+- Always apply the global skill `external-ai-orchestrator` when selecting or running external AI accounts, direct CLI/roster agents, or agent-driven browser verification. Keep provider, quota, CLI, browser, and failure-handling details in that skill rather than duplicating them here.

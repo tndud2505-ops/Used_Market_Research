@@ -28,9 +28,11 @@
 - 그래프: 실제 관측값과 수동 seed 분리, 2개 이상 관측일 전에는 추세 보류
 - PC 전용 계층: `pc_parts_v1` 검색 projection과 AWS SQLite 원장에 원본·상태·제품 master·30일 통계를 분리 저장한다.
 - PC 기본 UX: 사전수집형 제품 디렉터리다. 공개 catalog·products·listings 조회는 원 사이트 수집을 실행하지 않으며, 부품군·규격/용량·제조사·정확 모델 순으로 내부 publication을 탐색한다.
-- PC 제품 master: Intel 6세대·Ryzen 1000·GTX 900 이후를 포함한 V2 760개 디렉터리 노드다. GPU 칩 제조사와 보드 제조사는 별도 역할로 저장하며 RAM·SSD·HDD 등은 제조사별 탐색 노드를 제공한다.
+- PC 제품 master: Intel 6세대·Ryzen 1000·GTX 900 이후를 포함한 V3 828개 디렉터리 노드다. 공개 7개 부품군은 702개 모델이며 SSD 70개·HDD 40개·PSU 84개는 제조사와 연속 용량/정격출력 구간의 곱으로만 식별한다. GPU 칩 제조사와 보드 제조사는 별도 역할로 저장한다.
 - PC 수집 주기: 승인된 소스 스크립트를 AWS Runner에서 매시간 분할 실행하고, 일별 가격 통계는 03:00 KST에 확정한다. 사용자 화면 요청은 수집 target을 만들거나 실행하지 않는다.
 - 가격 의미: 판매완료는 명시적 SOLD만 인정하고, 통계에는 실제 체결가가 아닌 `sold_last_ask_price`를 사용한다. 기존 검색 `price_history`는 legacy read-only다.
+- 메인보드 가격 의미: B550 같은 칩셋과 제조사·플랫폼 facet은 검색 조건일 뿐 통계 identity가 아니다. 기준가격과 저가 판정은 `pc-master-v4`의 검증된 정확 모델 `PRODUCT`에만 제공하고, 미확인 모델은 `EXACT_MODEL_REQUIRED`로 검색 결과에만 유지한다.
+- 과거 가격 조회: 요청 `as_of`가 저장된 통계 창과 일치할 때만 반환한다. 보존되지 않은 과거 창은 현재 통계로 가장하지 않고 명시적 unavailable 응답을 낸다.
 - 전문 소스: 다나와·쿨엔조이는 adapter/fixture만 준비하며 최신 정책 확인과 운영자 활성화 전에는 호출하지 않는다.
 
 ## 위험 경계

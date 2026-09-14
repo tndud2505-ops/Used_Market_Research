@@ -1,4 +1,11 @@
 import { explicitSoldText } from "./listing-lifecycle.mjs";
+import {
+  PC_UNCLASSIFIED_MANUFACTURER_V3,
+  pcAggregateProductIdV3,
+  pcPsuWattsBucketV3,
+  pcStorageCapacityBucketV3
+} from "../data/pc-product-master-v2.mjs";
+import { resolveMotherboardDirectoryNode } from "./pc-public-catalog.mjs";
 
 const CONDITION_EXCLUSIONS = Object.freeze({
   BROKEN: 'BROKEN',
@@ -100,7 +107,24 @@ function detectSpecialKind(text, evidence, title = text) {
     addEvidence(evidence, 'listing_kind', box.matchedText, 'BOX_ONLY');
     return 'BOX_ONLY';
   }
-  const accessory = firstMatch(text, /본품\s*(?:없음|없이).*(?:쿨러|방열판)|(?:RTX|GTX|RX\s*\d{4}|그래픽\s*카드|\bGPU\b).{0,30}(?:쿨러|방열판)만\s*판매|(?:RTX|GTX|RX)\s*\d{3,4}.{0,30}(?:키캡|브라켓|백플레이트|지지대)(?=$|[\s,.)])/iu);
+  const storageEnclosure = firstMatch(text, /(?:(?:SSD|HDD|NVMe|M\.2|하드\s*디스크).{0,35}(?:외장\s*)?(?:케이스|인클로저|enclosure)|(?:외장\s*)?(?:케이스|인클로저|enclosure).{0,35}(?:SSD|HDD|NVMe|M\.2|하드\s*디스크))/iu);
+  const storageEnclosureCombination = /(?:SSD|HDD|하드\s*디스크).{0,50}\+.{0,30}(?:외장\s*)?케이스|(?:외장\s*)?케이스.{0,30}\+.{0,50}(?:SSD|HDD|하드\s*디스크)/iu.test(title);
+  if (storageEnclosure && !storageEnclosureCombination) {
+    addEvidence(evidence, 'listing_kind', storageEnclosure.matchedText, 'ACCESSORY_ONLY');
+    return 'ACCESSORY_ONLY';
+  }
+  const psuCable = firstMatch(text, /(?:(?:PSU|power\s*supply|파워\s*(?:서플라이)?).{0,25}케이블|케이블.{0,25}(?:PSU|power\s*supply|파워\s*(?:서플라이)?))/iu);
+  if (psuCable && !/(?:케이블.{0,10}(?:없음|누락|미포함|포함|완비|있음)|(?:없음|누락|미포함|포함|완비|있음).{0,10}케이블)/iu.test(text)) {
+    addEvidence(evidence, 'listing_kind', psuCable.matchedText, 'ACCESSORY_ONLY');
+    return 'ACCESSORY_ONLY';
+  }
+  const motherboardIoAccessory = firstMatch(title, /(?:(?:I\/?O|IO)\s*(?:실드|쉴드|패널|SHIELD)|백패널)/iu);
+  const motherboardIoIncluded = /(?:(?:I\/?O|IO)\s*(?:실드|쉴드|패널|SHIELD)|백패널).{0,12}(?:포함|동봉|있음|드립니다)|(?:포함|동봉|있음).{0,12}(?:(?:I\/?O|IO)\s*(?:실드|쉴드|패널|SHIELD)|백패널)/iu.test(text);
+  if (motherboardIoAccessory && !motherboardIoIncluded) {
+    addEvidence(evidence, 'listing_kind', motherboardIoAccessory.matchedText, 'ACCESSORY_ONLY');
+    return 'ACCESSORY_ONLY';
+  }
+  const accessory = firstMatch(text, /본품\s*(?:없음|없이).*(?:쿨러|방열판)|(?:(?:SSD|HDD|NVMe|M\.2).{0,30}(?:방열판|히트\s*싱크|heat\s*sink|heatsink)|(?:방열판|히트\s*싱크|heat\s*sink|heatsink).{0,30}(?:SSD|HDD|NVMe|M\.2)).{0,20}(?:only|만|지원|호환|전용)|(?:RTX|GTX|RX\s*\d{4}|그래픽\s*카드|\bGPU\b).{0,30}(?:쿨러|방열판)만\s*판매|(?:RTX|GTX|RX)\s*\d{3,4}.{0,30}(?:키캡|브라켓|백플레이트|지지대)(?=$|[\s,.)])/iu);
   if (accessory) {
     addEvidence(evidence, 'listing_kind', accessory.matchedText, 'ACCESSORY_ONLY');
     return 'ACCESSORY_ONLY';
@@ -204,10 +228,13 @@ function detectSpecialKind(text, evidence, title = text) {
     && !/(?:에서|으로)\s*(?:테스트|사용)|호환|장착\s*테스트/iu.test(title);
   const multiComponentBundle = componentGroups.size >= 2
     && /(?:\+|\/|[&＆]|와\s|과\s|,|일괄|묶음|세트|셋트|셋(?:\s|$)|포함)/i.test(title);
+  const storagePsuBundle = componentGroups.has('STORAGE') && componentGroups.has('PSU')
+    && !/(?:호환|지원|테스트|장착\s*확인|사용\s*가능)/iu.test(title);
+  const mixedStorageBundle = /\bSSD\b/iu.test(title) && /(?:\bHDD\b|하드\s*디스크|하드디스크)/iu.test(title);
   const storageEnclosureBundle = /(?:SSD|HDD|하드\s*디스크).{0,50}\+.{0,30}(?:외장\s*)?케이스|(?:외장\s*)?케이스.{0,30}\+.{0,50}(?:SSD|HDD|하드\s*디스크)/iu.test(title);
   const gpuCoolingBundle = /(?:RTX|GTX|RX\s*\d{4}|그래픽\s*카드).{0,50}(?:(?:워터\s*(?:블록|보드)|WATER\s*BLOCK).{0,20}포함|(?:수랭\s*)?쿨러\s*포함|\bEGPU\b)|\bEGPU\b.{0,40}(?:RTX|GTX|RX\s*\d{4})/iu.test(text);
   const componentBundle = explicitComponentBundle || cpuBoardBundle || cpuGpuBundle
-    || storageEnclosureBundle || gpuCoolingBundle || distinctGpuModels.size >= 2 || multiComponentBundle;
+    || storageEnclosureBundle || storagePsuBundle || mixedStorageBundle || gpuCoolingBundle || distinctGpuModels.size >= 2 || multiComponentBundle;
   if (componentBundle) {
     addEvidence(evidence, 'listing_kind', componentBundle.matchedText || [...componentGroups].join('+'), 'COMPONENT_BUNDLE');
     return 'COMPONENT_BUNDLE';
@@ -246,12 +273,12 @@ function detectCategory(text, specialKind, evidence) {
   const rules = [
     ['COOLING', /(?:CPU\s*(?:공랭|수랭)?\s*쿨러(?!\s*(?:별도|제외|없음|미포함))|공랭\s*쿨러|수랭\s*쿨러|케이스\s*팬|(?:120|240|280|360|420)\s*(?:MM\s*)?수랭|NH-D15)/i],
     ['GPU', /(?:RTX\s*\d{4}|GTX\s*\d{3,4}|\bGT\s*\d{3,4}|RX\s*\d{3,4}|(?:INTEL\s*)?ARC\s*[AB]\d{3}|\b[5-9]\d{3}\s*XT[X]?\b|\b(?:30[5-9]0|40[5-9]0|50[5-9]0)(?:\s*TI)?(?:\s*SUPER)?\b|그래픽\s*카드|그래픽카드|\bGPU\b|지포스|라데온)/i],
+    ['SSD', /(?:\bSSD\b|NVMe|M\.2|\b(?:8[67]0|9(?:70|80|90))\s*(?:EVO(?:\s*PLUS)?|QVO|PRO)\b|(?:Samsung|삼성).{0,20}\b(?:870|980|(?:PM|SM)\d[A-Z0-9]+)\b|(?:SK\s*hynix|하이닉스).{0,20}\bP(?:31|41)\b|\bSN\d{3,4}X?\b)/i],
+    ['HDD', /(?:\bHDD\b|하드\s*디스크|하드디스크|(?:WD|Western\s*Digital)\s*(?:Blue|Black|Red(?:\s*Plus)?|Purple|Gold)|IronWolf|Barracuda|Exos|Ultrastar|아이언울프|바라쿠다|\bST[A-Z0-9]{8,}\b|N300|(?:Toshiba.{0,20})?X300(?=.{0,20}\d+(?:\.\d+)?\s*(?:TB|테라)))/i],
     ['RAM', /(?:DDR[345]|\bRAM\b|메모리|서버램|삼성램|\d+\s*(?:GB|G|기가).*(?:램|두\s*장|\d+장|(?:\d+|한|두|세|네)\s*개))/i],
     ['MOTHERBOARD', /(?:메인\s*보드|메인보드|MOTHERBOARD|\bB[45678]\d{2}M?\b|\b(?:A?X|X)[3-8]\d{2}[A-Z]*\b)/i],
     ['CPU', /(?:\bCPU\b|라이젠|RYZEN|인텔\s*(?:코어)?|\bI[3579]\s*(?:[-~]\s*)?\d{4,5}(?:KF|KS|HX|K|F|H|U|T)?(?=\b|CPU)|\b\d{4,5}X(?:3D)?\b|\b1[2345]\d{3}K[F]?\b)/i],
-    ['SSD', /(?:\bSSD\b|NVMe|M\.2|\b9(?:70|80|90)\s*PRO\b)/i],
-    ['HDD', /(?:\bHDD\b|하드\s*디스크|하드디스크|WD\s*Blue)/i],
-    ['PSU', /(?:\bPSU\b|파워\s*(?:서플라이)?|RM\d{3,4}X?|GX-\d{3,4}|ATX\s*3\.0)/i],
+    ['PSU', /(?:\bPSU\b|power\s*supply|파워\s*(?:서플라이)?|\b(?:RM|HX|AX|TX|CX|CV|SF)\d{3,4}(?:X|I|M)?\b|GX-\d{3,4}|ATX\s*3\.0|(?:정격|피크)\s*\d{3,4}\s*W\b|(?:Classic\s*II|클래식\s*2|HYDRO\s*PRO|하이드로\s*프로|LEADEX|리덱스).{0,20}\d{3,4}\s*W?\b|(?:Seasonic|시소닉|Corsair|커세어|FSP|Super\s*Flower|슈퍼플라워|Micronics|마이크로닉스|Cooler\s*Master|쿨러마스터|Thermaltake|써멀테이크|Antec|안텍).{0,30}\d{3,4}\s*W\b)/i],
     ['CASE', /(?:PC\s*케이스|컴퓨터\s*케이스|Fractal\s+Design\s+North)/i],
     ['EXPANSION_CARD', /(?:확장\s*카드|확장카드|랜\s*카드|랜카드|사운드\s*카드|캡처\s*보드|XG-C100C)/i],
     ['ODD', /(?:\bODD\b|DVD\s*(?:ROM|라이터)?|블루레이\s*드라이브|GP60NB50)/i]
@@ -294,8 +321,10 @@ function gpuModel(text) {
 }
 
 function capacity(text) {
-  const match = text.match(/\b(\d+(?:\.\d+)?)\s*(TB|GB)\b/i);
-  return match ? { label: `${match[1]}${match[2].toUpperCase()}`, matchedText: match[0] } : null;
+  const match = text.match(/(?:^|[^0-9.])(\d+(?:\.\d+)?)\s*(TB|GB|테라(?:바이트)?)(?=$|[^A-Z가-힣]|(?:와|과|을|를|이|가|은|는|의)(?=\s|$))/iu);
+  if (!match) return null;
+  const unit = /^테라/iu.test(match[2]) ? "TB" : match[2].toUpperCase();
+  return { label: `${match[1]}${unit}`, matchedText: match[0].trim() };
 }
 
 const CATEGORY_MANUFACTURER_PATTERNS = Object.freeze({
@@ -310,22 +339,23 @@ const CATEGORY_MANUFACTURER_PATTERNS = Object.freeze({
     ["MSI", /\bMSI\b/iu], ["ASRock", /(?:\bASRock\b|애즈락|아스락)/iu], ["Biostar", /(?:\bBiostar\b|바이오스타)/iu]
   ],
   SSD: [
-    ["Samsung", /(?:\bSamsung\b|삼성전자|삼성\s*SSD|삼성)/iu], ["SK hynix", /(?:\bSK\s*hynix\b|하이닉스)/iu],
+    ["Samsung", /(?:\bSamsung\b|삼성전자|삼성\s*SSD|삼성|\b(?:970|980|990)\s*PRO\b|\b(?:PM|SM)\d[A-Z0-9]+\b)/iu], ["SK hynix", /(?:\bSK\s*hynix\b|하이닉스)/iu],
     ["Solidigm", /(?:\bSolidigm\b|솔리다임)/iu], ["Crucial", /(?:\bCrucial\b|크루셜)/iu],
-    ["Western Digital", /(?:\bWestern\s*Digital\b|\bWD\b)/iu], ["SanDisk", /(?:\bSanDisk\b|샌디스크)/iu],
+    ["Western Digital", /(?:\bWestern\s*Digital\b|\bWD\b|\bSN\d{3,4}X?\b)/iu], ["SanDisk", /(?:\bSanDisk\b|샌디스크)/iu],
     ["Kingston", /(?:\bKingston\b|킹스톤)/iu], ["Seagate", /(?:\bSeagate\b|씨게이트)/iu],
     ["Kioxia", /(?:\bKioxia\b|키옥시아)/iu]
   ],
   HDD: [
     ["Western Digital", /(?:\bWestern\s*Digital\b|\bWD\b)/iu], ["Seagate", /(?:\bSeagate\b|씨게이트)/iu],
+    ["Seagate", /(?:\b(?:IronWolf|Barracuda|Exos|ST[A-Z0-9]{8,})\b|아이언울프|바라쿠다)/iu],
     ["Toshiba", /(?:\bToshiba\b|도시바)/iu]
   ],
   PSU: [
-    ["Seasonic", /(?:\bSeasonic\b|시소닉)/iu], ["Corsair", /(?:\bCorsair\b|커세어)/iu], ["FSP", /\bFSP\b/iu],
-    ["Super Flower", /(?:\bSuper\s*Flower\b|슈퍼플라워)/iu], ["Cooler Master", /(?:\bCooler\s*Master\b|쿨러마스터)/iu],
+    ["Seasonic", /(?:\bSeasonic\b|시소닉|\bGX[- ]?\d{3,4}\b)/iu], ["Corsair", /(?:\bCorsair\b|커세어|\b(?:RM|HX|AX|TX|CX|CV|SF)\d{3,4}(?:X|I|M)?\b)/iu], ["FSP", /(?:\bFSP\b|HYDRO\s*PRO|하이드로\s*프로)/iu],
+    ["Super Flower", /(?:\bSuper\s*Flower\b|슈퍼플라워|LEADEX|리덱스)/iu], ["Cooler Master", /(?:\bCooler\s*Master\b|쿨러마스터)/iu],
     ["ASUS", /(?:\bASUS\b|에이수스|아수스)/iu], ["MSI", /\bMSI\b/iu],
     ["Thermaltake", /(?:\bThermaltake\b|써멀테이크)/iu], ["be quiet!", /\bbe\s*quiet!?\b/iu],
-    ["Antec", /(?:\bAntec\b|안텍)/iu], ["Micronics", /(?:\bMicronics\b|마이크로닉스)/iu]
+    ["Antec", /(?:\bAntec\b|안텍)/iu], ["Micronics", /(?:\bMicronics\b|마이크로닉스|Classic\s*II|클래식\s*2)/iu]
   ],
   COOLING: [
     ["Noctua", /(?:\bNoctua\b|녹투아)/iu], ["Cooler Master", /(?:\bCooler\s*Master\b|쿨러마스터)/iu],
@@ -368,31 +398,42 @@ export function detectPcPartManufacturer(value, category) {
 }
 
 function storageCapacityGb(text) {
-  const values = [...text.matchAll(/\b(\d+(?:\.\d+)?)\s*(TB|GB)\b/giu)]
-    .map((match) => Number(match[1]) * (match[2].toUpperCase() === 'TB' ? 1000 : 1))
+  const values = [...text.matchAll(/(?:^|[^0-9.])(\d+(?:\.\d+)?)\s*(TB|GB|테라(?:바이트)?)(?=$|[^A-Z가-힣]|(?:와|과|을|를|이|가|은|는|의)(?=\s|$))/giu)]
+    .map((match) => Number(match[1]) * (/^(?:TB|테라)/iu.test(match[2]) ? 1000 : 1))
     .filter((value) => Number.isFinite(value) && value > 0);
   const uniqueValues = [...new Set(values)];
   return uniqueValues.length === 1 ? uniqueValues[0] : null;
 }
 
 function storageBucketModel(category, manufacturer, text) {
-  if (!manufacturer) return null;
   const capacityGb = storageCapacityGb(text);
   if (!capacityGb) return null;
-  const buckets = category === 'SSD' ? [
-    [capacityGb <= 256, 'SSD up to 256GB'], [capacityGb >= 480 && capacityGb <= 512, 'SSD 480-512GB'],
-    [capacityGb >= 960 && capacityGb <= 1024, 'SSD 960GB-1TB'], [capacityGb >= 1920 && capacityGb <= 2048, 'SSD 1.92-2TB'],
-    [capacityGb >= 3840 && capacityGb <= 4096, 'SSD 3.84-4TB'], [capacityGb >= 7680 && capacityGb <= 8192, 'SSD 7.68-8TB'],
-    [capacityGb > 8192, 'SSD over 8TB']
-  ] : [
-    [capacityGb <= 1000, 'HDD up to 1TB'], [capacityGb >= 1900 && capacityGb <= 2100, 'HDD 2TB'],
-    [capacityGb >= 2900 && capacityGb <= 4100, 'HDD 3-4TB'], [capacityGb >= 4900 && capacityGb <= 6100, 'HDD 5-6TB'],
-    [capacityGb >= 7900 && capacityGb <= 8100, 'HDD 8TB'], [capacityGb >= 9900 && capacityGb <= 12100, 'HDD 10-12TB'],
-    [capacityGb >= 13900 && capacityGb <= 16100, 'HDD 14-16TB'], [capacityGb >= 17900 && capacityGb <= 20100, 'HDD 18-20TB'],
-    [capacityGb >= 21900 && capacityGb <= 24100, 'HDD 22-24TB'], [capacityGb >= 25900, 'HDD 26TB or more']
-  ];
-  const bucket = buckets.find(([matched]) => matched)?.[1];
-  return bucket ? `${manufacturer} ${bucket}` : null;
+  const bucket = pcStorageCapacityBucketV3(category, capacityGb);
+  return bucket ? `${manufacturer || PC_UNCLASSIFIED_MANUFACTURER_V3} ${category} ${bucket}` : null;
+}
+
+function ratedPsuWatts(text) {
+  const wattTokens = [...text.matchAll(/(\d{1,4}(?:\.\d+)?)\s*(KW|W)\b/giu)].map((match) => ({
+    matchedText: match[0],
+    index: match.index,
+    watts: Number(match[1]) * (match[2].toUpperCase() === "KW" ? 1000 : 1)
+  })).filter((match) => Number.isInteger(match.watts) && match.watts >= 100 && match.watts <= 5000);
+  const explicitlyRated = wattTokens.filter((match) => /정격\s*$/iu.test(text.slice(Math.max(0, match.index - 8), match.index)));
+  const ratedValues = [...new Set(explicitlyRated.map((match) => match.watts))];
+  if (ratedValues.length === 1) return ratedValues[0];
+  if (ratedValues.length > 1) return null;
+  const candidates = wattTokens.filter((match) => {
+    const before = text.slice(Math.max(0, match.index - 10), match.index);
+    const after = text.slice(match.index + match.matchedText.length, match.index + match.matchedText.length + 10);
+    return !/(?:최대\s*(?:출력)?|피크|MAXIMUM|PEAK|^(?:MAX)|(?:OUTPUT|POWER)\s+MAX)\s*$/iu.test(before)
+      && !/^\s*(?:최대\s*(?:출력)?|피크|MAX(?:IMUM)?\b|PEAK\b)/iu.test(after);
+  });
+  const values = [...new Set(candidates.map((match) => match.watts))];
+  if (values.length === 1) return values[0];
+  if (values.length > 1) return null;
+  if (wattTokens.length > 0) return null;
+  const namedModel = text.match(/(?:\b(?:RM|HX|AX|TX|CX|CV|SF)(\d{3,4})(?:X|I|M)?\b|\bGX[- ]?(\d{3,4})\b|(?:Classic\s*II|클래식\s*2|HYDRO\s*PRO|하이드로\s*프로|LEADEX|리덱스).{0,20}\b(\d{3,4})\b)/iu);
+  return namedModel ? Number(namedModel[1] || namedModel[2] || namedModel[3]) : null;
 }
 
 function detectModel(text, category, specialKind, evidence, quantityResult = {}, manufacturer = null) {
@@ -434,34 +475,20 @@ function detectModel(text, category, specialKind, evidence, quantityResult = {},
     if (boardModel) result = { model: boardModel[0].toUpperCase(), matchedText: boardModel[0] };
   }
   if (category === 'SSD') {
-    const exactModel = text.match(/\b(980|990)\s*PRO\b/i);
-    const driveCapacity = capacity(text);
-    if (exactModel && driveCapacity) {
-      result = { model: `${exactModel[1]} PRO ${driveCapacity.label}`, matchedText: `${exactModel[0]} ${driveCapacity.matchedText}` };
-    } else {
-      const model = storageBucketModel('SSD', manufacturer, text);
-      if (model) result = { model, matchedText: model };
-    }
+    const model = storageBucketModel('SSD', manufacturer, text);
+    if (model) result = { model, matchedText: model };
   }
   if (category === 'HDD') {
-    const wdBlue = text.match(/\b(?:WD|Western\s*Digital)\s*Blue\b/i);
-    const driveCapacity = capacity(text);
-    if (wdBlue && driveCapacity) {
-      result = { model: `WD BLUE ${driveCapacity.label}`, matchedText: `${wdBlue[0]} ${driveCapacity.matchedText}` };
-    } else {
-      const model = storageBucketModel('HDD', manufacturer, text);
-      if (model) result = { model, matchedText: model };
-    }
+    const model = storageBucketModel('HDD', manufacturer, text);
+    if (model) result = { model, matchedText: model };
   }
   if (category === 'PSU') {
-    const gx = text.match(/\bGX[- ]?(\d{3,4})\b/i);
-    const rm = text.match(/\bRM(\d{3,4})X\b/i);
-    const formFactor = /\bSFX-?L\b/i.test(text) ? 'SFX-L'
-      : /\bSFX\b|\bSF\d{3,4}\b/i.test(text) ? 'SFX'
-        : /\bATX\b|\bPSU\b|power\s*supply|파워/iu.test(text) ? 'ATX' : null;
-    if (gx) result = { model: `GX-${gx[1]} ${gx[1]}W`, matchedText: gx[0] };
-    else if (rm) result = { model: `RM${rm[1]}X ${rm[1]}W`, matchedText: rm[0] };
-    else if (manufacturer && formFactor) result = { model: `${manufacturer} ${formFactor} Power Supply`, matchedText: `${manufacturer} ${formFactor}` };
+    const watts = ratedPsuWatts(text);
+    const bucket = pcPsuWattsBucketV3(watts);
+    if (bucket) {
+      const model = `${manufacturer || PC_UNCLASSIFIED_MANUFACTURER_V3} Power Supply ${bucket}`;
+      result = { model, matchedText: model };
+    }
   }
   if (category === 'CASE') {
     const match = text.match(/Fractal\s+Design\s+North/i);
@@ -817,13 +844,14 @@ function publicCategoryCode(category, text, listingKind) {
     if (/(?:메인\s*보드|메인보드|\bB[45678]\d{2}M?\b)/iu.test(text)) candidates.push('MOTHERBOARD');
     if (/(?:\bSSD\b|NVMe|M\.2)/iu.test(text)) candidates.push('SSD');
     if (/(?:\bHDD\b|하드\s*디스크|하드디스크)/iu.test(text)) candidates.push('HDD');
-    if (/(?:\bPSU\b|파워\s*(?:서플라이)?|\d{3,4}\s*W\b)/iu.test(text)) candidates.push('PSU');
+    if (/(?:\bPSU\b|power\s*supply|파워\s*(?:서플라이)?|\d{3,4}\s*W\b)/iu.test(text)) candidates.push('PSU');
     return [...new Set(candidates)].length === 1 ? candidates[0] : 'UNSUPPORTED_CATEGORY';
   }
   return 'UNSUPPORTED_CATEGORY';
 }
 
 function publicMarketSegment(text, category) {
+  if (category === 'SSD' || category === 'HDD') return 'CONSUMER_DESKTOP';
   if (/(?:노트북|NOTEBOOK|LAPTOP|SO-DIMM|SODIMM)/iu.test(text)) return 'LAPTOP';
   if (/(?:서버|SERVER|XEON|EPYC|THREADRIPPER|RDIMM|LRDIMM)/iu.test(text)) return 'SERVER_ENTERPRISE';
   if (/(?:워크스테이션|WORKSTATION)/iu.test(text)) return 'WORKSTATION';
@@ -853,20 +881,40 @@ function publicChipVendor(category, model, text) {
   return 'NVIDIA';
 }
 
-function publicCanonicalProductId(category, model, text, marketSegment) {
-  if (!PUBLIC_CATEGORY_CODES.has(category) || !model || marketSegment !== 'CONSUMER_DESKTOP') return null;
+function publicCanonicalProductId(category, model, text, marketSegment, base = {}, fields = {}, motherboardResolution = null) {
+  if (!PUBLIC_CATEGORY_CODES.has(category) || (!model && category !== 'MOTHERBOARD') || marketSegment !== 'CONSUMER_DESKTOP') return null;
+  if (category === 'MOTHERBOARD') return motherboardResolution?.product?.id || null;
+  if (category === 'SSD' || category === 'HDD') {
+    return pcAggregateProductIdV3({
+      category,
+      manufacturer: base.manufacturer || PC_UNCLASSIFIED_MANUFACTURER_V3,
+      capacityGb: fields.marketed_capacity_gb
+    });
+  }
+  if (category === 'PSU') {
+    return pcAggregateProductIdV3({
+      category,
+      manufacturer: base.manufacturer || PC_UNCLASSIFIED_MANUFACTURER_V3,
+      ratedWatts: fields.rated_wattage
+    });
+  }
   const slug = model.toLowerCase().replace(/[^a-z0-9]+/gu, '-').replace(/^-|-$/gu, '');
   if (category === 'GPU') return `gpu:${publicChipVendor(category, model, text).toLowerCase()}:${slug}`;
   if (category === 'CPU') return `cpu:${/라이젠|RYZEN|AMD/iu.test(text) ? 'amd' : 'intel'}:${slug}`;
   return `${category.toLowerCase()}:spec:${slug}`;
 }
 
-function publicSpecGroupId(category, model, text, marketSegment) {
-  const id = publicCanonicalProductId(category, model, text, marketSegment);
+function publicSpecGroupId(category, model, text, marketSegment, base = {}, fields = {}) {
+  if (category === 'MOTHERBOARD') {
+    const chipset = fields.chipset?.toLowerCase();
+    const platform = /^(?:A320|B350|X370|B450|X470|A520|B550|X570|A620|B650|X670|B840|B850|X870)$/u.test(fields.chipset || '') ? 'amd' : 'intel';
+    return chipset ? `MOTHERBOARD:SPEC:chipset:${platform}:${chipset}:${marketSegment}` : null;
+  }
+  const id = publicCanonicalProductId(category, model, text, marketSegment, base, fields);
   return id ? `${category}:SPEC:${id}:${marketSegment}` : null;
 }
 
-function publicSpecificFields(category, model, text, base) {
+function publicSpecificFields(category, model, text, base, motherboardProduct = null) {
   const fields = {};
   if (category === 'GPU') {
     fields.chip_vendor = publicChipVendor(category, model, text);
@@ -896,21 +944,28 @@ function publicSpecificFields(category, model, text, base) {
           : chipsetToken && /^(?:H610|B660|Z690|B760|Z790|H810|B860|Z890)$/u.test(chipsetToken) ? 'LGA1700' : null);
     fields.chipset = chipsetToken;
     fields.form_factor = /(?:B[45678]\d{2}M|M-?ATX|MICRO-?ATX)/iu.test(text) ? 'M-ATX' : /ATX/iu.test(text) ? 'ATX' : null;
-    fields.exact_model = model;
+    fields.exact_model = motherboardProduct?.spec?.official_model || null;
     fields.memory_generation = /DDR5/iu.test(text) ? 'DDR5' : /DDR4/iu.test(text) ? 'DDR4' : /DDR3/iu.test(text) ? 'DDR3' : null;
     fields.wifi_variant = /WIFI|WI-FI|AX/iu.test(text) ? 'WIFI' : 'NONE';
+    if (motherboardProduct?.spec) {
+      for (const key of ['socket', 'chipset', 'form_factor', 'memory_generation', 'wifi_variant']) {
+        if (motherboardProduct.spec[key] !== undefined) fields[key] = motherboardProduct.spec[key];
+      }
+    }
   }
   if (category === 'SSD' || category === 'HDD') {
-    const storageCapacity = text.match(/\b(\d+(?:\.\d+)?)\s*(TB|GB)\b/iu);
-    fields.marketed_capacity_gb = storageCapacity ? Math.round(Number(storageCapacity[1]) * (storageCapacity[2].toUpperCase() === 'TB' ? 1000 : 1)) : null;
-    fields.form_factor = /2\.5|2,?5/iu.test(text) ? '2.5-inch' : /3\.5|3,?5/iu.test(text) ? '3.5-inch' : category === 'SSD' && /M\.2/iu.test(text) ? 'M.2' : null;
+    fields.marketed_capacity_gb = storageCapacityGb(text);
+    fields.capacity_bucket = pcStorageCapacityBucketV3(category, fields.marketed_capacity_gb);
+    fields.form_factor = /(?:^|[^0-9])2[.,]5\s*(?:INCH|인치|["″])/iu.test(text) ? '2.5-inch'
+      : /(?:^|[^0-9])3[.,]5\s*(?:INCH|인치|["″])/iu.test(text) ? '3.5-inch'
+        : category === 'SSD' && /M\.2/iu.test(text) ? 'M.2' : null;
     fields.interface = /SAS/iu.test(text) ? 'SAS' : /IDE/iu.test(text) ? 'IDE' : /SATA/iu.test(text) ? 'SATA' : /PCIe|NVMe/iu.test(text) ? 'PCIe' : null;
     if (category === 'SSD') fields.protocol = /SATA/iu.test(text) && !/NVMe/iu.test(text) ? 'SATA' : /NVMe/iu.test(text) ? 'NVMe' : null;
     if (category === 'HDD') fields.purpose = /NAS/iu.test(text) ? 'NAS' : /CCTV|감시/iu.test(text) ? 'CCTV_SURVEILLANCE' : /서버|ENTERPRISE|기업용/iu.test(text) ? 'ENTERPRISE' : /노트북|LAPTOP/iu.test(text) ? 'LAPTOP' : 'DESKTOP_PC';
   }
   if (category === 'PSU') {
-    const rated = text.match(/(?:정격\s*)?(\d{3,4})\s*W\b/iu);
-    fields.rated_wattage = rated && !/(?:최대|피크|MAX)/iu.test(rated[0]) ? Number(rated[1]) : null;
+    fields.rated_wattage = ratedPsuWatts(text);
+    fields.watts_bucket = pcPsuWattsBucketV3(fields.rated_wattage);
     fields.form_factor = /SFX-?L/iu.test(text) ? 'SFX-L' : /SFX/iu.test(text) ? 'SFX' : /ATX/iu.test(text) ? 'ATX' : null;
     fields.efficiency_rating = text.match(/80\s*PLUS(?:\s+(?:BRONZE|GOLD|PLATINUM|TITANIUM))?/iu)?.[0] || null;
     fields.modularity = /풀\s*모듈러|FULL\s*MODULAR/iu.test(text) ? 'FULL_MODULAR' : /세미\s*모듈러|SEMI\s*MODULAR/iu.test(text) ? 'SEMI_MODULAR' : null;
@@ -929,16 +984,22 @@ export function classifyPcPartListingPublic(input, options = {}) {
   const marketSegment = publicMarketSegment(text, category);
   const conditionGroup = publicConditionGroup(base.condition);
   const model = base.canonical_model;
-  const canonicalProductId = publicCanonicalProductId(category, model, text, marketSegment);
+  const motherboardResolution = category === 'MOTHERBOARD' && ['SINGLE', 'MULTI_SAME'].includes(listingType)
+    ? resolveMotherboardDirectoryNode(text) : null;
+  const exactMotherboardProduct = motherboardResolution?.product?.spec?.directory_node_type === 'PRODUCT'
+    ? motherboardResolution.product : null;
+  const fields = publicSpecificFields(category, model, text, base, exactMotherboardProduct);
+  const canonicalProductId = publicCanonicalProductId(category, model, text, marketSegment, base, fields, motherboardResolution);
   const exclusionReasons = unique([
     ...(base.exclusion_reasons || []),
     ...(category === 'UNSUPPORTED_CATEGORY' ? ['UNSUPPORTED_CATEGORY'] : []),
     ...(marketSegment !== 'CONSUMER_DESKTOP' ? ['MARKET_SEGMENT_OUT_OF_SCOPE'] : []),
     ...(!model && category !== 'UNSUPPORTED_CATEGORY' ? ['MODEL_AMBIGUOUS'] : []),
-    ...((category === 'PSU' && !publicSpecificFields(category, model, text, base).rated_wattage) ? ['RATED_WATTAGE_UNCONFIRMED'] : []),
+    ...((category === 'MOTHERBOARD' && ['SINGLE', 'MULTI_SAME'].includes(listingType) && !exactMotherboardProduct) ? ['EXACT_MODEL_REQUIRED'] : []),
+    ...((category === 'MOTHERBOARD' && motherboardResolution?.reason === 'MANUFACTURER_CONFLICT') ? ['MANUFACTURER_CONFLICT'] : []),
+    ...((category === 'PSU' && !fields.rated_wattage) ? ['RATED_WATTAGE_UNCONFIRMED'] : []),
     ...((category === 'PSU' && /(?:케이블\s*(?:없음|누락)|케이블\s*미포함)/iu.test(text)) ? ['INCOMPLETE_CABLE_SET'] : [])
   ]);
-  const fields = publicSpecificFields(category, model, text, base);
   const statisticsEligible = category !== 'UNSUPPORTED_CATEGORY'
     && marketSegment === 'CONSUMER_DESKTOP'
     && conditionGroup === 'USED_WORKING'
@@ -954,15 +1015,18 @@ export function classifyPcPartListingPublic(input, options = {}) {
     listing_type: listingType,
     condition_group: conditionGroup,
     canonical_product_id: canonicalProductId,
-    spec_group_id: publicSpecGroupId(category, model, text, marketSegment),
+    spec_group_id: publicSpecGroupId(category, model, text, marketSegment, base, fields),
     classification_confidence: base.confidence?.category ?? 0,
     model_confidence: base.confidence?.model ?? 0,
     quantity_confidence: base.confidence?.quantity ?? 0,
     price_scope_confidence: base.confidence?.price_scope ?? 0,
     statistics_eligible: statisticsEligible,
     statistics_exclusion_reasons: exclusionReasons,
-    parser_version: 'pc-parser-public-v1',
-    rule_version: 'pc-rules-public-v1',
+    parser_version: 'pc-parser-public-v2',
+    rule_version: 'pc-rules-public-v2',
+    canonical_manufacturer: ['SSD', 'HDD', 'PSU'].includes(category)
+      ? (base.manufacturer || PC_UNCLASSIFIED_MANUFACTURER_V3)
+      : (base.canonical_manufacturer ?? base.manufacturer ?? null),
     ...fields
   };
 }

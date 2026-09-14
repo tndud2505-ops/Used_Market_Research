@@ -14,6 +14,9 @@ const runnerSource = await readFile(new URL("../aws-runner/runner.mjs", import.m
 const statsRunnerSource = await readFile(new URL("../aws-runner/publish-pc-stats-runner.mjs", import.meta.url), "utf8");
 const repairSource = await readFile(new URL("../cloudflare/repair-active-stats-manifest.mjs", import.meta.url), "utf8");
 const workerSource = await readFile(new URL("../cloudflare/worker.mjs", import.meta.url), "utf8");
+const publicStatsSource = await readFile(new URL("../cloudflare/public-product-stats.mjs", import.meta.url), "utf8");
+assert.match(publicStatsSource, /sort\(\(left, right\) => statsPublicationKey\(left\)\.localeCompare\(statsPublicationKey\(right\)\)\)/u,
+  "large statistics publications must sort by the compact unique scope key instead of repeatedly serializing stats payloads");
 assert.match(statsRunnerSource, /SELECT DISTINCT n\.canonical_product_id, n\.market_pool/u,
   "daily publication must calculate only product/cohort scopes that have observations");
 assert.doesNotMatch(statsRunnerSource, /for \(const product of products\)[\s\S]{0,500}for \(const cohort of cohorts\)/u,
@@ -42,6 +45,8 @@ assert.doesNotMatch(repairSource, /SET active = 0/u,
   "checksum repair must never deactivate the currently served publication");
 assert.match(workerSource, /\/admin\/import-product-stats[\s\S]{0,500}readJsonPayload\(request, MAX_STATS_PUBLICATION_BYTES\)/u,
   "only the authenticated statistics publication route may accept the larger manifest");
+assert.match(workerSource, /const MAX_STATS_PUBLICATION_BYTES = 33_554_432;/u,
+  "the statistics publication limit must accommodate the complete V16 catalog payload");
 assert.doesNotMatch(workerSource, /\/api\/monetization\/contextual-offer[\s\S]{0,250}MAX_STATS_PUBLICATION_BYTES/u,
   "public JSON routes must retain the smaller request limit");
 
@@ -332,6 +337,25 @@ await assert.rejects(() => publishProductStats(mergeDb, {
   merge_with_active: false
 }), /cannot omit an active scope key/u,
 "the default path must preserve the active-key manifest guard");
+const migrationDb = new FakeD1(previousMergeRows, {
+  checksum: previousMergeChecksum,
+  expected_non_empty_scope_count: 2,
+  parser_version: "p1", rule_version: "r1", filter_version: "f1"
+});
+const migratedPublication = await publishProductStats(migrationDb, {
+  ...mergeInput,
+  publication_id: "schema-migrated-publication",
+  merge_with_active: false,
+  scope_schema_migration: {
+    previous_publication_id: "previous",
+    previous_checksum: previousMergeChecksum,
+    expected_removed_scope_count: 1,
+    reviewed_at: "2026-08-31T00:00:00.000Z",
+    reason: "Replace the obsolete active scope with the reviewed V2 scope manifest."
+  }
+});
+assert.equal(migratedPublication.scope_schema_migration_applied, true);
+assert.equal(migratedPublication.removed_scope_count, 1);
 const expectedMergedRows = [preservedRow, overlapNewRow, addedRow];
 const expectedMergedChecksum = await statsChecksum(expectedMergedRows);
 const mergedPublication = await publishProductStats(mergeDb, mergeInput);

@@ -1,4 +1,4 @@
-import { SERIES, idOf, nameOf, naturalCompare, money, metricValue, groupProducts, scopedStats, sourceStats, priceDateRange, modelPageItems, compatibility, validateBuild, dailySeries, percentChange } from './pc-tools-core.mjs?v=coverage-v4';
+import { SERIES, idOf, nameOf, naturalCompare, money, metricValue, groupProducts, scopedStats, sourceStats, priceDateRange, modelPageItems, buildTotals, compactBuild, compatibility, validateBuild, dailySeries, percentChange } from './pc-tools-core.mjs?v=coverage-v4';
 import { readJson, createPriceStore } from './pc-tools-data.mjs?v=coverage-v4';
 import { drawChart } from './pc-tools-chart.mjs?v=aligned-v1';
 import { createDatePicker } from './pc-tools-calendar.mjs?v=coverage-v4';
@@ -79,6 +79,7 @@ function analysisRecord(id) {
 function analysisData(id) { return sourceStats(analysisRecord(id)?.data, state.source); }
 function currentProducts() {
   return state.products.filter(p => (!state.category || p.category_code === state.category)
+    && (p.category_code !== 'MOTHERBOARD' || specOf(p).directory_node_type === 'PRODUCT')
     && (!state.manufacturer || brandOf(p) === state.manufacturer)
     && (!state.generation || generationOf(p) === state.generation));
 }
@@ -185,10 +186,23 @@ function renderModelTable() {
 function summaryItem(label, value, detail = '', className = '') {
   const node = el('div', 'tools-summary-item'); node.append(el('span', '', label), el('strong', className, value)); if (detail) node.title = detail; return node;
 }
+function persistBuild() {
+  const categories = new Set(state.categories.map(c => c.code));
+  const raw = JSON.stringify(compactBuild(state.entries, state.byId, categories));
+  try { localStorage.setItem(STORAGE_KEY, raw); } catch {}
+  const url = new URL(location.href);
+  url.hash = new URLSearchParams({ build: raw }).toString();
+  history.replaceState(null, '', url);
+}
 function renderSummary() {
   const summary = $('#tools-summary'); summary.replaceChildren();
   if (builder) {
+    const totals = buildTotals(state.entries, entry => payload(entry.id));
     summary.append(summaryItem('선택', `${state.entries.length}종`, `${state.entries.reduce((n, e) => n + e.quantity, 0)}개`));
+    [['active', '판매중 합계'], ['sold', '판매완료 합계']].forEach(([key, label]) => {
+      const total = totals[key];
+      summary.append(summaryItem(`${label} · 가격 확인 ${total.covered}/${total.total}개`, displayPrice(total.amount), '', `series-${key}`));
+    });
   } else if (state.selectedId) {
     const record = analysisRecord(state.selectedId);
     const data = scopedStats(analysisData(state.selectedId), state.selectedManufacturer);
@@ -312,9 +326,10 @@ document.addEventListener('click', event => {
     const product = state.byId.get(id); if (!product) return;
     state.entries = validateBuild([...state.entries.filter(e => e.category !== product.category_code), { id, quantity: state.entries.find(e => e.category === product.category_code)?.quantity || 1, manufacturer }], state.byId, new Set(state.categories.map(c => c.code)));
     state.selectedId = id; state.selectedManufacturer = manufacturer;
+    persistBuild();
     status('');
   }
-  if (type === 'remove') { state.entries = state.entries.filter(e => e.id !== id); status(''); }
+  if (type === 'remove') { state.entries = state.entries.filter(e => e.id !== id); persistBuild(); status(''); }
   if (type === 'analyze') {
     state.selectedId = id; state.selectedManufacturer = manufacturer; state.chartDate = ''; state.source = '';
     const url = new URL(location.href); url.searchParams.set('model', id); if (manufacturer) url.searchParams.set('manufacturer', manufacturer); else url.searchParams.delete('manufacturer');
@@ -327,7 +342,7 @@ document.addEventListener('change', event => {
   if (target.dataset.quantity) {
     const entry = state.entries.find(e => e.id === target.dataset.quantity); const n = Number(target.value);
     if (!Number.isInteger(n) || n < 1 || n > 16) { target.value = entry.quantity; status('수량은 1~16개로 입력해 주세요.', true); return; }
-    entry.quantity = n; renderSummary(); status(''); return;
+    entry.quantity = n; persistBuild(); renderSummary(); status(''); return;
   }
   if (target.id === 'tool-category') { selectCategory(target.value); return; }
   if (target.id === 'tool-manufacturer') { state.manufacturer = target.value; state.generation = ''; }
@@ -342,6 +357,7 @@ document.addEventListener('input', event => {
   const entry = state.entries.find(e => e.id === target.dataset.quantity), n = Number(target.value);
   if (!entry || !Number.isInteger(n) || n < 1 || n > 16) return;
   entry.quantity = n;
+  persistBuild();
   renderSummary();
 });
 

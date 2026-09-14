@@ -109,6 +109,8 @@ Quick Tunnel은 운영 경로가 아니다. 배포 시 `CLOUDFLARE_TUNNEL_MODE=n
 
 AWS release 배포는 `install-ubuntu24.sh`를 반복 실행한다. 스크립트는 Runner를 먼저 재시작하고 Named Tunnel을 enable·재시작한 다음 로컬·공개 `/health`의 `process_instance.id`가 같은지 확인한다. Runner만 stop/start하면 `Requires=` 관계로 내려간 Tunnel이 복구되지 않을 수 있으므로 배포 완료로 인정하지 않는다.
 
+제품 master와 정규화 버전을 함께 올릴 때는 운영 SQLite 백업과 무결성 확인 후, 구·신 canonical ID를 모두 읽는 Runner를 먼저 배포한다. 이어서 재분류를 dry-run하고 `--model-version`을 포함한 새 버전으로 한 트랜잭션에서 반영한 뒤 통계를 게시한다. 마지막에 Worker를 배포하고 공개 catalog의 모든 ID를 중고나라·번개장터·eBay별로 조회한다. 세부 제품 legacy ID는 단일 구간으로 연결하고, 용량/출력 정보가 없어 여러 구간이 가능한 legacy ID는 임의로 한 구간에 합치지 않는다.
+
 2026-08-17 4사이트 배포 확인에서 AWS의 `used-market-runner.service`와 `used-market-tunnel.service`는 모두 `active`였다. 공개 runner·두 사용자 도메인의 health는 모두 HTTP 200이고, 검색 용량은 동시 4개·대기열 16개·확장 스냅샷 최대 1,000개다. 당시에는 `shadow` 모드를 유지했다.
 
 2026-08-20 배포부터 `shadow`에서도 `refresh_index=false`인 사이트 보기·정렬 요청은 같은 SQLite 스냅샷을 읽는다. `collect_view=true` 또는 `expand_index=true`만 원 사이트 수집으로 넘어가므로 비교 모드를 유지하면서도 사이트 탭 자체가 5개 사이트를 재수집하지 않는다.

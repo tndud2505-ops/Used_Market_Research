@@ -84,7 +84,7 @@ sudo bash /opt/used-market-runner/aws-runner/configure-ubuntu24.sh
 - `D1_BACKGROUND_MIRROR_ENABLED`: 기본 `false`. `true`일 때만 수집·상태 확인 결과를 D1에 연속 복제
 - `D1_STATS_IMPORT_URL`: PC 전환 시 필수. checksum·row count가 포함된 완성 통계 publication을 받는 `/admin/import-product-stats`
 - `PC_STATS_PRODUCT_IDS`: 선택 사항. 쉼표로 구분한 canonical product ID만 다시 계산하고 같은 버전의 기존 활성 통계와 병합
-- `PC_SOURCE_TARGETS_PER_RUN`: 사이트별 한 번의 수집 배치 크기. 기본 `80`, 현재 최소 `71`; 전체 일일 모델 순회에 부족하면 설정·health가 실패한다.
+- `PC_SOURCE_TARGETS_PER_RUN`: 사이트별 한 번의 수집 배치 크기. 기본 `85`, 현재 최소 `83`; 전체 일일 모델 순회에 부족하면 설정·health가 실패한다.
 - `PC_SOURCE_TARGET_CONCURRENCY`: 사이트 내부 동시 요청 수. 기본 `6`, 허용 범위 `1~8`
 - `CLOUDFLARE_MANUAL_RUN_TOKEN`: 선택한 import API의 Bearer 토큰
 - `Cloudflare Tunnel token`: Dashboard에서 복사한 Tunnel 토큰
@@ -110,7 +110,7 @@ systemctl status used-market-tunnel.service --no-pager
 구버전 기본값처럼 기존 `PC_SOURCE_TARGETS_PER_RUN`이 `71` 미만이면 자동으로 덮어쓰지 않고 설치를 중단한다. 운영자가 처리량 변경을 승인한 뒤 다음처럼 명시적으로 올린다.
 
 ```bash
-sudo env PC_SOURCE_TARGETS_PER_RUN_OVERRIDE=80 PC_SOURCE_TARGET_CONCURRENCY_OVERRIDE=6 \
+sudo env PC_SOURCE_TARGETS_PER_RUN_OVERRIDE=85 PC_SOURCE_TARGET_CONCURRENCY_OVERRIDE=6 \
   RUNNER_PUBLIC_URL=https://runner.example.com \
   bash aws-runner/install-ubuntu24.sh /home/ubuntu/used-market-release
 ```
@@ -142,6 +142,8 @@ PC 원장 shadow dual-write는 `PC_PARTS_SHADOW_WRITE_ENABLED=true`로 켠다. �
 
 공개 매물·가격 통계의 주 저장소는 AWS SQLite다. `D1_BACKGROUND_MIRROR_ENABLED=false`와 Worker의 `D1_LISTING_FALLBACK_ENABLED=false`가 기본이다. 이 상태에서는 `D1_IMPORT_URL`과 token이 남아 있어도 scheduler와 lifecycle 확인이 D1 매물을 자동 갱신하거나 Worker가 오래된 D1 매물을 fallback으로 공개하지 않는다. D1 매물 fallback을 명시적으로 켜더라도 완전한 collection manifest가 있고 2시간 이내인 snapshot만 허용한다. 단순 `export-pc-listings-now.mjs` 결과 upsert는 누락된 판매완료·삭제 행을 퇴역시키지 않으므로 authoritative snapshot 교체로 취급하지 않는다. 가격 통계 publication용 `D1_STATS_IMPORT_URL`은 훨씬 작은 일일 fallback 데이터 경로이므로 매물 mirror와 별도로 계속 사용할 수 있다.
 
+`daily-price-refresh`가 성공하면 당일 관측과 매물별 최신 snapshot, 분류 교정·중복 판정·모델 후보 증거는 남기고 완료된 날짜의 원본 상세는 자동 압축한다. 평균·중앙값·최솟값·최댓값·표본 수와 소스별 일일 통계는 유지한다. 대규모 최초 정리는 `compact-pc-storage.mjs`의 dry-run checksum을 확인한 뒤 서비스 중지 상태에서 `--apply --confirm-observation-prune --confirm-plan-checksum <checksum> --vacuum`으로 실행한다.
+
 기존 비활성 검색행은 자동으로 SOLD/DELETED로 추정하지 않는다. 서비스 중지 후 아래 명시 명령을 한 번 실행하면 먼저 SQLite 복구 백업을 만들고 `UNAVAILABLE_UNKNOWN`으로 이행한다.
 
 ```bash
@@ -152,7 +154,7 @@ sudo systemctl start used-market-runner.service
 
 PC 사전수집·공개 전환에 포함할 source는 registry의 운영자 승인 기록, `directory_source:true`, `runtime_status:"ENABLED"`를 모두 갖춰야 한다. 현재 비활성 소스의 과거 adapter나 설정값이 남아 있어도 스케줄 이벤트와 공개 projection에는 포함되지 않는다. source 실패 시 이전 데이터 보존, backoff, 격리 기록을 남긴다.
 
-collection target은 `HOURLY_CATEGORY`와 `DAILY_MASTER`로 나뉜다. 전자는 모든 11개 부품군을 매시간 확인하고, 후자는 GPU·CPU 정확 모델과 RAM 세대·용량·제조사, 저장장치 용량·제조사 등 versioned master 전체를 24시간 간격으로 순회한다. `PC_SOURCE_TARGETS_PER_RUN`은 한 사이트를 한 번에 과도하게 호출하지 않도록 배치를 제한한다. `/health`의 `pc_parts.collection_capacity`는 현재 target set과 사이트별 실행 횟수로 전체 순회 가능 여부를 계산하며, 기본값 `80`은 현재 운영 소스 전체를 충족한다.
+collection target은 `HOURLY_CATEGORY`와 `DAILY_MASTER`로 나뉜다. 전자는 모든 11개 부품군을 매시간 확인하고, 후자는 GPU·CPU 정확 모델과 RAM 세대·용량·제조사, 저장장치 용량·제조사 등 versioned master 전체를 24시간 간격으로 순회한다. `PC_SOURCE_TARGETS_PER_RUN`은 한 사이트를 한 번에 과도하게 호출하지 않도록 배치를 제한한다. `/health`의 `pc_parts.collection_capacity`는 현재 target set과 사이트별 실행 횟수로 전체 순회 가능 여부를 계산하며, 기본값 `85`는 현재 운영 소스 전체와 한 회차 실패 여유를 충족한다.
 
 실패한 개별 target은 다음 소스 실행부터 지수 백오프로 재시도한다. `/health`의 `source_readiness[].target_coverage`는 성공 target 수, 실패 target 수, 2회 주기 이상 성공하지 못한 stale target 수를 공개하며, `--require-pc-continuous`는 stale target이 남아 있으면 통과하지 않는다.
 
@@ -176,8 +178,8 @@ npm run pc:quality-eval -- C:\path\to\pc-human-reviewed.json --ledger C:\path\to
 과거 snapshot은 원본을 수정하지 않고 새 정규화 버전으로 다시 처리할 수 있다. 기본은 dry-run이며 실제 반영 시 복구 백업을 먼저 만든다.
 
 ```powershell
-npm run pc:reclassify -- --db C:\path\to\search-index.sqlite --normalization-version 2 --parser-version pc-parser-v2 --rule-version pc-rules-v2 --filter-version pc-filter-v2
-npm run pc:reclassify -- --db C:\path\to\search-index.sqlite --normalization-version 2 --parser-version pc-parser-v2 --rule-version pc-rules-v2 --filter-version pc-filter-v2 --apply --confirm-reclassification
+npm run pc:reclassify -- --db C:\path\to\search-index.sqlite --normalization-version 3 --parser-version pc-parser-v2 --rule-version pc-rules-v2 --filter-version pc-filter-v2 --model-version pc-master-v3
+npm run pc:reclassify -- --db C:\path\to\search-index.sqlite --normalization-version 3 --parser-version pc-parser-v2 --rule-version pc-rules-v2 --filter-version pc-filter-v2 --model-version pc-master-v3 --apply --confirm-reclassification
 ```
 
 새 pipeline 버전은 `STAGED`로 등록된다. 사람이 검수한 품질 보고서가 모든 목표와 무결성 차단 조건을 통과해야 `ACTIVE`가 되며, 이후 목표 미달·무결성 오류·기준선 저하가 확인되면 정확한 이전 버전으로 자동 롤백된다.

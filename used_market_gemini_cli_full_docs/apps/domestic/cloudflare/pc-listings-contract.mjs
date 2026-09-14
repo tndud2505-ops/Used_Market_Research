@@ -126,6 +126,7 @@ export function pcListingsIdentity(query) {
   const identity = {
     namespace: "pc_parts_directory_v2",
     canonical_product_id: query.canonicalProductId || "",
+    canonical_product_ids: [...(query.canonicalProductIds || [])].sort(),
     catalog_scope: query.catalogScope ? {
       category_code: query.catalogScope.categoryCode || "",
       query: query.catalogScope.query || "",

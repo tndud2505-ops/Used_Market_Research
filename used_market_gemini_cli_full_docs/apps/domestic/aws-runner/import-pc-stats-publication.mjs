@@ -28,6 +28,14 @@ await stat(indexPath);
 await stat(publicationPath);
 
 const payload = JSON.parse(await readFile(publicationPath, "utf8"));
+const scopeSchemaMigrationValue = String(process.env.PC_STATS_SCOPE_SCHEMA_MIGRATION_JSON || "").trim();
+if (scopeSchemaMigrationValue) {
+  const migration = JSON.parse(scopeSchemaMigrationValue);
+  if (!migration || typeof migration !== "object" || Array.isArray(migration)) {
+    throw new Error("PC_STATS_SCOPE_SCHEMA_MIGRATION_JSON must be a JSON object");
+  }
+  payload.scope_schema_migration = migration;
+}
 if (payload.merge_with_active === true) throw new Error("cross-version stats publication must not merge with active rows");
 if (!Array.isArray(payload.rows) || payload.rows.length === 0) throw new Error("stats publication rows are empty");
 if (payload.rows.length !== Number(payload.expected_row_count)) throw new Error("stats publication row count mismatch");

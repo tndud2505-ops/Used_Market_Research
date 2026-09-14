@@ -20,6 +20,7 @@ import { OPERATIONAL_PC_DIRECTORY_SITES, OPERATIONAL_TARGET_SITES } from "../clo
 import { decodeSearchCursor, encodeSearchCursor } from "../aws-runner/search-cursor.mjs";
 import { SearchIndex, collectionIdentity } from "../aws-runner/search-index.mjs";
 import { MAX_PRICE_HISTORY_DAYS, parsePriceStatsRequest } from "../aws-runner/pc-price-stats-http.mjs";
+import { pcCollectionTargetSetV2 } from "../cloudflare/pc-directory-http.mjs";
 import {
   assertPcProjectionApplyConfirmation,
   buildPcProjectionReconciliation,
@@ -1612,17 +1613,20 @@ try {
   assert.equal(pcReadD1PrepareCalls, 0);
 
   const fallbackManifestAt = new Date().toISOString();
-  const fallbackTargetId = "pc-target:2:market-v10:GPU:0";
+  const fallbackTargetIds = pcCollectionTargetSetV2().targets
+    .filter((target) => target.categoryCode === "GPU" && target.sourceKeys.includes("joonggonara"))
+    .map((target) => target.targetId);
   d1.prepare(`INSERT INTO pc_listing_collection_manifests(
     source_id, as_of, manifest_version, successful_target_ids_json, successful_target_count, mirrored_at
-  ) VALUES ('joonggonara', ?, 'pc-listing-collection-v1', ?, 1, ?)`).run(
-    fallbackManifestAt, JSON.stringify([fallbackTargetId]), fallbackManifestAt
+  ) VALUES ('joonggonara', ?, 'pc-listing-collection-v1', ?, ?, ?)`).run(
+    fallbackManifestAt, JSON.stringify(fallbackTargetIds), fallbackTargetIds.length, fallbackManifestAt
   );
-  d1.prepare(`INSERT INTO pc_listing_collection_target_runtime(
+  const insertFallbackTarget = d1.prepare(`INSERT INTO pc_listing_collection_target_runtime(
     source_id, target_id, last_succeeded_at, manifest_version, mirrored_at
-  ) VALUES ('joonggonara', ?, ?, 'pc-listing-collection-v1', ?)`).run(
-    fallbackTargetId, fallbackManifestAt, fallbackManifestAt
-  );
+  ) VALUES ('joonggonara', ?, ?, 'pc-listing-collection-v1', ?)`);
+  for (const fallbackTargetId of fallbackTargetIds) {
+    insertFallbackTarget.run(fallbackTargetId, fallbackManifestAt, fallbackManifestAt);
+  }
   const d1ListingFallback = await worker.fetch(new Request(
     "https://used-pick.test/api/pc/listings?canonical_product_id=gpu%3Anvidia%3Artx-3080&sites=joonggonara&limit=4"
   ), pcReadRouteEnv);
@@ -1831,9 +1835,9 @@ const d1ListingItemsBeforeFreshnessMirror = structuredClone(workerListingsPayloa
 const sourceRuntimeCollectedAt = new Date(Date.now() - 30_000).toISOString();
 const unrelatedSourceRuntimeCollectedAt = new Date(Date.now() - 5_000).toISOString();
 const freshnessTargetIds = Object.freeze({
-  bunjangGpu: "pc-target:2:market-v10:GPU:0",
-  joonggonaraGpu: "pc-target:2:market-v10:GPU:0",
-  joonggonaraCpu: "pc-target:2:market-v10:CPU:1"
+  bunjangGpu: "pc-target:4:market-v12:GPU:0",
+  joonggonaraGpu: "pc-target:4:market-v12:GPU:0",
+  joonggonaraCpu: "pc-target:4:market-v12:CPU:1"
 });
 const mirrorCollectionManifest = async (sourceId, asOf, successfulTargetIds) => {
   const response = await worker.fetch(new Request("https://used-pick.test/admin/import-listings", {
@@ -2345,7 +2349,6 @@ const server = createServer(0, {
   }),
   getPcPriceStats: (query) => {
     assert.equal(query.canonicalProductId, "cpu:amd:ryzen-3-2200g");
-    assert.equal(query.asOf, "2026-09-10T23:59:59.999Z");
     return {
       active: { sample_count: 2, median: 33_250, mean: 33_250, min: 21_000, max: 45_500 },
       sold: { sample_count: 0, median: null, mean: null },
@@ -2397,6 +2400,14 @@ try {
   assert.equal(localStatsData.active.sample_count, 2);
   assert.equal(localStatsData.active.mean, 33_250,
     "the local publication route must preserve collected values while normalizing the API shape");
+  const currentStats = await fetch(`${baseUrl}/api/products/cpu%3Aamd%3Aryzen-3-2200g/price-stats?days=30&market_pool=KR_C2C_USED&condition=USED_WORKING&currency=KRW`);
+  assert.equal(currentStats.status, 200,
+    "a current request must use the latest publication even after the UTC date advances");
+  assert.equal((await currentStats.json()).data.active.sample_count, 2);
+  const unavailableHistoricalStats = await fetch(`${baseUrl}/api/products/cpu%3Aamd%3Aryzen-3-2200g/price-stats?days=30&market_pool=KR_C2C_USED&condition=USED_WORKING&currency=KRW&as_of=2026-09-09`);
+  assert.equal(unavailableHistoricalStats.status, 503,
+    "a local publication from another date must not impersonate an unavailable historical window");
+  assert.equal((await unavailableHistoricalStats.json()).error, "HISTORICAL_PRICE_STATS_UNAVAILABLE");
   assert.equal(localSearchCalls, 1, "PC directory GET routes must not invoke the live search collector");
 } finally {
   server.close();

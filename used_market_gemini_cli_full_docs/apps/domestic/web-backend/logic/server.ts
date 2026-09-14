@@ -18,7 +18,9 @@ import { pcCatalogResponse, pcProductsResponse } from '../../../cloudflare/pc-di
 import { parsePriceStatsRequest, priceStatsResponse } from '../../../aws-runner/pc-price-stats-http.mjs';
 // Public catalog APIs expose only the seven supported PC-part categories.
 // @ts-ignore shared runtime ESM module is loaded from the application root
-import { publicPcCatalogForApi, publicPcFacetsForApi, publicPcModelsForApi } from '../../../market/logic/pc-public-catalog.mjs';
+import { publicPcCatalogForApi, publicPcFacetsForApi, publicPcModelsForApi, publicPcProductById } from '../../../market/logic/pc-public-catalog.mjs';
+// @ts-ignore shared legacy canonical mapping is authored as runtime ESM JavaScript
+import { resolvePcCanonicalIdV3 } from '../../../market/data/pc-product-master-v2.mjs';
 // @ts-ignore canonical PC-directory source policy is authored as shared ESM JavaScript
 import { OPERATIONAL_PC_DIRECTORY_SITES } from '../../../cloudflare/target-sites.mjs';
 import { getPriceHistory } from './price-history-service.js';
@@ -522,16 +524,21 @@ export function createServer(
         if (minPrice !== null && maxPrice !== null && minPrice > maxPrice) throw new ApiError(400, 'price_min must be <= price_max');
         const requestedLimit = Number(urlObj.searchParams.get('limit') || 30);
         if (!Number.isInteger(requestedLimit) || requestedLimit < 1) throw new ApiError(400, 'limit must be a positive integer');
-        const canonicalProductId = urlObj.searchParams.get('canonical_product_id');
+        const requestedCanonicalProductId = urlObj.searchParams.get('canonical_product_id');
         const hasCatalogScope = urlObj.searchParams.has('category_code')
           || urlObj.searchParams.has('q') || urlObj.searchParams.has('query');
-        if (canonicalProductId && hasCatalogScope) {
+        if (requestedCanonicalProductId && hasCatalogScope) {
           throw new ApiError(400, 'canonical_product_id cannot be combined with catalog scope filters');
         }
+        const legacyResolution = requestedCanonicalProductId ? resolvePcCanonicalIdV3(requestedCanonicalProductId) : null;
+        const isLegacyId = legacyResolution?.status === 'alias' || legacyResolution?.status === 'ambiguous';
+        const canonicalProductId = isLegacyId ? null : requestedCanonicalProductId;
         const catalogModels = hasCatalogScope ? publicPcModelsForApi(urlObj.searchParams).models : null;
         const data = await resolvedOptions.listPcListings({
           canonicalProductId,
-          canonicalProductIds: catalogModels?.map((model: Record<string, unknown>) => String(model.canonical_product_id)) ?? null,
+          canonicalProductIds: isLegacyId
+            ? [legacyResolution.requestedId, ...legacyResolution.canonicalProductIds]
+            : catalogModels?.map((model: Record<string, unknown>) => String(model.canonical_product_id)) ?? null,
           manufacturer: hasCatalogScope ? null : urlObj.searchParams.get('manufacturer'),
           boardManufacturer: urlObj.searchParams.get('board_manufacturer'),
           sites,
@@ -555,19 +562,25 @@ export function createServer(
         } catch (error) {
           throw new ApiError(400, 'Invalid price stats request', error instanceof Error ? error.message : String(error));
         }
+        const legacyResolution = resolvePcCanonicalIdV3(priceQuery.canonicalProductId);
+        if (legacyResolution.status === 'alias') {
+          priceQuery = { ...priceQuery, canonicalProductId: legacyResolution.canonicalProductIds[0] };
+        } else if (legacyResolution.status === 'ambiguous') {
+          return sendJson(503, {
+            status: 'error', error: 'LEGACY_CANONICAL_ID_AMBIGUOUS',
+            requested_canonical_product_id: legacyResolution.requestedId,
+            successor_canonical_product_ids: legacyResolution.canonicalProductIds
+          });
+        }
         const normalizePriceStats = (stats: Record<string, unknown>) => ({
           ...priceStatsResponse(priceQuery, stats),
           ...(stats.availability ? { availability: stats.availability } : {})
         });
-        const localStats = resolvedOptions.getPcPriceStats?.({
-          canonicalProductId: priceQuery.canonicalProductId,
-          marketPool: priceQuery.marketPool,
-          condition: priceQuery.condition,
-          currency: priceQuery.currency,
-          days: priceQuery.days,
-          asOf: priceQuery.asOf
-        });
-        if (localStats) return sendJson(200, { status: 'success', data: normalizePriceStats(localStats) });
+        const statsMatchRequestedWindow = (stats: Record<string, any>) => {
+          if (!priceQuery.isHistorical) return true;
+          const publishedDate = String(stats?.window?.to || stats?.as_of || '').slice(0, 10);
+          return publishedDate === priceQuery.asOfDate;
+        };
         const emptyStats = (reason: string) => {
           const stats = {
             active: { sample_count: 0, median: null, mean: null },
@@ -584,11 +597,37 @@ export function createServer(
           };
           return { status: 'success', data: normalizePriceStats(stats) };
         };
-        if (!/^https:\/\//u.test(originUrl)) return sendJson(200, emptyStats('LOCAL_PUBLICATION_NOT_CONFIGURED'));
+        const requestedProduct = publicPcProductById(priceQuery.canonicalProductId);
+        if (requestedProduct?.category === 'MOTHERBOARD' && requestedProduct.spec?.directory_node_type !== 'PRODUCT') {
+          return sendJson(200, emptyStats('EXACT_MODEL_REQUIRED'));
+        }
+        const localStats = resolvedOptions.getPcPriceStats?.({
+          canonicalProductId: priceQuery.canonicalProductId,
+          marketPool: priceQuery.marketPool,
+          condition: priceQuery.condition,
+          currency: priceQuery.currency,
+          days: priceQuery.days,
+          asOf: priceQuery.isHistorical ? priceQuery.asOf : ''
+        });
+        if (localStats && statsMatchRequestedWindow(localStats)) {
+          return sendJson(200, { status: 'success', data: normalizePriceStats(localStats) });
+        }
+        if (!/^https:\/\//u.test(originUrl)) {
+          if (priceQuery.isHistorical) {
+            return sendJson(503, { ...emptyStats('HISTORICAL_PRICE_STATS_UNAVAILABLE'), status: 'error', error: 'HISTORICAL_PRICE_STATS_UNAVAILABLE' });
+          }
+          return sendJson(200, emptyStats('LOCAL_PUBLICATION_NOT_CONFIGURED'));
+        }
         try {
-          const target = new URL(`${pathname}${urlObj.search}`, originUrl);
+          const upstreamPath = `/api/products/${encodeURIComponent(priceQuery.canonicalProductId)}/price-stats`;
+          const target = new URL(`${upstreamPath}${urlObj.search}`, originUrl);
           const response = await fetch(target, { headers: { accept: 'application/json' } });
-          if (!response.ok) return sendJson(200, emptyStats(`PUBLICATION_UPSTREAM_${response.status}`));
+          if (!response.ok) {
+            const reason = `PUBLICATION_UPSTREAM_${response.status}`;
+            return priceQuery.isHistorical
+              ? sendJson(503, { ...emptyStats(reason), status: 'error', error: reason })
+              : sendJson(200, emptyStats(reason));
+          }
           const responseBody = await response.text();
           res.statusCode = 200;
           res.setHeader('Content-Type', response.headers.get('content-type') || 'application/json; charset=utf-8');
@@ -596,7 +635,9 @@ export function createServer(
           res.end(responseBody);
           return;
         } catch {
-          return sendJson(200, emptyStats('PUBLICATION_UPSTREAM_UNREACHABLE'));
+          return priceQuery.isHistorical
+            ? sendJson(503, { ...emptyStats('PUBLICATION_UPSTREAM_UNREACHABLE'), status: 'error', error: 'PUBLICATION_UPSTREAM_UNREACHABLE' })
+            : sendJson(200, emptyStats('PUBLICATION_UPSTREAM_UNREACHABLE'));
         }
       }
 

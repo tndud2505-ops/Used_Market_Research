@@ -6,22 +6,27 @@ const BROWSE_BUCKET_NODE = "BROWSE_BUCKET";
 
 const SSD_BUCKET_ORDER = Object.freeze([
   "LE_256_GB",
-  "480_512_GB",
-  "960_GB_1_TB",
-  "1_92_2_TB",
-  "3_84_4_TB",
-  "7_68_8_TB",
+  "257_512_GB",
+  "513_GB_1_TB",
+  "GT_1_TB_LE_2_TB",
+  "GT_2_TB_LE_4_TB",
+  "GT_4_TB_LE_8_TB",
   "GT_8_TB"
 ]);
 
 const SSD_BUCKET_LABELS = Object.freeze({
   LE_256_GB: "256GB 이하",
+  "257_512_GB": "257~512GB",
+  "513_GB_1_TB": "513GB~1TB",
+  "GT_1_TB_LE_2_TB": "1TB 초과~2TB",
+  "GT_2_TB_LE_4_TB": "2TB 초과~4TB",
+  "GT_4_TB_LE_8_TB": "4TB 초과~8TB",
+  GT_8_TB: "8TB 초과",
   "480_512_GB": "480~512GB",
   "960_GB_1_TB": "960GB~1TB",
   "1_92_2_TB": "1.92~2TB",
   "3_84_4_TB": "3.84~4TB",
-  "7_68_8_TB": "7.68~8TB",
-  GT_8_TB: "8TB 초과"
+  "7_68_8_TB": "7.68~8TB"
 });
 
 function freezeDeep(value) {
@@ -178,4 +183,3 @@ export function ssdBrowseFlowForApiV1(products = PC_PRODUCT_MASTER_V2, selection
     product_count: facets.model_count
   };
 }
-

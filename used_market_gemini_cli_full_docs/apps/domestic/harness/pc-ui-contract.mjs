@@ -14,6 +14,13 @@ const toolsScript = readFileSync(path.join(appRoot, "web-backend/public/pc-tools
 const toolsChart = readFileSync(path.join(appRoot, "web-backend/public/pc-tools-chart.mjs"), "utf8");
 const toolsStyles = readFileSync(path.join(appRoot, "web-backend/public/pc-tools.css"), "utf8");
 const requireText = (source, value, message) => assert.ok(source.includes(value), message);
+requireText(toolsScript, 'buildTotals(state.entries', 'builder summary must derive totals from the shared price state');
+requireText(toolsScript, '판매중 합계', 'builder must visibly label the active-price partial total');
+requireText(toolsScript, '판매완료 합계', 'builder must visibly label the sold-price partial total');
+requireText(toolsScript, '가격 확인', 'builder totals must disclose price-covered quantity');
+requireText(toolsScript, 'compactBuild(state.entries', 'builder writes must persist compact validated entries');
+requireText(toolsScript, 'localStorage.setItem(STORAGE_KEY, raw)', 'builder selection changes must write local storage');
+requireText(toolsScript, "history.replaceState(null, '', url)", 'builder selection changes must update the share hash without reloading');
 
 requireText(html, '<a href="/" aria-current="page">중고 시세</a>',
   "the listing page must be the default home navigation target");

@@ -15,7 +15,7 @@
   {"id":"s21-14","input":{"title":"RTX 3070 삽니다 최고가 매입"},"expected":{"listing_kind":"WANTED","price_eligible":false}},
   {"id":"s21-15","input":{"title":"고장난 RTX 3080 부품용"},"expected":{"category_code":"GPU","condition":"BROKEN","price_eligible":false}},
   {"id":"s21-16","input":{"title":"채굴 3070 정상작동"},"expected":{"category_code":"GPU","canonical_model":"RTX 3070","condition":"MINED","price_eligible":false}},
-  {"id":"s21-17","input":{"title":"990 PRO 2TB 2개 개당 14만원","price":140000},"expected":{"category_code":"SSD","canonical_model":"990 PRO 2TB","quantity":2,"price_scope":"UNIT"}},
+  {"id":"s21-17","input":{"title":"990 PRO 2TB 2개 개당 14만원","price":140000},"expected":{"category_code":"SSD","canonical_model":"Samsung SSD GT_1_TB_LE_2_TB","quantity":2,"price_scope":"UNIT"}},
   {"id":"s21-18","input":{"title":"SSD 1TB + 2TB 일괄 15만원","price":150000},"expected":{"listing_kind":"COMPONENT_BUNDLE","price_scope":"BUNDLE","price_eligible":false}},
   {"id":"s21-19","input":{"title":"B650M 박격포 WIFI"},"expected":{"category_code":"MOTHERBOARD","canonical_model":"B650M"}},
   {"id":"s21-20","input":{"title":"850W 파워 ATX 3.0 PCIe 5.0"},"expected":{"category_code":"PSU","quantity":1}},

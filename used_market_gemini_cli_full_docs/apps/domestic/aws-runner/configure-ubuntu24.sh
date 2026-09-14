@@ -108,18 +108,18 @@ public_url="${public_url%/}"
 [[ "$public_url" =~ ^https://[^/]+$ ]] || fail 'RUNNER_PUBLIC_URL은 경로 없는 https:// origin이어야 합니다.'
 
 if [[ "$existing_pc_source_targets_per_run" =~ ^[0-9]+$ ]] &&
-  (( existing_pc_source_targets_per_run >= 71 && existing_pc_source_targets_per_run <= 128 )); then
+  (( existing_pc_source_targets_per_run >= 81 && existing_pc_source_targets_per_run <= 128 )); then
   pc_source_targets_per_run_default="$existing_pc_source_targets_per_run"
 else
-  pc_source_targets_per_run_default=80
+  pc_source_targets_per_run_default=85
   if [[ -n "$existing_pc_source_targets_per_run" ]]; then
-    printf '기존 PC_SOURCE_TARGETS_PER_RUN=%s 값은 현재 전체 target set에 부족하여 기본값 80을 제안합니다.\n' "$existing_pc_source_targets_per_run"
+    printf '기존 PC_SOURCE_TARGETS_PER_RUN=%s 값은 현재 전체 target set에 부족하여 기본값 85를 제안합니다.\n' "$existing_pc_source_targets_per_run"
   fi
 fi
 read -r -p "PC_SOURCE_TARGETS_PER_RUN [${pc_source_targets_per_run_default}]: " pc_source_targets_per_run_input
 pc_source_targets_per_run="${pc_source_targets_per_run_input:-$pc_source_targets_per_run_default}"
-if [[ ! "$pc_source_targets_per_run" =~ ^[0-9]+$ ]] || (( pc_source_targets_per_run < 71 || pc_source_targets_per_run > 128 )); then
-  fail 'PC_SOURCE_TARGETS_PER_RUN은 71~128 정수여야 합니다. 현재 전체 모델 순회 권장값은 80입니다.'
+if [[ ! "$pc_source_targets_per_run" =~ ^[0-9]+$ ]] || (( pc_source_targets_per_run < 81 || pc_source_targets_per_run > 128 )); then
+  fail 'PC_SOURCE_TARGETS_PER_RUN은 81~128 정수여야 합니다. 현재 전체 모델 순회 권장값은 85입니다.'
 fi
 
 pc_source_target_concurrency_default="${existing_pc_source_target_concurrency:-6}"

@@ -173,6 +173,23 @@ for (const sourceKey of OPERATIONAL_PC_DIRECTORY_SITES) {
   assert.deepEqual([...sourceCategories].sort(), [...PC_PART_CATEGORY_CODES].sort(),
     `${sourceKey}: every operational PC source must have a target for every part category`);
 }
+for (const product of publicPcProducts().filter(({ category }) => ["SSD", "HDD", "PSU"].includes(category))) {
+  for (const sourceKey of OPERATIONAL_PC_DIRECTORY_SITES) {
+    assert.ok(collectionTargetSet.targets.some((target) => target.enabled !== false
+      && target.canonicalProductId === product.id
+      && target.sourceKeys.includes(sourceKey)),
+    `${sourceKey}: missing public aggregate target ${product.id}`);
+  }
+}
+const ebayExactQuery = (canonicalProductId) => collectionTargetSet.targets.find((target) => (
+  target.canonicalProductId === canonicalProductId && target.sourceKeys.includes("ebay")
+))?.queryText;
+assert.equal(ebayExactQuery("ssd:samsung:capacity-bucket:gt-1-tb-le-2-tb"), "Samsung 2TB internal SSD");
+assert.equal(ebayExactQuery("hdd:western-digital:capacity-bucket:gt-8-tb-le-12-tb"), "Western Digital 12TB internal HDD");
+assert.equal(ebayExactQuery("psu:corsair:watts-bucket:751-850"), "Corsair 850W computer power supply");
+assert.ok(collectionTargetSet.targets.filter((target) => target.sourceKeys.includes("ebay")
+  && ["SSD", "HDD", "PSU"].includes(target.categoryCode)).every((target) => !/\b(?:over|up to)\b/iu.test(target.queryText)),
+"eBay aggregate targets must use representative values instead of bucket-boundary prose");
 assert.ok(marketplaceTargets.every((target) => !/MONITOR|모니터/iu.test(`${target.categoryCode} ${target.queryText}`)));
 assert.ok(collectionTargetSet.targets.every((target) => !/MONITOR|모니터/iu.test(`${target.categoryCode} ${target.queryText}`)));
 assert.ok(hourlyMarketplaceTargets.some((target) => target.categoryCode === "MOTHERBOARD" && target.queryText === "메인보드"));
@@ -473,6 +490,30 @@ assert.equal(pcCategoryTitleMatches("RAM", "Dodge Ram 2500 wheel hub bearing"), 
 assert.equal(pcCategoryTitleMatches("RAM", "Samsung DDR4 16GB desktop memory"), true);
 assert.equal(pcCategoryTitleMatches("CASE", "iPhone leather case"), false);
 assert.equal(pcCategoryTitleMatches("ODD", "odd vintage pin button"), false);
+for (const [category, title] of [["SSD", "Samsung 990 PRO 2TB"], ["HDD", "WD Red Plus 8TB"], ["PSU", "Corsair RM850x 850W"]]) {
+  assert.equal(pcCategoryTitleMatches(category, title), true, `${category} exact family title must be accepted`);
+}
+for (const [category, title] of [["SSD", "990 PRO heatsink only"], ["HDD", "WD Red Plus external enclosure"], ["PSU", "RM850x cable only"], ["PSU", "Dell server power supply 1100W"]]) {
+  assert.equal(pcCategoryTitleMatches(category, title), false, `${category} accessory/server false positive`);
+}
+for (const title of ["990 PRO 히트싱크만", "외장 SSD 케이스", "외장 HDD 케이스", "파워서플라이 케이블"]) {
+  const category = title.includes("파워") ? "PSU" : title.includes("HDD") ? "HDD" : "SSD";
+  assert.equal(pcCategoryTitleMatches(category, title), false, `${category} Korean accessory false positive`);
+}
+for (const title of ["600W 파워 케이블 포함", "600W 파워 케이블 없음"]) {
+  assert.equal(pcCategoryTitleMatches("PSU", title), true, "a real PSU with cable-state text must reach classification");
+}
+for (const [category, title] of [
+  ["SSD", "Samsung 970 EVO Plus 1TB"],
+  ["SSD", "Samsung 980 500GB"],
+  ["SSD", "WD Black SN850X 2TB"],
+  ["HDD", "ST16000DM001 16TB"],
+  ["HDD", "씨게이트 아이언울프 4TB"],
+  ["PSU", "Corsair HX1200"],
+  ["PSU", "Micronics Classic II 700W"]
+]) {
+  assert.equal(pcCategoryTitleMatches(category, title), true, `${category} model-only target title`);
+}
 assert.equal(matchesRequestedKeyword({ title: "CPU i5 7400 단품" }, "i5-7400"), true,
   "hyphen and spacing variants must match the same PC model");
 assert.equal(matchesRequestedKeyword({ title: "RTX 3080 10GB 그래픽카드" }, "ASUS RTX 3080"), true,
@@ -670,6 +711,17 @@ try {
     "Bunjang keyword rows must retain the stable source product id");
   assert.equal(bunjangItems[0].item_id, "bunjang:402071229",
     "Bunjang item identity must not depend on its full product URL");
+
+  const bunjangVariantRequests = [];
+  globalThis.fetch = async (url) => {
+    bunjangVariantRequests.push(String(url));
+    return new Response(JSON.stringify({ list: [] }), { status: 200 });
+  };
+  await collectOne("bunjang", "Intel i5-7400", "pc", 20,
+    "Intel i5-7400", "recent", { min: null, max: null });
+  assert.deepEqual(new Set(bunjangVariantRequests.map((url) => new URL(url).searchParams.get("q"))),
+    new Set(["Intel i5-7400", "Intel i5 7400", "i5-7400"]),
+    "Bunjang must send each generated query variant to the upstream request");
 
   process.env.EBAY_CLIENT_ID = "fixture-client-id";
   process.env.EBAY_CLIENT_SECRET = "fixture-client-secret";

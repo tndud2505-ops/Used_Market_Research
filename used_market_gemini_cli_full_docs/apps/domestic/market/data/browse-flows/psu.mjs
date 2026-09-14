@@ -2,6 +2,7 @@ import { PC_PRODUCT_MASTER_V2 } from "../pc-product-master-v2.mjs";
 
 const PSU_CATEGORY = "PSU";
 const PRODUCT_NODE = "PRODUCT";
+const BROWSE_BUCKET_NODE = "BROWSE_BUCKET";
 
 /**
  * PSU browsing is intentionally a short path: rated output -> model.
@@ -15,21 +16,21 @@ export const PSU_BROWSE_FLOW_VERSION = 1;
 
 export const PSU_WATTS_BUCKET_ORDER_V1 = Object.freeze([
   "LE_500",
-  "550_650",
-  "700_750",
-  "800_850",
-  "900_1000",
-  "1100_1200",
+  "501_650",
+  "651_750",
+  "751_850",
+  "851_1000",
+  "1001_1200",
   "GT_1200"
 ]);
 
 export const PSU_WATTS_BUCKET_LABELS_V1 = Object.freeze({
   LE_500: "500W 이하",
-  "550_650": "550~650W",
-  "700_750": "700~750W",
-  "800_850": "800~850W",
-  "900_1000": "900~1000W",
-  "1100_1200": "1100~1200W",
+  "501_650": "501~650W",
+  "651_750": "651~750W",
+  "751_850": "751~850W",
+  "851_1000": "851~1000W",
+  "1001_1200": "1001~1200W",
   GT_1200: "1200W 초과"
 });
 
@@ -53,23 +54,28 @@ export const PSU_BROWSE_FLOW_V1 = deepFreeze({
 
 const BUCKET_ALIASES = new Map([
   ["LE_500", "LE_500"],
-  ["550_650", "550_650"],
-  ["700_750", "700_750"],
-  ["800_850", "800_850"],
-  ["900_1000", "900_1000"],
-  ["1100_1200", "1100_1200"],
+  ["501_650", "501_650"],
+  ["651_750", "651_750"],
+  ["751_850", "751_850"],
+  ["851_1000", "851_1000"],
+  ["1001_1200", "1001_1200"],
   ["GT_1200", "GT_1200"],
   ["500W 이하", "LE_500"],
-  ["550~650W", "550_650"],
-  ["550-650W", "550_650"],
-  ["700~750W", "700_750"],
-  ["700-750W", "700_750"],
-  ["800~850W", "800_850"],
-  ["800-850W", "800_850"],
-  ["900~1000W", "900_1000"],
-  ["900-1000W", "900_1000"],
-  ["1100~1200W", "1100_1200"],
-  ["1100-1200W", "1100_1200"],
+  ["501~650W", "501_650"],
+  ["501-650W", "501_650"],
+  ["651~750W", "651_750"],
+  ["651-750W", "651_750"],
+  ["751~850W", "751_850"],
+  ["751-850W", "751_850"],
+  ["851~1000W", "851_1000"],
+  ["851-1000W", "851_1000"],
+  ["1001~1200W", "1001_1200"],
+  ["1001-1200W", "1001_1200"],
+  ["550_650", "501_650"],
+  ["700_750", "651_750"],
+  ["800_850", "751_850"],
+  ["900_1000", "851_1000"],
+  ["1100_1200", "1001_1200"],
   ["1200W 초과", "GT_1200"],
   [">1200W", "GT_1200"]
 ]);
@@ -108,11 +114,11 @@ export function psuWattsBucketV1(value) {
   const watts = asPositiveNumber(value);
   if (watts === null) return null;
   if (watts <= 500) return "LE_500";
-  if (watts <= 650) return "550_650";
-  if (watts <= 750) return "700_750";
-  if (watts <= 850) return "800_850";
-  if (watts <= 1000) return "900_1000";
-  if (watts <= 1200) return "1100_1200";
+  if (watts <= 650) return "501_650";
+  if (watts <= 750) return "651_750";
+  if (watts <= 850) return "751_850";
+  if (watts <= 1000) return "851_1000";
+  if (watts <= 1200) return "1001_1200";
   return "GT_1200";
 }
 
@@ -140,11 +146,14 @@ function isProductNode(product) {
 
 /** Return only registered PSU model rows that can be reached by output. */
 export function psuBrowseProductsV1(products = PC_PRODUCT_MASTER_V2) {
-  return (Array.isArray(products) ? products : []).filter((product) => (
-    normalizeKey(product?.category) === PSU_CATEGORY
-    && isProductNode(product)
-    && productWattsBucket(product) !== null
+  const records = (Array.isArray(products) ? products : []).filter((product) => (
+    normalizeKey(product?.category) === PSU_CATEGORY && productWattsBucket(product) !== null
   ));
+  const productRecords = records.filter(isProductNode);
+  if (productRecords.length > 0) return productRecords;
+  return records.filter((product) => normalizeKey(
+    product?.spec?.directory_node_type ?? product?.browse_facets?.directory_node_type
+  ) === BROWSE_BUCKET_NODE);
 }
 
 function compareBucket(left, right) {

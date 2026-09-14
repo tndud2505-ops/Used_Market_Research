@@ -295,6 +295,7 @@ function planOutput(plan, authorityAudit, mode) {
     local_stale_count: plan.local_stale_count,
     local_missing_count: plan.local_missing_count,
     d1_stale: plan.d1_stale.map(summary),
+    d1_missing: plan.d1_missing.map(summary),
     local_stale: plan.local_stale.map(summary)
   };
 }
@@ -337,7 +338,7 @@ async function main() {
   if (!importToken) throw new Error("D1 import token is required for --apply");
   const appliedAt = new Date().toISOString();
   const d1Items = [
-    ...plan.d1_upserts,
+    ...plan.d1_upserts.map((item) => ({ ...item, updated_at: appliedAt })),
     ...plan.d1_stale.map((item) => pcProjectionTombstone(item, { updatedAt: appliedAt }))
   ];
   const d1Import = await importD1Plan(importUrl, importToken, d1Items);
@@ -365,6 +366,15 @@ async function main() {
     || verified.local_stale_count !== 0 || verified.local_missing_count !== 0
     || verified.d1_public_count !== verified.authoritative_count
     || verified.local_public_count !== verified.authoritative_count) {
+    console.error(JSON.stringify({
+      verified_authoritative_count: verified.authoritative_count,
+      verified_d1_public_count: verified.d1_public_count,
+      verified_d1_stale_count: verified.d1_stale_count,
+      verified_d1_missing_count: verified.d1_missing_count,
+      verified_local_public_count: verified.local_public_count,
+      verified_local_stale_count: verified.local_stale_count,
+      verified_local_missing_count: verified.local_missing_count
+    }));
     throw new Error("POST_APPLY_RECONCILIATION_INTEGRITY_FAILURE");
   }
   console.log(JSON.stringify({

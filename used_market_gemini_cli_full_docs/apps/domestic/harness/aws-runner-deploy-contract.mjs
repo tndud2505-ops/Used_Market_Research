@@ -85,6 +85,16 @@ assert.match(installScript,
   /cp -a "\$SOURCE_ROOT\/market\/data\/browse-flows\/\." "\$APP_ROOT\/market\/data\/browse-flows\/"/u,
   "the AWS installer must deploy the browse-flow dependencies imported by the directory module");
 const ledgerScript = await read("aws-runner/pc-parts-ledger.mjs");
+const reclassificationScript = await read("aws-runner/reclassify-pc-snapshots.mjs");
+const republishScript = await read("aws-runner/republish-pc-projections.mjs");
+assert.match(reclassificationScript, /existingTargetCount > 0 && alreadyInserted\.get/u,
+  "a fresh full reclassification must not issue one redundant existence query per snapshot");
+assert.match(reclassificationScript, /normalizeItem\(item, row\.observed_at, versions, \{ reclassification: true \}\)/u,
+  "historical reclassification must skip live-ingestion lifecycle and empty target-version stats lookups");
+assert.match(await read("aws-runner/pc-shadow-pipeline.mjs"), /exactSku && priceEligible && !options\.reclassification/u,
+  "live anomaly checks must remain limited to exact products while a fresh target version replay skips its empty statistics");
+assert.match(republishScript, /plan\.d1_upserts\.map\(\(item\) => \(\{ \.\.\.item, updated_at: appliedAt \}\)\)/u,
+  "reconciliation must refresh D1 upsert timestamps so newer tombstones cannot suppress authoritative rows");
 assert.match(ledgerScript, /rows\.filter\(\(row\) => !reviewedPcListingExclusion/u,
   "reviewed source-listing exclusions must also remove historical statistics members");
 
@@ -98,6 +108,8 @@ assert.doesNotMatch(importStatsScript, /versions\.normalization\s*!==\s*9/u,
   "stats import must work with the active pipeline instead of a hard-coded version");
 assert.match(importStatsScript, /traceability mismatch/u,
   "stats import must fail closed when publication rows cannot be traced to ledger members");
+assert.match(importStatsScript, /PC_STATS_SCOPE_SCHEMA_MIGRATION_JSON/u,
+  "cross-version statistics imports must accept an explicit scope-schema migration acknowledgement");
 assert.match(statsTraceabilityScript, /member_checksum/u,
   "stats traceability must bind the exact member identities and prices, not only a count");
 assert.match(importStatsScript, /explicitSoldText/u,
@@ -159,29 +171,31 @@ for (const field of [
 }
 assert.match(runnerScript, /const PC_SCHEDULER_CATCHUP_MS = 0;/u,
   "runner startup must not synchronously replay a multi-hour scheduler backlog");
-assert.match(runnerScript, /process\.env\.PC_SOURCE_TARGETS_PER_RUN \|\| "80"/u,
+assert.match(runnerScript, /process\.env\.PC_SOURCE_TARGETS_PER_RUN \|\| "85"/u,
   "the runtime default must cover the largest hourly plus daily source target budget");
+assert.match(runnerScript, /requireAsOfCoverage:\s*query\.isHistorical/u,
+  "the runner must reject uncovered historical windows without rejecting ordinary current-stat reads");
 assert.match(runnerScript, /process\.env\.PC_SOURCE_TARGET_CONCURRENCY \|\| "6"/u,
   "the runtime default must process the expanded target budget within the scheduler window");
 assert.match(runnerScript, /collection_capacity: collectionCapacity/u,
   "runner health must expose whether the configured batch can sustain the full target set");
-assert.match(installScript, /^PC_SOURCE_TARGETS_PER_RUN=80$/mu,
+assert.match(installScript, /^PC_SOURCE_TARGETS_PER_RUN=85$/mu,
   "new AWS environments must persist the target throughput required for full daily master coverage");
 assert.match(installScript, /^PC_SOURCE_TARGET_CONCURRENCY=6$/mu,
   "new AWS environments must persist bounded source concurrency");
 assert.match(installScript,
-  /if ! grep -q '\^PC_SOURCE_TARGETS_PER_RUN=' "\$RUNNER_ENV_FILE"; then\s+set_env_value PC_SOURCE_TARGETS_PER_RUN 80/u,
+  /if ! grep -q '\^PC_SOURCE_TARGETS_PER_RUN=' "\$RUNNER_ENV_FILE"; then\s+set_env_value PC_SOURCE_TARGETS_PER_RUN 85/u,
   "repeat installs must add missing target throughput without overriding an explicit operator limit");
 assert.match(installScript,
   /if ! grep -q '\^PC_SOURCE_TARGET_CONCURRENCY=' "\$RUNNER_ENV_FILE"; then\s+set_env_value PC_SOURCE_TARGET_CONCURRENCY 6/u,
   "repeat installs must add missing concurrency without overriding an explicit operator limit");
 assert.match(installScript, /PC_SOURCE_TARGETS_PER_RUN_OVERRIDE/u,
   "repeat installs must provide an explicit operator-authorized legacy throughput upgrade path");
-assert.match(installScript, /configured_pc_source_targets_per_run < 71 \|\| configured_pc_source_targets_per_run > 128/u,
+assert.match(installScript, /configured_pc_source_targets_per_run < 81 \|\| configured_pc_source_targets_per_run > 128/u,
   "repeat installs must stop before restarting an undersized continuous collector");
-assert.match(configureScript, /existing_pc_source_targets_per_run >= 71/u,
+assert.match(configureScript, /existing_pc_source_targets_per_run >= 81/u,
   "interactive reconfiguration must replace an obsolete undersized default while preserving sufficient explicit settings");
-assert.match(configureScript, /pc_source_targets_per_run < 71 \|\| pc_source_targets_per_run > 128/u,
+assert.match(configureScript, /pc_source_targets_per_run < 81 \|\| pc_source_targets_per_run > 128/u,
   "interactive reconfiguration must enforce the current sustained target minimum");
 assert.match(configureScript, /pc_source_target_concurrency < 1 \|\| pc_source_target_concurrency > 8/u,
   "interactive reconfiguration must preserve valid operator concurrency");
@@ -206,6 +220,11 @@ assert.match(runnerScript, /spawn\(childCommand, childArgs/u,
 assert.match(runnerScript, /\["-c", "3", "\/usr\/bin\/nice", "-n", "10", process\.execPath, scriptPath\]/u,
   "production statistics work must yield CPU and disk priority to public requests");
 assert.match(runnerScript, /const publication = await runPcStatsPublisher\(\);/u);
+assertOrdered(runnerScript, [
+  "const storageCompactionBackup = searchIndex?.createBackup();",
+  'if (!storageCompactionBackup) throw new Error("PC_STORAGE_COMPACTION_BACKUP_REQUIRED");',
+  "const storageCompaction = pcLedger.compactStorage({"
+], "daily compaction recovery backup");
 assert.doesNotMatch(runnerScript, /compactStatsForPublication\(pcLedger\.rebuildAndGetPriceStats/u,
   "the public runner process must not build every product-stat scope synchronously");
 assert.doesNotMatch(runnerScript, /pcLedger\.runIntegrityAudit/u,
@@ -221,6 +240,14 @@ assert.match(runnerScript, /const INDEX_STARTUP_BACKUP_ENABLED = String\(process
 assert.match(runnerScript,
   /pcLedger = new PcPartsLedger\(\{ db: searchIndex\.db \}\);[\s\S]*?searchIndex\.createBackup\(\);[\s\S]*?pcLedger\.migrate\(\);/u,
   "the PC identity SQL function must be registered before a migration backup reads expression indexes");
+assert.doesNotMatch(reclassificationScript, /new SearchIndex/u,
+  "reclassification must not open expression indexes before registering the PC identity SQL function");
+assertOrdered(reclassificationScript, [
+  "const ledger = new PcPartsLedger({ db });",
+  "const backup = createRecoveryBackup(db, filePath);",
+  "ledger.migrate();",
+  'db.exec("BEGIN IMMEDIATE")'
+], "reclassification recovery ordering");
 assert.match(runnerScript, /const INDEX_BACKGROUND_MAINTENANCE_ENABLED = String\(process\.env\.RUNNER_INDEX_BACKGROUND_MAINTENANCE_ENABLED \?\? "false"\)/u,
   "large background index maintenance must be opt-in on the public runner");
 assert.match(runnerScript, /schedulerReadDeferral\(\{/u,

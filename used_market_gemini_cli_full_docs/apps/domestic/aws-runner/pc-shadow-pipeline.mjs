@@ -1,7 +1,11 @@
 import { createHash } from "node:crypto";
 import { classifyPcPartListing, classifyPcPartListingPublic, detectPcPartManufacturer } from "../market/logic/pc-parts-classifier.mjs";
 import { explicitSoldText } from "../market/logic/listing-lifecycle.mjs";
-import { PC_PRODUCT_MASTER_V2, PC_PRODUCT_MASTER_V2_VERSION } from "../market/data/pc-product-master-v2.mjs";
+import {
+  PC_PRODUCT_MASTER_V2,
+  PC_PRODUCT_MASTER_V2_VERSION,
+  PC_UNCLASSIFIED_MANUFACTURER_V3
+} from "../market/data/pc-product-master-v2.mjs";
 import { PC_SOURCE_REGISTRY, getPcSource } from "../collector/logic/pc-source-registry.mjs";
 import { trustedSpecialistCategory } from "../collector/logic/pc-specialist-targets.mjs";
 import { reviewedPcListingExclusion } from "../market/logic/pc-reviewed-listing-exclusions.mjs";
@@ -112,17 +116,10 @@ function unknownModelCandidate(value) {
   }) || null;
 }
 
-function storageCapacityGb(value) {
-  const matches = [...String(value || "").matchAll(/\b(\d+(?:\.\d+)?)\s*(TB|GB)\b/giu)]
-    .map((match) => Number(match[1]) * (match[2].toUpperCase() === "TB" ? 1000 : 1))
-    .filter((capacity) => Number.isFinite(capacity) && capacity > 0);
-  const unique = [...new Set(matches)];
-  return unique.length === 1 ? unique[0] : null;
-}
-
 function directoryFacetProduct(classified, value) {
   const category = classified.category_code;
-  const manufacturer = classified.manufacturer;
+  const manufacturer = classified.canonical_manufacturer || classified.manufacturer
+    || (["SSD", "HDD", "PSU"].includes(category) ? PC_UNCLASSIFIED_MANUFACTURER_V3 : null);
   if (!manufacturer || !category) return null;
   const text = String(value || "").normalize("NFKC");
   const candidates = PC_PRODUCT_MASTER_V2.filter((product) => product.category === category && product.manufacturer === manufacturer);
@@ -132,16 +129,13 @@ function directoryFacetProduct(classified, value) {
     const capacity = Number(classified.module_capacity_gb);
     matches = candidates.filter((product) => product.spec?.memory_generation === generation && Number(product.spec?.module_capacity_gb) === capacity);
   } else if (category === "SSD" || category === "HDD") {
-    const capacity = storageCapacityGb(text);
-    matches = candidates.filter((product) => Array.isArray(product.spec?.capacity_examples_gb) && product.spec.capacity_examples_gb.includes(capacity));
+    matches = candidates.filter((product) => product.spec?.capacity_bucket === classified.capacity_bucket);
   } else if (category === "MOTHERBOARD") {
     const isAmd = /\b(?:A320|B350|X370|B450|X470|A520|B550|X570|A620|B650|X670|B840|B850|X870)/iu.test(text);
     const isIntel = /\b(?:H110|B150|Z170|B250|Z270|B360|B365|Z370|Z390|B460|Z490|B560|Z590|H610|B660|Z690|B760|Z790|B860|Z890)/iu.test(text);
     if (isAmd !== isIntel) matches = candidates.filter((product) => product.spec?.platform_vendor === (isAmd ? "AMD" : "Intel"));
   } else if (category === "PSU") {
-    const formFactor = /\bSFX-?L\b/iu.test(text) ? "SFX-L" : /\bSFX\b|\bSF\d{3,4}\b/iu.test(text) ? "SFX" : /\bATX\b|\bPSU\b|power\s*supply|파워/iu.test(text) ? "ATX" : null;
-    const inferredFormFactor = formFactor || (/(?:정격\s*)?\d{3,4}\s*W\b|80\s*PLUS/iu.test(text) ? "ATX" : null);
-    matches = candidates.filter((product) => product.spec?.form_factor === inferredFormFactor);
+    matches = candidates.filter((product) => product.spec?.watts_bucket === classified.watts_bucket);
   } else if (category === "COOLING") {
     const subtype = /\bAIO\b|수(?:냉|랭)|water\s*cool/iu.test(text) ? "AIO"
       : /case\s*fan|케이스\s*팬|쿨링\s*팬/iu.test(text) ? "CASE_FAN"
@@ -284,7 +278,7 @@ export class PcShadowPipeline {
     } : VERSIONS;
   }
 
-  normalizeItem(item, observedAt = new Date().toISOString(), versions = null) {
+  normalizeItem(item, observedAt = new Date().toISOString(), versions = null, options = {}) {
     const effectiveVersions = versions || this.pipelineVersions();
     const source = getPcSource(item.site);
     const textClassified = classifyPcPartListing(item);
@@ -328,10 +322,15 @@ export class PcShadowPipeline {
           ? exactAlias
           : textAlias;
     const aliasMatched = Boolean(alias?.matched && !alias?.forbidden);
-    const facetProduct = aliasMatched ? null : directoryFacetProduct(classified, `${item.title || ""} ${item.description || ""}`);
-    let product = aliasMatched
-      ? this.ledger.getCanonicalProduct(alias.canonical_product_id, alias.master_version)
-      : facetProduct ? this.ledger.getCanonicalProduct(facetProduct.id, PC_PRODUCT_MASTER_V2_VERSION) : null;
+    const facetClassification = ["SSD", "HDD", "PSU"].includes(classified.category_code) ? publicClassified : classified;
+    const facetProduct = aliasMatched ? null : directoryFacetProduct(facetClassification, `${item.title || ""} ${item.description || ""}`);
+    let product = classified.category_code === "MOTHERBOARD"
+      ? (publicClassified.canonical_product_id
+        ? this.ledger.getCanonicalProduct(publicClassified.canonical_product_id, PC_PRODUCT_MASTER_V2_VERSION)
+        : null)
+      : aliasMatched
+        ? this.ledger.getCanonicalProduct(alias.canonical_product_id, alias.master_version)
+        : facetProduct ? this.ledger.getCanonicalProduct(facetProduct.id, PC_PRODUCT_MASTER_V2_VERSION) : null;
     if (!cpuProductMatchesClassification(classified, product)) product = null;
     const matched = Boolean(product);
     const exclusionReasons = [...classified.exclusion_reasons];
@@ -346,7 +345,7 @@ export class PcShadowPipeline {
       ? comparablePrices(price, classified.quantity, classified.price_scope)
       : { unitPrice: null, totalPrice: null };
     const state = lifecycle(item);
-    const previousLifecycleStatus = matched
+    const previousLifecycleStatus = !options.reclassification && matched
       ? this.ledger.latestSnapshot(source.key, sourceListingId(item))?.lifecycle_status || null
       : null;
     if (matched && previousLifecycleStatus && previousLifecycleStatus !== state.status) {
@@ -373,8 +372,9 @@ export class PcShadowPipeline {
     let priceEligible = matched && prices.unitPrice !== null && statsExclusionReasons.length === 0;
     let statisticsEligible = publicSupportedCategory && matched && prices.unitPrice !== null
       && publicClassified.statistics_eligible === true && statsExclusionReasons.length === 0;
+    const exactSku = matched && product?.spec?.directory_node_type === "PRODUCT";
     let stats = null;
-    if (matched && priceEligible) {
+    if (exactSku && priceEligible && !options.reclassification) {
       stats = this.priceReference({
         canonicalProductId: product.canonical_product_id,
         days: 30,
@@ -397,9 +397,9 @@ export class PcShadowPipeline {
       priceEligible = false;
       statisticsEligible = false;
     }
-    const exactSku = matched && product?.spec?.directory_node_type === "PRODUCT";
     const exactAggregationIdentity = matched && ["PRODUCT", "BROWSE_BUCKET", "BROWSE_FACET"]
-      .includes(product?.spec?.directory_node_type);
+      .includes(product?.spec?.directory_node_type)
+      && !(classified.category_code === "MOTHERBOARD" && product?.spec?.directory_node_type === "BROWSE_FACET");
     const normalized = {
       normalizationVersion: Number(effectiveVersions.normalizationVersion || 1),
       canonicalProductId: product?.canonical_product_id || null,

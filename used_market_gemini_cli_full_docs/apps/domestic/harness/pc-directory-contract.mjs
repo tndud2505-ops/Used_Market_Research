@@ -14,7 +14,7 @@ import {
 import { pcProductsResponse } from "../cloudflare/pc-directory-http.mjs";
 import { publicPcModelsForApi } from "../market/logic/pc-public-catalog.mjs";
 
-assert.equal(PC_PRODUCT_MASTER_V2_VERSION, 2);
+assert.equal(PC_PRODUCT_MASTER_V2_VERSION, 4);
 assert.equal(PC_PART_CATEGORY_SEEDS_V2.length, 11);
 assert.deepEqual(listPcPartCategoriesV2().map(({ code }) => code), [
   "GPU", "CPU", "RAM", "MOTHERBOARD", "SSD", "HDD", "PSU", "COOLING", "CASE", "EXPANSION_CARD", "ODD"
@@ -45,11 +45,13 @@ for (const product of PC_PRODUCT_MASTER_V2.filter((entry) => manufacturerExpande
     manufacturerAliasOwners.set(key, owners);
   }
 }
-assert.deepEqual(
-  [...manufacturerAliasOwners].filter(([, owners]) => owners.size > 1),
-  [],
-  "manufacturer-specific directory aliases must never resolve to multiple products"
-);
+const ambiguousManufacturerAliases = [...manufacturerAliasOwners].filter(([, owners]) => owners.size > 1);
+assert.deepEqual(ambiguousManufacturerAliases.map(([key]) => key), ["SSD:990pro"],
+  "only an intentionally capacity-ambiguous detailed family alias may resolve to multiple aggregate buckets");
+assert.deepEqual([...ambiguousManufacturerAliases[0][1]], [
+  "ssd:samsung:capacity-bucket:513-gb-1-tb",
+  "ssd:samsung:capacity-bucket:gt-1-tb-le-2-tb"
+]);
 
 const expectedGpuGenerations = ["GTX 900", "GTX 10", "GTX 16", "RTX 20", "RTX 30", "RTX 40", "RTX 50", "RX 400", "RX 500", "Vega", "RX 5000", "RX 6000", "RX 7000", "RX 9000", "Arc A", "Arc B"];
 const gpuProducts = PC_PRODUCT_MASTER_V2.filter((product) => product.category === "GPU");
@@ -123,7 +125,7 @@ assert.throws(
 );
 
 const api = pcPartsDirectoryForApiV2({ category: "RAM", facets: { memory_generation: "DDR5", module_capacity_gb: [48, 64] }, limit: 10 });
-assert.equal(api.master_version, 2);
+assert.equal(api.master_version, 4);
 assert.deepEqual([...new Set(api.products.items.map((product) => product.spec.module_capacity_gb))], [48, 64]);
 assert.ok(api.categories.length === 11 && api.facet_schema.memory_generation.includes("DDR5"));
 
@@ -141,7 +143,16 @@ assert.deepEqual(repeatedPublic.products.items.map((product) => product.id),
 assert.equal(repeatedPublic.products.total, repeatedExpected.models.length);
 
 const legacyModelFilter = pcProductsResponse("https://used-pick.test/api/pc/products?category_code=SSD&model=990%20PRO");
-assert.ok(legacyModelFilter.products.items.some((product) => product.id === "ssd:samsung:990-pro-1tb"),
+assert.ok(legacyModelFilter.products.items.some((product) => product.id === "ssd:samsung:capacity-bucket:513-gb-1-tb"),
   "legacy public model filters must stay routed through the public catalog");
+for (const [category, facet, expectedLabels] of [
+  ["SSD", "capacity_bucket", ["256GB 이하", "257~512GB", "513GB~1TB", "1TB 초과~2TB", "2TB 초과~4TB", "4TB 초과~8TB", "8TB 초과"]],
+  ["HDD", "capacity_bucket", ["1TB 이하", "1TB 초과~2TB", "2TB 초과~4TB", "4TB 초과~6TB", "6TB 초과~8TB", "8TB 초과~12TB", "12TB 초과~16TB", "16TB 초과~20TB", "20TB 초과~24TB", "24TB 초과"]],
+  ["PSU", "watts_bucket", ["500W 이하", "501~650W", "651~750W", "751~850W", "851~1000W", "1001~1200W", "1200W 초과"]]
+]) {
+  const response = pcProductsResponse(`https://used-pick.test/api/pc/products?category_code=${category}`);
+  assert.deepEqual(response.available_facets[facet].map(({ label }) => label), expectedLabels,
+    `${category} public browse facets must expose human-readable continuous bucket labels`);
+}
 
-console.log(`pc-directory-contract: ok (${PC_PRODUCT_MASTER_V2.length} V2 directory nodes)`);
+console.log(`pc-directory-contract: ok (${PC_PRODUCT_MASTER_V2.length} V3 directory nodes)`);

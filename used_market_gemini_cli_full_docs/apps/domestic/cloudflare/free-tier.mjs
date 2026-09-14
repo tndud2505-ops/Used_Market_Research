@@ -4,6 +4,7 @@ import { pcCollectionTargetSetV2 } from "./pc-directory-http.mjs";
 import { PC_SOURCE_REGISTRY } from "../collector/logic/pc-source-registry.mjs";
 import { OPERATIONAL_PC_DIRECTORY_SITES, OPERATIONAL_TARGET_SITES } from "./target-sites.mjs";
 import { publicPcModelsForApi } from "../market/logic/pc-public-catalog.mjs";
+import { resolvePcCanonicalIdV3 } from "../market/data/pc-product-master-v2.mjs";
 import {
   decodePcListingsCursor,
   encodePcListingsCursor,
@@ -226,6 +227,14 @@ export async function browsePcListingsD1(request, env) {
   let catalogScope;
   try {
     query = parsePcListingsRequest(request, { allowedSites: OPERATIONAL_PC_DIRECTORY_SITES });
+    const legacyResolution = query.canonicalProductId ? resolvePcCanonicalIdV3(query.canonicalProductId) : null;
+    if (legacyResolution?.status === "alias" || legacyResolution?.status === "ambiguous") {
+      query = {
+        ...query,
+        canonicalProductId: "",
+        canonicalProductIds: [legacyResolution.requestedId, ...legacyResolution.canonicalProductIds]
+      };
+    }
     catalogScope = resolvePcCatalogListingScope(query);
     cursorState = decodePcListingsCursor(query, env.SEARCH_CURSOR_SECRET || env.RUNNER_TOKEN || "used-market-local-cursor-v2");
   } catch (error) {
@@ -296,7 +305,10 @@ export async function browsePcListingsD1(request, env) {
     "updated_at <= ?"
   ];
   const bindings = [asOf];
-  if (query.canonicalProductId) {
+  if (query.canonicalProductIds?.length) {
+    conditions.push(`canonical_product_id IN (${query.canonicalProductIds.map(() => "?").join(", ")})`);
+    bindings.push(...query.canonicalProductIds);
+  } else if (query.canonicalProductId) {
     conditions.push("canonical_product_id = ?");
     bindings.push(query.canonicalProductId);
   } else if (catalogScope?.modelIds.length === 1) {
@@ -470,6 +482,7 @@ export async function browsePcListingsD1(request, env) {
       },
       filters: {
         canonical_product_id: query.canonicalProductId || null,
+        canonical_product_ids: query.canonicalProductIds || null,
         catalog_scope: query.catalogScope || null,
         matched_model_count: catalogScope?.modelCount ?? null,
         manufacturer: query.manufacturer || null,

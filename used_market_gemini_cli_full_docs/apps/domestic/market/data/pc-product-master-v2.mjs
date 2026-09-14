@@ -1,4 +1,5 @@
-export const PC_PRODUCT_MASTER_V2_VERSION = 2;
+export const PC_PRODUCT_MASTER_V2_VERSION = 4;
+export const PC_UNCLASSIFIED_MANUFACTURER_V3 = "기타/미분류 제조사";
 
 export const PC_GPU_BOARD_MANUFACTURERS_V2 = Object.freeze([
   "NVIDIA", "AMD", "Intel", "ASUS", "Colorful", "EVGA", "Gainward", "GALAX", "GIGABYTE",
@@ -10,9 +11,9 @@ const CATEGORY_SEEDS = [
   ["CPU", "CPU", ["Intel", "AMD"], ["Core", "Core Ultra", "Ryzen"]],
   ["RAM", "RAM", ["Samsung", "SK hynix", "Micron", "Kingston", "Corsair", "G.Skill", "Crucial", "TeamGroup"], ["Memory Module"]],
   ["MOTHERBOARD", "메인보드", ["ASUS", "GIGABYTE", "MSI", "ASRock", "Biostar"], ["ROG", "TUF", "Prime", "AORUS", "MPG", "MAG", "MEG", "Taichi", "Steel Legend"]],
-  ["SSD", "SSD", ["Samsung", "SK hynix", "Solidigm", "Crucial", "Western Digital", "SanDisk", "Kingston", "Seagate", "Kioxia"], ["SSD"]],
-  ["HDD", "HDD", ["Western Digital", "Seagate", "Toshiba"], ["Blue", "Black", "Red", "Purple", "Gold", "IronWolf", "Barracuda", "Exos", "N300", "X300"]],
-  ["PSU", "파워", ["Seasonic", "Corsair", "FSP", "Super Flower", "Cooler Master", "ASUS", "MSI", "Thermaltake", "be quiet!", "Antec", "Micronics"], ["Power Supply"]],
+  ["SSD", "SSD", ["Samsung", "SK hynix", "Solidigm", "Crucial", "Western Digital", "SanDisk", "Kingston", "Seagate", "Kioxia", PC_UNCLASSIFIED_MANUFACTURER_V3], ["SSD"]],
+  ["HDD", "HDD", ["Western Digital", "Seagate", "Toshiba", PC_UNCLASSIFIED_MANUFACTURER_V3], ["Blue", "Black", "Red", "Purple", "Gold", "IronWolf", "Barracuda", "Exos", "N300", "X300"]],
+  ["PSU", "파워", ["Seasonic", "Corsair", "FSP", "Super Flower", "Cooler Master", "ASUS", "MSI", "Thermaltake", "be quiet!", "Antec", "Micronics", PC_UNCLASSIFIED_MANUFACTURER_V3], ["Power Supply"]],
   ["COOLING", "쿨러", ["Noctua", "Cooler Master", "Thermalright", "DeepCool", "ARCTIC", "Corsair", "NZXT", "be quiet!", "Scythe", "Thermaltake"], ["Air Cooler", "AIO", "Case Fan", "Custom Loop"]],
   ["CASE", "케이스", ["Corsair", "Cooler Master", "Lian Li", "Fractal Design", "NZXT", "Phanteks", "Thermaltake", "Antec", "3RSYS", "darkFlash", "ABKO", "Micronics"], ["PC Case"]],
   ["EXPANSION_CARD", "확장카드", ["ASUS", "Creative", "Elgato", "Blackmagic Design", "Intel", "Broadcom", "TP-Link", "QNAP", "HighPoint", "StarTech"], ["Network", "Sound", "Capture", "Storage Controller", "M.2 Carrier", "Thunderbolt"]],
@@ -63,21 +64,21 @@ const FACET_SCHEMA = {
     memory_generation: ["DDR3", "DDR4", "DDR5"]
   },
   SSD: {
-    capacity_bucket: ["LE_256_GB", "480_512_GB", "960_GB_1_TB", "1_92_2_TB", "3_84_4_TB", "7_68_8_TB", "GT_8_TB"],
+    capacity_bucket: ["LE_256_GB", "257_512_GB", "513_GB_1_TB", "GT_1_TB_LE_2_TB", "GT_2_TB_LE_4_TB", "GT_4_TB_LE_8_TB", "GT_8_TB"],
     form_factor: ["2.5-inch", "M.2 2242", "M.2 2260", "M.2 2280", "M.2 22110", "U.2", "AIC"],
     interface: ["SATA", "PCIe"],
     protocol: ["AHCI", "NVMe"],
     pcie_generation: [3, 4, 5]
   },
   HDD: {
-    capacity_bucket: ["LE_1_TB", "2_TB", "3_4_TB", "5_6_TB", "8_TB", "10_12_TB", "14_16_TB", "18_20_TB", "22_24_TB", "GE_26_TB"],
+    capacity_bucket: ["LE_1_TB", "GT_1_TB_LE_2_TB", "GT_2_TB_LE_4_TB", "GT_4_TB_LE_6_TB", "GT_6_TB_LE_8_TB", "GT_8_TB_LE_12_TB", "GT_12_TB_LE_16_TB", "GT_16_TB_LE_20_TB", "GT_20_TB_LE_24_TB", "GT_24_TB"],
     use_class: ["DESKTOP", "PERFORMANCE", "NAS", "SURVEILLANCE", "ENTERPRISE"],
     form_factor: ["2.5-inch", "3.5-inch"],
     interface: ["SATA", "SAS"],
     recording_technology: ["CMR", "SMR", "UNKNOWN"]
   },
   PSU: {
-    watts_bucket: ["LE_500", "550_650", "700_750", "800_850", "900_1000", "1100_1200", "GT_1200"],
+    watts_bucket: ["LE_500", "501_650", "651_750", "751_850", "851_1000", "1001_1200", "GT_1200"],
     form_factor: ["ATX", "SFX", "SFX-L"],
     atx_spec: ["ATX 2.x", "ATX 3.0", "ATX 3.1"],
     modularity: ["NON_MODULAR", "SEMI_MODULAR", "FULL_MODULAR"],
@@ -119,6 +120,7 @@ function deepFreeze(value) {
 export const PC_PART_FACET_SCHEMA_V2 = deepFreeze(FACET_SCHEMA);
 
 function slug(value) {
+  if (value === PC_UNCLASSIFIED_MANUFACTURER_V3) return "other-unclassified";
   return String(value).toLowerCase().replace(/[^a-z0-9]+/gu, "-").replace(/^-|-$/gu, "");
 }
 
@@ -309,25 +311,108 @@ function ramRecords() {
   }))));
 }
 
-const SSD_BUCKETS = [
+export const PC_SSD_CAPACITY_BUCKETS_V3 = Object.freeze([
   ["LE_256_GB", "SSD up to 256GB", [120, 128, 240, 250, 256]],
-  ["480_512_GB", "SSD 480-512GB", [480, 500, 512]],
-  ["960_GB_1_TB", "SSD 960GB-1TB", [960, 1000, 1024]],
-  ["1_92_2_TB", "SSD 1.92-2TB", [1920, 2000, 2048]],
-  ["3_84_4_TB", "SSD 3.84-4TB", [3840, 4000, 4096]],
-  ["7_68_8_TB", "SSD 7.68-8TB", [7680, 8000, 8192]],
+  ["257_512_GB", "SSD 257-512GB", [400, 480, 500, 512]],
+  ["513_GB_1_TB", "SSD 513GB-1TB", [800, 960, 1000]],
+  ["GT_1_TB_LE_2_TB", "SSD over 1TB up to 2TB", [1600, 1920, 2000]],
+  ["GT_2_TB_LE_4_TB", "SSD over 2TB up to 4TB", [3200, 3840, 4000]],
+  ["GT_4_TB_LE_8_TB", "SSD over 4TB up to 8TB", [5000, 7680, 8000]],
   ["GT_8_TB", "SSD over 8TB", [15360, 16000]]
-];
+]);
 
-const HDD_BUCKETS = [
-  ["LE_1_TB", "HDD up to 1TB", [500, 1000]], ["2_TB", "HDD 2TB", [2000]],
-  ["3_4_TB", "HDD 3-4TB", [3000, 4000]], ["5_6_TB", "HDD 5-6TB", [5000, 6000]],
-  ["8_TB", "HDD 8TB", [8000]], ["10_12_TB", "HDD 10-12TB", [10000, 12000]],
-  ["14_16_TB", "HDD 14-16TB", [14000, 16000]], ["18_20_TB", "HDD 18-20TB", [18000, 20000]],
-  ["22_24_TB", "HDD 22-24TB", [22000, 24000]], ["GE_26_TB", "HDD 26TB or more", [26000, 28000, 30000, 32000]]
-];
+export const PC_HDD_CAPACITY_BUCKETS_V3 = Object.freeze([
+  ["LE_1_TB", "HDD up to 1TB", [500, 1000]],
+  ["GT_1_TB_LE_2_TB", "HDD over 1TB up to 2TB", [1500, 2000]],
+  ["GT_2_TB_LE_4_TB", "HDD over 2TB up to 4TB", [3000, 4000]],
+  ["GT_4_TB_LE_6_TB", "HDD over 4TB up to 6TB", [5000, 6000]],
+  ["GT_6_TB_LE_8_TB", "HDD over 6TB up to 8TB", [7000, 8000]],
+  ["GT_8_TB_LE_12_TB", "HDD over 8TB up to 12TB", [10000, 12000]],
+  ["GT_12_TB_LE_16_TB", "HDD over 12TB up to 16TB", [14000, 16000]],
+  ["GT_16_TB_LE_20_TB", "HDD over 16TB up to 20TB", [18000, 20000]],
+  ["GT_20_TB_LE_24_TB", "HDD over 20TB up to 24TB", [22000, 24000]],
+  ["GT_24_TB", "HDD over 24TB", [26000, 28000, 30000, 32000]]
+]);
+
+export const PC_PSU_WATTS_BUCKETS_V3 = Object.freeze([
+  ["LE_500", "Power Supply up to 500W", [300, 400, 500]],
+  ["501_650", "Power Supply 501-650W", [520, 550, 600, 650]],
+  ["651_750", "Power Supply 651-750W", [700, 750]],
+  ["751_850", "Power Supply 751-850W", [800, 850]],
+  ["851_1000", "Power Supply 851-1000W", [900, 1000]],
+  ["1001_1200", "Power Supply 1001-1200W", [1050, 1100, 1200]],
+  ["GT_1200", "Power Supply over 1200W", [1300, 1500, 1600]]
+]);
+
+export function pcStorageCapacityBucketV3(category, capacityGb) {
+  const value = Number(capacityGb);
+  if (!Number.isFinite(value) || value <= 0) return null;
+  if (category === "SSD") {
+    if (value <= 256) return "LE_256_GB";
+    if (value <= 512) return "257_512_GB";
+    if (value <= 1024) return "513_GB_1_TB";
+    if (value <= 2048) return "GT_1_TB_LE_2_TB";
+    if (value <= 4096) return "GT_2_TB_LE_4_TB";
+    if (value <= 8192) return "GT_4_TB_LE_8_TB";
+    return "GT_8_TB";
+  }
+  if (category === "HDD") {
+    if (value <= 1000) return "LE_1_TB";
+    if (value <= 2000) return "GT_1_TB_LE_2_TB";
+    if (value <= 4000) return "GT_2_TB_LE_4_TB";
+    if (value <= 6000) return "GT_4_TB_LE_6_TB";
+    if (value <= 8000) return "GT_6_TB_LE_8_TB";
+    if (value <= 12000) return "GT_8_TB_LE_12_TB";
+    if (value <= 16000) return "GT_12_TB_LE_16_TB";
+    if (value <= 20000) return "GT_16_TB_LE_20_TB";
+    if (value <= 24000) return "GT_20_TB_LE_24_TB";
+    return "GT_24_TB";
+  }
+  return null;
+}
+
+export function pcPsuWattsBucketV3(ratedWatts) {
+  const value = Number(ratedWatts);
+  if (!Number.isFinite(value) || value <= 0) return null;
+  if (value <= 500) return "LE_500";
+  if (value <= 650) return "501_650";
+  if (value <= 750) return "651_750";
+  if (value <= 850) return "751_850";
+  if (value <= 1000) return "851_1000";
+  if (value <= 1200) return "1001_1200";
+  return "GT_1200";
+}
+
+export function pcAggregateProductIdV3({ category, manufacturer, capacityGb = null, ratedWatts = null }) {
+  const normalizedCategory = String(category || "").toUpperCase();
+  const normalizedManufacturer = manufacturer || PC_UNCLASSIFIED_MANUFACTURER_V3;
+  const bucket = normalizedCategory === "PSU"
+    ? pcPsuWattsBucketV3(ratedWatts)
+    : pcStorageCapacityBucketV3(normalizedCategory, capacityGb);
+  if (!bucket || !["SSD", "HDD", "PSU"].includes(normalizedCategory)) return null;
+  const dimension = normalizedCategory === "PSU" ? "watts-bucket" : "capacity-bucket";
+  return `${normalizedCategory.toLowerCase()}:${slug(normalizedManufacturer)}:${dimension}:${slug(bucket)}`;
+}
+
+const EXTRA_AGGREGATE_ALIASES = Object.freeze({
+  "ssd:samsung:capacity-bucket:513-gb-1-tb": ["990 PRO", "Samsung 990 PRO 1TB", "990 PRO 1TB", "Samsung M.2 SATA 1TB", "M.2 SATA 1TB"],
+  "ssd:samsung:capacity-bucket:gt-1-tb-le-2-tb": ["990 PRO", "Samsung 990 PRO 2TB", "990 PRO 2TB"],
+  "hdd:seagate:capacity-bucket:gt-12-tb-le-16-tb": ["Seagate ST16000DM001 16TB", "ST16000DM001 16TB"],
+  "psu:micronics:watts-bucket:le-500": ["Micronics Classic II 500W", "Classic II 500W", "클래식2 500W"],
+  "psu:micronics:watts-bucket:501-650": ["Micronics Classic II 600W", "Classic II 600W", "클래식2 600W"],
+  "psu:fsp:watts-bucket:501-650": ["FSP HYDRO PRO 600W", "HYDRO PRO 600W", "하이드로 프로 600W"],
+  "psu:micronics:watts-bucket:651-750": ["Micronics Classic II 700W", "Classic II 700W", "클래식2 700W"],
+  "psu:seasonic:watts-bucket:651-750": ["Seasonic FOCUS GOLD GX-750", "FOCUS GOLD GX-750", "포커스 골드 750W"],
+  "psu:seasonic:watts-bucket:751-850": ["Seasonic VERTEX GX-850", "VERTEX GX-850 850W"],
+  "psu:super-flower:watts-bucket:751-850": ["SuperFlower LEADEX III GOLD 850W", "LEADEX III GOLD 850W", "리덱스 3 850W"],
+  "psu:seasonic:watts-bucket:851-1000": ["Seasonic FOCUS GOLD GX-1000", "FOCUS GOLD GX-1000", "포커스 골드 1000W"],
+  "psu:corsair:watts-bucket:851-1000": ["Corsair RM1000x", "커세어 RM1000x"]
+});
 
 function capacityBucketRecords(category, buckets) {
+  const auxiliary = category === "SSD"
+    ? { form_factor: ["2.5-inch", "M.2 2280"], interface: ["SATA", "PCIe"], protocol: ["AHCI", "NVMe"] }
+    : { form_factor: ["2.5-inch", "3.5-inch"], interface: ["SATA", "SAS"], use_class: ["DESKTOP", "NAS", "SURVEILLANCE", "ENTERPRISE"] };
   return buckets.flatMap(([capacityBucket, name, capacityExamplesGb]) => categoryManufacturers(category).map((manufacturer) => ({
     ...record({
       id: `${category.toLowerCase()}:${slug(manufacturer)}:capacity-bucket:${slug(capacityBucket)}`,
@@ -338,22 +423,63 @@ function capacityBucketRecords(category, buckets) {
       brand: category,
       aliases: [
         `${manufacturer} ${name}`,
-        ...capacityExamplesGb.map((capacity) => `${manufacturer} ${capacity >= 1000 ? capacity / 1000 : capacity}${capacity >= 1000 ? "TB" : "GB"} ${category}`)
+        ...capacityExamplesGb.map((capacity) => `${manufacturer} ${capacity >= 1000 && capacity % 1000 === 0 ? capacity / 1000 : capacity}${capacity >= 1000 && capacity % 1000 === 0 ? "TB" : "GB"} ${category}`),
+        ...(EXTRA_AGGREGATE_ALIASES[`${category.toLowerCase()}:${slug(manufacturer)}:capacity-bucket:${slug(capacityBucket)}`] || [])
       ],
-      spec: { capacity_bucket: capacityBucket, capacity_examples_gb: capacityExamplesGb },
-      browseFacets: { capacity_bucket: capacityBucket }
+      spec: { capacity_bucket: capacityBucket, capacity_examples_gb: capacityExamplesGb, ...auxiliary },
+      browseFacets: { capacity_bucket: capacityBucket, ...auxiliary }
     }),
-    spec: { directory_node_type: "BROWSE_BUCKET", capacity_bucket: capacityBucket, capacity_examples_gb: capacityExamplesGb },
-    browse_facets: { directory_node_type: "BROWSE_BUCKET", capacity_bucket: capacityBucket }
+    spec: { directory_node_type: "BROWSE_BUCKET", capacity_bucket: capacityBucket, capacity_examples_gb: capacityExamplesGb, ...auxiliary },
+    browse_facets: { directory_node_type: "BROWSE_BUCKET", capacity_bucket: capacityBucket, ...auxiliary }
   })));
+}
+
+function wattsBucketRecords() {
+  return PC_PSU_WATTS_BUCKETS_V3.flatMap(([wattsBucket, name, wattsExamples]) => categoryManufacturers("PSU").map((manufacturer) => {
+    const id = `psu:${slug(manufacturer)}:watts-bucket:${slug(wattsBucket)}`;
+    return {
+      ...record({
+        id,
+        name: `${manufacturer} ${name}`,
+        category: "PSU",
+        group: "psu:watts-bucket",
+        manufacturer,
+        brand: "Power Supply",
+        aliases: [
+          `${manufacturer} ${name}`,
+          ...wattsExamples.map((watts) => `${manufacturer} ${watts}W Power Supply`),
+          ...(EXTRA_AGGREGATE_ALIASES[id] || [])
+        ],
+        spec: {
+          watts_bucket: wattsBucket, watts_examples: wattsExamples,
+          form_factor: ["ATX", "SFX", "SFX-L"], atx_spec: ["ATX 2.x", "ATX 3.0", "ATX 3.1"],
+          efficiency: ["80 PLUS", "80 PLUS Bronze", "80 PLUS Gold", "80 PLUS Platinum", "80 PLUS Titanium"],
+          modularity: ["NON_MODULAR", "SEMI_MODULAR", "FULL_MODULAR"]
+        },
+        browseFacets: {
+          watts_bucket: wattsBucket, form_factor: ["ATX", "SFX", "SFX-L"], atx_spec: ["ATX 2.x", "ATX 3.0", "ATX 3.1"],
+          efficiency: ["80 PLUS", "80 PLUS Bronze", "80 PLUS Gold", "80 PLUS Platinum", "80 PLUS Titanium"],
+          modularity: ["NON_MODULAR", "SEMI_MODULAR", "FULL_MODULAR"]
+        }
+      }),
+      spec: {
+        directory_node_type: "BROWSE_BUCKET", watts_bucket: wattsBucket, watts_examples: wattsExamples,
+        form_factor: ["ATX", "SFX", "SFX-L"], atx_spec: ["ATX 2.x", "ATX 3.0", "ATX 3.1"],
+        efficiency: ["80 PLUS", "80 PLUS Bronze", "80 PLUS Gold", "80 PLUS Platinum", "80 PLUS Titanium"],
+        modularity: ["NON_MODULAR", "SEMI_MODULAR", "FULL_MODULAR"]
+      },
+      browse_facets: {
+        directory_node_type: "BROWSE_BUCKET", watts_bucket: wattsBucket, form_factor: ["ATX", "SFX", "SFX-L"], atx_spec: ["ATX 2.x", "ATX 3.0", "ATX 3.1"],
+        efficiency: ["80 PLUS", "80 PLUS Bronze", "80 PLUS Gold", "80 PLUS Platinum", "80 PLUS Titanium"],
+        modularity: ["NON_MODULAR", "SEMI_MODULAR", "FULL_MODULAR"]
+      }
+    };
+  }));
 }
 
 const OTHER_CATEGORY_NODES = [
   ["MOTHERBOARD", "motherboard:platform:intel", "Intel Desktop Motherboard Platform", "motherboard:intel", "Intel", "Motherboard", { platform_vendor: "Intel" }],
   ["MOTHERBOARD", "motherboard:platform:amd", "AMD Desktop Motherboard Platform", "motherboard:amd", "AMD", "Motherboard", { platform_vendor: "AMD" }],
-  ["PSU", "psu:facet:atx", "ATX Power Supply", "psu:form-factor", "Generic", "Power Supply", { form_factor: "ATX" }],
-  ["PSU", "psu:facet:sfx", "SFX Power Supply", "psu:form-factor", "Generic", "Power Supply", { form_factor: "SFX" }],
-  ["PSU", "psu:facet:sfx-l", "SFX-L Power Supply", "psu:form-factor", "Generic", "Power Supply", { form_factor: "SFX-L" }],
   ["COOLING", "cooling:facet:air-cpu", "Air CPU Cooler", "cooling:subtype", "Generic", "Air Cooler", { subtype: "AIR_CPU" }],
   ["COOLING", "cooling:facet:aio", "AIO Liquid Cooler", "cooling:subtype", "Generic", "AIO", { subtype: "AIO" }],
   ["COOLING", "cooling:facet:case-fan", "PC Case Fan", "cooling:subtype", "Generic", "Case Fan", { subtype: "CASE_FAN" }],
@@ -384,6 +510,129 @@ const OTHER_CATEGORY_NODES = [
   browse_facets: { directory_node_type: "BROWSE_FACET", ...facets }
 })));
 
+function verifiedMotherboard({ manufacturer, model, family, platform, socket, chipset, formFactor, ddr, wifi = false,
+  edition = null, revision = null, revisionRequired = false, verifiedRevisions = [], sourceUrl, aliases = [] }) {
+  return record({
+    id: `motherboard:${slug(manufacturer)}:${slug(model)}`,
+    name: `${manufacturer} ${model}`,
+    category: "MOTHERBOARD", group: `motherboard:${platform.toLowerCase()}:${chipset.toLowerCase()}`,
+    manufacturer, brand: family,
+    aliases: [model, `${manufacturer} ${model}`, ...aliases],
+    spec: {
+      official_model: model, exact_model: model, product_family: family, platform_vendor: platform,
+      socket, chipset, form_factor: formFactor, memory_generation: ddr, wifi, wifi_variant: wifi ? "WIFI" : "NONE",
+      edition, revision, revision_required: revisionRequired, verified_revisions: verifiedRevisions,
+      official_source_urls: [sourceUrl]
+    }
+  });
+}
+
+const MOTHERBOARD_PRODUCTS = [
+  record({
+    id: "motherboard:asus:rog-strix-b550-a-gaming",
+    name: "ASUS ROG STRIX B550-A GAMING",
+    category: "MOTHERBOARD", group: "motherboard:amd:b550", manufacturer: "ASUS", brand: "ROG Strix",
+    aliases: ["ROG STRIX B550-A GAMING", "ASUS ROG STRIX B550-A GAMING"],
+    spec: {
+      official_model: "ROG STRIX B550-A GAMING", exact_model: "ROG STRIX B550-A GAMING",
+      product_family: "ROG Strix", platform_vendor: "AMD", socket: "AM4", chipset: "B550",
+      form_factor: "ATX", memory_generation: "DDR4", wifi: false, wifi_variant: "NONE",
+      edition: "A GAMING", revision: null,
+      official_source_urls: ["https://rog.asus.com/motherboards/rog-strix/rog-strix-b550-a-gaming-model/"]
+    }
+  }),
+  record({
+    id: "motherboard:asus:tuf-gaming-b550-pro",
+    name: "ASUS TUF GAMING B550-PRO",
+    category: "MOTHERBOARD", group: "motherboard:amd:b550", manufacturer: "ASUS", brand: "TUF Gaming",
+    aliases: ["TUF GAMING B550-PRO", "ASUS TUF GAMING B550-PRO"],
+    spec: {
+      official_model: "TUF GAMING B550-PRO", exact_model: "TUF GAMING B550-PRO",
+      product_family: "TUF Gaming", platform_vendor: "AMD", socket: "AM4", chipset: "B550",
+      form_factor: "ATX", memory_generation: "DDR4", wifi: false, wifi_variant: "NONE",
+      edition: "PRO", revision: null,
+      official_source_urls: ["https://www.asus.com/us/motherboards-components/motherboards/tuf-gaming/tuf-gaming-b550-pro/"]
+    }
+  }),
+  record({
+    id: "motherboard:asus:prime-b550m-a",
+    name: "ASUS PRIME B550M-A",
+    category: "MOTHERBOARD", group: "motherboard:amd:b550", manufacturer: "ASUS", brand: "Prime",
+    aliases: ["PRIME B550M-A", "ASUS PRIME B550M-A"],
+    spec: {
+      official_model: "PRIME B550M-A", exact_model: "PRIME B550M-A",
+      product_family: "Prime", platform_vendor: "AMD", socket: "AM4", chipset: "B550",
+      form_factor: "Micro-ATX", memory_generation: "DDR4", wifi: false, wifi_variant: "NONE",
+      edition: "A", revision: null,
+      official_source_urls: ["https://www.asus.com/motherboards-components/motherboards/prime/prime-b550m-a/"]
+    }
+  }),
+  record({
+    id: "motherboard:asus:rog-strix-b550-i-gaming",
+    name: "ASUS ROG STRIX B550-I GAMING",
+    category: "MOTHERBOARD", group: "motherboard:amd:b550", manufacturer: "ASUS", brand: "ROG Strix",
+    aliases: ["ROG STRIX B550-I GAMING", "ASUS ROG STRIX B550-I GAMING"],
+    spec: {
+      official_model: "ROG STRIX B550-I GAMING", exact_model: "ROG STRIX B550-I GAMING",
+      product_family: "ROG Strix", platform_vendor: "AMD", socket: "AM4", chipset: "B550",
+      form_factor: "Mini-ITX", memory_generation: "DDR4", wifi: true, wifi_variant: "WIFI",
+      edition: "I GAMING", revision: null,
+      official_source_urls: ["https://rog.asus.com/motherboards/rog-strix/rog-strix-b550-i-gaming-model/spec/"]
+    }
+  }),
+  record({
+    id: "motherboard:msi:mag-b650m-mortar-wifi",
+    name: "MSI MAG B650M MORTAR WIFI",
+    category: "MOTHERBOARD", group: "motherboard:amd:b650", manufacturer: "MSI", brand: "MAG",
+    aliases: ["MAG B650M MORTAR WIFI", "MSI MAG B650M MORTAR WIFI", "B650M 박격포 WIFI", "MSI B650M 박격포 WIFI"],
+    spec: {
+      official_model: "MAG B650M MORTAR WIFI", exact_model: "MAG B650M MORTAR WIFI",
+      product_family: "MAG", platform_vendor: "AMD", socket: "AM5", chipset: "B650",
+      form_factor: "Micro-ATX", memory_generation: "DDR5", wifi: true, wifi_variant: "WIFI",
+      edition: "MORTAR WIFI", revision: null,
+      official_source_urls: ["https://www.msi.com/Motherboard/MAG-B650M-MORTAR-WIFI/Specification"]
+    }
+  }),
+  record({
+    id: "motherboard:asrock:z370m-pro4",
+    name: "ASRock Z370M Pro4",
+    category: "MOTHERBOARD", group: "motherboard:intel:z370", manufacturer: "ASRock", brand: "Pro",
+    aliases: ["ASRock Z370M Pro4", "Z370M Pro4"],
+    spec: {
+      official_model: "Z370M Pro4", exact_model: "Z370M Pro4",
+      product_family: "Pro", platform_vendor: "Intel", socket: "LGA1151", chipset: "Z370",
+      form_factor: "Micro-ATX", memory_generation: "DDR4", wifi: false, wifi_variant: "NONE",
+      edition: "PRO4", revision: null,
+      official_source_urls: ["https://www.asrock.com/mb/Intel/Z370M%20Pro4/"]
+    }
+  }),
+  ...[
+    { manufacturer: "ASUS", model: "ROG CROSSHAIR VIII IMPACT", family: "ROG Crosshair", platform: "AMD", socket: "AM4", chipset: "X570", formFactor: "Mini-DTX", ddr: "DDR4", wifi: true, edition: "VIII IMPACT", sourceUrl: "https://rog.asus.com/motherboards/rog-crosshair/rog-crosshair-viii-impact-model/" },
+    { manufacturer: "ASUS", model: "TUF GAMING B850M-PLUS II", family: "TUF Gaming", platform: "AMD", socket: "AM5", chipset: "B850", formFactor: "Micro-ATX", ddr: "DDR5", edition: "PLUS II", sourceUrl: "https://www.asus.com/motherboards-components/motherboards/tuf-gaming/tuf-gaming-b850m-plus-ii/" },
+    { manufacturer: "ASUS", model: "PRIME H610M-E D4", family: "Prime", platform: "Intel", socket: "LGA1700", chipset: "H610", formFactor: "Micro-ATX", ddr: "DDR4", edition: "E D4", sourceUrl: "https://www.asus.com/motherboards-components/motherboards/prime/prime-h610m-e-d4/" },
+    { manufacturer: "ASUS", model: "TUF Z370-PLUS GAMING", family: "TUF Gaming", platform: "Intel", socket: "LGA1151", chipset: "Z370", formFactor: "ATX", ddr: "DDR4", edition: "PLUS GAMING", sourceUrl: "https://www.asus.com/motherboards-components/motherboards/tuf-gaming/tuf-z370-plus-gaming/" },
+    { manufacturer: "ASUS", model: "EX-H110M-V", family: "Expedition", platform: "Intel", socket: "LGA1151", chipset: "H110", formFactor: "Micro-ATX", ddr: "DDR4", edition: "V", sourceUrl: "https://www.asus.com/supportonly/ex-h110m-v/" },
+    { manufacturer: "ASUS", model: "TUF GAMING B760M-PLUS WIFI", family: "TUF Gaming", platform: "Intel", socket: "LGA1700", chipset: "B760", formFactor: "Micro-ATX", ddr: "DDR5", wifi: true, edition: "PLUS WIFI", sourceUrl: "https://www.asus.com/motherboards-components/motherboards/tuf-gaming/tuf-gaming-b760m-plus-wifi/" },
+    { manufacturer: "ASUS", model: "TUF GAMING B760M-PLUS II", family: "TUF Gaming", platform: "Intel", socket: "LGA1700", chipset: "B760", formFactor: "Micro-ATX", ddr: "DDR5", edition: "PLUS II", sourceUrl: "https://www.asus.com/motherboards-components/motherboards/tuf-gaming/tuf-gaming-b760m-plus-ii/" },
+    { manufacturer: "ASUS", model: "H110I-PLUS", family: "ASUS", platform: "Intel", socket: "LGA1151", chipset: "H110", formFactor: "Mini-ITX", ddr: "DDR4", edition: "I PLUS", sourceUrl: "https://www.asus.com/supportonly/h110i-plus/" },
+    { manufacturer: "MSI", model: "B450M-A PRO MAX", family: "PRO", platform: "AMD", socket: "AM4", chipset: "B450", formFactor: "Micro-ATX", ddr: "DDR4", edition: "MAX", sourceUrl: "https://www.msi.com/Motherboard/B450M-A-PRO-MAX" },
+    { manufacturer: "MSI", model: "PRO B650M-P", family: "PRO", platform: "AMD", socket: "AM5", chipset: "B650", formFactor: "Micro-ATX", ddr: "DDR5", edition: "P", sourceUrl: "https://www.msi.com/Motherboard/PRO-B650M-P" },
+    { manufacturer: "MSI", model: "PRO B550M-P GEN3", family: "PRO", platform: "AMD", socket: "AM4", chipset: "B550", formFactor: "Micro-ATX", ddr: "DDR4", edition: "GEN3", sourceUrl: "https://www.msi.com/Motherboard/PRO-B550M-P-GEN3" },
+    { manufacturer: "MSI", model: "B450M MORTAR MAX", family: "MORTAR", platform: "AMD", socket: "AM4", chipset: "B450", formFactor: "Micro-ATX", ddr: "DDR4", edition: "MAX", sourceUrl: "https://www.msi.com/Motherboard/B450M-MORTAR-MAX" },
+    { manufacturer: "GIGABYTE", model: "B550M AORUS ELITE", family: "AORUS", platform: "AMD", socket: "AM4", chipset: "B550", formFactor: "Micro-ATX", ddr: "DDR4", revision: "1.x", revisionRequired: true, verifiedRevisions: ["1.0", "1.1", "1.2", "1.3"], sourceUrl: "https://www.gigabyte.com/Motherboard/B550M-AORUS-ELITE-rev-13" },
+    { manufacturer: "GIGABYTE", model: "X870 AORUS ELITE WIFI7 ICE", family: "AORUS", platform: "AMD", socket: "AM5", chipset: "X870", formFactor: "ATX", ddr: "DDR5", wifi: true, edition: "WIFI7 ICE", revision: "1.x", revisionRequired: true, verifiedRevisions: ["1.0", "1.1", "1.2"], sourceUrl: "https://www.gigabyte.com/Motherboard/X870-AORUS-ELITE-WIFI7-ICE-rev-12" },
+    { manufacturer: "GIGABYTE", model: "B850M AORUS STEALTH ICE", family: "AORUS", platform: "AMD", socket: "AM5", chipset: "B850", formFactor: "Micro-ATX", ddr: "DDR5", wifi: true, edition: "STEALTH ICE", sourceUrl: "https://www.gigabyte.com/Motherboard/B850M-AORUS-STEALTH-ICE" },
+    { manufacturer: "GIGABYTE", model: "B850M AORUS ELITE", family: "AORUS", platform: "AMD", socket: "AM5", chipset: "B850", formFactor: "Micro-ATX", ddr: "DDR5", edition: "ELITE", sourceUrl: "https://www.gigabyte.com/Motherboard/B850M-AORUS-ELITE" },
+    { manufacturer: "GIGABYTE", model: "B450M DS3H", family: "Ultra Durable", platform: "AMD", socket: "AM4", chipset: "B450", formFactor: "Micro-ATX", ddr: "DDR4", revision: "1.x", revisionRequired: true, sourceUrl: "https://www.gigabyte.com/Motherboard/B450M-DS3H-rev-1x" },
+    { manufacturer: "GIGABYTE", model: "A520M K V2", family: "Ultra Durable", platform: "AMD", socket: "AM4", chipset: "A520", formFactor: "Micro-ATX", ddr: "DDR4", edition: "V2", revision: "1.x", revisionRequired: true, verifiedRevisions: ["1.0", "1.1", "1.2"], sourceUrl: "https://www.gigabyte.com/Motherboard/A520M-K-V2-rev-12" },
+    { manufacturer: "ASRock", model: "Z390 Steel Legend", family: "Steel Legend", platform: "Intel", socket: "LGA1151", chipset: "Z390", formFactor: "ATX", ddr: "DDR4", edition: "STEEL LEGEND", sourceUrl: "https://www.asrock.com/mb/Intel/Z390%20Steel%20Legend/index.asp" },
+    { manufacturer: "ASRock", model: "B360M-HDV", family: "HDV", platform: "Intel", socket: "LGA1151", chipset: "B360", formFactor: "Micro-ATX", ddr: "DDR4", edition: "HDV", sourceUrl: "https://www.asrock.com/mb/Intel/B360M-HDV/index.asp" },
+    { manufacturer: "ASRock", model: "B150M Pro4", family: "Pro", platform: "Intel", socket: "LGA1151", chipset: "B150", formFactor: "Micro-ATX", ddr: "DDR4", edition: "PRO4", sourceUrl: "https://www.asrock.com/mb/Intel/B150M%20Pro4/index.asp" },
+    { manufacturer: "ASRock", model: "H110M-DGS", family: "DGS", platform: "Intel", socket: "LGA1151", chipset: "H110", formFactor: "Micro-ATX", ddr: "DDR4", edition: "DGS", sourceUrl: "https://www.asrock.com/mb/Intel/H110M-DGS/index.asp" },
+    { manufacturer: "ASRock", model: "B360M Pro4", family: "Pro", platform: "Intel", socket: "LGA1151", chipset: "B360", formFactor: "Micro-ATX", ddr: "DDR4", edition: "PRO4", sourceUrl: "https://www.asrock.com/mb/Intel/B360M%20Pro4/index.asp" }
+  ].map(verifiedMotherboard)
+];
+
 export const PC_PRODUCT_MASTER_V2 = deepFreeze([
   ...gpuRecords("NVIDIA", "GeForce", NVIDIA_GPU_FAMILIES),
   ...gpuRecords("AMD", "Radeon", AMD_GPU_FAMILIES),
@@ -391,7 +640,78 @@ export const PC_PRODUCT_MASTER_V2 = deepFreeze([
   ...intelCpuRecords(),
   ...amdCpuRecords(),
   ...ramRecords(),
-  ...capacityBucketRecords("SSD", SSD_BUCKETS),
-  ...capacityBucketRecords("HDD", HDD_BUCKETS),
+  ...MOTHERBOARD_PRODUCTS,
+  ...capacityBucketRecords("SSD", PC_SSD_CAPACITY_BUCKETS_V3),
+  ...capacityBucketRecords("HDD", PC_HDD_CAPACITY_BUCKETS_V3),
+  ...wattsBucketRecords(),
   ...OTHER_CATEGORY_NODES
 ]);
+
+const legacySuccessors = {};
+function addLegacy(legacyId, ...successors) {
+  legacySuccessors[legacyId] = Object.freeze([...new Set(successors)]);
+}
+const storageLegacyBuckets = {
+  SSD: {
+    "le-256-gb": "le-256-gb", "480-512-gb": "257-512-gb", "960-gb-1-tb": "513-gb-1-tb",
+    "1-92-2-tb": "gt-1-tb-le-2-tb", "3-84-4-tb": "gt-2-tb-le-4-tb", "7-68-8-tb": "gt-4-tb-le-8-tb", "gt-8-tb": "gt-8-tb"
+  },
+  HDD: {
+    "le-1-tb": "le-1-tb", "2-tb": "gt-1-tb-le-2-tb", "3-4-tb": "gt-2-tb-le-4-tb",
+    "5-6-tb": "gt-4-tb-le-6-tb", "8-tb": "gt-6-tb-le-8-tb", "10-12-tb": "gt-8-tb-le-12-tb",
+    "14-16-tb": "gt-12-tb-le-16-tb", "18-20-tb": "gt-16-tb-le-20-tb", "22-24-tb": "gt-20-tb-le-24-tb", "ge-26-tb": "gt-24-tb"
+  }
+};
+for (const category of ["SSD", "HDD"]) {
+  for (const manufacturer of categoryManufacturers(category).filter((value) => value !== PC_UNCLASSIFIED_MANUFACTURER_V3)) {
+    for (const [legacyBucket, successorBucket] of Object.entries(storageLegacyBuckets[category])) {
+      addLegacy(`${category.toLowerCase()}:${slug(manufacturer)}:capacity-bucket:${legacyBucket}`,
+        `${category.toLowerCase()}:${slug(manufacturer)}:capacity-bucket:${successorBucket}`);
+    }
+  }
+}
+const psuSuccessorSuffixes = PC_PSU_WATTS_BUCKETS_V3.map(([bucket]) => slug(bucket));
+for (const formFactor of ["atx", "sfx", "sfx-l"]) {
+  addLegacy(`psu:facet:${formFactor}`,
+    ...categoryManufacturers("PSU").flatMap((manufacturer) => psuSuccessorSuffixes
+      .map((bucket) => `psu:${slug(manufacturer)}:watts-bucket:${bucket}`)));
+}
+for (const manufacturer of categoryManufacturers("PSU").filter((value) => value !== PC_UNCLASSIFIED_MANUFACTURER_V3)) {
+  for (const formFactor of ["atx", "sfx", "sfx-l"]) {
+    addLegacy(`psu:facet:${formFactor}:${slug(manufacturer)}`,
+      ...psuSuccessorSuffixes.map((bucket) => `psu:${slug(manufacturer)}:watts-bucket:${bucket}`));
+  }
+}
+for (const [legacyId, successor] of Object.entries({
+  "ssd:samsung:990-pro-1tb": "ssd:samsung:capacity-bucket:513-gb-1-tb",
+  "ssd:samsung:990-pro-2tb": "ssd:samsung:capacity-bucket:gt-1-tb-le-2-tb",
+  "ssd:samsung:m2-sata-1tb": "ssd:samsung:capacity-bucket:513-gb-1-tb",
+  "hdd:seagate:st16000dm001": "hdd:seagate:capacity-bucket:gt-12-tb-le-16-tb",
+  "psu:micronics:classic-ii-500": "psu:micronics:watts-bucket:le-500",
+  "psu:micronics:classic-ii-600": "psu:micronics:watts-bucket:501-650",
+  "psu:fsp:hydro-pro-600": "psu:fsp:watts-bucket:501-650",
+  "psu:micronics:classic-ii-700": "psu:micronics:watts-bucket:651-750",
+  "psu:seasonic:focus-gold-gx-750": "psu:seasonic:watts-bucket:651-750",
+  "psu:seasonic:vertex-gx-850": "psu:seasonic:watts-bucket:751-850",
+  "psu:super-flower:leadex-iii-850": "psu:super-flower:watts-bucket:751-850",
+  "psu:seasonic:focus-gold-gx-1000": "psu:seasonic:watts-bucket:851-1000",
+  "psu:corsair:rm1000x": "psu:corsair:watts-bucket:851-1000"
+})) addLegacy(legacyId, successor);
+
+export const PC_LEGACY_CANONICAL_ID_SUCCESSORS_V3 = deepFreeze(legacySuccessors);
+
+const currentCanonicalIds = new Set(PC_PRODUCT_MASTER_V2.map((product) => product.id));
+export function resolvePcCanonicalIdV3(value) {
+  const requestedId = String(value || "").trim();
+  if (currentCanonicalIds.has(requestedId)) {
+    return { status: "current", requestedId, canonicalProductIds: [requestedId] };
+  }
+  const successors = PC_LEGACY_CANONICAL_ID_SUCCESSORS_V3[requestedId] || [];
+  if (successors.length === 1) {
+    return { status: "alias", requestedId, canonicalProductIds: [...successors] };
+  }
+  if (successors.length > 1) {
+    return { status: "ambiguous", requestedId, canonicalProductIds: [...successors] };
+  }
+  return { status: "missing", requestedId, canonicalProductIds: [] };
+}

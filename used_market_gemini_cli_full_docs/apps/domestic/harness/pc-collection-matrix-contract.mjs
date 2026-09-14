@@ -13,11 +13,11 @@ const categorySet = new Set(PC_PART_CATEGORY_CODES);
 const operationalSites = new Set(OPERATIONAL_PC_DIRECTORY_SITES);
 const publicProducts = publicPcProducts();
 
-const defaultCapacity = pcCollectionCapacityPlan(80);
+const defaultCapacity = pcCollectionCapacityPlan();
 assert.equal(defaultCapacity.all_sources_sufficient, true,
   "the default per-run budget must cover hourly searches and the full daily model sweep");
-assert.equal(defaultCapacity.configured_targets_per_run, 80);
-assert.ok(defaultCapacity.sources.every((source) => source.minimum_targets_per_run <= 80));
+assert.equal(defaultCapacity.configured_targets_per_run, 85);
+assert.ok(defaultCapacity.sources.every((source) => source.minimum_targets_per_run <= defaultCapacity.configured_targets_per_run));
 const legacyLowCapacity = pcCollectionCapacityPlan(12);
 assert.equal(legacyLowCapacity.all_sources_sufficient, false,
   "an intentionally preserved low legacy limit must be visible as insufficient instead of silently starving daily targets");
@@ -28,8 +28,8 @@ assert.ok(targets.length > PC_PART_CATEGORY_CODES.length, "the active target set
 assert.equal(new Set(targets.map((target) => target.categoryCode)).size, categorySet.size,
   "every PC part category must have an active collection target");
 assert.doesNotMatch(JSON.stringify(targetSet), /quasarzone/iu, "retired Quasarzone must not be an active collection target");
-assert.equal(targetSet.targetSetVersion, "pc-targets:2:full-master-v10");
-assert.ok(targetSet.targets.every((target) => /:(?:category|market|master)-v10:/u.test(target.targetId)),
+assert.equal(targetSet.targetSetVersion, "pc-targets:4:full-master-v12");
+assert.ok(targetSet.targets.every((target) => /:(?:category|market|master)-v12:/u.test(target.targetId)),
   "a new collection target set must own new target ids instead of reusing prior-set ids");
 for (const product of publicProducts) {
   assert.ok(targets.some((target) => target.canonicalProductId === product.id),
@@ -99,8 +99,16 @@ assert.ok(intel12400Targets.some((target) => target.queryText === "i5 12400F"
 const gtx1070TiTargets = targets.filter((target) => target.canonicalProductId === "gpu:nvidia:gtx-1070-ti");
 assert.ok(gtx1070TiTargets.some((target) => target.queryText === "GTX1070Ti"
   && target.sourceKeys.includes("bunjang")), "GPU collection must include a compact model variant");
-assert.ok(targets.some((target) => target.canonicalProductId === "ssd:samsung:990-pro-1tb"
+assert.ok(targets.some((target) => target.canonicalProductId === "ssd:samsung:capacity-bucket:513-gb-1-tb"
   && target.sourceKeys.includes("bunjang")), "supplemental public products must be collected");
+assert.equal(targets.some((target) => /\b(?:257|513)GB\b/u.test(target.queryText)), false,
+  "storage collection must not spend source quota on synthetic bucket-boundary capacities");
+assert.ok(targets.some((target) => target.canonicalProductId === "ssd:samsung:capacity-bucket:257-512-gb"
+  && target.sourceKeys.length === 1 && target.sourceKeys[0] === "ebay" && target.queryText === "Samsung 512GB internal SSD"),
+"eBay storage collection must use a common capacity representative");
+assert.ok(targets.some((target) => target.canonicalProductId === "psu:seasonic:watts-bucket:501-650"
+  && target.sourceKeys.length === 1 && target.sourceKeys[0] === "ebay" && target.queryText === "Seasonic 650W computer power supply"),
+"eBay PSU collection must use a common rated-wattage representative");
 
 console.log(JSON.stringify({
   status: "passed",

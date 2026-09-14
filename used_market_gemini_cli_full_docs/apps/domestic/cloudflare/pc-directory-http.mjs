@@ -1,7 +1,8 @@
 import {
   PC_PART_CATEGORY_SEEDS_V2,
   PC_PRODUCT_MASTER_V2,
-  PC_PRODUCT_MASTER_V2_VERSION
+  PC_PRODUCT_MASTER_V2_VERSION,
+  PC_UNCLASSIFIED_MANUFACTURER_V3
 } from "../market/data/pc-product-master-v2.mjs";
 import { pcPartsDirectoryForApiV2 } from "../market/logic/pc-parts-directory.mjs";
 import { pcProductQueryVariants } from "../market/logic/pc-search-query-variants.mjs";
@@ -212,7 +213,7 @@ export function pcCollectionTargetSetV2() {
     ["ODD", "블루레이 ODD"]
   ];
   const categoryTargets = PC_PART_CATEGORY_SEEDS_V2.map((category, index) => ({
-    targetId: `pc-target:${PC_PRODUCT_MASTER_V2_VERSION}:category-v10:${category.code}`,
+    targetId: `pc-target:${PC_PRODUCT_MASTER_V2_VERSION}:category-v12:${category.code}`,
     canonicalProductId: null,
     categoryCode: category.code,
     queryText: category.label,
@@ -223,7 +224,7 @@ export function pcCollectionTargetSetV2() {
     enabled: true
   }));
   const generalTargets = generalQueries.map(([categoryCode, queryText], index) => ({
-    targetId: `pc-target:${PC_PRODUCT_MASTER_V2_VERSION}:market-v10:${categoryCode}:${index}`,
+    targetId: `pc-target:${PC_PRODUCT_MASTER_V2_VERSION}:market-v12:${categoryCode}:${index}`,
     canonicalProductId: null,
     categoryCode,
     queryText,
@@ -245,19 +246,22 @@ export function pcCollectionTargetSetV2() {
   });
   const domesticExactQueries = (product) => {
     const spec = product.spec || {};
+    const manufacturer = product.manufacturer === PC_UNCLASSIFIED_MANUFACTURER_V3 ? "" : product.manufacturer;
     if (["CPU", "GPU"].includes(product.category) || spec.exact_model) {
       return pcProductQueryVariants(product, { maximum: 2 });
     }
     if (product.category === "RAM") {
-      return [`${product.manufacturer} ${spec.memory_generation} ${spec.module_capacity_gb}GB 램`];
+      return [`${manufacturer} ${spec.memory_generation} ${spec.module_capacity_gb}GB 램`];
     }
     if (["SSD", "HDD"].includes(product.category)) {
       return (spec.capacity_examples_gb || []).map((capacity) => (
-        `${product.manufacturer} ${formatCapacity(capacity)} ${product.category}`
+        `${manufacturer} ${formatCapacity(capacity)} ${product.category}`.trim()
       ));
     }
-    if (product.category === "MOTHERBOARD") return [`${product.manufacturer} 메인보드`];
-    if (product.category === "PSU") return [`${product.manufacturer} ${spec.form_factor || ""} 파워서플라이`];
+    if (product.category === "MOTHERBOARD") return [`${manufacturer} 메인보드`];
+    if (product.category === "PSU") return (spec.watts_examples || []).map((watts) => (
+      `${manufacturer} ${watts}W 파워서플라이`.trim()
+    ));
     if (product.category === "COOLING") return [`${product.manufacturer} ${subtypeQuery[spec.subtype] || "PC 쿨러"}`];
     if (product.category === "CASE") return [`${product.manufacturer} PC 케이스`];
     if (product.category === "EXPANSION_CARD") {
@@ -273,9 +277,16 @@ export function pcCollectionTargetSetV2() {
   const exactTargets = [];
   let exactOrder = categoryTargets.length + generalTargets.length;
   for (const product of collectionProducts) {
+    const spec = product.spec || {};
+    const ebayManufacturer = product.manufacturer === PC_UNCLASSIFIED_MANUFACTURER_V3 ? "" : product.manufacturer;
+    const ebayQuery = product.category === "PSU"
+      ? `${ebayManufacturer} ${spec.watts_examples?.at(-1) || ""}W computer power supply`.trim()
+      : ["SSD", "HDD"].includes(product.category)
+        ? `${ebayManufacturer} ${formatCapacity(spec.capacity_examples_gb?.at(-1) || 0)} internal ${product.category}`.trim()
+        : product.name;
     const queryPlans = [
       ...domesticExactQueries(product).map((queryText) => ({ scope: "domestic", queryText, sourceKeys: searchMarketplaceSources })),
-      { scope: "ebay", queryText: product.name, sourceKeys: overseasExactSources }
+      { scope: "ebay", queryText: ebayQuery, sourceKeys: overseasExactSources }
     ].filter((plan) => plan.sourceKeys.length > 0 && String(plan.queryText || "").trim());
     const uniquePlans = [...new Map(queryPlans.map((plan) => [
       `${plan.scope}:${String(plan.queryText).normalize("NFKC").replace(/\s+/gu, " ").trim().toLocaleLowerCase("en-US")}`,
@@ -284,7 +295,7 @@ export function pcCollectionTargetSetV2() {
     for (let queryIndex = 0; queryIndex < uniquePlans.length; queryIndex += 1) {
       const plan = uniquePlans[queryIndex];
       exactTargets.push({
-        targetId: `pc-target:${PC_PRODUCT_MASTER_V2_VERSION}:master-v10:${product.id}:${plan.scope}:${queryIndex}`,
+        targetId: `pc-target:${PC_PRODUCT_MASTER_V2_VERSION}:master-v12:${product.id}:${plan.scope}:${queryIndex}`,
         canonicalProductId: product.id,
         categoryCode: product.category,
         queryText: plan.queryText,
@@ -298,13 +309,13 @@ export function pcCollectionTargetSetV2() {
     }
   }
   return {
-    targetSetVersion: `pc-targets:${PC_PRODUCT_MASTER_V2_VERSION}:full-master-v10`,
+    targetSetVersion: `pc-targets:${PC_PRODUCT_MASTER_V2_VERSION}:full-master-v12`,
     directoryVersion: PC_PRODUCT_MASTER_V2_VERSION,
     targets: [...categoryTargets, ...generalTargets, ...exactTargets]
   };
 }
 
-export function pcCollectionCapacityPlan(targetsPerRun = 80) {
+export function pcCollectionCapacityPlan(targetsPerRun = 85) {
   const configuredTargetsPerRun = Number(targetsPerRun);
   if (!Number.isInteger(configuredTargetsPerRun) || configuredTargetsPerRun < 1 || configuredTargetsPerRun > 128) {
     throw new TypeError("targetsPerRun must be an integer from 1 to 128");

@@ -1,0 +1,184 @@
+C:\DeVelop\USED_WEB 저장소의 중고 PC 부품 분류 체계를 검토해줘.
+
+목적은 이론적으로 완벽한 분류기가 아니라 실제 중고거래 사용자가 검색하고 가격을 비교할 때 불편하거나 오해할 만한 분류 오류를 찾는 것이다. 기준을 지나치게 타이트하게 잡지 말고, 흔한 매물이 대체로 올바른 부품, 모델, 용량으로 들어가는지를 실용적으로 판단해라.
+
+중요 조건
+
+이번 작업은 검토만 한다. 코드는 수정하지 마라.
+실제 마켓플레이스 호출이나 운영 배포는 하지 마라.
+라이브 인증정보가 필요한 검증은 하지 말고 기존 fixture와 결정론적 테스트를 사용해라.
+드물고 애매한 제목 한두 개를 이유로 전체 구조를 실패 처리하지 마라.
+확실하지 않은 내용은 오류로 단정하지 말고 확인 필요로 분리해라.
+코드 규칙만 읽고 결론 내리지 말고 기존 테스트 사례와 실제 사용자 화면에 나타나는 결과까지 연결해서 판단해라.
+
+먼저 읽을 문서
+
+README.md
+used_market_gemini_cli_full_docs/SETUP.md
+used_market_gemini_cli_full_docs/apps/domestic/README.md
+used_market_gemini_cli_full_docs/apps/domestic/docs/AI_CONTEXT.md
+used_market_gemini_cli_full_docs/apps/domestic/docs/decisions/ADR-pc-parts-ledger-and-source-policy.md
+used_market_gemini_cli_full_docs/apps/domestic/docs/decisions/ADR-precollected-pc-parts-directory.md
+
+주요 검토 대상
+
+used_market_gemini_cli_full_docs/apps/domestic/market/logic/pc-parts-classifier.mjs
+used_market_gemini_cli_full_docs/apps/domestic/market/logic/pc-public-catalog.mjs
+used_market_gemini_cli_full_docs/apps/domestic/market/data/pc-product-master-v2.mjs
+used_market_gemini_cli_full_docs/apps/domestic/cloudflare/category-filter.mjs
+used_market_gemini_cli_full_docs/apps/domestic/cloudflare/category-source-map.mjs
+used_market_gemini_cli_full_docs/apps/domestic/aws-runner/pc-shadow-pipeline.mjs
+used_market_gemini_cli_full_docs/apps/domestic/aws-runner/pc-quality-eval.mjs
+관련 pc-* contract harness
+사용자에게 카테고리, 제품, 매물을 보여주는 API와 UI 코드
+
+공개 부품군을 각각 독립적으로 검토해라.
+
+CPU
+GPU
+RAM
+MOTHERBOARD
+SSD
+HDD
+PSU
+
+CASE, COOLING, EXPANSION_CARD, ODD와 완본체, 반본체, 묶음, 액세서리도 위 7개 부품군에 잘못 섞이는지 확인하는 범위에서 검토해라.
+
+관점 1. 실제 사용자
+
+해당 카테고리를 열었을 때 사용자가 기대하는 매물이 나오는가?
+본체, 노트북 완제품, 다른 부품, 빈 박스, 케이블, 방열판, 케이스 같은 물건이 섞이지 않는가?
+흔히 쓰는 한글명, 영문명, 띄어쓰기, 약칭, 모델명만 적힌 제목도 적절히 인식하는가?
+제조사, 모델, 용량, 세대 필터가 사용자가 이해하는 의미와 맞는가?
+제목이 조금 불완전해도 명백한 매물을 과도하게 버리지 않는가?
+애매한 매물이 포함되는 것과 명백히 잘못된 매물이 포함되는 것을 구분해라.
+분류 오류가 가격 평균과 모델별 시세를 실제로 왜곡할 가능성이 있는가?
+화면의 제품명과 필터명이 중고거래 사용자에게 자연스럽고 구별 가능한가?
+
+관점 2. 실제 분류기
+
+category_code, listing_kind, canonical_model, canonical_product_id가 서로 일관적인가?
+FULL_SYSTEM, COMPONENT_BUNDLE, ACCESSORY_ONLY, BOX_ONLY, OPTION_AD, WANTED가 단일 부품으로 오인되지 않는가?
+제목과 설명이 충돌할 때 어떤 값이 우선하는지 합리적인가?
+규칙 실행 순서 때문에 정상 매물이 다른 카테고리로 먼저 잡히지 않는가?
+모델명이 없는 매물을 억지로 특정 모델에 넣지 않는가?
+모델명이 명확한 매물을 UNKNOWN으로 지나치게 보내지 않는가?
+quantity, price_scope, condition, market_segment가 가격 통계 대상 여부와 일관적인가?
+잘못된 매물이 statistics_eligible=true가 되어 평균 가격에 들어갈 위험을 우선 확인해라.
+같은 의미의 규칙이 여러 파일에 중복돼 서로 다르게 작동하지 않는지 확인해라.
+
+CPU 중점 확인
+
+Intel i3, i5, i7, i9 및 Core Ultra 표기
+AMD Ryzen 숫자 모델
+CPU 쿨러, 메인보드 세트, 반본체 및 완본체 혼입
+관련 없는 숫자를 CPU 모델로 오인하는 사례
+
+GPU 중점 확인
+
+RTX, GTX, GT, RX, Intel Arc 모델
+GPU 칩 제조사와 ASUS, MSI, GALAX 같은 보드 제조사의 역할 분리
+Ti, SUPER, XT, XTX 파생 모델 구분
+노트북, eGPU, 워터블록, 쿨러, 브라켓, 박스만 판매하는 매물
+VRAM 용량이 GPU 모델이나 판매 수량으로 잘못 사용되는지
+
+RAM 중점 확인
+
+DDR3, DDR4, DDR5 구분
+데스크톱 UDIMM과 노트북 SODIMM
+ECC, RDIMM, 서버 메모리와 일반 소비자 메모리 구분
+8GB×2, 16GB 2개, 32GB KIT 같은 모듈 용량, 수량, 총용량
+여러 개 판매 시 개당 가격과 일괄 가격 구분
+자동차 Dodge Ram 같은 영문 오탐
+
+MOTHERBOARD 중점 확인
+
+B650M, Z790, A520 같은 칩셋과 정확 모델
+AM4, AM5, LGA 소켓 추론
+M-ATX와 ATX 구분
+DDR4, DDR5 및 Wi-Fi 파생 모델 구분
+CPU+보드 세트, 보드셋, 노트북 메인보드, 고장 보드 혼입
+단순히 보드라는 표현만으로 메인보드가 되는 오탐
+
+SSD 중점 확인
+
+SSD, NVMe, M.2, SATA 표기
+실제 저장장치와 외장 케이스, 인클로저, 방열판 구분
+256GB, 500GB, 512GB, 1TB, 2TB 등의 용량 추출
+제품명만 있는 970 EVO, 980 PRO, SN850X 같은 흔한 제목
+현재 정책인 제조사 × 용량 구간 분류가 사용자 검색에 실용적인지
+모델명이 검색 별칭으로만 쓰일 때 UI에서 오해가 생기지 않는지
+
+HDD 중점 확인
+
+HDD, 하드디스크, 모델 번호만 있는 매물
+WD Red, IronWolf 등 NAS 계열과 일반 데스크톱 HDD
+노트북용, CCTV용, 엔터프라이즈, SAS 제품 구분
+외장 HDD 완제품과 외장 케이스만 있는 매물
+용량과 수량 혼동
+현재 제조사 × 용량 구간 정책의 실용성
+
+PSU 중점 확인
+
+파워서플라이 본체와 케이블만 판매하는 매물
+정격 출력과 제품명 속 숫자의 혼동
+ATX, SFX, 효율 등급, 모듈러 여부
+서버용 전원공급장치와 일반 데스크톱 PSU 구분
+현재 제조사 × 정격 출력 구간 정책의 실용성
+
+검토 방법
+
+기존 테스트와 fixture에서 각 부품군의 정상 사례와 경계 사례를 찾아라.
+코드상 분류 흐름을 따라 예상 결과를 확인해라.
+필요하면 기존 분류 함수를 대상으로 읽기 전용 임시 입력을 실행해라.
+각 부품군에서 흔한 정상 매물, 모델명만 적힌 매물, 한글 약칭과 띄어쓰기 변형, 완본체 또는 묶음, 액세서리만 판매, 용량과 수량과 가격 범위가 애매한 매물, 다른 카테고리와 충돌하는 매물을 확인해라.
+테스트 통과 여부만으로 올바르다고 결론 내리지 말고 테스트에 빠진 현실적인 사례도 제안해라.
+
+판정 기준
+
+치명적: 다른 부품이나 완본체가 시세 통계에 들어가 가격을 크게 왜곡할 수 있음
+중요: 흔한 정상 매물이 지속적으로 누락되거나 잘못된 모델로 들어감
+보통: 일부 검색이나 필터 경험이 부정확하지만 사용은 가능함
+낮음: 드문 표기나 매우 애매한 제목에서만 발생함
+허용 가능: 현재 정책과 실용성을 고려하면 복잡도를 늘려 고칠 필요가 없음
+
+사소한 예외 하나마다 정규식 추가를 권하지 마라. 다음 조건 중 하나를 만족할 때만 수정 후보로 올려라.
+
+반복 가능성이 높은 실제 중고거래 표현이다.
+가격 통계를 오염시킬 수 있다.
+사용자가 명백히 다른 부품이나 모델을 보게 된다.
+간단한 규칙 변경으로 여러 사례를 함께 개선할 수 있다.
+기존 정상 사례를 망가뜨릴 위험이 낮다.
+
+최종 보고서 형식
+
+1. 전체 결론
+
+현재 분류가 실사용 가능한 수준인지 알려줘.
+가장 큰 문제 3~5개를 알려줘.
+그대로 유지해도 되는 부분을 알려줘.
+
+2. 부품별 결과
+
+각 부품군에 대해 사용자 관점 판정, 분류기 관점 판정, 대표 정상 사례, 대표 오분류 또는 누락 사례, 실제 영향, 권장 조치를 정리해라.
+판정은 양호, 대체로 양호, 개선 필요, 위험 중 하나를 사용해라.
+
+3. 구체적인 발견 사항
+
+관련 파일과 정확한 코드 위치를 적어라.
+재현 입력, 현재 출력, 기대 출력을 적어라.
+심각도와 수정 필요 여부를 적어라.
+
+4. 테스트 공백
+
+실제 가치가 높은 추가 테스트만 제안해라.
+부품별 테스트 수를 억지로 맞추지 마라.
+같은 의미의 중복 테스트를 만들지 마라.
+
+5. 최종 우선순위
+
+지금 수정할 것
+데이터나 실제 표본을 더 본 뒤 결정할 것
+현재 상태로 허용할 것
+
+근거 없는 추측이나 지나치게 엄격한 정확도 목표보다 사용자가 검색 결과를 신뢰할 수 있는지와 가격 통계가 오염되지 않는지를 중심으로 결론을 내려라.

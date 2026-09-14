@@ -613,6 +613,7 @@ export class PcPartsLedger {
           created_at TEXT NOT NULL
         ) STRICT;
         CREATE INDEX IF NOT EXISTS idx_listing_snapshots_identity ON listing_snapshots(source_id, source_listing_id, observed_at DESC, id DESC);
+        CREATE INDEX IF NOT EXISTS idx_listing_snapshots_raw ON listing_snapshots(raw_listing_id);
         CREATE INDEX IF NOT EXISTS idx_listing_snapshots_canonical_identity
           ON listing_snapshots(pc_source_listing_identity(source_id, source_listing_id), observed_at, id);
         CREATE INDEX IF NOT EXISTS idx_listing_snapshots_status ON listing_snapshots(lifecycle_status, observed_at);
@@ -706,6 +707,7 @@ export class PcPartsLedger {
           reason TEXT,
           created_at TEXT NOT NULL
         ) STRICT;
+        CREATE INDEX IF NOT EXISTS idx_classification_feedback_snapshot ON classification_feedback(snapshot_id);
 
         CREATE TABLE IF NOT EXISTS duplicate_clusters (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -754,6 +756,7 @@ export class PcPartsLedger {
           rule_version TEXT NOT NULL,
           filter_version TEXT NOT NULL,
           as_of TEXT NOT NULL,
+          member_details_retained INTEGER NOT NULL DEFAULT 1 CHECK(member_details_retained IN (0, 1)),
           UNIQUE(stat_date, canonical_product_id, market_pool, condition_code, currency, metric_scope)
         ) STRICT;
         CREATE INDEX IF NOT EXISTS idx_daily_price_stats_lookup ON daily_price_stats(canonical_product_id, market_pool, condition_code, currency, stat_date DESC);
@@ -790,6 +793,9 @@ export class PcPartsLedger {
           outlier_reason TEXT,
           UNIQUE(daily_price_stat_id, snapshot_id, listing_item_id, member_role)
         ) STRICT;
+        CREATE INDEX IF NOT EXISTS idx_daily_price_stat_members_snapshot ON daily_price_stat_members(snapshot_id);
+        CREATE INDEX IF NOT EXISTS idx_daily_price_stat_members_item ON daily_price_stat_members(listing_item_id);
+        CREATE INDEX IF NOT EXISTS idx_daily_price_stat_members_raw ON daily_price_stat_members(raw_listing_id);
 
         CREATE TABLE IF NOT EXISTS daily_source_price_stats (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -809,6 +815,7 @@ export class PcPartsLedger {
           outlier_upper_bound REAL,
           seven_day_sold_median REAL,
           confidence_level TEXT NOT NULL,
+          member_details_retained INTEGER NOT NULL DEFAULT 1 CHECK(member_details_retained IN (0, 1)),
           UNIQUE(daily_price_stat_id, source_id)
         ) STRICT;
         CREATE INDEX IF NOT EXISTS idx_daily_source_price_stats_lookup
@@ -828,6 +835,9 @@ export class PcPartsLedger {
           outlier_reason TEXT,
           UNIQUE(daily_source_price_stat_id, snapshot_id, listing_item_id, member_role)
         ) STRICT;
+        CREATE INDEX IF NOT EXISTS idx_daily_source_price_stat_members_snapshot ON daily_source_price_stat_members(snapshot_id);
+        CREATE INDEX IF NOT EXISTS idx_daily_source_price_stat_members_item ON daily_source_price_stat_members(listing_item_id);
+        CREATE INDEX IF NOT EXISTS idx_daily_source_price_stat_members_raw ON daily_source_price_stat_members(raw_listing_id);
 
         CREATE TABLE IF NOT EXISTS pc_pipeline_versions (
           version_key TEXT PRIMARY KEY,
@@ -867,6 +877,7 @@ export class PcPartsLedger {
           observed_at TEXT NOT NULL,
           PRIMARY KEY(candidate_id, source_id, source_listing_id)
         ) STRICT;
+        CREATE INDEX IF NOT EXISTS idx_model_candidate_sightings_snapshot ON model_candidate_sightings(snapshot_id);
       `);
       const snapshotColumns = new Set(this.db.prepare("PRAGMA table_info(listing_snapshots)").all().map((row) => row.name));
       if (!snapshotColumns.has("transaction_evidence_json")) {
@@ -914,6 +925,9 @@ export class PcPartsLedger {
       if (!statColumns.has("max_value")) this.db.exec("ALTER TABLE daily_price_stats ADD COLUMN max_value REAL");
       if (!statColumns.has("seven_day_sold_median")) this.db.exec("ALTER TABLE daily_price_stats ADD COLUMN seven_day_sold_median REAL");
       if (!statColumns.has("normalization_version")) this.db.exec("ALTER TABLE daily_price_stats ADD COLUMN normalization_version INTEGER NOT NULL DEFAULT 1");
+      if (!statColumns.has("member_details_retained")) this.db.exec("ALTER TABLE daily_price_stats ADD COLUMN member_details_retained INTEGER NOT NULL DEFAULT 1 CHECK(member_details_retained IN (0, 1))");
+      const sourceStatColumns = new Set(this.db.prepare("PRAGMA table_info(daily_source_price_stats)").all().map((row) => row.name));
+      if (!sourceStatColumns.has("member_details_retained")) this.db.exec("ALTER TABLE daily_source_price_stats ADD COLUMN member_details_retained INTEGER NOT NULL DEFAULT 1 CHECK(member_details_retained IN (0, 1))");
       const memberColumns = new Set(this.db.prepare("PRAGMA table_info(daily_price_stat_members)").all().map((row) => row.name));
       if (!memberColumns.has("outlier_flag")) this.db.exec("ALTER TABLE daily_price_stat_members ADD COLUMN outlier_flag INTEGER NOT NULL DEFAULT 0");
       if (!memberColumns.has("outlier_reason")) this.db.exec("ALTER TABLE daily_price_stat_members ADD COLUMN outlier_reason TEXT");
@@ -2556,6 +2570,11 @@ export class PcPartsLedger {
       canonicalProductId, marketPool, condition, currency, normalizationVersion,
       parserVersion, ruleVersion, filterVersion
     );
+    const requestedThroughDate = asOf.slice(0, 10);
+    if (options.requireAsOfCoverage === true && (!windowRow
+      || windowRow.from_date > requestedThroughDate || windowRow.through_date < requestedThroughDate)) {
+      throw new Error("PRICE_STATS_WINDOW_UNAVAILABLE");
+    }
     const dailyRows = this.db.prepare(`
       SELECT * FROM daily_price_stats WHERE canonical_product_id = ? AND market_pool = ? AND condition_code = ?
         AND currency = ? AND stat_date >= ? AND stat_date <= ?
@@ -2648,7 +2667,9 @@ export class PcPartsLedger {
         filter: versionRow?.filter_version || windowRow?.filter_version || filterVersion
       },
       traceability: { member_count: null },
-      as_of: versionRow?.as_of || windowRow?.as_of || asOf
+      as_of: options.requireAsOfCoverage === true
+        ? asOf
+        : versionRow?.as_of || windowRow?.as_of || asOf
     };
   }
 
@@ -2942,6 +2963,88 @@ export class PcPartsLedger {
       FROM pc_publication_runtime WHERE publication_kind = ?`).get(requireValue(publicationKind, "publicationKind")) || null;
   }
 
+  storageCompactionPlan(options = {}) {
+    const asOf = options.asOf instanceof Date ? options.asOf : new Date(options.asOf || this.now());
+    if (!Number.isFinite(asOf.getTime())) throw new TypeError("invalid compaction asOf");
+    const observationRetentionDays = Math.min(30, Math.max(1, Number(options.observationRetentionDays) || 1));
+    const observationCutoffDay = dayKey(new Date(asOf.getTime() - (observationRetentionDays - 1) * DAY_MS));
+    const observationCutoff = `${observationCutoffDay}T00:00:00.000Z`;
+    this.db.exec(`
+      DROP TABLE IF EXISTS temp.pc_storage_compaction_snapshots;
+      DROP TABLE IF EXISTS temp.pc_storage_compaction_stats;
+      DROP TABLE IF EXISTS temp.pc_storage_compaction_raw;
+      DROP TABLE IF EXISTS temp.pc_storage_compaction_protected;
+      CREATE TEMP TABLE pc_storage_compaction_snapshots(snapshot_id INTEGER PRIMARY KEY);
+      CREATE TEMP TABLE pc_storage_compaction_stats(stat_id INTEGER PRIMARY KEY);
+      CREATE TEMP TABLE pc_storage_compaction_raw(raw_id INTEGER PRIMARY KEY);
+      CREATE TEMP TABLE pc_storage_compaction_protected(snapshot_id INTEGER PRIMARY KEY);
+      INSERT OR IGNORE INTO pc_storage_compaction_protected(snapshot_id)
+        SELECT snapshot_id FROM classification_feedback;
+      INSERT OR IGNORE INTO pc_storage_compaction_protected(snapshot_id)
+        SELECT snapshot_id FROM duplicate_cluster_members;
+    `);
+    this.db.prepare(`INSERT INTO pc_storage_compaction_snapshots(snapshot_id)
+      WITH ranked AS (
+        SELECT id, observed_at,
+          ROW_NUMBER() OVER (
+            PARTITION BY source_id, source_listing_id
+            ORDER BY observed_at DESC, id DESC
+          ) AS identity_rank
+        FROM listing_snapshots
+      )
+      SELECT ranked.id FROM ranked
+      WHERE ranked.observed_at < ? AND ranked.identity_rank > 1
+        AND NOT EXISTS (SELECT 1 FROM pc_storage_compaction_protected p WHERE p.snapshot_id = ranked.id)`)
+      .run(observationCutoff);
+    this.db.exec(`
+      INSERT OR IGNORE INTO pc_storage_compaction_stats(stat_id)
+        SELECT daily_price_stat_id FROM daily_price_stat_members
+        WHERE snapshot_id IN (SELECT snapshot_id FROM pc_storage_compaction_snapshots);
+      INSERT OR IGNORE INTO pc_storage_compaction_stats(stat_id)
+        SELECT s.daily_price_stat_id
+        FROM daily_source_price_stat_members m
+        JOIN daily_source_price_stats s ON s.id = m.daily_source_price_stat_id
+        WHERE m.snapshot_id IN (SELECT snapshot_id FROM pc_storage_compaction_snapshots);
+    `);
+    this.db.prepare(`INSERT OR IGNORE INTO pc_storage_compaction_raw(raw_id)
+        SELECT r.id
+        FROM raw_listings r
+        JOIN (
+          SELECT s.raw_listing_id
+          FROM listing_snapshots s
+          LEFT JOIN pc_storage_compaction_snapshots c ON c.snapshot_id = s.id
+          GROUP BY s.raw_listing_id
+          HAVING COUNT(*) = COUNT(c.snapshot_id)
+        ) removable ON removable.raw_listing_id = r.id
+        WHERE r.captured_at < ?`).run(observationCutoff);
+    const scalar = (sql) => Number(this.db.prepare(sql).get()?.count || 0);
+    return {
+      observation_retention_days: observationRetentionDays,
+      observation_cutoff: observationCutoff,
+      snapshots_to_remove: scalar("SELECT COUNT(*) AS count FROM pc_storage_compaction_snapshots"),
+      normalizations_to_remove: scalar(`SELECT COUNT(*) AS count FROM normalized_listings
+        WHERE snapshot_id IN (SELECT snapshot_id FROM pc_storage_compaction_snapshots)`),
+      listing_items_to_remove: scalar(`SELECT COUNT(*) AS count FROM listing_items
+        WHERE normalized_listing_id IN (
+          SELECT id FROM normalized_listings
+          WHERE snapshot_id IN (SELECT snapshot_id FROM pc_storage_compaction_snapshots)
+        )`),
+      raw_listings_to_remove: scalar("SELECT COUNT(*) AS count FROM pc_storage_compaction_raw"),
+      aggregate_rows_to_archive: scalar("SELECT COUNT(*) AS count FROM pc_storage_compaction_stats"),
+      candidate_sightings_to_repoint: scalar(`SELECT COUNT(*) AS count FROM model_candidate_sightings
+        WHERE snapshot_id IN (SELECT snapshot_id FROM pc_storage_compaction_snapshots)`)
+    };
+  }
+
+  clearStorageCompactionPlan() {
+    this.db.exec(`
+      DROP TABLE IF EXISTS temp.pc_storage_compaction_raw;
+      DROP TABLE IF EXISTS temp.pc_storage_compaction_stats;
+      DROP TABLE IF EXISTS temp.pc_storage_compaction_snapshots;
+      DROP TABLE IF EXISTS temp.pc_storage_compaction_protected;
+    `);
+  }
+
   compactStorage(options = {}) {
     const asOf = options.asOf instanceof Date ? options.asOf : new Date(options.asOf || this.now());
     if (!Number.isFinite(asOf.getTime())) throw new TypeError("invalid compaction asOf");
@@ -2963,7 +3066,11 @@ export class PcPartsLedger {
       .map((row) => Number(row.normalization_version))
       .filter((value) => !retainedNormalizationVersions.includes(value));
 
-    return this.transaction(() => {
+    const pruneObservationDetails = options.pruneObservationDetails === true;
+    const detailPlan = pruneObservationDetails ? this.storageCompactionPlan(options) : null;
+
+    try {
+      return this.transaction(() => {
       this.db.exec(`INSERT INTO daily_price_stat_windows(
           canonical_product_id, market_pool, condition_code, currency, normalization_version,
           parser_version, rule_version, filter_version, from_date, through_date, as_of
@@ -2985,6 +3092,52 @@ export class PcPartsLedger {
       const emptyStats = this.db.prepare("DELETE FROM daily_price_stats WHERE sample_count = 0").run();
       const emptySourceStats = this.db.prepare("DELETE FROM daily_source_price_stats WHERE sample_count = 0").run();
       const expiredCrawlRuns = this.db.prepare("DELETE FROM crawl_runs WHERE started_at < ?").run(crawlCutoff);
+
+      let archivedStatMembers = { changes: 0 };
+      let archivedSourceStatMembers = { changes: 0 };
+      let repointedCandidateSightings = { changes: 0 };
+      let removedDetailItems = { changes: 0 };
+      let removedDetailNormalizations = { changes: 0 };
+      let removedSnapshots = { changes: 0 };
+      let removedRawListings = { changes: 0 };
+      if (detailPlan) {
+        this.db.exec(`
+          UPDATE daily_price_stats SET member_details_retained = 0
+          WHERE id IN (SELECT stat_id FROM pc_storage_compaction_stats);
+          UPDATE daily_source_price_stats SET member_details_retained = 0
+          WHERE daily_price_stat_id IN (SELECT stat_id FROM pc_storage_compaction_stats);
+        `);
+        archivedSourceStatMembers = this.db.prepare(`DELETE FROM daily_source_price_stat_members
+          WHERE daily_source_price_stat_id IN (
+            SELECT id FROM daily_source_price_stats
+            WHERE daily_price_stat_id IN (SELECT stat_id FROM pc_storage_compaction_stats)
+          )`).run();
+        archivedStatMembers = this.db.prepare(`DELETE FROM daily_price_stat_members
+          WHERE daily_price_stat_id IN (SELECT stat_id FROM pc_storage_compaction_stats)`).run();
+        repointedCandidateSightings = this.db.prepare(`UPDATE model_candidate_sightings
+          SET snapshot_id = (
+            SELECT latest.id FROM listing_snapshots latest
+            WHERE latest.source_id = model_candidate_sightings.source_id
+              AND latest.source_listing_id = model_candidate_sightings.source_listing_id
+            ORDER BY latest.observed_at DESC, latest.id DESC LIMIT 1
+          )
+          WHERE snapshot_id IN (SELECT snapshot_id FROM pc_storage_compaction_snapshots)`).run();
+        removedDetailItems = this.db.prepare(`DELETE FROM listing_items
+          WHERE normalized_listing_id IN (
+            SELECT id FROM normalized_listings
+            WHERE snapshot_id IN (SELECT snapshot_id FROM pc_storage_compaction_snapshots)
+          )`).run();
+        removedDetailNormalizations = this.db.prepare(`DELETE FROM normalized_listings
+          WHERE snapshot_id IN (SELECT snapshot_id FROM pc_storage_compaction_snapshots)`).run();
+        removedSnapshots = this.db.prepare(`DELETE FROM listing_snapshots
+          WHERE id IN (SELECT snapshot_id FROM pc_storage_compaction_snapshots)`).run();
+        this.db.exec("DROP TRIGGER IF EXISTS raw_listings_delete_immutable");
+        removedRawListings = this.db.prepare(`DELETE FROM raw_listings
+          WHERE id IN (SELECT raw_id FROM pc_storage_compaction_raw)`).run();
+        this.db.exec(`CREATE TRIGGER raw_listings_delete_immutable
+          BEFORE DELETE ON raw_listings
+          BEGIN SELECT RAISE(ABORT, 'raw listing content is immutable'); END`);
+      }
 
       let removedItems = { changes: 0 };
       let removedNormalizations = { changes: 0 };
@@ -3012,9 +3165,20 @@ export class PcPartsLedger {
         empty_source_stats_removed: Number(emptySourceStats.changes || 0),
         expired_crawl_runs_removed: Number(expiredCrawlRuns.changes || 0),
         old_listing_items_removed: Number(removedItems.changes || 0),
-        old_normalizations_removed: Number(removedNormalizations.changes || 0)
+        old_normalizations_removed: Number(removedNormalizations.changes || 0),
+        observation_detail_plan: detailPlan,
+        archived_stat_members_removed: Number(archivedStatMembers.changes || 0),
+        archived_source_stat_members_removed: Number(archivedSourceStatMembers.changes || 0),
+        model_candidate_sightings_repointed: Number(repointedCandidateSightings.changes || 0),
+        observation_listing_items_removed: Number(removedDetailItems.changes || 0),
+        observation_normalizations_removed: Number(removedDetailNormalizations.changes || 0),
+        observation_snapshots_removed: Number(removedSnapshots.changes || 0),
+        observation_raw_listings_removed: Number(removedRawListings.changes || 0)
       };
-    });
+      });
+    } finally {
+      if (detailPlan) this.clearStorageCompactionPlan();
+    }
   }
 
   runIntegrityAudit(auditedAt = new Date(this.now())) {
@@ -3030,7 +3194,8 @@ export class PcPartsLedger {
     const memberMismatches = this.db.prepare(`SELECT d.id
       FROM daily_price_stats d
       LEFT JOIN daily_price_stat_members m ON m.daily_price_stat_id = d.id AND m.included = 1
-      GROUP BY d.id HAVING COUNT(m.snapshot_id) <> d.sample_count`).all();
+      GROUP BY d.id HAVING (d.member_details_retained = 1 AND COUNT(m.snapshot_id) <> d.sample_count)
+        OR (d.member_details_retained = 0 AND COUNT(m.snapshot_id) <> 0)`).all();
     if (memberMismatches.length > 0) blockers.push(`STAT_MEMBER_COUNT_MISMATCH:${memberMismatches.length}`);
 
     const soldRows = this.db.prepare(`SELECT id, status_evidence_json FROM listing_snapshots
