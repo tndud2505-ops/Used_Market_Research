@@ -1,4 +1,5 @@
 import { TARGET_SITES, normalizeTargetSites } from "./target-sites.mjs";
+import { bunjangLifecycleStatus } from "../market/logic/bunjang-lifecycle.mjs";
 import { categoryIdsFromBody, filterCategoryItems, isCategoryExcluded, isKeywordCategoryNoise } from "./category-filter.mjs";
 import { hasOfficialCategory, sourceCategoryIds } from "./category-source-map.mjs";
 import { ebayTargetForCategory, pcCategoryTitleMatches } from "../collector/logic/pc-specialist-targets.mjs";
@@ -679,7 +680,7 @@ async function collectBunjangCategory(sourceCategoryId, categoryId, limit, sortM
     seller: row?.shop?.uid ? `user:${row.shop.uid}` : "",
     postedAt: row?.updatedAt,
     searchText: row?.name,
-    lifecycleStatus: marketplaceLifecycleStatus(row?.status)
+    lifecycleStatus: bunjangLifecycleStatus(row?.status)
   })).filter(Boolean);
 }
 
@@ -727,7 +728,7 @@ async function collectBunjangKeyword(keyword, categoryId, limit, queryKeyword = 
       seller: row?.uid ? `user:${row.uid}` : "",
       postedAt: row?.update_time,
       searchText: `${row?.name || ""} ${row?.tag || ""}`,
-      lifecycleStatus: marketplaceLifecycleStatus(row?.status)
+      lifecycleStatus: bunjangLifecycleStatus(row?.status)
     })).filter(Boolean).filter((item) => matchesRequestedKeyword(item, queryKeyword || keyword))
       .filter((item) => !isObviousKeywordNoise(categoryId, item, queryKeyword || keyword));
     items.push(...pageItems);
@@ -759,7 +760,7 @@ async function collectBunjangKeyword(keyword, categoryId, limit, queryKeyword = 
         seller: row?.uid ? `user:${row.uid}` : "",
         postedAt: row?.update_time,
         searchText: `${row?.name || ""} ${row?.tag || ""}`,
-        lifecycleStatus: marketplaceLifecycleStatus(row?.status)
+        lifecycleStatus: bunjangLifecycleStatus(row?.status)
       })).filter(Boolean).filter((item) => matchesRequestedKeyword(item, queryKeyword || keyword))
         .filter((item) => !isObviousKeywordNoise(categoryId, item, queryKeyword || keyword));
       const floor = relativePriceFloor(recentItems);
@@ -834,6 +835,7 @@ function parseJoongnaItems(html) {
 
 function marketplaceLifecycleStatus(value) {
   const normalized = String(value ?? "").trim().toUpperCase();
+  if (["DELETED", "EXPIRED", "BLOCKED_OR_PRIVATE"].includes(normalized)) return normalized;
   if (["0", "ACTIVE", "SELLING", "FORSALE", "ONSALE"].includes(normalized)) return "ACTIVE";
   if (normalized === "1" || normalized === "RESERVED" || normalized === "HOLD") return "RESERVED";
   if (["2", "SOLD", "SOLDOUT", "SOLD_OUT", "COMPLETED", "CLOSED"].includes(normalized)) return "SOLD";

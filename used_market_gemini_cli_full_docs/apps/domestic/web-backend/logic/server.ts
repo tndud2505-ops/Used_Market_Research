@@ -240,6 +240,7 @@ export function createServer(
       canonicalProductIds: string[] | null;
       manufacturer: string | null;
       boardManufacturer: string | null;
+      listingFacets: Record<string, string[]>;
       sites: string[];
       sort: string;
       minPrice: number | null;
@@ -534,6 +535,18 @@ export function createServer(
         const isLegacyId = legacyResolution?.status === 'alias' || legacyResolution?.status === 'ambiguous';
         const canonicalProductId = isLegacyId ? null : requestedCanonicalProductId;
         const catalogModels = hasCatalogScope ? publicPcModelsForApi(urlObj.searchParams).models : null;
+        const listingFacetValues: Record<string, { category: string; values: Set<string> }> = {
+          product_kind: { category: 'SSD', values: new Set(['M2_NVME', 'SATA_2_5', 'M2_SATA', 'EXTERNAL', 'OTHER_UNKNOWN']) },
+          placement: { category: 'HDD', values: new Set(['INTERNAL', 'EXTERNAL', 'UNKNOWN']) },
+          form_factor: { category: 'PSU', values: new Set(['ATX', 'SFX', 'SFX-L']) }
+        };
+        const listingFacetCategory = (urlObj.searchParams.get('category_code') || requestedCanonicalProductId?.split(':', 1)[0] || '').toUpperCase();
+        const listingFacets = Object.fromEntries(Object.entries(listingFacetValues).flatMap(([key, definition]) => {
+          if (listingFacetCategory !== definition.category) return [];
+          const values = [...new Set(urlObj.searchParams.getAll(key).flatMap((value) => value.split(',')).map((value) => value.trim().toUpperCase()).filter(Boolean))];
+          if (values.some((value) => !definition.values.has(value))) throw new ApiError(400, `unsupported ${key} listing filter`);
+          return values.length ? [[key, values]] : [];
+        }));
         const data = await resolvedOptions.listPcListings({
           canonicalProductId,
           canonicalProductIds: isLegacyId
@@ -541,6 +554,7 @@ export function createServer(
             : catalogModels?.map((model: Record<string, unknown>) => String(model.canonical_product_id)) ?? null,
           manufacturer: hasCatalogScope ? null : urlObj.searchParams.get('manufacturer'),
           boardManufacturer: urlObj.searchParams.get('board_manufacturer'),
+          listingFacets,
           sites,
           sort,
           minPrice,

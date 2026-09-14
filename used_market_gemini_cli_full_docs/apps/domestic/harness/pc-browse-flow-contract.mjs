@@ -27,8 +27,17 @@ assert.ok(ram.product_count > 0);
 
 const ssd = pcBrowseFlowForApiV1("SSD", {});
 assert.ok(ssd.available_facets.capacity_bucket.length > 0);
+assert.deepEqual(ssd.steps.map(({ key }) => key), ["product_kind", "capacity_bucket", "manufacturer"]);
+assert.ok(ssd.available_facets.product_kind.some(({ value }) => value === "M2_NVME"));
 const psu = pcBrowseFlowForApiV1("PSU", {});
 assert.ok(Array.isArray(psu.available_facets.watts_bucket));
+assert.deepEqual(psu.steps.map(({ key }) => key), ["watts_bucket", "form_factor", "manufacturer"]);
+const motherboard = pcBrowseFlowForApiV1("MOTHERBOARD", { socket: "AM5", chipset: "B650" });
+assert.deepEqual(motherboard.steps.map(({ key }) => key), ["platform_vendor", "socket", "chipset", "manufacturer"]);
+assert.ok(motherboard.product_count > 0, "AM5/B650 motherboard browse path resolves exact products");
+const hdd = pcBrowseFlowForApiV1("HDD", { placement: "EXTERNAL" });
+assert.deepEqual(hdd.steps.map(({ key }) => key), ["placement", "capacity_bucket", "manufacturer"]);
+assert.ok(hdd.product_count > 0);
 
 for (const [category, flow] of Object.entries(catalog)) {
   for (const step of flow.steps) {

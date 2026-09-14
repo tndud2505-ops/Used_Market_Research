@@ -97,6 +97,19 @@ const scopedPcListingsRequest = parsePcListingsRequest(
 assert.equal(scopedPcListingsRequest.marketPool, "KR_C2C_USED");
 assert.equal(scopedPcListingsRequest.currency, "KRW");
 assert.equal(scopedPcListingsRequest.boardManufacturer, "ASUS");
+const exactStorageListingRequest = parsePcListingsRequest(
+  "https://used-pick.test/api/pc/listings?canonical_product_id=ssd%3Asamsung%3Acapacity-bucket%3A513-gb-1-tb&product_kind=M2_NVME",
+  { allowedSites: [] }
+);
+assert.deepEqual(exactStorageListingRequest.listingFacets, { product_kind: ["M2_NVME"] });
+assert.throws(
+  () => parsePcListingsRequest("https://used-pick.test/api/pc/listings?category_code=SSD&product_kind=NOT_REAL", { allowedSites: [] }),
+  /unsupported product_kind/u
+);
+assert.deepEqual(parsePcListingsRequest(
+  "https://used-pick.test/api/pc/listings?category_code=MOTHERBOARD&form_factor=M-ATX",
+  { allowedSites: [] }
+).listingFacets, {}, "motherboard form factor remains a catalog facet instead of a PSU listing facet");
 const catalogScopedPcListingsRequest = parsePcListingsRequest(
   "https://used-pick.test/api/pc/listings?category_code=RAM&module_capacity_gb=16&manufacturer=Samsung&manufacturer=SK%20hynix",
   { allowedSites: [] }
@@ -673,6 +686,23 @@ const publicProjection = index.upsertPublicProjections([{
   title: "RTX 3080 unopened", price: 490_000, condition_code: "NEW"
 }], { observedAt: "2026-08-29T00:00:00.000Z" });
 assert.equal(publicProjection.inserted, 4);
+index.upsertPublicProjections([{
+  ...items[0], id: "danawa:ssd-nvme", item_id: "danawa:ssd-nvme", site: "danawa",
+  title: "Samsung 980 PRO M.2 NVMe SSD 1TB", price: 100_000,
+  canonical_product_id: "ssd:samsung:capacity-bucket:513-gb-1-tb", category_code: "SSD",
+  product_kind: "M2_NVME", placement: "INTERNAL", form_factor: "M.2"
+}, {
+  ...items[0], id: "danawa:ssd-sata", item_id: "danawa:ssd-sata", site: "danawa",
+  title: "Samsung 870 EVO 2.5 SATA SSD 1TB", price: 90_000,
+  canonical_product_id: "ssd:samsung:capacity-bucket:513-gb-1-tb", category_code: "SSD",
+  product_kind: "SATA_2_5", placement: "INTERNAL", form_factor: "2.5-INCH"
+}], { observedAt: "2026-08-29T00:00:00.000Z" });
+const indexedNvmeOnly = index.browsePcListings({
+  canonicalProductId: "ssd:samsung:capacity-bucket:513-gb-1-tb",
+  listingFacets: { product_kind: ["M2_NVME"] }, sites: ["danawa"], limit: 10,
+  asOf: "2026-08-29T00:00:01.000Z", currency: "KRW"
+});
+assert.deepEqual(indexedNvmeOnly.items.map((item) => item.item_id), ["danawa:ssd-nvme"]);
 const browsedProjection = index.browsePcListings({
   canonicalProductId: "gpu:nvidia:rtx-3080", sites: ["danawa"], sort: "price_asc", limit: 2,
   asOf: "2026-08-29T00:00:01.000Z"
@@ -990,6 +1020,7 @@ d1.exec(await readFile(new URL("../cloudflare/migrations/0009_pc_listing_board_m
 d1.exec(await readFile(new URL("../cloudflare/migrations/0010_pc_listing_public_pagination.sql", import.meta.url), "utf8"));
 d1.exec(await readFile(new URL("../cloudflare/migrations/0011_pc_listing_collection_runtime.sql", import.meta.url), "utf8"));
 d1.exec(await readFile(new URL("../cloudflare/migrations/0012_pc_public_classification.sql", import.meta.url), "utf8"));
+d1.exec(await readFile(new URL("../cloudflare/migrations/0014_pc_listing_facets.sql", import.meta.url), "utf8"));
 d1.prepare(`INSERT INTO listings(item_id, site, category_id, title, search_text, price_value, currency, url, updated_at, active)
   VALUES (?, 'ebay', 'pc', 'legacy eBay row', 'legacy eBay row', 100, 'USD', ?, ?, 1)`).run(
   "ebay:https://www.ebay.com/itm/legacy-d1-id", "https://www.ebay.com/itm/legacy-d1-id", "2026-08-29T00:00:00.000Z"
@@ -1181,6 +1212,10 @@ for (const [index, price] of [90_000, 100_000, 110_000].entries()) {
     "2026-08-31T00:00:00.000Z", ssdBucketId
   );
 }
+d1.prepare("UPDATE listings SET listing_facets_json = ? WHERE item_id IN (?, ?)")
+  .run(JSON.stringify({ product_kind: "M2_NVME", placement: "INTERNAL", form_factor: "M.2" }), "danawa:ssd-bucket-0", "danawa:ssd-bucket-1");
+d1.prepare("UPDATE listings SET listing_facets_json = ? WHERE item_id = ?")
+  .run(JSON.stringify({ product_kind: "SATA_2_5", placement: "INTERNAL", form_factor: "2.5-INCH" }), "danawa:ssd-bucket-2");
 for (const [index, price] of [280_000, 300_000, 320_000].entries()) {
   d1.prepare(`INSERT INTO listings(item_id, site, category_id, title, search_text, price_value, currency, url, updated_at, active,
     canonical_product_id, canonical_display_name, canonical_manufacturer, listing_kind, pc_category_code, quantity, price_scope,
@@ -1288,6 +1323,12 @@ const bunjangOnlyListings = await worker.fetch(new Request(
 const bunjangOnlyItems = (await bunjangOnlyListings.json()).data.items;
 assert.equal(bunjangOnlyItems.length, 3);
 assert.equal(bunjangOnlyItems.every((item) => item.site === "bunjang"), true);
+const nvmeOnlyListings = await worker.fetch(new Request(
+  `https://used-pick.test/api/pc/listings?canonical_product_id=${encodeURIComponent(ssdBucketId)}&product_kind=M2_NVME&currency=KRW`
+), { ...importEnv, SEARCH_CURSOR_SECRET: "fixture-cursor-secret-that-is-long-enough" });
+const nvmeOnlyItems = (await nvmeOnlyListings.json()).data.items;
+assert.equal(nvmeOnlyItems.length, 2);
+assert.ok(nvmeOnlyItems.every((item) => item.product_kind === "M2_NVME"));
 const combinedSourceListings = await worker.fetch(new Request(
   "https://used-pick.test/api/pc/listings?canonical_product_id=gpu%3Anvidia%3Artx-3060&sites=joonggonara,bunjang&currency=KRW"
 ), { ...importEnv, SEARCH_CURSOR_SECRET: "fixture-cursor-secret-that-is-long-enough" });
@@ -1316,7 +1357,8 @@ for (const migration of [
   "0009_pc_listing_board_manufacturer.sql",
   "0010_pc_listing_public_pagination.sql",
   "0011_pc_listing_collection_runtime.sql",
-  "0012_pc_public_classification.sql"
+  "0012_pc_public_classification.sql",
+  "0014_pc_listing_facets.sql"
 ]) {
   paginationD1.exec(await readFile(new URL(`../cloudflare/migrations/${migration}`, import.meta.url), "utf8"));
 }
@@ -1941,7 +1983,8 @@ for (const migration of [
   "0009_pc_listing_board_manufacturer.sql",
   "0010_pc_listing_public_pagination.sql",
   "0011_pc_listing_collection_runtime.sql",
-  "0012_pc_public_classification.sql"
+  "0012_pc_public_classification.sql",
+  "0014_pc_listing_facets.sql"
 ]) {
   coverageD1.exec(await readFile(new URL(`../cloudflare/migrations/${migration}`, import.meta.url), "utf8"));
 }

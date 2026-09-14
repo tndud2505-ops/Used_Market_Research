@@ -40,10 +40,12 @@ for (const code of categoryCodes) {
     assert.equal(["model", "gpu_model"].includes(facet.key), false, "exact models belong in search and the model table");
   }
 }
-assert.deepEqual(publicPcFacetsForApi({ category: "SSD" }).available_facets.protocol.map(({ value }) => value), ["AHCI", "NVMe"]);
-assert.deepEqual(publicPcFacetsForApi({ category: "SSD" }).available_facets.form_interface.map(({ value }) => value), [
-  "2.5-inch PCIe", "2.5-inch SATA", "M.2 2280 PCIe", "M.2 2280 SATA"
-]);
+assert.deepEqual(new Set(publicPcFacetsForApi({ category: "SSD" }).available_facets.product_kind.map(({ value }) => value)), new Set([
+  "M2_NVME", "SATA_2_5", "M2_SATA", "EXTERNAL", "OTHER_UNKNOWN"
+]));
+assert.deepEqual(new Set(publicPcFacetsForApi({ category: "HDD" }).available_facets.placement.map(({ value }) => value)), new Set([
+  "INTERNAL", "EXTERNAL", "UNKNOWN"
+]));
 
 const requiredModelFields = [
   "canonical_product_id", "canonical_display_name", "category_code", "brand_label", "key_specs",
@@ -278,10 +280,17 @@ for (const [title, expectedId, expectedBucket] of aggregateBoundaryCases) {
   assert.equal(result.canonical_product_id, expectedId, `${title} canonical aggregate`);
   assert.equal(result.capacity_bucket || result.watts_bucket, expectedBucket, `${title} aggregate bucket`);
 }
+for (const [title, expectedId, expectedSegment] of [
+  ["Toshiba 노트북용 2.5인치 HDD 1TB", "hdd:toshiba:capacity-bucket:le-1-tb", "LAPTOP"],
+  ["Seagate Exos 기업용 HDD 20TB", "hdd:seagate:capacity-bucket:gt-16-tb-le-20-tb", "SERVER_ENTERPRISE"],
+  ["Samsung 서버용 SSD 3.2TB", "ssd:samsung:capacity-bucket:gt-2-tb-le-4-tb", "SERVER_ENTERPRISE"]
+]) {
+  const result = classifyPcPartListingPublic({ title, price: 100_000, currency: "KRW" });
+  assert.equal(result.canonical_product_id, expectedId, `${title} keeps a browse identity`);
+  assert.equal(result.market_segment, expectedSegment, `${title} market segment`);
+  assert.equal(result.statistics_eligible, false, `${title} cannot enter desktop reference statistics`);
+}
 for (const [title, expectedId] of [
-  ["Toshiba 노트북용 2.5인치 HDD 1TB", "hdd:toshiba:capacity-bucket:le-1-tb"],
-  ["Seagate Exos 기업용 HDD 20TB", "hdd:seagate:capacity-bucket:gt-16-tb-le-20-tb"],
-  ["Samsung 서버용 SSD 3.2TB", "ssd:samsung:capacity-bucket:gt-2-tb-le-4-tb"],
   ["삼성 970 EVO Plus 1TB", "ssd:samsung:capacity-bucket:513-gb-1-tb"],
   ["삼성 980 500GB", "ssd:samsung:capacity-bucket:257-512-gb"],
   ["삼성 PM9A1 512GB", "ssd:samsung:capacity-bucket:257-512-gb"],
@@ -295,8 +304,40 @@ for (const [title, expectedId] of [
 ]) {
   const result = classifyPcPartListingPublic({ title, price: 100_000, currency: "KRW" });
   assert.equal(result.canonical_product_id, expectedId, `${title} storage aggregate`);
-  assert.equal(result.statistics_eligible, true, `${title} auxiliary use class must not exclude storage`);
+  assert.equal(result.statistics_eligible, true, `${title} consumer storage remains statistics eligible`);
 }
+
+const externalHdd = classifyPcPartListingPublic({ title: "외장하드 WD 4TB USB", price: 100_000, currency: "KRW" });
+assert.equal(externalHdd.category_code, "HDD");
+assert.equal(externalHdd.placement, "EXTERNAL");
+assert.ok(externalHdd.canonical_product_id);
+assert.equal(externalHdd.statistics_eligible, false);
+assert.ok(externalHdd.statistics_exclusion_reasons.includes("EXTERNAL_STORAGE_EXCLUDED_FROM_REFERENCE_STATS"));
+
+for (const [title, category] of [
+  ["Samsung T7 Shield SSD 1TB", "SSD"],
+  ["WD My Passport SSD 1TB", "SSD"],
+  ["Seagate Backup Plus HDD 4TB", "HDD"],
+  ["WD Elements HDD 4TB", "HDD"]
+]) {
+  const externalStorage = classifyPcPartListingPublic({ title, price: 100_000, currency: "KRW" });
+  assert.equal(externalStorage.category_code, category, `${title} category`);
+  assert.equal(externalStorage.placement, "EXTERNAL", `${title} placement`);
+  assert.ok(externalStorage.canonical_product_id, `${title} remains searchable`);
+  assert.equal(externalStorage.statistics_eligible, false, `${title} reference statistics exclusion`);
+}
+
+const nvmeSsd = classifyPcPartListingPublic({ title: "삼성 980 PRO M.2 NVMe SSD 1TB", price: 100_000, currency: "KRW" });
+assert.equal(nvmeSsd.product_kind, "M2_NVME");
+assert.equal(nvmeSsd.placement, "INTERNAL");
+const sataSsdIdentityCase = classifyPcPartListingPublic({ title: "삼성 870 EVO 2.5인치 SATA SSD 1TB", price: 100_000, currency: "KRW" });
+assert.equal(sataSsdIdentityCase.product_kind, "SATA_2_5");
+assert.equal(sataSsdIdentityCase.canonical_product_id, nvmeSsd.canonical_product_id, "SSD detail filters must not split the statistics identity");
+const internalHdd = classifyPcPartListingPublic({ title: "WD Blue 3.5인치 SATA HDD 4TB", price: 100_000, currency: "KRW" });
+assert.equal(internalHdd.canonical_product_id, externalHdd.canonical_product_id, "HDD placement must not split the statistics identity");
+const atxPsu = classifyPcPartListingPublic({ title: "Corsair 750W ATX 파워", price: 100_000, currency: "KRW" });
+const sfxPsu = classifyPcPartListingPublic({ title: "Corsair 750W SFX 파워", price: 100_000, currency: "KRW" });
+assert.equal(atxPsu.canonical_product_id, sfxPsu.canonical_product_id, "PSU form factor must not split the statistics identity");
 
 const ratedAndPeakPsu = classifyPcPartListingPublic({
   title: "정격 650W 피크 750W 파워",
@@ -308,6 +349,14 @@ assert.equal(ratedAndPeakPsu.rated_wattage, 650);
 
 const modelOnlyPsu = classifyPcPartListingPublic({ title: "RM850", price: 50_000, currency: "KRW" });
 assert.equal(modelOnlyPsu.canonical_product_id, "psu:corsair:watts-bucket:751-850");
+assert.equal(modelOnlyPsu.form_factor, "ATX");
+assert.equal(classifyPcPartListingPublic({ title: "Classic II 700W", price: 50_000, currency: "KRW" }).form_factor, "ATX");
+
+for (const title of ["삼성 980 500GB", "삼성 PM9A1 512GB", "WD Blue SN580 1TB"]) {
+  const modelNamedSsd = classifyPcPartListingPublic({ title, price: 100_000, currency: "KRW" });
+  assert.equal(modelNamedSsd.product_kind, "M2_NVME", `${title} product kind`);
+  assert.equal(modelNamedSsd.placement, "UNKNOWN", `${title} placement remains evidence-based`);
+}
 
 const ratingOnlyPsu = classifyPcPartListingPublic({ title: "피크 900W 정격 700W", price: 50_000, currency: "KRW" });
 assert.equal(ratingOnlyPsu.canonical_product_id, "psu:other-unclassified:watts-bucket:651-750");

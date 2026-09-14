@@ -28,6 +28,7 @@ import { parsePriceStatsRequest, priceStatsResponse } from "./pc-price-stats-htt
 import { schedulerReadDeferral } from "./pc-scheduler-admission.mjs";
 import { PcShadowPipeline } from "./pc-shadow-pipeline.mjs";
 import { explicitSoldText, structuredSoldEvidenceFromHtml } from "../market/logic/listing-lifecycle.mjs";
+import { parseBunjangDetailLifecycle } from "../market/logic/bunjang-lifecycle.mjs";
 import {
   pcCatalogResponse,
   pcCollectionCapacityPlan,
@@ -531,6 +532,9 @@ function toImportItem(item) {
     price_scope_confidence: Number(item.price_scope_confidence || 0),
     statistics_eligible: item.statistics_eligible === true,
     statistics_exclusion_reasons: item.statistics_exclusion_reasons || [],
+    product_kind: item.product_kind || null,
+    placement: item.placement || null,
+    form_factor: item.form_factor || null,
     quantity: item.quantity || null,
     price_scope: item.price_scope || "UNKNOWN",
     condition_code: item.condition_code || "UNKNOWN",
@@ -710,6 +714,19 @@ async function publishPcProductStats() {
 }
 
 async function collectJob(jobName) {
+  if (jobName === "bunjang-lifecycle-recheck") {
+    if (!pcLedger || !pcPipeline) throw new Error("PC_LEDGER_UNAVAILABLE");
+    if (pcSchedulerActive) throw new Error("PC_SCHEDULER_BUSY");
+    const source = pcLedger.getSource("bunjang");
+    if (source?.policy_status !== "APPROVED" || source?.runtime_status !== "ENABLED") {
+      throw new Error("BUNJANG_SOURCE_NOT_ENABLED");
+    }
+    pcSchedulerActive = true;
+    try {
+      const items = await recheckKnownListings("bunjang", new Date().toISOString(), AbortSignal.timeout(9 * 60 * 1000));
+      return { status: "completed", job_name: jobName, changed: items.length };
+    } finally { pcSchedulerActive = false; }
+  }
   if (jobName === "daily-price-refresh") {
     const publication = await publishPcProductStats();
     return { status: "completed", job_name: jobName, mode: "pc-parts-ledger", items: publication.row_count || 0, publication };
@@ -1368,6 +1385,7 @@ function listingIdentityIsPresent(html, listing) {
 }
 
 async function recheckKnownListings(sourceKey, checkedAt, parentSignal) {
+  if (sourceKey === "ebay") return [];
   const changedProjections = [];
   const captureProjection = (sourceListingId, result) => {
     if (result?.snapshotCreated !== true) return;
@@ -1378,14 +1396,74 @@ async function recheckKnownListings(sourceKey, checkedAt, parentSignal) {
   const due = pcLedger.dueRechecks({
     sourceId: sourceKey,
     checkedBefore: new Date(Date.parse(checkedAt) - 6 * 60 * 60 * 1000).toISOString(),
-    limit: PC_RECHECK_LIMIT_PER_RUN
+    limit: sourceKey === "bunjang" ? 1500 : PC_RECHECK_LIMIT_PER_RUN
   });
+  const recheckDeadline = Date.now() + 8 * 60 * 1000;
   for (const listing of due) {
+    if (sourceKey === "bunjang" && Date.now() >= recheckDeadline) break;
     throwIfAborted(parentSignal);
     let raw;
     try { raw = JSON.parse(listing.raw_json); } catch { raw = {}; }
     const url = String(raw.url || raw.item_url || "").trim();
     if (!/^https?:\/\//iu.test(url)) continue;
+    if (sourceKey === "bunjang") {
+      const parsedUrl = new URL(url);
+      const pid = /^(?:m\.)?bunjang\.co\.kr$/i.test(parsedUrl.hostname)
+        ? parsedUrl.pathname.match(/^\/products\/(\d+)\/?$/)?.[1] : null;
+      if (!pid) continue;
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      let response;
+      try {
+        response = await fetch(`https://api.bunjang.co.kr/api/pms/v1/products/${pid}/detail/web`, {
+          headers: { accept: "application/json" }, signal: boundedFetchSignal(parentSignal)
+        });
+      } catch {
+        throwIfAborted(parentSignal);
+        break;
+      }
+      const payload = await response.json().catch(() => null);
+      const unavailableStatus = ({
+        ERR_NOT_HIDDEN_PRODUCT_OWNER: "BLOCKED_OR_PRIVATE",
+        ERR_DELETED_PRODUCT: "DELETED",
+        ERR_PRODUCT_NOT_FOUND: "UNAVAILABLE_UNKNOWN",
+        ERR_PRODUCT_STOP_SELLING: "UNAVAILABLE_UNKNOWN"
+      })[payload?.errorCode];
+      if (unavailableStatus) {
+        captureProjection(listing.source_listing_id, pcLedger.recordObservation({
+          sourceId: sourceKey, sourceListingId: listing.source_listing_id, observedAt: checkedAt,
+          title: listing.title, description: listing.description, rawPayload: raw,
+          price: listing.price_value, currency: listing.currency, status: unavailableStatus,
+          statusEvidence: { type: "STRUCTURED_STATUS", value: unavailableStatus },
+          availability: unavailableStatus === "BLOCKED_OR_PRIVATE" ? "BLOCKED_OR_PRIVATE" : "UNAVAILABLE"
+        }));
+        continue;
+      }
+      if ([401, 403, 429].includes(response.status)) break;
+      if (response.status === 404 || response.status === 410) {
+        captureProjection(listing.source_listing_id, pcLedger.recordMissingCheck({
+          sourceId: sourceKey, sourceListingId: listing.source_listing_id, checkedAt
+        }));
+        continue;
+      }
+      if (!response.ok) continue;
+      let detail;
+      try { detail = parseBunjangDetailLifecycle(payload, pid); }
+      catch (error) {
+        console.warn("Bunjang detail recheck stopped", error.message);
+        break;
+      }
+      if (detail.status === "UNAVAILABLE_UNKNOWN") continue;
+      const result = pcLedger.recordObservation({
+        sourceId: sourceKey, sourceListingId: listing.source_listing_id, observedAt: checkedAt,
+        title: listing.title, description: listing.description,
+        rawPayload: { ...raw, status: detail.status, bunjang_sale_status: detail.sourceStatus },
+        price: detail.price ?? listing.price_value, currency: listing.currency,
+        status: detail.status, statusEvidence: detail.evidence,
+        availability: ["ACTIVE", "RESERVED"].includes(detail.status) ? "AVAILABLE" : "UNAVAILABLE"
+      });
+      captureProjection(listing.source_listing_id, result);
+      continue;
+    }
     let response;
     try {
       response = await fetch(url, {
@@ -2229,6 +2307,7 @@ const server = http.createServer(async (req, res) => {
           filters: {
             canonical_product_id: query.canonicalProductId || null,
             catalog_scope: query.catalogScope || null,
+            listing_facets: query.listingFacets || {},
             matched_model_count: catalogModels?.length ?? null,
             manufacturer: query.manufacturer || null,
             board_manufacturer: query.boardManufacturer || null,

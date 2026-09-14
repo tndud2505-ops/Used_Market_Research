@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import "./bunjang-lifecycle-contract.mjs";
 import { readFile } from "node:fs/promises";
 
 import { buildLivePayload, collectOne, matchesRequestedKeyword, parseHelloMarketDetailHtml, pcSearchQueryVariants, resetEbayAccessTokenCacheForTests } from "../cloudflare/live-search.mjs";

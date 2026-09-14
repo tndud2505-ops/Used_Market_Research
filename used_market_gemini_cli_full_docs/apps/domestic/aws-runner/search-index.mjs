@@ -167,6 +167,9 @@ function pcProjection(item = {}) {
     price_scope_confidence: Number.isFinite(Number(item.price_scope_confidence)) ? Number(item.price_scope_confidence) : 0,
     statistics_eligible: item.statistics_eligible === true,
     statistics_exclusion_reasons: Array.isArray(item.statistics_exclusion_reasons) ? item.statistics_exclusion_reasons.map((value) => cleanText(value, 80)).filter(Boolean) : [],
+    product_kind: cleanText(item.product_kind, 40).toUpperCase() || null,
+    placement: cleanText(item.placement, 40).toUpperCase() || null,
+    form_factor: cleanText(item.form_factor, 40).toUpperCase() || null,
     quantity: Number.isInteger(quantity) && quantity > 0 ? quantity : null,
     price_scope: cleanText(item.price_scope, 80) || "UNKNOWN",
     condition_code: cleanText(item.condition_code, 80) || "UNKNOWN",
@@ -290,6 +293,9 @@ function publicItem(row) {
     price_scope_confidence: pc.price_scope_confidence || 0,
     statistics_eligible: pc.statistics_eligible === true,
     statistics_exclusion_reasons: Array.isArray(pc.statistics_exclusion_reasons) ? pc.statistics_exclusion_reasons : [],
+    product_kind: pc.product_kind || null,
+    placement: pc.placement || null,
+    form_factor: pc.form_factor || null,
     quantity: Number.isInteger(pc.quantity) ? pc.quantity : null,
     price_scope: pc.price_scope || "UNKNOWN",
     condition_code: pc.condition_code || "UNKNOWN",
@@ -1054,6 +1060,7 @@ export class SearchIndex {
     const marketPool = cleanText(options.marketPool, 80);
     const currency = cleanText(options.currency, 12).toUpperCase();
     const sites = sortedStrings(options.sites);
+    const listingFacets = options.listingFacets && typeof options.listingFacets === "object" ? options.listingFacets : {};
     const minPrice = options.minPrice !== null && options.minPrice !== undefined && options.minPrice !== ""
       && Number.isFinite(Number(options.minPrice)) ? Number(options.minPrice) : null;
     const maxPrice = options.maxPrice !== null && options.maxPrice !== undefined && options.maxPrice !== ""
@@ -1098,6 +1105,12 @@ export class SearchIndex {
       where.push("pc_category_code = 'GPU'");
       where.push("pc_board_manufacturer = ?");
       params.push(boardManufacturer);
+    }
+    for (const key of ["product_kind", "placement", "form_factor"]) {
+      const selected = sortedStrings(listingFacets[key]);
+      if (!selected.length) continue;
+      where.push(`UPPER(json_extract(pc_metadata_json, '$.${key}')) IN (SELECT UPPER(value) FROM json_each(?))`);
+      params.push(JSON.stringify(selected));
     }
     if (minPrice !== null) {
       where.push("price_value >= ?");

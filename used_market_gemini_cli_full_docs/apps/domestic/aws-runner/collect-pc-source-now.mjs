@@ -144,6 +144,7 @@ function toImportItem(item) {
     classification_confidence: Number(item.classification_confidence || 0), model_confidence: Number(item.model_confidence || 0),
     quantity_confidence: Number(item.quantity_confidence || 0), price_scope_confidence: Number(item.price_scope_confidence || 0),
     statistics_eligible: item.statistics_eligible === true, statistics_exclusion_reasons: item.statistics_exclusion_reasons || [],
+    product_kind: item.product_kind || null, placement: item.placement || null, form_factor: item.form_factor || null,
     price_scope: item.price_scope || "UNKNOWN", condition_code: item.condition_code || "UNKNOWN",
     lifecycle_status: item.lifecycle_status || "UNAVAILABLE_UNKNOWN", market_pool: item.market_pool || null,
     confidence: item.confidence || {}, evidence: item.evidence || {}, price_eligible: item.price_eligible === true,
@@ -172,12 +173,12 @@ function d1ProjectionSql(items, generatedAt) {
     "item_id", "site", "category_id", "title", "search_text", "price_value", "currency", "url", "image_url", "seller_name",
     "posted_at", "updated_at", "active", "canonical_product_id", "canonical_display_name", "canonical_manufacturer", "board_manufacturer",
     "listing_kind", "pc_category_code", "market_segment", "listing_type", "condition_group", "spec_group_id",
-    "classification_confidence", "model_confidence", "quantity_confidence", "price_scope_confidence", "statistics_eligible", "statistics_exclusion_reasons_json",
+    "classification_confidence", "model_confidence", "quantity_confidence", "price_scope_confidence", "statistics_eligible", "statistics_exclusion_reasons_json", "listing_facets_json",
     "quantity", "price_scope", "condition_code", "lifecycle_status", "market_pool",
     "confidence_json", "evidence_json", "price_eligible", "exclusion_reasons_json", "good_listing_eligible", "reference_price"
   ];
   const rows = items.map(toImportItem)
-    .filter((item) => item.price_eligible === true && item.statistics_eligible === true && item.canonical_product_id
+    .filter((item) => item.price_eligible === true && item.canonical_product_id
       && item.lifecycle_status === "ACTIVE" && item.condition_code === "USED_WORKING"
       && ["SINGLE_COMPONENT", "SAME_PRODUCT_LOT"].includes(item.listing_kind)
       && Number(item.price_value) > 0)
@@ -191,7 +192,12 @@ function d1ProjectionSql(items, generatedAt) {
       confidence_json: JSON.stringify(item.confidence || {}),
       evidence_json: JSON.stringify(item.evidence || {}),
       price_eligible: 1,
-      statistics_eligible: 1,
+      statistics_eligible: item.statistics_eligible === true ? 1 : 0,
+      listing_facets_json: JSON.stringify({
+        product_kind: item.product_kind || null,
+        placement: item.placement || null,
+        form_factor: item.form_factor || null
+      }),
       exclusion_reasons_json: JSON.stringify(item.exclusion_reasons || []),
       statistics_exclusion_reasons_json: JSON.stringify(item.statistics_exclusion_reasons || []),
       good_listing_eligible: item.good_listing_eligible === true ? 1 : 0

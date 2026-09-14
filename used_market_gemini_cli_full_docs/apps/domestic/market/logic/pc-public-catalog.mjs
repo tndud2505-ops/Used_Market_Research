@@ -28,18 +28,19 @@ const FACETS = Object.freeze({
     ["generation", "DDR 세대"], ["module_capacity_gb", "모듈 용량"], ["manufacturer", "제조사"]
   ],
   MOTHERBOARD: [
-    ["platform_vendor", "CPU 플랫폼"], ["socket", "CPU 소켓"], ["chipset", "칩셋"], ["manufacturer", "제조사"], ["form_factor", "폼팩터"]
+    ["platform_vendor", "CPU 플랫폼"], ["socket", "CPU 소켓"], ["chipset", "칩셋"], ["manufacturer", "제조사"]
   ],
   SSD: [
-    ["form_interface", "제품 형태·인터페이스"], ["capacity_bucket", "용량"], ["manufacturer", "제조사"], ["protocol", "프로토콜"]
+    ["product_kind", "제품 종류"], ["capacity_bucket", "용량"], ["manufacturer", "제조사"]
   ],
   HDD: [
-    ["capacity_bucket", "용량"], ["manufacturer", "제조사"], ["purpose", "용도"], ["interface", "인터페이스"]
+    ["placement", "설치 방식"], ["capacity_bucket", "용량"], ["manufacturer", "제조사"]
   ],
   PSU: [
-    ["watts_bucket", "정격 출력"], ["form_factor", "폼팩터"], ["manufacturer", "제조사"], ["atx_spec", "ATX 규격"], ["efficiency", "효율 등급"], ["modularity", "케이블 방식"]
+    ["watts_bucket", "정격 출력"], ["form_factor", "크기 규격"], ["manufacturer", "제조사"]
   ]
 });
+const LISTING_ONLY_FACETS = new Set(["product_kind", "placement", "form_factor"]);
 
 const PUBLIC_PRODUCTS = Object.freeze([
   ...PC_PRODUCT_MASTER_V2.filter((product) => PUBLIC_PC_CATEGORY_CODES.includes(product.category))
@@ -209,6 +210,8 @@ function publicFacetValues(product, key) {
     case "socket": return values(spec.socket);
     case "chipset": return values(spec.chipset || first(modelValue(product).match(/\b([ABHXZ]\d{3})M?/iu)?.[1]));
     case "form_factor": return values(spec.form_factor);
+    case "product_kind": return product.category === "SSD" ? ["M2_NVME", "SATA_2_5", "M2_SATA", "EXTERNAL", "OTHER_UNKNOWN"] : [];
+    case "placement": return product.category === "HDD" ? ["INTERNAL", "EXTERNAL", "UNKNOWN"] : values(spec.placement);
     case "form_interface": {
       const forms = values(spec.form_factor);
       const interfaces = values(spec.interface);
@@ -264,7 +267,7 @@ function normalizeFilters(options = {}) {
     gpu_model: ["gpu_model"], board_brand: ["board_brand", "board_manufacturer"], usage: ["usage", "market_segment"],
     platform_vendor: ["platform_vendor"], family: ["family"], suffix: ["suffix"],
     configuration: ["configuration", "config"], module_capacity_gb: ["module_capacity_gb", "capacity_per_module_gb"], vram_gb: ["vram_gb", "vram_options_gb"], socket: ["socket"], chipset: ["chipset"], form_factor: ["form_factor"],
-    form_interface: ["form_interface"], capacity: ["capacity", "marketed_capacity_gb"], purpose: ["purpose", "use_class"],
+    form_interface: ["form_interface"], product_kind: ["product_kind"], placement: ["placement"], capacity: ["capacity", "marketed_capacity_gb"], purpose: ["purpose", "use_class"],
     capacity_bucket: ["capacity_bucket"], interface: ["interface"], protocol: ["protocol"],
     rated_wattage: ["rated_wattage", "watts"], watts_bucket: ["watts_bucket"], atx_spec: ["atx_spec", "atx_or_sfx_version"], efficiency: ["efficiency"], modularity: ["modularity"]
   };
@@ -303,6 +306,8 @@ function optionLabel(key, value) {
     return `${value}W`;
   }
   if (key === "module_capacity_gb" || key === "vram_gb") return `${value}GB`;
+  if (key === "product_kind") return ({ M2_NVME: "M.2 NVMe", SATA_2_5: "2.5형 SATA", M2_SATA: "M.2 SATA", EXTERNAL: "외장 SSD", OTHER_UNKNOWN: "기타·불명확" })[value] || value;
+  if (key === "placement") return ({ INTERNAL: "내장 HDD", EXTERNAL: "외장 HDD", UNKNOWN: "불명확" })[value] || value;
   if (key === "watts_bucket") {
     return ({ LE_500: "500W 이하", "501_650": "501~650W", "651_750": "651~750W", "751_850": "751~850W", "851_1000": "851~1000W", "1001_1200": "1001~1200W", GT_1200: "1200W 초과" })[value] || value;
   }
@@ -363,7 +368,11 @@ export function publicPcFacetsForApi(options = {}) {
     for (const product of matchingProducts(category, filters, key).filter((candidate) => productMatchesQuery(candidate, query))) {
       for (const value of publicFacetValues(product, key)) counts.set(value, (counts.get(value) || 0) + 1);
     }
-    return [key, { key, label, order, values: [...counts.entries()].sort(([a], [b]) => compact(a).localeCompare(compact(b))).map(([value, count]) => ({ value, label: optionLabel(key, value), count })) }];
+    return [key, { key, label, order, values: [...counts.entries()].sort(([a], [b]) => compact(a).localeCompare(compact(b))).map(([value, count]) => ({
+      value,
+      label: optionLabel(key, value),
+      ...(!LISTING_ONLY_FACETS.has(key) ? { count } : {})
+    })) }];
   }));
   return { category, filters, facets, available_facets: Object.fromEntries(Object.entries(facets).map(([key, value]) => [key, value.values])) };
 }

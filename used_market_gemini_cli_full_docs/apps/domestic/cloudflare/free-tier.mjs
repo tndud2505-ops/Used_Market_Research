@@ -174,6 +174,7 @@ export async function isFreshCompletePcListingFallback(request, env, maximumAgeS
 
 function pcListingItem(row) {
   const chipManufacturer = String(row.canonical_product_id || "").match(/^gpu:(nvidia|amd|intel):/u)?.[1];
+  const listingFacets = parseJson(row.listing_facets_json, {});
   return {
     id: row.item_id,
     item_id: row.item_id,
@@ -203,6 +204,9 @@ function pcListingItem(row) {
     price_scope_confidence: Number(row.price_scope_confidence || 0),
     statistics_eligible: row.statistics_eligible === 1,
     statistics_exclusion_reasons: parseJson(row.statistics_exclusion_reasons_json, []),
+    product_kind: listingFacets.product_kind || null,
+    placement: listingFacets.placement || null,
+    form_factor: listingFacets.form_factor || null,
     quantity: Number.isInteger(row.quantity) ? row.quantity : null,
     price_scope: row.price_scope || "UNKNOWN",
     condition_code: row.condition_code || "UNKNOWN",
@@ -327,6 +331,12 @@ export async function browsePcListingsD1(request, env) {
     conditions.push("board_manufacturer = ?");
     bindings.push(query.boardManufacturer);
   }
+  for (const key of ["product_kind", "placement", "form_factor"]) {
+    const selected = query.listingFacets?.[key] || [];
+    if (!selected.length) continue;
+    conditions.push(`UPPER(json_extract(listing_facets_json, '$.${key}')) IN (${selected.map(() => "?").join(", ")})`);
+    bindings.push(...selected.map((value) => String(value).toUpperCase()));
+  }
   if (query.minPrice !== null) {
     conditions.push("price_value >= ?");
     bindings.push(query.minPrice);
@@ -365,7 +375,7 @@ export async function browsePcListingsD1(request, env) {
   const selectListings = (boardManufacturerColumn, selectedWhere, selectedBindings, suffix = "", indexHint = "") => env.DB.prepare(`SELECT item_id, site, category_id, title, price_value, currency, url,
       image_url, posted_at, updated_at, canonical_product_id, canonical_display_name, canonical_manufacturer,
       ${boardManufacturerColumn}, listing_kind, pc_category_code, quantity, price_scope, condition_code, lifecycle_status, market_pool,
-      confidence_json, evidence_json, price_eligible, exclusion_reasons_json, good_listing_eligible, reference_price
+      confidence_json, evidence_json, price_eligible, exclusion_reasons_json, good_listing_eligible, reference_price, listing_facets_json
     FROM listings${indexHint} WHERE ${selectedWhere} ${suffix}`).bind(...selectedBindings).all();
   const executeListingSelect = async (selectedWhere, selectedBindings, suffix = "", indexHint = "") => {
     try {
@@ -484,6 +494,7 @@ export async function browsePcListingsD1(request, env) {
         canonical_product_id: query.canonicalProductId || null,
         canonical_product_ids: query.canonicalProductIds || null,
         catalog_scope: query.catalogScope || null,
+        listing_facets: query.listingFacets || {},
         matched_model_count: catalogScope?.modelCount ?? null,
         manufacturer: query.manufacturer || null,
         board_manufacturer: query.boardManufacturer || null,

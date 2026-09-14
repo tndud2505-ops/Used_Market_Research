@@ -188,6 +188,7 @@ if [[ "$SOURCE_ROOT" != "$APP_ROOT" ]]; then
   install -m 0644 "$SOURCE_ROOT/market/logic/pc-reviewed-listing-exclusions.mjs" "$APP_ROOT/market/logic/pc-reviewed-listing-exclusions.mjs"
   install -m 0644 "$SOURCE_ROOT/market/logic/pc-parts-directory.mjs" "$APP_ROOT/market/logic/pc-parts-directory.mjs"
   install -m 0644 "$SOURCE_ROOT/market/logic/listing-lifecycle.mjs" "$APP_ROOT/market/logic/listing-lifecycle.mjs"
+  install -m 0644 "$SOURCE_ROOT/market/logic/bunjang-lifecycle.mjs" "$APP_ROOT/market/logic/bunjang-lifecycle.mjs"
   install -m 0644 "$SOURCE_ROOT/market/data/pc-product-master-v1.mjs" "$APP_ROOT/market/data/pc-product-master-v1.mjs"
   install -m 0644 "$SOURCE_ROOT/market/data/pc-product-master-v2.mjs" "$APP_ROOT/market/data/pc-product-master-v2.mjs"
   cp -a "$SOURCE_ROOT/market/data/browse-flows/." "$APP_ROOT/market/data/browse-flows/"

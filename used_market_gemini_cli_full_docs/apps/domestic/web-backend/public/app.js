@@ -6,7 +6,7 @@ const PRODUCT_QUERY_KEYS = new Set([
   "chip_manufacturer", "market_segment", "family", "generation", "vram_gb",
   "platform_vendor", "socket", "suffix", "memory_generation", "module_capacity_gb", "form_factor", "ecc", "buffering",
   "chipset", "capacity_bucket", "interface", "protocol", "pcie_generation", "use_class", "recording_technology",
-  "watts_bucket", "atx_spec", "modularity", "efficiency", "subtype", "radiator_mm", "fan_mm", "chassis_class",
+  "watts_bucket", "atx_spec", "modularity", "efficiency", "product_kind", "subtype", "radiator_mm", "fan_mm", "chassis_class",
   "motherboard_support", "side_panel", "host_interface", "bracket", "media_family", "capability", "placement",
 ]);
 const FALLBACK_BROWSE_FLOWS = Object.freeze({
@@ -33,27 +33,21 @@ const FALLBACK_BROWSE_FLOWS = Object.freeze({
     Object.freeze({ key: "socket", label: "CPU 소켓" }),
     Object.freeze({ key: "chipset", label: "칩셋" }),
     Object.freeze({ key: "manufacturer", label: "제조사" }),
-    Object.freeze({ key: "form_factor", label: "폼팩터" }),
   ]),
   SSD: Object.freeze([
-    Object.freeze({ key: "form_interface", label: "형태·인터페이스" }),
+    Object.freeze({ key: "product_kind", label: "제품 종류" }),
     Object.freeze({ key: "capacity_bucket", label: "용량" }),
     Object.freeze({ key: "manufacturer", label: "제조사" }),
-    Object.freeze({ key: "protocol", label: "프로토콜" }),
   ]),
   HDD: Object.freeze([
+    Object.freeze({ key: "placement", label: "설치 방식" }),
     Object.freeze({ key: "capacity_bucket", label: "용량" }),
     Object.freeze({ key: "manufacturer", label: "제조사" }),
-    Object.freeze({ key: "purpose", label: "용도" }),
-    Object.freeze({ key: "interface", label: "인터페이스" }),
   ]),
   PSU: Object.freeze([
     Object.freeze({ key: "watts_bucket", label: "정격 출력" }),
-    Object.freeze({ key: "form_factor", label: "폼팩터" }),
+    Object.freeze({ key: "form_factor", label: "크기 규격" }),
     Object.freeze({ key: "manufacturer", label: "제조사" }),
-    Object.freeze({ key: "atx_spec", label: "ATX 규격" }),
-    Object.freeze({ key: "efficiency", label: "효율 등급" }),
-    Object.freeze({ key: "modularity", label: "케이블 방식" }),
   ]),
 });
 const COHORTS = [
@@ -966,7 +960,9 @@ function makeFacetCheckboxRow(definition) {
     checkbox.checked = selectedSet.has(option.value);
     checkbox.addEventListener("change", () => updateFacet(definition.key, option.value, definition.rowKey));
     choice.append(checkbox, createElement("span", "model-facet-option-label", option.label));
-    if (Number.isFinite(Number(option.count))) {
+    const listingOnlyFacet = ["product_kind", "placement"].includes(definition.key)
+      || (state.categoryCode === "PSU" && definition.key === "form_factor");
+    if (!listingOnlyFacet && Number.isFinite(Number(option.count))) {
       choice.append(createElement("span", "model-facet-count", `${Number(option.count).toLocaleString("ko-KR")}개`));
     }
     values.append(choice);
@@ -1604,12 +1600,15 @@ function buildListingQuery(cursor = "") {
     params.set("canonical_product_id", productId(state.selectedProduct));
   } else {
     if (state.categoryCode) params.set("category_code", state.categoryCode);
-    Object.keys(state.facets).sort().forEach((key) => {
-      if (!PRODUCT_QUERY_KEYS.has(key)) return;
-      selectedFacetValues(key).sort().forEach((value) => params.append(key, value));
-    });
     if (state.query) params.set("q", state.query);
   }
+  const listingFacetKeys = new Set(state.categoryCode === "SSD" ? ["product_kind"]
+    : state.categoryCode === "HDD" ? ["placement"]
+      : state.categoryCode === "PSU" ? ["form_factor"] : []);
+  Object.keys(state.facets).sort().forEach((key) => {
+    if (!PRODUCT_QUERY_KEYS.has(key) || (state.selectedProduct && !listingFacetKeys.has(key))) return;
+    selectedFacetValues(key).sort().forEach((value) => params.append(key, value));
+  });
   if (state.listingSort) params.set("sort", state.listingSort);
   if (state.priceMin) params.set("price_min", state.priceMin);
   if (state.priceMax) params.set("price_max", state.priceMax);

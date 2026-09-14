@@ -814,9 +814,9 @@ const usdStats = ledger.rebuildAndGetPriceStats({
   condition: "USED_WORKING", currency: "USD", asOf: new Date(now).toISOString(),
   parserVersion: "pc-parser-v1", ruleVersion: "pc-rules-v1", filterVersion: "pc-filter-v1"
 });
-assert.equal(usdStats.sold.sample_count, 3);
-assert.equal(usdStats.sold.median, 320);
-assert.equal(usdStats.sold.mean, null, "n=3~4 exposes median with a sample warning, not mean");
+assert.equal(usdStats.sold.sample_count, 0, "eBay is excluded from completed-sale statistics");
+assert.equal(usdStats.sold.median, null);
+assert.equal(usdStats.sold.mean, null, "excluded eBay sales have no representative price");
 const emptyStats = ledger.rebuildAndGetPriceStats({
   canonicalProductId: "gpu:nvidia:rtx-3080", days: 30, marketPool: "KR_C2C_USED",
   condition: "NEW", currency: "KRW", asOf: new Date(now).toISOString()
@@ -1253,6 +1253,15 @@ assert.equal(ledger.getPublicProjection("joonggonara", "stable-id").item_id, sta
 assert.equal(ledger.getPublicProjection("joonggonara", "stable-id").image_url, "https://img.example.test/stable-id.jpg",
   "lifecycle projections must preserve the public product image when source raw payload is nested");
 assert.equal(ledger.getPublicProjection("joonggonara", "stable-id").posted_at, "2026-08-29T00:00:00.000Z");
+pipeline.recordItem({
+  item_id: "joonggonara:ssd-facet", source_listing_id: "ssd-facet", site: "joonggonara",
+  title: "삼성 980 PRO M.2 NVMe SSD 1TB", description: "정상 작동", price: 100_000, currency: "KRW",
+  url: "https://web.joongna.com/product/ssd-facet", status: "ACTIVE"
+}, new Date(now + 525).toISOString());
+const storageFacetProjection = ledger.getPublicProjection("joonggonara", "ssd-facet");
+assert.equal(storageFacetProjection.product_kind, "M2_NVME");
+assert.equal(storageFacetProjection.placement, "INTERNAL");
+assert.equal(storageFacetProjection.form_factor, "M.2");
 pipeline.recordItem({
   item_id: "joonggonara:232154630", source_listing_id: "232154630", site: "joonggonara",
   title: "RTX 3080 정상 작동", description: "개인 사용", price: 480_000, currency: "KRW",

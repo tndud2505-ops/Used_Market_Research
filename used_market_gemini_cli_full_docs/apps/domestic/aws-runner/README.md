@@ -1,5 +1,26 @@
 # AWS Ubuntu 러너 운영
 
+## Bunjang lifecycle tracking (2026-09-14)
+
+The scheduled Bunjang collection rechecks stored listing URLs through the same
+public `/api/pms/v1/products/{pid}/detail/web` endpoint used by Bunjang's web app.
+Product identity must match; `SOLD_OUT` is sold, `DELETED` is deleted, and hidden
+or inaccessible products are not counted as sales. Bunjang numeric status `2`
+means deleted and `3` means sold.
+
+Each source run checks up to 1,500 Bunjang listings, with 200 ms pacing and an
+eight-minute budget. Listings last checked at least six hours ago are eligible;
+this does not guarantee a six-hour refresh for every listing. A generic access
+block or rate limit stops the batch. The authenticated `/api/runner/run` job
+`bunjang-lifecycle-recheck` invokes the same path for an operator-requested run.
+It shares the scheduler lock and refuses disabled or unapproved sources.
+
+The existing daily compaction policy is unchanged: keep each listing's latest
+snapshot and archive older detail into aggregates. A later sold observation uses
+the last retained asking price, not a confirmed transaction price. eBay remains
+in active-price collection but is excluded from sold-price statistics and HTML
+lifecycle rechecks. Statistics become public through the normal stats publication.
+
 이 디렉터리는 현재 `runner.mjs`를 AWS Ubuntu 24.04에서 실행하기 위한 설치·환경·systemd·Cloudflare Tunnel·헬스체크 파일만 담는다.
 
 검색과 PC 디렉터리의 승인된 운영 대상은 다음 3곳이다.

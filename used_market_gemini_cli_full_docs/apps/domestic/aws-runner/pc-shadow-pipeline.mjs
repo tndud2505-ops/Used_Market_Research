@@ -419,6 +419,9 @@ export class PcShadowPipeline {
       priceScopeConfidence: publicClassified.price_scope_confidence,
       statisticsEligible,
       statisticsExclusionReasons: [...new Set(statisticsExclusionReasons)],
+      productKind: publicClassified.product_kind || null,
+      placement: publicClassified.placement || null,
+      formFactor: publicClassified.form_factor || null,
       listingKind: classified.listing_kind,
       quantity: classified.quantity,
       priceScope: classified.price_scope,
@@ -454,7 +457,10 @@ export class PcShadowPipeline {
         exact_sku: exactSku,
         ...(classified.gpu_board_manufacturer ? { board_manufacturer: classified.gpu_board_manufacturer } : {}),
         ...(classified.module_capacity_gb ? { module_capacity_gb: classified.module_capacity_gb } : {}),
-        ...(classified.total_capacity_gb ? { total_capacity_gb: classified.total_capacity_gb } : {})
+        ...(classified.total_capacity_gb ? { total_capacity_gb: classified.total_capacity_gb } : {}),
+        listing_product_kind: publicClassified.product_kind || null,
+        listing_placement: publicClassified.placement || null,
+        listing_form_factor: publicClassified.form_factor || null
       }
     };
     if (["COMPONENT_BUNDLE", "FULL_SYSTEM"].includes(classified.listing_kind)) {
@@ -611,6 +617,9 @@ export class PcShadowPipeline {
       price_scope_confidence: normalized.priceScopeConfidence,
       statistics_eligible: normalized.statisticsEligible,
       statistics_exclusion_reasons: normalized.statisticsExclusionReasons,
+      product_kind: normalized.productKind,
+      placement: normalized.placement,
+      form_factor: normalized.formFactor,
       parser_version: versions.parserVersion,
       rule_version: versions.ruleVersion,
       quantity: normalized.quantity,

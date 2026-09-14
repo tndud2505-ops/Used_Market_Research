@@ -974,6 +974,11 @@ function normalizeImportedListing(value, index) {
     price_scope_confidence: importedNumber(value.price_scope_confidence) ?? 0,
     statistics_eligible: statisticsEligible ? 1 : 0,
     statistics_exclusion_reasons_json: JSON.stringify([...statisticsExclusionReasons].slice(0, 20)),
+    listing_facets_json: JSON.stringify({
+      product_kind: importedText(value.product_kind, 40).toUpperCase() || null,
+      placement: importedText(value.placement, 40).toUpperCase() || null,
+      form_factor: importedText(value.form_factor, 40).toUpperCase() || null
+    }),
     quantity,
     price_scope: priceScope,
     condition_code: importedText(value.condition_code, 80) || "UNKNOWN",
@@ -1077,12 +1082,12 @@ async function importListings(env, values, collectionManifestValue = null) {
       (item_id, site, category_id, title, search_text, price_value, currency, url, image_url, seller_name, posted_at, updated_at, active,
        canonical_product_id, canonical_display_name, canonical_manufacturer, board_manufacturer, listing_kind, pc_category_code,
        market_segment, listing_type, condition_group, spec_group_id, classification_confidence, model_confidence, quantity_confidence, price_scope_confidence,
-       statistics_eligible, statistics_exclusion_reasons_json, quantity, price_scope, condition_code,
+       statistics_eligible, statistics_exclusion_reasons_json, listing_facets_json, quantity, price_scope, condition_code,
        lifecycle_status, market_pool, confidence_json, evidence_json, price_eligible, exclusion_reasons_json, good_listing_eligible, reference_price)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
               ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
               ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-              ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(item_id) DO UPDATE SET
         site = excluded.site,
         category_id = excluded.category_id,
@@ -1112,6 +1117,7 @@ async function importListings(env, values, collectionManifestValue = null) {
         price_scope_confidence = excluded.price_scope_confidence,
         statistics_eligible = excluded.statistics_eligible,
         statistics_exclusion_reasons_json = excluded.statistics_exclusion_reasons_json,
+        listing_facets_json = excluded.listing_facets_json,
         quantity = excluded.quantity,
         price_scope = excluded.price_scope,
         condition_code = excluded.condition_code,
@@ -1150,6 +1156,7 @@ async function importListings(env, values, collectionManifestValue = null) {
          OR listings.price_scope_confidence IS NOT excluded.price_scope_confidence
          OR listings.statistics_eligible IS NOT excluded.statistics_eligible
          OR listings.statistics_exclusion_reasons_json IS NOT excluded.statistics_exclusion_reasons_json
+         OR listings.listing_facets_json IS NOT excluded.listing_facets_json
          OR listings.quantity IS NOT excluded.quantity
          OR listings.price_scope IS NOT excluded.price_scope
          OR listings.condition_code IS NOT excluded.condition_code
@@ -1177,7 +1184,7 @@ async function importListings(env, values, collectionManifestValue = null) {
     item.active,
     item.canonical_product_id, item.canonical_display_name, item.canonical_manufacturer, item.board_manufacturer, item.listing_kind, item.pc_category_code,
     item.market_segment, item.listing_type, item.condition_group, item.spec_group_id, item.classification_confidence, item.model_confidence, item.quantity_confidence, item.price_scope_confidence,
-    item.statistics_eligible, item.statistics_exclusion_reasons_json, item.quantity, item.price_scope, item.condition_code, item.lifecycle_status, item.market_pool,
+    item.statistics_eligible, item.statistics_exclusion_reasons_json, item.listing_facets_json, item.quantity, item.price_scope, item.condition_code, item.lifecycle_status, item.market_pool,
     item.confidence_json, item.evidence_json, item.price_eligible, item.exclusion_reasons_json,
     item.good_listing_eligible, item.reference_price
   ));

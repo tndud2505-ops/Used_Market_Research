@@ -272,6 +272,7 @@ function currentSoldIdentityEligible(identity, firstSoldByListing, latestByListi
   const firstSold = firstSoldByListing.get(identity);
   const latest = latestByListing.get(identity);
   return Boolean(firstSold)
+    && firstSold.source_id !== "ebay"
     && priceStatsRowEligible(firstSold)
     && latest?.lifecycle_status === "SOLD"
     && priceStatsRowEligible(latest)
@@ -1988,13 +1989,14 @@ export class PcPartsLedger {
 
   dueRechecks({ sourceId, checkedBefore, limit = 20 }) {
     const cutoff = iso(checkedBefore || new Date(this.now() - 6 * HOUR_MS));
-    const boundedLimit = Math.min(100, Math.max(1, Number(limit) || 20));
+    const boundedLimit = Math.min(sourceId === "bunjang" ? 1500 : 100, Math.max(1, Number(limit) || 20));
     return this.db.prepare(`
       SELECT s.source_id, s.source_listing_id, s.lifecycle_status, s.price_value, s.currency,
              r.raw_json, r.title, r.description, r.seller_ref_masked, r.last_checked_at
         FROM listing_snapshots s
         JOIN raw_listings r ON r.id = s.raw_listing_id
-       WHERE s.source_id = ? AND s.lifecycle_status IN ('ACTIVE', 'RESERVED')
+       WHERE s.source_id = ? AND (s.lifecycle_status IN ('ACTIVE', 'RESERVED')
+         OR (s.source_id = 'bunjang' AND s.lifecycle_status = 'UNAVAILABLE_UNKNOWN'))
          AND r.last_checked_at <= ?
          AND NOT EXISTS (
            SELECT 1 FROM listing_snapshots newer
@@ -2061,7 +2063,7 @@ export class PcPartsLedger {
              n.quantity, n.price_scope, n.condition_code, n.market_pool, n.price_eligible,
              n.normalization_version, n.parser_version, n.rule_version, n.filter_version,
              n.exclusion_reasons_json, n.confidence_json, n.evidence_json,
-             li.unit_price, li.total_price
+             li.unit_price, li.total_price, li.spec_json AS listing_spec_json
         FROM listing_snapshots s
         JOIN raw_listings r ON r.id = s.raw_listing_id
         LEFT JOIN normalized_listings n ON n.id = (
@@ -2083,6 +2085,7 @@ export class PcPartsLedger {
     );
     if (!row) return null;
     const raw = parseJson(row.raw_json, {});
+    const listingSpec = parseJson(row.listing_spec_json, {});
     const projection = {
       item_id: cleanText(raw.item_id || raw.id || (raw.url || raw.item_url
         ? `${row.source_id}:${raw.url || raw.item_url}`
@@ -2103,6 +2106,9 @@ export class PcPartsLedger {
       canonical_display_name: row.canonical_display_name,
       listing_kind: row.listing_kind || "UNKNOWN",
       category_code: row.category_code,
+      product_kind: typeof listingSpec.listing_product_kind === "string" ? listingSpec.listing_product_kind : null,
+      placement: typeof listingSpec.listing_placement === "string" ? listingSpec.listing_placement : null,
+      form_factor: typeof listingSpec.listing_form_factor === "string" ? listingSpec.listing_form_factor : null,
       quantity: row.quantity,
       price_scope: row.price_scope || "UNKNOWN",
       condition_code: row.condition_code || "UNKNOWN",

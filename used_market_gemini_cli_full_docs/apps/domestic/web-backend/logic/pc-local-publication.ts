@@ -9,6 +9,7 @@ export interface LocalPcListingQuery {
   canonicalProductIds: string[] | null;
   manufacturer: string | null;
   boardManufacturer: string | null;
+  listingFacets: Record<string, string[]>;
   sites: string[];
   sort: string;
   minPrice: number | null;
@@ -180,6 +181,7 @@ export function createLocalPcPublicationReader() {
       if (sites.size && !sites.has(normalize(item.site))) return false;
       if (query.manufacturer && !same(item.canonical_manufacturer || item.manufacturer, query.manufacturer)) return false;
       if (query.boardManufacturer && !same(item.board_manufacturer, query.boardManufacturer)) return false;
+      if (!Object.entries(query.listingFacets || {}).every(([key, expected]) => expected.some((value) => same(item[key], value)))) return false;
       const price = Number(item.price_value);
       if (!Number.isFinite(price) || price <= 0) return false;
       if (query.minPrice !== null && price < query.minPrice) return false;

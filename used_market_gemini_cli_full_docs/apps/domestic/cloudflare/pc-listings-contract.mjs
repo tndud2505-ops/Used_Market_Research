@@ -9,11 +9,16 @@ const PUBLIC_PC_FACET_KEYS = new Set([
   "manufacturer", "brand", "model", "exact_model", "gpu_model", "board_brand", "usage", "market_segment",
   "configuration", "config", "platform_vendor", "family", "generation", "memory_generation", "suffix",
   "module_capacity_gb", "capacity_per_module_gb", "vram_gb", "vram_options_gb", "socket", "chipset",
-  "form_factor", "form_interface", "capacity", "marketed_capacity_gb", "capacity_bucket", "purpose", "use_class",
+  "form_factor", "form_interface", "product_kind", "placement", "capacity", "marketed_capacity_gb", "capacity_bucket", "purpose", "use_class",
   "interface", "protocol", "rated_wattage", "watts", "watts_bucket", "atx_spec", "atx_or_sfx_version",
   "efficiency", "modularity"
 ]);
 const MAX_CATALOG_SCOPE_VALUES = 60;
+const LISTING_FACET_VALUES = Object.freeze({
+  product_kind: { category: "SSD", values: new Set(["M2_NVME", "SATA_2_5", "M2_SATA", "EXTERNAL", "OTHER_UNKNOWN"]) },
+  placement: { category: "HDD", values: new Set(["INTERNAL", "EXTERNAL", "UNKNOWN"]) },
+  form_factor: { category: "PSU", values: new Set(["ATX", "SFX", "SFX-L"]) }
+});
 
 const SOURCE_URL_ID_PATTERNS = Object.freeze({
   ebay: [/\/itm\/(?:[^/?#]+\/)?(\d{8,14})(?:[/?#]|$)/iu],
@@ -57,6 +62,21 @@ function catalogScopeFrom(url) {
     facets[key] = selected;
   }
   return { categoryCode, query, facets };
+}
+
+function listingFacetsFrom(url) {
+  const categoryCode = text(url.searchParams.get("category_code"), 40).toUpperCase();
+  const canonicalCategory = text(url.searchParams.get("canonical_product_id"), 300).split(":", 1)[0].toUpperCase();
+  const category = categoryCode || canonicalCategory;
+  return Object.fromEntries(Object.entries(LISTING_FACET_VALUES).flatMap(([key, definition]) => {
+    if (category !== definition.category) return [];
+    const selected = [...new Set(url.searchParams.getAll(key)
+      .flatMap((value) => value.split(","))
+      .map((value) => text(value, 40).toUpperCase())
+      .filter(Boolean))].sort();
+    if (selected.some((value) => !definition.values.has(value))) throw new TypeError(`unsupported ${key} listing filter`);
+    return selected.length ? [[key, selected]] : [];
+  }));
 }
 
 export function parsePcListingsRequest(urlOrRequest, { allowedSites = [] } = {}) {
@@ -108,6 +128,7 @@ export function parsePcListingsRequest(urlOrRequest, { allowedSites = [] } = {})
   return {
     canonicalProductId,
     catalogScope,
+    listingFacets: listingFacetsFrom(url),
     manufacturer,
     boardManufacturer,
     sites: requestedSites,
@@ -134,6 +155,9 @@ export function pcListingsIdentity(query) {
         .sort(([left], [right]) => left.localeCompare(right))
         .map(([key, values]) => [key, [...values].sort()]))
     } : null,
+    listing_facets: Object.fromEntries(Object.entries(query.listingFacets || {})
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, values]) => [key, [...values].sort()])),
     manufacturer: query.manufacturer || "",
     board_manufacturer: query.boardManufacturer || "",
     sites: [...(query.sites || [])].sort(),

@@ -5,7 +5,7 @@ import { pcStatsTraceability } from "../aws-runner/pc-stats-traceability.mjs";
 const read = (relativePath) => readFile(new URL(`../${relativePath}`, import.meta.url), "utf8");
 const [runnerUnit, tunnelUnit, installScript, configureScript, healthScript, smokeScript, readme,
   publishStatsScript, completeStatsScript, importStatsScript, statsTraceabilityScript, runnerScript,
-  statsRunnerScript, publicClassificationMigration, retiredSourceMigration] = await Promise.all([
+  statsRunnerScript, publicClassificationMigration, retiredSourceMigration, collectSourceScript] = await Promise.all([
   read("aws-runner/used-market-runner.service"),
   read("aws-runner/used-market-tunnel.service"),
   read("aws-runner/install-ubuntu24.sh"),
@@ -20,7 +20,8 @@ const [runnerUnit, tunnelUnit, installScript, configureScript, healthScript, smo
   read("aws-runner/runner.mjs"),
   read("aws-runner/publish-pc-stats-runner.mjs"),
   read("cloudflare/migrations/0012_pc_public_classification.sql"),
-  read("cloudflare/migrations/0013_retire_quasarzone.sql")
+  read("cloudflare/migrations/0013_retire_quasarzone.sql"),
+  read("aws-runner/collect-pc-source-now.mjs")
 ]);
 
 assert.match(runnerUnit, /^Wants=.*used-market-tunnel\.service/mu,
@@ -169,6 +170,15 @@ for (const field of [
   assert.match(runnerD1Serializer, new RegExp(`\\b${field}:`, "u"),
     `background D1 publication must preserve ${field}`);
 }
+for (const field of ["product_kind", "placement", "form_factor"]) {
+  assert.match(collectSourceScript, new RegExp(`\\b${field}:`, "u"),
+    `one-shot source publication must preserve ${field}`);
+}
+assert.match(collectSourceScript, /"listing_facets_json"/u,
+  "one-shot SQL publication must persist listing facets");
+assert.doesNotMatch(collectSourceScript,
+  /\.filter\(\(item\) => item\.price_eligible === true && item\.statistics_eligible === true/u,
+  "searchable non-statistical listings must not be dropped from one-shot publication");
 assert.match(runnerScript, /const PC_SCHEDULER_CATCHUP_MS = 0;/u,
   "runner startup must not synchronously replay a multi-hour scheduler backlog");
 assert.match(runnerScript, /process\.env\.PC_SOURCE_TARGETS_PER_RUN \|\| "85"/u,
@@ -225,6 +235,8 @@ assertOrdered(runnerScript, [
   'if (!storageCompactionBackup) throw new Error("PC_STORAGE_COMPACTION_BACKUP_REQUIRED");',
   "const storageCompaction = pcLedger.compactStorage({"
 ], "daily compaction recovery backup");
+assert.match(runnerScript, /observationRetentionDays:\s*1/u,
+  "daily compaction must preserve the one-day detail retention policy that controls disk growth");
 assert.doesNotMatch(runnerScript, /compactStatsForPublication\(pcLedger\.rebuildAndGetPriceStats/u,
   "the public runner process must not build every product-stat scope synchronously");
 assert.doesNotMatch(runnerScript, /pcLedger\.runIntegrityAudit/u,

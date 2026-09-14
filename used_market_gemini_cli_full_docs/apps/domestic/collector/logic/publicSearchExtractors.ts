@@ -333,12 +333,19 @@ function hasBunjangHardwareEvidence(haystack: string): boolean {
   return BUNJANG_FULL_PC_CONTEXT_PATTERN.test(haystack);
 }
 
+function isDeletedBunjangSourceStatus(value: string | number | null | undefined): boolean {
+  return ["2", "DELETED"].includes(String(value ?? "").trim().toUpperCase());
+}
+
 function detectBunjangNegativeVertical(haystack: string): string | null {
   const matched = BUNJANG_NEGATIVE_VERTICAL_PATTERNS.find(({ pattern }) => pattern.test(haystack));
   return matched?.label ?? null;
 }
 
 function shouldKeepBunjangProduct(input: SearchCommandInput, product: BunjangApiProduct): { keep: true } | { keep: false; reason: string } {
+  if (isDeletedBunjangSourceStatus(product.status)) {
+    return { keep: false, reason: "deleted-source-status" };
+  }
   const title = typeof product.name === "string" ? product.name : "";
   const tag = typeof product.tag === "string" ? product.tag : "";
   const haystack = `${title} ${tag}`.trim();
@@ -1093,6 +1100,8 @@ async function extractDaangnItems(input: SearchCommandInput, _pageHtml: string):
 }
 
 function mapBunjangItem(product: BunjangApiProduct, index: number): SearchItem {
+  const sourceStatus = String(product.status ?? "").toUpperCase();
+  const status = sourceStatus === "2" ? "DELETED" : ["3", "SOLD_OUT"].includes(sourceStatus) ? "SOLD" : sourceStatus;
   const postedAt = formatUnixTimestamp(product.update_time);
   const imageUrl = normalizeListingImageUrl(product.product_image);
   const notes = [
@@ -1110,7 +1119,7 @@ function mapBunjangItem(product: BunjangApiProduct, index: number): SearchItem {
     currency: "KRW",
     price_label: "",
     seller: typeof product.uid === "string" ? `user:${product.uid}` : "",
-    status: parseItemStatus(product.status),
+    status: parseItemStatus(status),
     condition: typeof product.used === "number" ? String(product.used) : "",
     shipping: product.free_shipping ? "free_shipping" : "",
     location: typeof product.location === "string" ? product.location : "",
@@ -1120,7 +1129,7 @@ function mapBunjangItem(product: BunjangApiProduct, index: number): SearchItem {
     notes,
     listing_type_hint: "unknown",
     warnings: product.ad ? ["PROMOTED_LISTING"] : [],
-    sale_status: parseSaleStatus(product.status),
+    sale_status: parseSaleStatus(status),
     estimated_deal_price: null,
     price_change_count: 0,
     upload_date: buildUploadDate(postedAt),
@@ -1203,6 +1212,7 @@ export async function tryExtractPublicSearchResult(
         }
 
         const mappedItemsBeforeCategoryFilter = payload.products
+          .filter((product) => !isDeletedBunjangSourceStatus(product.status))
           .map(mapBunjangWebItem)
           .filter((item) => item.title !== "" && item.price !== null && item.url !== "");
         const categoryFiltered = filterBunjangCategoryItems(input.category.id, mappedItemsBeforeCategoryFilter);
