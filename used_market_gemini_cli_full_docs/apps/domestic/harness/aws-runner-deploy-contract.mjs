@@ -96,6 +96,8 @@ assert.match(await read("aws-runner/pc-shadow-pipeline.mjs"), /exactSku && price
   "live anomaly checks must remain limited to exact products while a fresh target version replay skips its empty statistics");
 assert.match(republishScript, /plan\.d1_upserts\.map\(\(item\) => \(\{ \.\.\.item, updated_at: appliedAt \}\)\)/u,
   "reconciliation must refresh D1 upsert timestamps so newer tombstones cannot suppress authoritative rows");
+assert.match(republishScript, /const PUBLIC_PC_CATEGORY_CODES = Object\.freeze\(\["CPU", "GPU", "RAM", "MOTHERBOARD", "SSD", "HDD", "PSU"\]\)/u,
+  "reconciliation authority must use the same seven categories exposed by the public PC listings API");
 assert.match(ledgerScript, /rows\.filter\(\(row\) => !reviewedPcListingExclusion/u,
   "reviewed source-listing exclusions must also remove historical statistics members");
 

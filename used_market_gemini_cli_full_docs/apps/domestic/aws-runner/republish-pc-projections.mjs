@@ -15,6 +15,7 @@ import {
 } from "./pc-projection-republish-policy.mjs";
 
 const IMPORT_BATCH_SIZE = 400;
+const PUBLIC_PC_CATEGORY_CODES = Object.freeze(["CPU", "GPU", "RAM", "MOTHERBOARD", "SSD", "HDD", "PSU"]);
 
 function parseJson(value, fallback = {}) {
   try {
@@ -127,6 +128,7 @@ function localPublicRows(db, requestedSources) {
     FROM listings
     WHERE site IN (${placeholders})
       AND active = 1 AND price_value IS NOT NULL AND price_value > 0
+      AND json_extract(pc_metadata_json, '$.category_code') IN (${PUBLIC_PC_CATEGORY_CODES.map(() => "?").join(", ")})
       AND json_extract(pc_metadata_json, '$.canonical_product_id') IS NOT NULL
       AND json_extract(pc_metadata_json, '$.listing_kind') IN ('SINGLE_COMPONENT', 'SAME_PRODUCT_LOT')
       AND json_extract(pc_metadata_json, '$.lifecycle_status') = 'ACTIVE'
@@ -136,7 +138,7 @@ function localPublicRows(db, requestedSources) {
       AND json_extract(pc_metadata_json, '$.price_scope') IN ('TOTAL', 'UNIT')
       AND ((json_extract(pc_metadata_json, '$.market_pool') IN ('KR_C2C_USED', 'KR_DEALER_USED', 'KR_REFURB_RETAIL') AND currency = 'KRW')
         OR (json_extract(pc_metadata_json, '$.market_pool') = 'OVERSEAS_USED' AND currency = 'USD'))
-    ORDER BY site, item_id`).all(...requestedSources);
+    ORDER BY site, item_id`).all(...requestedSources, ...PUBLIC_PC_CATEGORY_CODES);
   return rows.map((row) => {
     const metadata = parseJson(row.pc_metadata_json, {});
     return {
@@ -168,6 +170,7 @@ function readLocalState(indexPath, requestedSources) {
       FROM listing_snapshots s
       JOIN normalized_listings n ON n.snapshot_id = s.id
       WHERE s.source_id IN (${placeholders})
+        AND n.category_code IN (${PUBLIC_PC_CATEGORY_CODES.map(() => "?").join(", ")})
         AND s.id = (
           SELECT latest.id FROM listing_snapshots latest
           WHERE latest.source_id = s.source_id AND latest.source_listing_id = s.source_listing_id
@@ -184,6 +187,7 @@ function readLocalState(indexPath, requestedSources) {
           OR (n.market_pool = 'OVERSEAS_USED' AND s.currency = 'USD'))
       ORDER BY s.source_id, s.source_listing_id`).all(
         ...requestedSources,
+        ...PUBLIC_PC_CATEGORY_CODES,
         activeVersion.normalization_version,
         activeVersion.parser_version,
         activeVersion.rule_version,
