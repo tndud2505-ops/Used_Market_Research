@@ -1128,12 +1128,12 @@ export class SearchIndex {
       where.push("currency = ?");
       params.push(currency);
     }
-    const sourceCountWhere = [...where];
-    const sourceCountParams = [...params];
     if (sites.length > 0) {
       where.push(`site IN (${sqlPlaceholders(sites)})`);
       params.push(...sites);
     }
+    const sourceCountWhere = [...where];
+    const sourceCountParams = [...params];
     const after = options.after && typeof options.after === "object" ? options.after : null;
     const candidateRows = this.db.prepare(`SELECT * FROM listings
       WHERE ${where.join(" AND ")}`).all(...params);
