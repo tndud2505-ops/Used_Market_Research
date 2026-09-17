@@ -14,7 +14,7 @@ import {
 import { pcProductsResponse } from "../cloudflare/pc-directory-http.mjs";
 import { publicPcModelsForApi } from "../market/logic/pc-public-catalog.mjs";
 
-assert.equal(PC_PRODUCT_MASTER_V2_VERSION, 4);
+assert.equal(PC_PRODUCT_MASTER_V2_VERSION, 5);
 assert.equal(PC_PART_CATEGORY_SEEDS_V2.length, 11);
 assert.deepEqual(listPcPartCategoriesV2().map(({ code }) => code), [
   "GPU", "CPU", "RAM", "MOTHERBOARD", "SSD", "HDD", "PSU", "COOLING", "CASE", "EXPANSION_CARD", "ODD"
@@ -125,7 +125,7 @@ assert.throws(
 );
 
 const api = pcPartsDirectoryForApiV2({ category: "RAM", facets: { memory_generation: "DDR5", module_capacity_gb: [48, 64] }, limit: 10 });
-assert.equal(api.master_version, 4);
+assert.equal(api.master_version, PC_PRODUCT_MASTER_V2_VERSION);
 assert.deepEqual([...new Set(api.products.items.map((product) => product.spec.module_capacity_gb))], [48, 64]);
 assert.ok(api.categories.length === 11 && api.facet_schema.memory_generation.includes("DDR5"));
 

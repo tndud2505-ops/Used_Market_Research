@@ -69,6 +69,8 @@ for required_file in \
   market/logic/pc-parts-classifier.mjs \
   market/logic/pc-search-query-variants.mjs \
   market/logic/pc-public-catalog.mjs \
+  market/logic/pc-price-readiness.mjs \
+  market/logic/pc-product-search.mjs \
   market/logic/pc-reviewed-listing-exclusions.mjs \
   market/logic/pc-parts-directory.mjs \
   market/data/pc-product-master-v1.mjs \
@@ -185,6 +187,8 @@ if [[ "$SOURCE_ROOT" != "$APP_ROOT" ]]; then
   install -m 0644 "$SOURCE_ROOT/market/logic/pc-parts-classifier.mjs" "$APP_ROOT/market/logic/pc-parts-classifier.mjs"
   install -m 0644 "$SOURCE_ROOT/market/logic/pc-search-query-variants.mjs" "$APP_ROOT/market/logic/pc-search-query-variants.mjs"
   install -m 0644 "$SOURCE_ROOT/market/logic/pc-public-catalog.mjs" "$APP_ROOT/market/logic/pc-public-catalog.mjs"
+  install -m 0644 "$SOURCE_ROOT/market/logic/pc-price-readiness.mjs" "$APP_ROOT/market/logic/pc-price-readiness.mjs"
+  install -m 0644 "$SOURCE_ROOT/market/logic/pc-product-search.mjs" "$APP_ROOT/market/logic/pc-product-search.mjs"
   install -m 0644 "$SOURCE_ROOT/market/logic/pc-reviewed-listing-exclusions.mjs" "$APP_ROOT/market/logic/pc-reviewed-listing-exclusions.mjs"
   install -m 0644 "$SOURCE_ROOT/market/logic/pc-parts-directory.mjs" "$APP_ROOT/market/logic/pc-parts-directory.mjs"
   install -m 0644 "$SOURCE_ROOT/market/logic/listing-lifecycle.mjs" "$APP_ROOT/market/logic/listing-lifecycle.mjs"
@@ -312,6 +316,7 @@ rm -f -- "$tunnel_tmp"
 
 node --check "$APP_ROOT/aws-runner/runner.mjs"
 node --check "$APP_ROOT/aws-runner/publish-pc-stats-runner.mjs"
+node --check "$APP_ROOT/aws-runner/pc-stats-publication-client.mjs"
 node --check "$APP_ROOT/aws-runner/search-index.mjs"
 node --check "$APP_ROOT/aws-runner/migration-smoke.mjs"
 migration_smoke_dir="$(mktemp -d)"
@@ -327,6 +332,11 @@ node --check "$APP_ROOT/collector/logic/pc-specialist-targets.mjs"
 node --check "$APP_ROOT/market/logic/pc-parts-classifier.mjs"
 node --check "$APP_ROOT/market/logic/pc-search-query-variants.mjs"
 node --check "$APP_ROOT/market/logic/pc-public-catalog.mjs"
+node --check "$APP_ROOT/market/logic/pc-price-readiness.mjs"
+node --check "$APP_ROOT/market/logic/pc-product-search.mjs"
+node --check "$APP_ROOT/aws-runner/pc-stored-price-publication.mjs"
+node --check "$APP_ROOT/aws-runner/pc-publication-scopes.mjs"
+node --check "$APP_ROOT/aws-runner/collect-pc-release-sample.mjs"
 node --check "$APP_ROOT/market/logic/pc-reviewed-listing-exclusions.mjs"
 node --check "$APP_ROOT/market/logic/pc-parts-directory.mjs"
 node --check "$APP_ROOT/market/logic/listing-lifecycle.mjs"

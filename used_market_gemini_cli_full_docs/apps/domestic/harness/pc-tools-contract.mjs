@@ -79,6 +79,26 @@ const lowSample = coherentStats({
 });
 assert.equal(lowSample.active.sample_count, 1);
 assert.equal(lowSample.by_source.length, 1);
+const historicalOnlySource = coherentStats({
+  active: { sample_count: 1, min: 50_000, max: 50_000, mean: null, median: null },
+  by_source: [
+    {
+      source_id: 'current',
+      active: { sample_count: 1, min: 50_000, max: 50_000, mean: null, median: null },
+      sold: { sample_count: 0, mean: null, median: null },
+      daily: []
+    },
+    {
+      source_id: 'historical-reserved',
+      active: { sample_count: 0, mean: null, median: null },
+      sold: { sample_count: 0, mean: null, median: null },
+      daily: [{ date: '2026-09-01', active: { sample_count: 1, min: 40_000, max: 40_000, mean: null, median: null } }]
+    }
+  ]
+});
+assert.equal(historicalOnlySource.integrity_filtered_source_count || 0, 0,
+  'a source with only valid historical daily evidence is not internally contradictory');
+assert.equal(historicalOnlySource.by_source.length, 2);
 const mixedLowSamples = coherentStats({
   active: { sample_count: 9, min: 1, max: 2, mean: 0 },
   by_source: [

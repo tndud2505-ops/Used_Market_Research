@@ -2,6 +2,7 @@ import {
   PC_PRODUCT_MASTER_V2,
   PC_PRODUCT_MASTER_V2_VERSION
 } from "../data/pc-product-master-v2.mjs";
+import { pcBrandSearchAliases, pcProductMatchesQuery } from './pc-product-search.mjs';
 
 export const PUBLIC_PC_CATEGORY_CODES = Object.freeze([
   "CPU", "GPU", "RAM", "MOTHERBOARD", "SSD", "HDD", "PSU"
@@ -284,9 +285,7 @@ function matchingProducts(category, filters, exceptKey = null) {
 }
 
 function productMatchesQuery(product, query) {
-  if (!query) return true;
-  return [product.id, product.name, ...(product.aliases || [])]
-    .some((value) => normalize(value).toLocaleUpperCase("ko-KR").includes(query));
+  return pcProductMatchesQuery(product, query);
 }
 
 function optionLabel(key, value) {
@@ -393,7 +392,7 @@ function publicProductForApi(product, stats = {}) {
     sold_30d_count: Number(stats.sold_30d_count || 0),
     sold_30d_last_ask_median: stats.sold_30d_last_ask_median ?? null,
     last_updated_at: stats.last_updated_at || null,
-    aliases: product.aliases || []
+    aliases: [...new Set([...(product.aliases || []), ...pcBrandSearchAliases(product.manufacturer || product.brand)])]
   };
 }
 

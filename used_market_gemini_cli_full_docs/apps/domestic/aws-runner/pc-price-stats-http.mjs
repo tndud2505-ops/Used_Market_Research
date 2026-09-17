@@ -76,8 +76,30 @@ function confidenceFor(sampleCount, period) {
 export function priceStatsResponse(request, stats) {
   const sold = stats?.sold || { sample_count: 0, median: null, mean: null };
   const soldCount = Number(sold.sample_count || 0);
-  const soldMedian = Number.isFinite(Number(sold.median)) ? Number(sold.median) : null;
+  const soldMedian = typeof sold.median === 'number' && Number.isFinite(sold.median) && sold.median > 0 ? sold.median : null;
   const period = request.days === 30 && !request.isHistorical ? '최근 30일' : '선택 기간';
+  const aggregateIncomplete = stats?.aggregate_incomplete === true
+    || [stats, ...(stats?.by_source || [])].some(parent => ['active', 'reserved', 'sold', 'confirmed_transactions']
+      .some(key => parent?.[key]?.aggregate_incomplete === true));
+  const wrongHistoricalWindow = request.isHistorical && Boolean(stats?.publication_id)
+    && stats?.published_window?.to !== request.asOfDate;
+  if (wrongHistoricalWindow) {
+    const error = new Error('HISTORICAL_PRICE_STATS_UNAVAILABLE');
+    error.code = 'HISTORICAL_PRICE_STATS_UNAVAILABLE';
+    error.reason = 'PUBLISHED_WINDOW_MISMATCH';
+    throw error; // Never return another day's summary as the requested history.
+  }
+  const exactUnavailable = aggregateIncomplete || wrongHistoricalWindow;
+  // Daily observation totals are not distinct period listings. Incomplete
+  // storage/publication is an internal readiness state, not market scarcity.
+  const availability = exactUnavailable ? {
+    status: 'UNAVAILABLE',
+    code: request.isHistorical ? 'HISTORICAL_EXACT_STATS_UNAVAILABLE' : 'EXACT_STATS_NOT_READY',
+    reason: wrongHistoricalWindow ? 'PUBLISHED_WINDOW_MISMATCH' : 'AGGREGATE_INCOMPLETE',
+    counts_are_unique_period_listings: false,
+    requested_as_of: request.asOfDate
+  } : { status: stats?.publication_id ? 'EXACT_PUBLISHED' : 'NO_EXACT_PUBLICATION',
+    counts_are_unique_period_listings: Boolean(stats?.publication_id) };
   return {
     canonical_product_id: request.canonicalProductId,
     active: stats?.active || { sample_count: 0, median: null, mean: null },
@@ -92,11 +114,15 @@ export function priceStatsResponse(request, stats) {
     daily: Array.isArray(stats?.daily) ? stats.daily : [],
     window: request.window,
     reference_price: {
-      amount: soldCount >= 3 ? soldMedian : null,
+      amount: !exactUnavailable && soldCount >= 3 ? soldMedian : null,
       currency: request.currency,
       label: `${period} 판매완료 중앙값`
     },
-    confidence: confidenceFor(soldCount, period),
+    confidence: exactUnavailable ? { level: '통계 준비 미완료', reasons: [
+      request.isHistorical ? '선택한 과거 기간의 정확한 통계가 게시되지 않았습니다.'
+        : '정확한 기간 통계 게시가 완료되지 않았습니다. 시장 표본 부족을 의미하지 않습니다.'
+    ] } : confidenceFor(soldCount, period),
+    availability,
     exclusions: stats?.exclusions || { total: 0, reasons: {} },
     methodology: {
       days: request.days,
@@ -109,6 +135,8 @@ export function priceStatsResponse(request, stats) {
       sample_policy: "n<3 대표가격 없음, n=3~4 중앙값, n>=5 평균·중앙값, n>=10 절사평균·IQR"
     },
     versions: stats?.versions || { parser: null, rule: null, filter: null },
+    ...(stats?.publication_id ? { publication_id: stats.publication_id } : {}),
+    ...(stats?.published_window ? { published_window: stats.published_window } : {}),
     traceability: stats?.traceability || { member_count: 0 },
     ...(stats?.integrity_repaired_active ? { integrity_repaired_active: true } : {}),
     ...(Array.isArray(stats?.integrity_repaired_source_ids) && stats.integrity_repaired_source_ids.length > 0

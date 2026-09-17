@@ -698,7 +698,7 @@ export function bunjangKeywordPagePlan(limit, priceRange = { min: null, max: nul
   };
 }
 
-async function collectBunjangKeyword(keyword, categoryId, limit, queryKeyword = keyword, sortMode = "price_asc", priceRange = { min: null, max: null }) {
+async function collectBunjangKeyword(keyword, categoryId, limit, queryKeyword = keyword, sortMode = "price_asc", priceRange = { min: null, max: null }, requestImpl = fetchWithRetry) {
   const hasPriceRange = priceRange.min !== null || priceRange.max !== null;
   const { pageSize, maxPages } = bunjangKeywordPagePlan(limit, priceRange);
   const items = [];
@@ -712,7 +712,7 @@ async function collectBunjangKeyword(keyword, categoryId, limit, queryKeyword = 
     url.searchParams.set("order", sortMode === "price_asc" ? "price_asc" : "date");
     url.searchParams.set("stat_device", "w");
     url.searchParams.set("version", "4");
-    const response = await fetchWithRetry(url, { headers: requestHeaders("application/json, text/plain, */*") });
+    const response = await requestImpl(url, { headers: requestHeaders("application/json, text/plain, */*") });
     if (!response.ok) throw new Error(`HTTP_${response.status}`);
     const payload = await response.json();
     const rows = Array.isArray(payload?.list) ? payload.list : [];
@@ -744,7 +744,7 @@ async function collectBunjangKeyword(keyword, categoryId, limit, queryKeyword = 
     recentUrl.searchParams.set("order", "date");
     recentUrl.searchParams.set("stat_device", "w");
     recentUrl.searchParams.set("version", "4");
-    const recentResponse = await fetchWithRetry(recentUrl, { headers: requestHeaders("application/json, text/plain, */*") });
+    const recentResponse = await requestImpl(recentUrl, { headers: requestHeaders("application/json, text/plain, */*") });
     if (recentResponse.ok) {
       const recentPayload = await recentResponse.json();
       const recentRows = Array.isArray(recentPayload?.list) ? recentPayload.list : [];
@@ -878,17 +878,17 @@ export function joongnaPagePlan(limit) {
   };
 }
 
-async function collectJoongna(keyword, categoryId, limit, queryKeyword = "", sortMode = "price_asc", priceRange = { min: null, max: null }) {
+async function collectJoongna(keyword, categoryId, limit, queryKeyword = "", sortMode = "price_asc", priceRange = { min: null, max: null }, { requestImpl = fetchWithRetry, expandQueries = true } = {}) {
   const categoryIds = sourceCategoryIds("joonggonara", categoryId);
   const rawUrls = categoryIds.length > 0 && !queryKeyword
     ? categoryIds.map((sourceCategoryId) => `https://web.joongna.com/search?category=${encodeURIComponent(sourceCategoryId)}`)
-    : pcSearchQueryVariants(queryKeyword || keyword).map((variant) => `https://web.joongna.com/search/${encodeURIComponent(variant)}`);
+    : (expandQueries ? pcSearchQueryVariants(queryKeyword || keyword) : [queryKeyword || keyword]).map((variant) => `https://web.joongna.com/search/${encodeURIComponent(variant)}`);
   let referenceItems = [];
   let adaptiveMinPrice = minimumPriceForSite("joonggonara", categoryId);
   if (sortMode === "price_asc" && queryKeyword && rawUrls.length === 1) {
     const recentUrl = new URL(rawUrls[0]);
     recentUrl.searchParams.set("sort", "RECENT_SORT");
-    const recentResponse = await fetchWithRetry(recentUrl, { headers: requestHeaders("text/html,application/xhtml+xml,*/*;q=0.8") });
+    const recentResponse = await requestImpl(recentUrl, { headers: requestHeaders("text/html,application/xhtml+xml,*/*;q=0.8") });
     if (recentResponse.ok) {
       const recentRows = parseJoongnaItems(await recentResponse.text());
       referenceItems = recentRows.map((row) => sourceItem({
@@ -925,7 +925,7 @@ async function collectJoongna(keyword, categoryId, limit, queryKeyword = "", sor
     return url.toString();
   }));
   const settled = await Promise.allSettled(urls.map(async (url) => {
-    const response = await fetchWithRetry(url, { headers: requestHeaders("text/html,application/xhtml+xml,*/*;q=0.8") });
+    const response = await requestImpl(url, { headers: requestHeaders("text/html,application/xhtml+xml,*/*;q=0.8") });
     if (!response.ok) throw new Error(`HTTP_${response.status}`);
     return parseJoongnaItems(await response.text());
   }));
@@ -1508,6 +1508,43 @@ async function collectEbay(keyword, categoryId, limit, queryKeyword = "") {
     if (!summaries.length) break;
     offset += summaries.length;
   }
+  return items;
+}
+
+// Operator evidence uses one exact query and one fresh approved-source request.
+// Interactive search keeps its existing behavior; this explicit path never
+// retries a rate limit, expands aliases or substitutes cached observations.
+export async function collectApprovedDomesticQueryOnce(site, keyword, limit = 20) {
+  if (!['bunjang', 'joonggonara'].includes(site) || !TARGET_SITES.includes(site)
+    || typeof keyword !== 'string' || !keyword.trim() || !Number.isInteger(limit) || limit < 1 || limit > 20) {
+    throw new Error('APPROVED_BOUNDED_DOMESTIC_QUERY_REQUIRED');
+  }
+  let requests = 0;
+  const requestOnce = async (url, init) => {
+    if (++requests > 1) throw new Error('SINGLE_QUERY_REQUEST_BOUND_EXCEEDED');
+    const response = await fetchWithTimeout(url, init);
+    if (!response.ok) throw new Error(`HTTP_${response.status}`);
+    if (site === 'bunjang') {
+      const body = await response.clone().json();
+      if (!Array.isArray(body?.list)) throw new Error('UNVERIFIED_BUNJANG_SEARCH_RESPONSE');
+    } else {
+      const html = await response.clone().text();
+      if (/cf-chl-|<title>\s*(?:Just a moment|Attention Required)|verify (?:that )?you are human|captcha challenge/iu.test(html)) {
+        throw new Error('CAPTCHA_OR_ACCESS_CHALLENGE');
+      }
+      const decoded = html.replaceAll('\\"', '"').replaceAll('&quot;', '"');
+      if (!/"items"\s*:\s*\[/u.test(decoded) || !decoded.includes('changedProductFilterType')) {
+        throw new Error('UNVERIFIED_JOONGNA_SEARCH_RESPONSE');
+      }
+    }
+    return response;
+  };
+  const range = { min: null, max: null };
+  const items = site === 'bunjang'
+    ? await collectBunjangKeyword(keyword, 'pc', limit, keyword, 'recent', range, requestOnce)
+    : await collectJoongna(keyword, 'pc', limit, keyword, 'recent', range, { requestImpl: requestOnce, expandQueries: false });
+  if (!Array.isArray(items) || items.stale_cache || items.partial_error || requests !== 1) throw new Error('UNVERIFIED_FRESH_COLLECTION_RESULT');
+  items.verified_request_count = requests;
   return items;
 }
 

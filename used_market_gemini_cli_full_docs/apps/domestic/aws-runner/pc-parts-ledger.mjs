@@ -4,6 +4,7 @@ import { mkdirSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { canonicalSourceListingIdentity } from "./pc-source-listing-identity.mjs";
 import { reviewedPcListingExclusion } from "../market/logic/pc-reviewed-listing-exclusions.mjs";
+import { migrateStoredPricePublications, readCompletedPricePublication, pruneCompletedPricePublications } from './pc-stored-price-publication.mjs';
 
 const HOUR_MS = 60 * 60 * 1000;
 const HOURLY_COLLECTION_GUARD_MS = 55 * 60 * 1000;
@@ -42,6 +43,8 @@ export const PC_PARTS_LEDGER_TABLES = Object.freeze([
   "duplicate_cluster_members",
   "daily_price_stats",
   "daily_price_stat_windows",
+  "pc_stored_price_publications",
+  "pc_stored_price_publication_rows",
   "daily_price_stat_members",
   "daily_source_price_stats",
   "daily_source_price_stat_members",
@@ -949,6 +952,8 @@ export class PcPartsLedger {
       this.db.prepare("INSERT OR IGNORE INTO pc_parts_schema_migrations(version, applied_at) VALUES (8, ?)").run(versionTimestamp);
       this.db.prepare("INSERT OR IGNORE INTO pc_parts_schema_migrations(version, applied_at) VALUES (9, ?)").run(versionTimestamp);
       this.db.prepare("INSERT OR IGNORE INTO pc_parts_schema_migrations(version, applied_at) VALUES (10, ?)").run(versionTimestamp);
+      migrateStoredPricePublications(this.db);
+      this.db.prepare("INSERT OR IGNORE INTO pc_parts_schema_migrations(version, applied_at) VALUES (11, ?)").run(versionTimestamp);
       this.db.exec("COMMIT");
     } catch (error) {
       try { this.db.exec("ROLLBACK"); } catch {}
@@ -1532,12 +1537,42 @@ export class PcPartsLedger {
     return row ? { ...row, matched: row.alias_type === "ALIAS", forbidden: row.alias_type === "FORBIDDEN", spec: parseJson(row.spec_json, {}) } : null;
   }
 
+  withReclassificationAliasSnapshot(operation) {
+    // Reclassification does not modify the product/alias catalogue. Freeze its
+    // ordered read set only for this synchronous operation, not for live writes.
+    if (this.reclassificationAliases) return operation();
+    const rows = this.db.prepare(`SELECT a.*, p.canonical_display_name, p.category_code, p.product_group_key, p.spec_json
+      FROM product_aliases a JOIN product_master p
+        ON p.canonical_product_id = a.canonical_product_id AND p.master_version = a.master_version
+      WHERE a.alias_type IN ('ALIAS', 'FORBIDDEN') AND a.validation_status IN ('APPROVED', 'SHADOW')
+      ORDER BY p.category_code, LENGTH(a.alias_text) DESC,
+        CASE a.alias_type WHEN 'FORBIDDEN' THEN 0 ELSE 1 END,
+        a.master_version DESC, p.canonical_product_id`).all();
+    const byCategory = new Map();
+    for (const row of rows) {
+      if (!byCategory.has(row.category_code)) byCategory.set(row.category_code, []);
+      byCategory.get(row.category_code).push(row);
+    }
+    const components = this.db.prepare(`SELECT a.alias_text, p.* FROM product_aliases a
+      JOIN product_master p ON p.canonical_product_id = a.canonical_product_id AND p.master_version = a.master_version
+      WHERE a.alias_type = 'ALIAS' AND a.validation_status = 'APPROVED'
+      ORDER BY LENGTH(a.alias_text) DESC, p.canonical_product_id`).all();
+    this.reclassificationAliases = { byCategory, components };
+    try {
+      const result = operation();
+      if (result && typeof result.then === 'function') throw new TypeError('Alias snapshot operation must be synchronous');
+      return result;
+    } finally { this.reclassificationAliases = null; }
+  }
+
   matchAliasInText(categoryCode, value, options = {}) {
     const text = normalizeProductAlias(value);
     if (!text) return null;
     const statuses = options.includeShadow === true ? ["APPROVED", "SHADOW"] : ["APPROVED"];
     const placeholders = statuses.map(() => "?").join(",");
-    const rows = this.db.prepare(`
+    const category = requireValue(categoryCode, "categoryCode").toUpperCase();
+    const cached = this.reclassificationAliases?.byCategory.get(category);
+    const candidates = cached ? cached.filter(row => statuses.includes(row.validation_status)) : this.db.prepare(`
       SELECT a.*, p.canonical_display_name, p.category_code, p.product_group_key, p.spec_json
         FROM product_aliases a
         JOIN product_master p ON p.canonical_product_id = a.canonical_product_id AND p.master_version = a.master_version
@@ -1545,8 +1580,8 @@ export class PcPartsLedger {
        ORDER BY LENGTH(a.alias_text) DESC,
                 CASE a.alias_type WHEN 'FORBIDDEN' THEN 0 ELSE 1 END,
                 a.master_version DESC, p.canonical_product_id
-    `).all(requireValue(categoryCode, "categoryCode").toUpperCase(), ...statuses)
-      .filter((row) => text.includes(row.alias_text));
+    `).all(category, ...statuses);
+    const rows = candidates.filter((row) => text.includes(row.alias_text));
     if (rows.length === 0) return null;
     const longestLength = rows[0].alias_text.length;
     const longest = rows.filter((row) => row.alias_text.length === longestLength);
@@ -1560,7 +1595,7 @@ export class PcPartsLedger {
   findApprovedProductsInText(value) {
     const text = normalizeProductAlias(value);
     if (!text) return [];
-    const rows = this.db.prepare(`SELECT a.alias_text, p.*
+    const rows = this.reclassificationAliases?.components || this.db.prepare(`SELECT a.alias_text, p.*
       FROM product_aliases a
       JOIN product_master p ON p.canonical_product_id = a.canonical_product_id AND p.master_version = a.master_version
       WHERE a.alias_type = 'ALIAS' AND a.validation_status = 'APPROVED'
@@ -2465,9 +2500,9 @@ export class PcPartsLedger {
     if (!row) return { ...summarize([]), average: null, seven_day_sold_median: null };
     const sampleCount = Math.max(0, Number(row.sample_count) || 0);
     const unitCount = Math.max(0, Number(row.unit_count) || 0);
-    const average = sampleCount > 0
-      ? firstFiniteValue(row.mean_value, row.median_value, row.min_value, row.max_value)
-      : null;
+    // A median or minimum is not an arithmetic mean. Keep low-sample prices
+    // available as a range without manufacturing an average for the chart.
+    const average = sampleCount >= 5 ? finiteOrNull(row.mean_value) : null;
     return {
       sample_count: sampleCount,
       unit_count: unitCount,
@@ -2508,7 +2543,7 @@ export class PcPartsLedger {
       const rowMax = finiteOrNull(row.max_value);
       if (rowMin != null) minValue = minValue == null ? rowMin : Math.min(minValue, rowMin);
       if (rowMax != null) maxValue = maxValue == null ? rowMax : Math.max(maxValue, rowMax);
-      const displayAverage = firstFiniteValue(row.mean_value, row.median_value, row.min_value, row.max_value);
+      const displayAverage = finiteOrNull(row.mean_value);
       if (displayAverage != null) {
         averageWeightedSum += displayAverage * rowSampleCount;
         averageWeight += rowSampleCount;
@@ -2526,8 +2561,9 @@ export class PcPartsLedger {
       unit_count: unitCount,
       min: round(minValue),
       max: round(maxValue),
-      mean: meanWeight === sampleCount && meanWeight > 0 ? round(meanWeightedSum / meanWeight) : null,
-      average: averageWeight > 0 ? round(averageWeightedSum / averageWeight) : null,
+      mean: sampleCount >= 5 && meanWeight === sampleCount ? round(meanWeightedSum / meanWeight) : null,
+      average: sampleCount >= 5 && averageWeight === sampleCount ? round(averageWeightedSum / averageWeight) : null,
+      aggregate_incomplete: sampleRows.length > 1 && (meanWeight !== sampleCount || sampleCount < 5),
       median: singleDayMetric?.median ?? null,
       trimmed_mean: singleDayMetric?.trimmed_mean ?? null,
       p25: singleDayMetric?.p25 ?? null,
@@ -2569,6 +2605,11 @@ export class PcPartsLedger {
     const parserVersion = cleanText(options.parserVersion || "pc-parser-v1", 100);
     const ruleVersion = cleanText(options.ruleVersion || "pc-rules-v1", 100);
     const filterVersion = cleanText(options.filterVersion || "pc-filter-v1", 100);
+    const published = readCompletedPricePublication(this.db, {
+      ...options, canonicalProductId, marketPool, condition, currency, asOf, days,
+      normalizationVersion, parserVersion, ruleVersion, filterVersion
+    });
+    if (published) return published;
     const windowRow = this.db.prepare(`SELECT * FROM daily_price_stat_windows
       WHERE canonical_product_id = ? AND market_pool = ? AND condition_code = ? AND currency = ?
         AND normalization_version = ?
@@ -3092,6 +3133,7 @@ export class PcPartsLedger {
           through_date = CASE WHEN excluded.through_date > through_date THEN excluded.through_date ELSE through_date END,
           as_of = CASE WHEN excluded.as_of > as_of THEN excluded.as_of ELSE as_of END`);
       const expiredStats = this.db.prepare("DELETE FROM daily_price_stats WHERE stat_date < ?").run(statsCutoff);
+      pruneCompletedPricePublications(this.db, statsCutoff);
       this.db.prepare("DELETE FROM daily_price_stat_windows WHERE through_date < ?").run(statsCutoff);
       this.db.prepare(`UPDATE daily_price_stat_windows
         SET from_date = CASE WHEN from_date < ? THEN ? ELSE from_date END`).run(statsCutoff, statsCutoff);

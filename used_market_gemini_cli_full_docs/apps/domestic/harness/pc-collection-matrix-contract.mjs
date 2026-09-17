@@ -28,9 +28,12 @@ assert.ok(targets.length > PC_PART_CATEGORY_CODES.length, "the active target set
 assert.equal(new Set(targets.map((target) => target.categoryCode)).size, categorySet.size,
   "every PC part category must have an active collection target");
 assert.doesNotMatch(JSON.stringify(targetSet), /quasarzone/iu, "retired Quasarzone must not be an active collection target");
-assert.equal(targetSet.targetSetVersion, "pc-targets:4:full-master-v12");
-assert.ok(targetSet.targets.every((target) => /:(?:category|market|master)-v12:/u.test(target.targetId)),
-  "a new collection target set must own new target ids instead of reusing prior-set ids");
+assert.equal(targetSet.targetSetVersion, "pc-targets:5:full-master-v13");
+assert.ok(targetSet.targets.every((target) => /^pc-target:5:(?:category|market|master)-v13:/u.test(target.targetId)),
+  "a new target set owns new IDs and cannot reuse an old set's immutable ownership");
+const koreanGskill = targets.filter(target => target.targetId.endsWith(':domestic:ko'));
+assert.equal(koreanGskill.length, 27);
+assert.ok(koreanGskill.every(target => target.queryText.startsWith('지스킬 ') && !target.sourceKeys.includes('ebay')));
 for (const product of publicProducts) {
   assert.ok(targets.some((target) => target.canonicalProductId === product.id),
     `${product.id} must have an exact collection target`);

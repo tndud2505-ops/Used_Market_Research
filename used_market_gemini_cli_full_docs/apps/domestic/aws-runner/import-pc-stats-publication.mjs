@@ -5,6 +5,9 @@ import { explicitSoldText } from "../market/logic/listing-lifecycle.mjs";
 import { PcPartsLedger } from "./pc-parts-ledger.mjs";
 import { pcStatsTraceability } from "./pc-stats-traceability.mjs";
 import { SearchIndex } from "./search-index.mjs";
+import { storeCompletedPricePublication, storedPricePublicationKey } from './pc-stored-price-publication.mjs';
+import { PC_DIRECTORY_PUBLICATION_SOURCE_KEYS } from '../collector/logic/pc-source-registry.mjs';
+import { publishStatsInChunks, readActiveStatsScopes } from './pc-stats-publication-client.mjs';
 
 const SOLD_EVIDENCE_TYPES = new Set(["STRUCTURED_STATUS", "OFFICIAL_API", "EXPLICIT_TEXT"]);
 const indexValue = String(process.env.RUNNER_INDEX_PATH || "").trim();
@@ -164,21 +167,22 @@ try {
     })}`);
   }
 
-  const response = await fetch(importUrl, {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${importToken}`,
-      "content-type": "application/json",
-      accept: "application/json"
-    },
-    body: JSON.stringify(payload),
-    signal: AbortSignal.timeout(120_000)
+  const localOptions = {
+    publicationId: payload.publication_id, rows: payload.rows, expectedRowCount: payload.expected_row_count,
+    expectedKeys: payload.rows.map(storedPricePublicationKey), allowedSourceIds: PC_DIRECTORY_PUBLICATION_SOURCE_KEYS
+  };
+  storeCompletedPricePublication(ledger.db, { ...localOptions, validateOnly: true });
+  const externalActive = await readActiveStatsScopes({ importUrl, token: importToken });
+  const publication = await publishStatsInChunks({
+    importUrl,
+    token: importToken,
+    publication: { ...payload,
+      expected_previous_publication: { publication_id: externalActive.publication_id, checksum: externalActive.checksum } },
+    timeoutMs: 120_000,
+    onProgress: ({ staged, total }) => {
+      if (staged === total || staged % 10 === 0) console.error(JSON.stringify({ phase: "staging", staged, total }));
+    }
   });
-  const result = await response.json().catch(() => null);
-  if (!response.ok || result?.ok !== true) {
-    throw new Error(`D1 stats import failed with HTTP ${response.status}: ${JSON.stringify(result)}`);
-  }
-  const publication = result.publication;
   if (publication?.active !== true
     || publication?.publication_id !== payload.publication_id
     || publication?.checksum !== payload.checksum
@@ -191,6 +195,7 @@ try {
   }
 
   const publishedAt = new Date().toISOString();
+  const localPublication = storeCompletedPricePublication(ledger.db, { ...localOptions, publishedAt });
   ledger.recordPublicationSuccess({
     publicationId: publication.publication_id,
     checksum: publication.checksum,
@@ -201,6 +206,7 @@ try {
     publication_id: publication.publication_id,
     checksum: publication.checksum,
     row_count: publication.row_count,
+    local_publication: localPublication,
     non_empty_scope_count: nonEmptyScopeCount,
     sold_member_count: soldMembers.length,
     invalid_sold_evidence_count: invalidEvidence.length,

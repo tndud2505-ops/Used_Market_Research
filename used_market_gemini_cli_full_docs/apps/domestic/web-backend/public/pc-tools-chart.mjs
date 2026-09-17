@@ -19,7 +19,8 @@ export function drawChart(container, series, { index = false, label = '가격 �
     container.append(empty);
     return;
   }
-  const width = Math.max(320, container.clientWidth), height = 280, left = 68, right = 24, top = 24, bottom = 42;
+  const width = Math.max(220, container.clientWidth), height = width < 420 ? 240 : 280;
+  const left = width < 420 ? 62 : 68, right = width < 420 ? 16 : 24, top = 24, bottom = 42;
   const values = points.map(p => p.value);
   let low = Math.min(...values), high = Math.max(...values);
   const margin = Math.max((high - low) * 0.2, high * 0.025, 1);
@@ -30,14 +31,17 @@ export function drawChart(container, series, { index = false, label = '가격 �
   const svg = svgNode('svg', { viewBox: `0 0 ${width} ${height}`, role: 'img', 'aria-label': `${label} · 일별 평균 가격` });
   for (let i = 0; i < 5; i++) {
     const value = low + (high - low) * i / 4;
-    svg.append(svgNode('line', { x1: left, x2: width - right, y1: y(value), y2: y(value), stroke: '#e5ddd2' }));
+    svg.append(svgNode('line', { x1: left, x2: width - right, y1: y(value), y2: y(value), stroke: 'var(--line, #e4e8ed)' }));
     svg.append(svgNode('text', { x: left - 10, y: y(value) + 4, 'text-anchor': 'end' }, index ? value.toFixed(1) : currency === 'USD' ? `$${value.toLocaleString('en-US', { maximumFractionDigits: 0 })}` : Math.round(value).toLocaleString('ko-KR')));
   }
-  [...new Set([0, Math.floor((dates.length - 1) / 3), Math.floor((dates.length - 1) * 2 / 3), dates.length - 1])].forEach(i => {
+  const ticks = width < 420 ? [0, Math.floor((dates.length - 1) / 2), dates.length - 1]
+    : [0, Math.floor((dates.length - 1) / 3), Math.floor((dates.length - 1) * 2 / 3), dates.length - 1];
+  [...new Set(ticks)].forEach(i => {
     svg.append(svgNode('text', { x: x(dates[i]), y: height - 10, 'text-anchor': 'middle' }, dates[i].slice(5).replace('-', '/')));
   });
   series.forEach(({ key, points }) => {
-    const color = SERIES.find(s => s.key === key)?.color || '#655d54';
+    const color = key === 'active' ? 'var(--accent-strong, #bd422f)' : key === 'sold' ? 'var(--sold, #357e58)'
+      : SERIES.find(s => s.key === key)?.color || '#526071';
     let drawing = false, path = '';
     points.forEach(point => {
       if (point.value == null) { drawing = false; return; }

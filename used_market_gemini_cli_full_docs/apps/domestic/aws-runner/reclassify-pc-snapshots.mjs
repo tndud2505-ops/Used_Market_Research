@@ -107,7 +107,11 @@ function validateTarget(ledger, versions) {
   }
 }
 
-export function reclassifyPcSnapshots({ ledger, pipeline, versions, versionKey = null, apply = false, batchSize = 250, limit = Infinity }) {
+export function reclassifyPcSnapshots(options) {
+  return options.ledger.withReclassificationAliasSnapshot(() => reclassifyPcSnapshotsCore(options));
+}
+
+function reclassifyPcSnapshotsCore({ ledger, pipeline, versions, versionKey = null, apply = false, batchSize = 250, limit = Infinity }) {
   validateTarget(ledger, versions);
   if (apply) {
     const active = ledger.getActivePipelineVersion();
@@ -298,6 +302,7 @@ async function main(argv) {
     const backup = createRecoveryBackup(db, filePath);
     ledger.migrate();
     const pipeline = new PcShadowPipeline({ ledger });
+    await pipeline.initialize();
     db.exec("BEGIN IMMEDIATE");
     try {
       const result = reclassifyPcSnapshots({ ledger, pipeline, versions, versionKey, apply: true, limit });

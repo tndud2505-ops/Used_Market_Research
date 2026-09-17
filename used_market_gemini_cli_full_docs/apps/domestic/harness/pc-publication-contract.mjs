@@ -15,24 +15,37 @@ const statsRunnerSource = await readFile(new URL("../aws-runner/publish-pc-stats
 const repairSource = await readFile(new URL("../cloudflare/repair-active-stats-manifest.mjs", import.meta.url), "utf8");
 const workerSource = await readFile(new URL("../cloudflare/worker.mjs", import.meta.url), "utf8");
 const publicStatsSource = await readFile(new URL("../cloudflare/public-product-stats.mjs", import.meta.url), "utf8");
+const publicationClientSource = await readFile(new URL("../aws-runner/pc-stats-publication-client.mjs", import.meta.url), "utf8");
 assert.match(publicStatsSource, /sort\(\(left, right\) => statsPublicationKey\(left\)\.localeCompare\(statsPublicationKey\(right\)\)\)/u,
   "large statistics publications must sort by the compact unique scope key instead of repeatedly serializing stats payloads");
 assert.match(statsRunnerSource, /SELECT DISTINCT n\.canonical_product_id, n\.market_pool/u,
-  "daily publication must calculate only product/cohort scopes that have observations");
+  "daily publication must start from observed product/cohort scopes");
 assert.doesNotMatch(statsRunnerSource, /for \(const product of products\)[\s\S]{0,500}for \(const cohort of cohorts\)/u,
   "daily publication must not materialize the full product by cohort cross-product");
-assert.match(statsRunnerSource, /const publication = \{[\s\S]{0,240}merge_with_active: true/u,
-  "daily publication must explicitly preserve same-version active scopes missing from a partial refresh");
-assert.match(statsRunnerSource, /PC_STATS_PRODUCT_IDS/u,
-  "daily publication must expose an explicit product-only rebuild selector");
-assert.match(statsRunnerSource, /availableScopes\.filter\(\(scope\) => statsProductIds\.includes/u,
-  "daily publication must limit a product-only rebuild before merging with active scopes");
-assert.match(statsRunnerSource, /PC_STATS_PRODUCT_IDS_NOT_FOUND/u,
-  "a product-only publication must fail when a requested product has no ledger scope");
-assert.match(statsRunnerSource, /const activated = payload\?\.publication;[\s\S]{0,1200}ledger\.recordPublicationSuccess\(\{[\s\S]{0,200}checksum: activated\.checksum,[\s\S]{0,120}rowCount: Number\(activated\.row_count\)/u,
-  "publication child must record the Worker's activated union checksum and row count");
-assert.match(statsRunnerSource, /Number\(activated\.input_row_count\) !== rows\.length[\s\S]{0,180}Number\(activated\.scope_key_count\) !== Number\(activated\.row_count\)/u,
-  "publication child must reject an activation manifest that does not match its input and active scope keys");
+assert.match(statsRunnerSource, /const publication = \{[\s\S]{0,240}merge_with_active: false/u,
+  "daily publication must replace one complete same-time cohort without retaining previous prices");
+assert.match(statsRunnerSource, /readActiveStatsScopes\([\s\S]{0,200}fullPublicationScopes\(ledger\.db, availableScopes, \{ externalActive \}\)/u,
+  "a fresh identity-only D1 proof must cover the first exact local publication and expired scopes");
+assert.match(statsRunnerSource, /PC_STATS_PARTIAL_PUBLICATION_DISABLED/u,
+  "partial diagnostic product selectors must not enter the scheduled production publisher");
+assert.match(statsRunnerSource, /const activated = await publishStatsInChunks\([\s\S]{0,1200}ledger\.recordPublicationSuccess\(\{[\s\S]{0,200}checksum: activated\.checksum,[\s\S]{0,120}rowCount: Number\(activated\.row_count\)/u,
+  "publication child must record the Worker's activated checksum and complete row count");
+assert.match(statsRunnerSource, /assertFullPublicationActivation\(publication, activated\)/u,
+  "publication child must verify the complete input manifest before recording success");
+assert.match(statsRunnerSource, /pcStatsTraceability\(ledger, options\)/u,
+  "scheduled publication must retain member counts AND member checksums");
+assert.match(runnerSource, /pcPublicationActive = true;[\s\S]{0,100}const drainDeadline[\s\S]{0,100}while \(pcSchedulerActive\)[\s\S]{0,300}const publication = await runPcStatsPublisher/u,
+  'publication must reserve the writer before waiting for the current collection to finish');
+assert.match(runnerSource, /finally \{ pcPublicationActive = false; \}/u,
+  'failed publication must always release the scheduler gate');
+assert.match(runnerSource, /traceability: stats\.traceability \|\| \{ member_count: null \}/u,
+  'public reads must preserve sealed member counts and checksums instead of replacing them with null');
+assert.match(runnerSource, /observationRetentionDays: 30/u,
+  'post-publication compaction must retain the entire active 30-day member window');
+assert.doesNotMatch(runnerSource, /observationRetentionDays: 1[,\s]/u,
+  'one-day pruning would break the just-published complete member trace');
+assert.match(runnerSource, /async function runPcSourceSchedulerTick\(\) \{[\s\S]{0,160}pcSchedulerActive \|\| pcPublicationActive\) return/u,
+  'a scheduled collection must not start while full statistics are being published');
 assert.match(runnerSource, /pcSchedulerLastSucceededAt = persistedSchedulerSuccesses\.at\(-1\) \|\| null/u,
   "runner restarts must recover truthful scheduler readiness from persisted source successes");
 assert.match(repairSource, /Number\(metadata\.expected_row_count\) !== rows\.length/u,
@@ -49,6 +62,14 @@ assert.match(workerSource, /const MAX_STATS_PUBLICATION_BYTES = 33_554_432;/u,
   "the statistics publication limit must accommodate the complete V16 catalog payload");
 assert.doesNotMatch(workerSource, /\/api\/monetization\/contextual-offer[\s\S]{0,250}MAX_STATS_PUBLICATION_BYTES/u,
   "public JSON routes must retain the smaller request limit");
+assert.match(publicationClientSource, /const CHUNK_ROW_COUNT = 40;/u,
+  "large publications must use bounded transport chunks on the free Worker plan");
+assert.match(publicationClientSource, /\/admin\/stage-product-stats[\s\S]{0,2200}\/admin\/activate-product-stats/u,
+  "publication transport must stage all chunks before the active pointer changes");
+assert.match(publicStatsSource, /statsChunkManifestChecksum\(chunks\) !== String\(input\.chunk_manifest_checksum/u,
+  "all chunk checksums must be verified before activation");
+assert.match(publicStatsSource, /stagedRowCount !== metadata\.expectedRowCount[\s\S]{0,500}staged publication row count mismatch/u,
+  "chunk aggregates and stored rows must match the sealed publication manifest");
 
 const emptyDailyMetric = { sample_count: 0, unit_count: 0, min: null, max: null, mean: null, median: null };
 const sampledDailyMetric = { ...emptyDailyMetric, sample_count: 1, unit_count: 1, min: 400_000, max: 400_000 };

@@ -1,4 +1,4 @@
-import { idOf, coherentStats } from './pc-tools-core.mjs?v=coverage-v4';
+import { idOf, coherentStats } from './pc-tools-core.mjs?v=parts-ux-v4';
 
 export async function readJson(url, signal) {
   const request = new AbortController();
@@ -8,9 +8,17 @@ export async function readJson(url, signal) {
   const timeout = setTimeout(() => request.abort(), 20000);
   try {
     const response = await fetch(url, { signal: request.signal, credentials: 'same-origin', cache: 'no-store', headers: { accept: 'application/json' } });
-    if (!response.ok) throw new Error(`자료 요청 실패 (${response.status})`);
-    const payload = await response.json();
-    if (payload.status === 'error') throw new Error('자료를 불러오지 못했습니다.');
+    const payload = await response.json().catch(() => null);
+    if (!response.ok || payload?.status === 'error') {
+      const rawCode = payload?.error?.code || payload?.code || (typeof payload?.error === 'string' ? payload.error : '');
+      // Keep the public error classification, never an arbitrary raw response.
+      const code = /^[A-Z][A-Z0-9_]{0,99}$/.test(rawCode) ? rawCode : '';
+      const hint = ['HISTORICAL_PRICE_STATS_UNAVAILABLE', 'HISTORICAL_EXACT_STATS_UNAVAILABLE'].includes(code) ? '선택 기간의 보존 통계가 없습니다.'
+        : /PUBLICATION|STATS_NOT_READY/.test(code) ? '정확 통계 게시가 준비되지 않았습니다.' : '자료 요청 실패';
+      const error = new Error(`${hint} (${response.status}${code ? ` · ${code}` : ''})`);
+      error.code = code; error.httpStatus = response.status; throw error;
+    }
+    if (!payload || typeof payload !== 'object') throw new Error('올바른 JSON 자료 응답이 아닙니다.');
     return payload.data ?? payload;
   } finally { clearTimeout(timeout); signal?.removeEventListener('abort', abort); }
 }
@@ -49,12 +57,16 @@ export function createPriceStore(onChange, options = {}) {
           const scope = data.methodology || {};
           if (scope.days != null && Number(scope.days) !== days) throw new Error('가격 집계 기간이 일치하지 않습니다.');
           if (asOf && data.window?.to !== asOf) throw new Error('요청한 날짜의 가격 기록이 아닙니다.');
+          if (data.published_window && data.window && ['from', 'to'].some(key => data.published_window[key] !== data.window[key])) {
+            const error = new Error('선택 기간과 게시 요약기간이 다릅니다. 현재 가격으로 대체하지 않습니다.');
+            error.code = 'HISTORICAL_PRICE_STATS_UNAVAILABLE'; throw error;
+          }
           if ((scope.currency && scope.currency !== currency) || (scope.market_pool && scope.market_pool !== marketPool)
             || (scope.condition && scope.condition !== condition)) throw new Error('가격 집계 범위가 일치하지 않습니다.');
           cache.set(key, { state: 'ready', data: coherentStats(data), loadedAt: Date.now() });
         } catch (error) {
           if (signal.aborted) { if (current === generation && cache.get(key)?.state === 'loading') cache.delete(key); break; }
-          cache.set(key, { state: 'error', error: error.message });
+          cache.set(key, { state: 'error', error: error.message, errorCode: error.code || '', httpStatus: error.httpStatus || null });
         }
         if (current === generation) onChange();
       }

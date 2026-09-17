@@ -25,7 +25,14 @@ import {
   normalizeOperationalTargetSites
 } from "./target-sites.mjs";
 import { parsePriceStatsRequest, priceStatsResponse } from "../aws-runner/pc-price-stats-http.mjs";
-import { publishProductStats, readPublishedProductStats } from "./public-product-stats.mjs";
+import { guardPriceStatsResponse } from './pc-price-response-guard.mjs';
+import {
+  activateStagedProductStats,
+  publishProductStats,
+  readActiveProductStatsScopes,
+  readPublishedProductStats,
+  stageProductStatsChunk
+} from "./public-product-stats.mjs";
 import { getPcSource } from "../collector/logic/pc-source-registry.mjs";
 import { resolvePcCanonicalIdV3 } from "../market/data/pc-product-master-v2.mjs";
 import {
@@ -49,6 +56,7 @@ const DEFAULT_RUNNER_MAX_ATTEMPTS = 3;
 const DEFAULT_RUNNER_RETRY_DELAY_MS = 250;
 const MAX_RUNNER_REQUEST_BYTES = 1_048_576;
 const MAX_STATS_PUBLICATION_BYTES = 33_554_432;
+const MAX_STATS_PUBLICATION_CHUNK_BYTES = 4_194_304;
 const MAX_RUNNER_RESPONSE_BYTES = 4_194_304;
 const MAX_IMPORTED_LISTINGS = 500;
 const PC_LISTING_COLLECTION_MANIFEST_VERSION = "pc-listing-collection-v1";
@@ -656,9 +664,12 @@ async function readPriceStatsFromPreferredStore(request, env, runnerPath) {
     const runnerResponse = await proxyToSearchRunner(request, env, runnerPath);
     if (runnerResponse.status < 500 || !hasD1(env)) return runnerResponse;
     if (new URL(request.url).searchParams.has("as_of")) {
-      return responseAsPcD1Fallback(json(503, {
-        status: "error", error: "Historical price statistics are temporarily unavailable"
-      }));
+      const unavailable = noStoreJson(503, {
+        status: 'error', error: 'HISTORICAL_PRICE_STATS_UNAVAILABLE',
+        availability: { status: 'UNAVAILABLE', reason: 'EXACT_HISTORICAL_LEDGER_UNAVAILABLE' }
+      });
+      unavailable.headers.set('x-search-data-source', 'aws-runner');
+      return unavailable; // No D1 read occurred; do not label this a D1 fallback.
     }
     console.warn("AWS price stats read failed; using D1 fallback", runnerResponse.status);
     return responseAsPcD1Fallback(await serveProductPriceStats(request, env));
@@ -1425,8 +1436,9 @@ export default {
       if (requestedProduct?.category === "MOTHERBOARD" && requestedProduct.spec?.directory_node_type !== "PRODUCT") {
         return serveProductPriceStats(request, env);
       }
-      return fetchThroughPcReadCache(request, env,
-        (statsRequest) => readPriceStatsFromPreferredStore(statsRequest, env, url.pathname));
+      const response = await fetchThroughPcReadCache(request, env, async statsRequest =>
+        guardPriceStatsResponse(statsRequest, await readPriceStatsFromPreferredStore(statsRequest, env, url.pathname)));
+      return guardPriceStatsResponse(request, response);
     }
     if (isPriceStatsPath && searchRunnerIsConfigured(env)) {
       return proxyToSearchRunner(request, env, url.pathname);
@@ -1590,6 +1602,16 @@ export default {
       }
     }
 
+    if (request.method === "GET" && url.pathname === "/admin/product-stats-scopes") {
+      if (!await manualTokenIsValid(request, env)) return noStoreJson(401, { ok: false, error: "Unauthorized" });
+      if (!hasD1(env)) return noStoreJson(503, { ok: false, error: "D1 is not configured" });
+      try {
+        return noStoreJson(200, { ok: true, external_active: await readActiveProductStatsScopes(env.DB) });
+      } catch {
+        return noStoreJson(503, { ok: false, error: "Active publication scope manifest is unavailable" });
+      }
+    }
+
     if (request.method === "POST" && url.pathname === "/admin/import-product-stats") {
       if (!await manualTokenIsValid(request, env)) {
         return json(401, { ok: false, error: "Unauthorized" });
@@ -1606,6 +1628,50 @@ export default {
       }
       try {
         const publication = await publishProductStats(env.DB, body || {});
+        return json(200, { ok: true, publication });
+      } catch (error) {
+        return json(400, { ok: false, error: error instanceof Error ? error.message : String(error) });
+      }
+    }
+
+    if (request.method === "POST" && url.pathname === "/admin/stage-product-stats") {
+      if (!await manualTokenIsValid(request, env)) {
+        return json(401, { ok: false, error: "Unauthorized" });
+      }
+      if (!hasD1(env)) return json(503, { ok: false, error: "D1 is not configured" });
+      let body;
+      try {
+        body = await readJsonPayload(request, MAX_STATS_PUBLICATION_CHUNK_BYTES);
+      } catch (error) {
+        return json(error instanceof PayloadTooLargeError ? 413 : 400, {
+          ok: false,
+          error: error instanceof PayloadTooLargeError ? "Payload too large" : "Invalid JSON body"
+        });
+      }
+      try {
+        const chunk = await stageProductStatsChunk(env.DB, body || {});
+        return json(200, { ok: true, chunk });
+      } catch (error) {
+        return json(400, { ok: false, error: error instanceof Error ? error.message : String(error) });
+      }
+    }
+
+    if (request.method === "POST" && url.pathname === "/admin/activate-product-stats") {
+      if (!await manualTokenIsValid(request, env)) {
+        return json(401, { ok: false, error: "Unauthorized" });
+      }
+      if (!hasD1(env)) return json(503, { ok: false, error: "D1 is not configured" });
+      let body;
+      try {
+        body = await readJsonPayload(request);
+      } catch (error) {
+        return json(error instanceof PayloadTooLargeError ? 413 : 400, {
+          ok: false,
+          error: error instanceof PayloadTooLargeError ? "Payload too large" : "Invalid JSON body"
+        });
+      }
+      try {
+        const publication = await activateStagedProductStats(env.DB, body || {});
         return json(200, { ok: true, publication });
       } catch (error) {
         return json(400, { ok: false, error: error instanceof Error ? error.message : String(error) });

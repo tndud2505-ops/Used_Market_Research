@@ -25,6 +25,7 @@ import { collectionIdentity, SearchIndex } from "./search-index.mjs";
 import { PcPartsLedger } from "./pc-parts-ledger.mjs";
 import { stabilizeIncrementalPcProjections } from "./pc-projection-republish-policy.mjs";
 import { parsePriceStatsRequest, priceStatsResponse } from "./pc-price-stats-http.mjs";
+import { pcPriceReadinessProblem } from '../market/logic/pc-price-readiness.mjs';
 import { schedulerReadDeferral } from "./pc-scheduler-admission.mjs";
 import { PcShadowPipeline } from "./pc-shadow-pipeline.mjs";
 import { explicitSoldText, structuredSoldEvidenceFromHtml } from "../market/logic/listing-lifecycle.mjs";
@@ -259,6 +260,7 @@ let pcPipelineError = "";
 let pcSchedulerAfter = new Date(Date.now() - PC_SCHEDULER_CATCHUP_MS).toISOString();
 let pcSchedulerRuntime = Object.fromEntries(PC_SOURCE_REGISTRY.map((source) => [source.key, getSourceRuntimeDefaults(source.key)]));
 let pcSchedulerActive = false;
+let pcPublicationActive = false;
 let pcSchedulerLastTickAt = null;
 let pcSchedulerLastSucceededAt = null;
 let pcSchedulerLastError = null;
@@ -289,8 +291,9 @@ function pcPartsLedgerMigrationNeedsBackup(db) {
       SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'pc_parts_schema_migrations'
     `).get();
     if (!table) return true;
-    const version = Number(db.prepare("SELECT MAX(version) AS version FROM pc_parts_schema_migrations").get()?.version || 0);
-    return version < 10;
+    // One-time data migrations use numbers such as 1001; they must not hide
+    // a missing schema migration when deciding whether a backup is required.
+    return !db.prepare("SELECT 1 FROM pc_parts_schema_migrations WHERE version = 11").get();
   } catch {
     return true;
   }
@@ -698,6 +701,16 @@ function runPcStatsPublisher() {
 
 async function publishPcProductStats() {
   if (!pcLedger) return { published: false, skipped: true, warning: "PC parts ledger is unavailable" };
+  if (pcPublicationActive) throw new Error('PC_STATS_PUBLICATION_ALREADY_ACTIVE');
+  // Let an already-running approved collection commit, then prevent another
+  // collection tick from racing the full-cohort SQLite writer or compaction.
+  pcPublicationActive = true;
+  try {
+  const drainDeadline = Date.now() + PC_SCHEDULER_WATCHDOG_MS + 5000;
+  while (pcSchedulerActive) {
+    if (Date.now() >= drainDeadline) throw new Error('PC_STATS_SCHEDULER_DRAIN_TIMEOUT');
+    await new Promise(resolve => setTimeout(resolve, 1000));
+  }
   const publication = await runPcStatsPublisher();
   if (publication?.published !== true || !publication?.publication_id || !publication?.published_at) {
     throw new Error("PC_STATS_PUBLISHER_RESULT_INVALID");
@@ -706,17 +719,20 @@ async function publishPcProductStats() {
   if (!storageCompactionBackup) throw new Error("PC_STORAGE_COMPACTION_BACKUP_REQUIRED");
   const storageCompaction = pcLedger.compactStorage({
     asOf: new Date(publication.published_at),
-    observationRetentionDays: 1,
+    // The active publication is a full 30-day cohort. Archiving details after
+    // one day would immediately invalidate its saved member checksum.
+    observationRetentionDays: 30,
     pruneObservationDetails: true
   });
   pcPublicationLastSucceededAt = publication.published_at;
   return { ...publication, storage_compaction_backup: storageCompactionBackup, storage_compaction: storageCompaction };
+  } finally { pcPublicationActive = false; }
 }
 
 async function collectJob(jobName) {
   if (jobName === "bunjang-lifecycle-recheck") {
     if (!pcLedger || !pcPipeline) throw new Error("PC_LEDGER_UNAVAILABLE");
-    if (pcSchedulerActive) throw new Error("PC_SCHEDULER_BUSY");
+    if (pcSchedulerActive || pcPublicationActive) throw new Error("PC_SCHEDULER_BUSY");
     const source = pcLedger.getSource("bunjang");
     if (source?.policy_status !== "APPROVED" || source?.runtime_status !== "ENABLED") {
       throw new Error("BUNJANG_SOURCE_NOT_ENABLED");
@@ -1016,6 +1032,7 @@ function runnerStatus() {
       ledger_ready: Boolean(pcLedger),
       scheduler_enabled: PC_PARTS_SCHEDULER_ENABLED,
       scheduler_active: pcSchedulerActive,
+      publication_active: pcPublicationActive,
       d1_background_mirror_enabled: D1_BACKGROUND_MIRROR_ENABLED,
       d1_background_mirror_configured: Boolean(IMPORT_URL && IMPORT_TOKEN),
       publication_configured: Boolean(STATS_IMPORT_URL && IMPORT_TOKEN),
@@ -1678,7 +1695,7 @@ function pcSourceAdapter(sourceKey) {
 }
 
 async function runPcSourceSchedulerTick() {
-  if (!PC_PARTS_SCHEDULER_ENABLED || !pcPipeline || !pcLedger || pcSchedulerActive) return;
+  if (!PC_PARTS_SCHEDULER_ENABLED || !pcPipeline || !pcLedger || pcSchedulerActive || pcPublicationActive) return;
   const admission = schedulerReadDeferral({
     lastPublicReadAtMs: lastPcPublicReadAt,
     deferralStartedAtMs: pcSchedulerReadDeferralStartedAt,
@@ -2221,6 +2238,7 @@ const server = http.createServer(async (req, res) => {
         ledger_ready: Boolean(pcLedger),
         scheduler_enabled: PC_PARTS_SCHEDULER_ENABLED,
         scheduler_active: pcSchedulerActive,
+        publication_active: pcPublicationActive,
         source_targets_per_run: PC_SOURCE_TARGETS_PER_RUN,
         source_target_concurrency: PC_SOURCE_TARGET_CONCURRENCY,
         d1_background_mirror_enabled: D1_BACKGROUND_MIRROR_ENABLED,
@@ -2369,11 +2387,17 @@ const server = http.createServer(async (req, res) => {
         requireAsOfCoverage: query.isHistorical,
         ...priceVersionOptions
       });
+      const problem = pcPriceReadinessProblem(query, stats);
+      if (problem) {
+        res.setHeader('cache-control', 'no-store');
+        return json(res, 503, { status: 'error', error: problem.code, availability: { status: 'UNAVAILABLE', ...problem } });
+      }
       return json(res, 200, {
         status: "success",
-        data: priceStatsResponse(query, { ...stats, traceability: { member_count: null } })
+        data: priceStatsResponse(query, { ...stats, traceability: stats.traceability || { member_count: null } })
       });
     } catch (error) {
+      res.setHeader('cache-control', 'no-store');
       return json(res, 503, { status: "error", error: error instanceof Error ? error.message : String(error) });
     }
   }

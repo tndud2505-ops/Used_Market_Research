@@ -653,7 +653,7 @@ export async function fetchThroughPcReadCache(request, env, originFetch) {
   normalizedUrl.search = "";
   normalizedEntries.forEach(([key, value]) => normalizedUrl.searchParams.append(key, value));
   const cacheKey = new Request(
-    `https://used-market-pc-read-cache-v1.invalid${normalizedUrl.pathname}${normalizedUrl.search}`,
+    `https://used-market-pc-read-cache-v2.invalid${normalizedUrl.pathname}${normalizedUrl.search}`,
     { method: "GET" }
   );
   let cached;

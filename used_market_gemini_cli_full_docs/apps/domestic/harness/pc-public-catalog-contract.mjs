@@ -22,8 +22,8 @@ import {
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const catalog = publicPcCatalogForApi();
-assert.equal(PC_PRODUCT_MASTER_V2_VERSION, 4);
-assert.equal(catalog.master_version, "public-pc-4");
+assert.equal(PC_PRODUCT_MASTER_V2_VERSION, 5);
+assert.equal(catalog.master_version, "public-pc-5");
 const categoryCodes = catalog.categories.map((category) => category.code);
 assert.deepEqual(categoryCodes, ["CPU", "GPU", "RAM", "MOTHERBOARD", "SSD", "HDD", "PSU"]);
 assert.deepEqual(PUBLIC_PC_PART_CATEGORIES, categoryCodes);
@@ -161,6 +161,11 @@ assert.equal(motherboard.socket, "AM5");
 assert.equal(motherboard.chipset, "B650");
 assert.equal(motherboard.form_factor, "Micro-ATX");
 const exactMotherboardCases = [
+  ["MSI MAG B650 TOMAHAWK WIFI", "motherboard:msi:mag-b650-tomahawk-wifi"],
+  ["MSI B650 토마호크 와이파이 메인보드", "motherboard:msi:mag-b650-tomahawk-wifi"],
+  ["MSI PRO B760M-A WIFI DDR4", "motherboard:msi:pro-b760m-a-wifi-ddr4"],
+  ["ASRock B550M Steel Legend", "motherboard:asrock:b550m-steel-legend"],
+  ["애즈락 B550M 스틸레전드 메인보드", "motherboard:asrock:b550m-steel-legend"],
   ["ASUS ROG STRIX B550-A GAMING", "motherboard:asus:rog-strix-b550-a-gaming"],
   ["ASUS TUF GAMING B550-PRO", "motherboard:asus:tuf-gaming-b550-pro"],
   ["ASUS PRIME B550M-A", "motherboard:asus:prime-b550m-a"],
@@ -171,7 +176,7 @@ const exactMotherboardCases = [
   ["GIGABYTE X870 AORUS ELITE WIFI7 ICE rev 1.2 메인보드", "motherboard:gigabyte:x870-aorus-elite-wifi7-ice"]
 ];
 const registeredMotherboards = publicPcModelsForApi({ category: "MOTHERBOARD" }).models;
-assert.equal(registeredMotherboards.filter((product) => product.key_specs.directory_node_type === "PRODUCT").length, 29);
+assert.equal(registeredMotherboards.filter((product) => product.key_specs.directory_node_type === "PRODUCT").length, 32);
 assert.equal(registeredMotherboards.some((product) => product.canonical_product_id === "motherboard:asus:tuf-gaming-b760m-a-d4"), false,
   "an unverified/non-existent supplemental model must not survive outside the master");
 for (const [title, id] of exactMotherboardCases) {
@@ -181,6 +186,9 @@ for (const [title, id] of exactMotherboardCases) {
   assert.equal(result.statistics_eligible, true);
 }
 for (const title of [
+  "MSI MAG B650 TOMAHAWK WIFI DDR4",
+  "MSI PRO B760M-A WIFI DDR5",
+  "ASRock B550M Steel Legend WIFI",
   "ASUS B550 메인보드",
   "ASUS PRIME B550M-A WIFI",
   "ASUS PRIME B550M-A WIFI6",

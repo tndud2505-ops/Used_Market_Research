@@ -5,7 +5,7 @@ import { pcStatsTraceability } from "../aws-runner/pc-stats-traceability.mjs";
 const read = (relativePath) => readFile(new URL(`../${relativePath}`, import.meta.url), "utf8");
 const [runnerUnit, tunnelUnit, installScript, configureScript, healthScript, smokeScript, readme,
   publishStatsScript, completeStatsScript, importStatsScript, statsTraceabilityScript, runnerScript,
-  statsRunnerScript, publicClassificationMigration, retiredSourceMigration, collectSourceScript] = await Promise.all([
+  statsRunnerScript, publicationClientScript, publicClassificationMigration, retiredSourceMigration, collectSourceScript] = await Promise.all([
   read("aws-runner/used-market-runner.service"),
   read("aws-runner/used-market-tunnel.service"),
   read("aws-runner/install-ubuntu24.sh"),
@@ -19,6 +19,7 @@ const [runnerUnit, tunnelUnit, installScript, configureScript, healthScript, smo
   read("aws-runner/pc-stats-traceability.mjs"),
   read("aws-runner/runner.mjs"),
   read("aws-runner/publish-pc-stats-runner.mjs"),
+  read("aws-runner/pc-stats-publication-client.mjs"),
   read("cloudflare/migrations/0012_pc_public_classification.sql"),
   read("cloudflare/migrations/0013_retire_quasarzone.sql"),
   read("aws-runner/collect-pc-source-now.mjs")
@@ -82,6 +83,11 @@ assert.match(installScript, /node --check "\$APP_ROOT\/market\/logic\/pc-search-
 assert.match(installScript,
   /install -m 0644 "\$SOURCE_ROOT\/market\/logic\/pc-public-catalog\.mjs" "\$APP_ROOT\/market\/logic\/pc-public-catalog\.mjs"/u,
   "the AWS installer must deploy the public catalog used to build collection targets");
+assert.match(installScript,
+  /install -m 0644 "\$SOURCE_ROOT\/market\/logic\/pc-price-readiness\.mjs" "\$APP_ROOT\/market\/logic\/pc-price-readiness\.mjs"/u,
+  "the AWS installer must copy the readiness module imported by runner.mjs before service restart");
+assert.match(installScript, /node --check "\$APP_ROOT\/market\/logic\/pc-price-readiness\.mjs"/u,
+  "the installed readiness module must be syntax-checked before restarting the Runner");
 assert.match(installScript,
   /cp -a "\$SOURCE_ROOT\/market\/data\/browse-flows\/\." "\$APP_ROOT\/market\/data\/browse-flows\/"/u,
   "the AWS installer must deploy the browse-flow dependencies imported by the directory module");
@@ -223,10 +229,14 @@ assert.match(configureScript, /^PC_SOURCE_TARGET_CONCURRENCY=\$\{pc_source_targe
   "runner reconfiguration must retain the repaired source concurrency");
 assert.match(statsRunnerScript, /const publicationTimeoutMs = Math\.min\(15 \* 60 \* 1000/u,
   "large product-stat publications must have a dedicated bounded timeout");
-assert.match(statsRunnerScript, /request as httpsRequest/u,
-  "large product-stat imports must avoid the default fetch header timeout");
+assert.match(publicationClientScript, /signal: AbortSignal\.timeout\(timeoutMs\)/u,
+  "every bounded product-stat chunk request must retain an explicit timeout");
+assert.match(publicationClientScript, /const CHUNK_ROW_COUNT = 40;/u,
+  "large product-stat imports must stay below the free Worker CPU and request budgets");
 assert.match(installScript, /node --check "\$APP_ROOT\/aws-runner\/publish-pc-stats-runner\.mjs"/u,
   "AWS deployment must syntax-check the isolated statistics publisher before restarting services");
+assert.match(installScript, /node --check "\$APP_ROOT\/aws-runner\/pc-stats-publication-client\.mjs"/u,
+  "AWS deployment must syntax-check the chunked publication client before restarting services");
 assert.match(runnerScript, /spawn\(childCommand, childArgs/u,
   "product-stat generation must run outside the public runner event loop");
 assert.match(runnerScript, /\["-c", "3", "\/usr\/bin\/nice", "-n", "10", process\.execPath, scriptPath\]/u,
@@ -237,8 +247,8 @@ assertOrdered(runnerScript, [
   'if (!storageCompactionBackup) throw new Error("PC_STORAGE_COMPACTION_BACKUP_REQUIRED");',
   "const storageCompaction = pcLedger.compactStorage({"
 ], "daily compaction recovery backup");
-assert.match(runnerScript, /observationRetentionDays:\s*1/u,
-  "daily compaction must preserve the one-day detail retention policy that controls disk growth");
+assert.match(runnerScript, /observationRetentionDays:\s*30[,\s]/u,
+  "daily compaction must preserve every observation in the active 30-day publication's member trace");
 assert.doesNotMatch(runnerScript, /compactStatsForPublication\(pcLedger\.rebuildAndGetPriceStats/u,
   "the public runner process must not build every product-stat scope synchronously");
 assert.doesNotMatch(runnerScript, /pcLedger\.runIntegrityAudit/u,
@@ -260,6 +270,7 @@ assertOrdered(reclassificationScript, [
   "const ledger = new PcPartsLedger({ db });",
   "const backup = createRecoveryBackup(db, filePath);",
   "ledger.migrate();",
+  "await pipeline.initialize();",
   'db.exec("BEGIN IMMEDIATE")'
 ], "reclassification recovery ordering");
 assert.match(runnerScript, /const INDEX_BACKGROUND_MAINTENANCE_ENABLED = String\(process\.env\.RUNNER_INDEX_BACKGROUND_MAINTENANCE_ENABLED \?\? "false"\)/u,

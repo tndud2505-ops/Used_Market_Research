@@ -5,6 +5,7 @@ import { compactStatsForPublication, statsChecksum, statsPublicationKey } from "
 import { PcPartsLedger } from "./pc-parts-ledger.mjs";
 import { pcStatsTraceability } from "./pc-stats-traceability.mjs";
 import { SearchIndex } from "./search-index.mjs";
+import { PC_DIRECTORY_PUBLICATION_SOURCE_KEYS } from '../collector/logic/pc-source-registry.mjs';
 
 const indexValue = String(process.env.RUNNER_INDEX_PATH || "").trim();
 const inputValue = String(process.env.PC_STATS_PUBLICATION_INPUT || "").trim();
@@ -80,6 +81,7 @@ try {
       currency: scope.currency,
       days: 30,
       asOf: input.created_at,
+      sourceIds: PC_DIRECTORY_PUBLICATION_SOURCE_KEYS,
       ...versionOptions
     };
     const stats = compactStatsForPublication(ledger.rebuildAndGetPriceStats(options));

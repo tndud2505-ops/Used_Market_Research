@@ -15,8 +15,12 @@ export const money = (value, currency = 'KRW') => {
   return `${Number(value).toLocaleString('ko-KR')} ${code}`;
 };
 export function metricValue(metric) {
-  if (!(Number(metric?.sample_count) > 0)) return null;
-  for (const key of ['mean', 'median', 'average']) {
+  // A partial aggregate is not a published representative, even when a stale
+  // or diagnostic central value is present in the response.
+  if (metric?.aggregate_incomplete === true) return null;
+  const count = Number(metric?.sample_count);
+  if (!Number.isInteger(count) || !(count >= 3) || !metricIsConsistent(metric)) return null;
+  for (const key of count < 5 ? ['median'] : ['mean', 'median', 'average']) {
     const value = metric?.[key];
     if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) continue;
     if (typeof metric.min === 'number' && value < metric.min) continue;
@@ -24,6 +28,58 @@ export function metricValue(metric) {
     return value;
   }
   return null;
+}
+export function metricPresentation(metric, seriesKey = 'active', currency = 'KRW') {
+  const count = Number(metric?.sample_count || 0);
+  if (metric?.aggregate_incomplete === true) return { text: '집계 준비 중', label: '정확 집계·게시 미완료', empty: true, state: 'incomplete' };
+  const value = metricValue(metric);
+  if (value != null) return {
+    text: money(value, currency),
+    label: count < 5 ? '중앙값' : metric?.mean === value || metric?.average === value ? '평균' : '중앙값',
+    empty: false, state: 'ready',
+  };
+  if (count >= 3 || !Number.isInteger(count) || count < 0 || (metric && !metricIsConsistent(metric))) {
+    return { text: '집계 확인 필요', label: '표본 부족이 아닌 통계 오류', empty: true, state: 'invalid' };
+  }
+  const minimum = Number(metric?.min), maximum = Number(metric?.max);
+  if (count > 0 && Number.isFinite(minimum) && minimum > 0 && Number.isFinite(maximum) && maximum >= minimum) {
+    const wording = seriesKey === 'sold' ? { single: '표시', label: '표시가' }
+      : seriesKey === 'confirmed_transactions' ? { single: '확인', label: '거래가' } : { single: '등록', label: '등록가' };
+    return { text: minimum === maximum ? `${wording.single} ${money(minimum, currency)}` : `${money(minimum, currency)}~${money(maximum, currency)}`,
+      label: `${wording.label} ${count}건 · 대표가격 없음`, empty: false, state: 'insufficient' };
+  }
+  return { text: '—', label: count > 0 ? '표본 부족 · 대표가격 없음' : '가격 자료 없음', empty: true, state: count > 0 ? 'insufficient' : 'missing' };
+}
+export function statsUnavailable(data) {
+  // Runner and Worker expose uppercase and legacy lowercase readiness states.
+  // Missing publication is unknown coverage, not proof of zero market samples.
+  const status = String(data?.availability?.status || '').toUpperCase();
+  return status === 'UNAVAILABLE' || status === 'NO_EXACT_PUBLICATION' || data?.aggregate_incomplete === true;
+}
+export function priceRecordIssue(record, data = record?.data) {
+  if (record?.state === 'error') return `가격 조회 실패 · ${record.error || '다시 시도해 주세요.'}`;
+  if (record?.state === 'loading' || !record) return '가격 자료 확인 중';
+  if (statsUnavailable(record?.data) || statsUnavailable(data)) {
+    const code = data?.availability?.code || record?.data?.availability?.code || '';
+    if (['HISTORICAL_PRICE_STATS_UNAVAILABLE', 'HISTORICAL_EXACT_STATS_UNAVAILABLE'].includes(code)) {
+      return '선택 기간의 정확 통계가 게시되지 않았습니다. 현재 기간의 가격으로 대체하지 않습니다.';
+    }
+    return '공개 통계 미제공 · 표본 부족 여부를 확인할 수 없습니다.';
+  }
+  if (!data) return '선택한 사이트·제조사의 통계가 제공되지 않았습니다.';
+  if (['active', 'sold'].some(key => metricPresentation(data[key]).state === 'incomplete')) {
+    return '정확 집계·게시 준비 중입니다. 현재 숫자는 완성된 고유 매물 표본 수가 아니므로 대표가격과 구분합니다.';
+  }
+  if (['active', 'sold'].some(key => metricPresentation(data[key]).state === 'invalid')) {
+    return '통계 집계값 확인이 필요합니다. 실제 시장 표본 부족으로 판정하지 않습니다.';
+  }
+  return '';
+}
+export function analysisSelectionUrl(href, id = '', manufacturer = '') {
+  const url = new URL(href);
+  if (id) url.searchParams.set('model', id); else url.searchParams.delete('model');
+  if (id && manufacturer) url.searchParams.set('manufacturer', manufacturer); else url.searchParams.delete('manufacturer');
+  return url.href;
 }
 export function metricIsConsistent(metric) {
   const count = Number(metric?.sample_count || 0);
@@ -36,7 +92,7 @@ export function metricIsConsistent(metric) {
   const central = mean ?? median ?? average;
   if (count >= 5 && metric?.aggregate_incomplete !== true && (!Number.isFinite(central) || central <= 0)) return false;
   if (mean !== null && (!Number.isFinite(mean) || mean <= 0)) return false;
-  if (count >= 3 && count < 5 && (!Number.isFinite(median) || median <= 0)) return false;
+  if (count >= 3 && count < 5 && metric?.aggregate_incomplete !== true && (!Number.isFinite(median) || median <= 0)) return false;
   if (median !== null && (!Number.isFinite(median) || median <= 0)) return false;
   if (average !== null && (!Number.isFinite(average) || average <= 0)) return false;
   if (Number.isFinite(minimum) && Number.isFinite(maximum) && minimum > maximum) return false;
@@ -74,13 +130,19 @@ export function groupProducts(products, grouped = true) {
 export function scopedStats(data, manufacturer = '') {
   if (!manufacturer) return data;
   const row = data?.by_manufacturer?.find(row => row.manufacturer === manufacturer);
-  return row ? { ...row, as_of: data.as_of, window: data.window } : null;
+  return row ? inheritStatsScope(data, row) : null;
+}
+function inheritStatsScope(data, row) {
+  const inherited = Object.fromEntries(['as_of', 'window', 'published_window', 'methodology', 'publication_id', 'versions', 'availability']
+    .filter(key => data[key] !== undefined).map(key => [key, data[key]]));
+  // Member traceability belongs to the selected row, never to the whole market.
+  return { ...inherited, ...row, as_of: data.as_of, window: data.window };
 }
 export const sourceId = row => String(row?.source_id || row?.site || row?.source || '');
 export function sourceStats(data, source = '') {
   if (!source) return data;
   const row = data?.by_source?.find(row => sourceId(row) === source);
-  return row ? { ...row, as_of: data.as_of, window: data.window } : null;
+  return row ? inheritStatsScope(data, row) : null;
 }
 // Match the existing marketplace's exclusion of internally inconsistent source summaries.
 export function coherentStats(data) {
@@ -88,11 +150,11 @@ export function coherentStats(data) {
   const sampled = row => ['active', 'sold'].filter(key => Number(row?.[key]?.sample_count) > 0);
   const rows = (data.by_source || []).filter(row => sampled(row).length || row.daily?.some(day => sampled(day).length));
   if (!rows.length) return data;
-  const valid = rows.filter(row => sampled(row).length && sampled(row).every(key => metricIsConsistent(row[key])));
+  const valid = rows.filter(row => sampled(row).every(key => metricIsConsistent(row[key])));
   if (valid.length === rows.length) return data;
   const combine = (rows, key) => {
     if (rows.length === 1 && metricIsConsistent(rows[0]?.[key])) return { ...rows[0][key] };
-    const metrics = rows.map(row => row[key]).filter(metric => metricValue(metric) != null);
+    const metrics = rows.map(row => row[key]).filter(metric => Number(metric?.sample_count) > 0 && metricIsConsistent(metric));
     const count = metrics.reduce((sum, metric) => sum + Number(metric.sample_count), 0);
     const minimums = metrics.map(metric => Number(metric.min)).filter(value => Number.isFinite(value) && value > 0);
     const maximums = metrics.map(metric => Number(metric.max)).filter(value => Number.isFinite(value) && value > 0);
@@ -102,7 +164,7 @@ export function coherentStats(data) {
       sample_count: count,
       min: minimums.length ? Math.min(...minimums) : null,
       max: maximums.length ? Math.max(...maximums) : null,
-      mean: count && allHaveCentral
+      mean: count >= 5 && allHaveCentral
         ? metrics.reduce((sum, metric) => sum + centralOf(metric) * Number(metric.sample_count), 0) / count
         : null,
       median: null,
@@ -182,6 +244,9 @@ export function validateBuild(input, products, categories) {
   return input.map(e => {
     if (!e || typeof e !== 'object' || !products.has(e.id)) throw new Error('등록되지 않은 모델입니다.');
     const category = products.get(e.id).category_code;
+    if (category === 'MOTHERBOARD' && ['FACET', 'BROWSE_FACET'].includes(products.get(e.id).key_specs?.directory_node_type)) {
+      throw new Error('메인보드는 검증된 정확 모델만 견적에 선택할 수 있습니다.');
+    }
     if (!categories.has(category) || used.has(category)) throw new Error('같은 부품 종류가 중복되었습니다.');
     used.add(category);
     const quantity = Number(e.quantity ?? 1);

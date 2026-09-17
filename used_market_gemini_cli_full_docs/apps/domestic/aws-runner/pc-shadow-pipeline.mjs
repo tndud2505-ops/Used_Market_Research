@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { classifyPcPartListing, classifyPcPartListingPublic, detectPcPartManufacturer } from "../market/logic/pc-parts-classifier.mjs";
+import { classifyPcPartListing, classifyPcPartListingPublic, detectPcPartManufacturer, pcPartMarketSegment } from "../market/logic/pc-parts-classifier.mjs";
 import { explicitSoldText } from "../market/logic/listing-lifecycle.mjs";
 import {
   PC_PRODUCT_MASTER_V2,
@@ -306,6 +306,8 @@ export class PcShadowPipeline {
       description: item.description
     }, { preclassified: classified });
     const publicSupportedCategory = ["CPU", "GPU", "RAM", "MOTHERBOARD", "SSD", "HDD", "PSU"].includes(publicClassified.category_code);
+    const toolComparisonCategory = ['CASE', 'COOLING'].includes(classified.category_code);
+    const marketSegment = toolComparisonCategory ? pcPartMarketSegment(item, classified.category_code) : publicClassified.market_segment;
     const duplicate = duplicateIdentity(item);
     const exactAlias = classified.canonical_model
       ? this.ledger.matchAlias(classified.category_code, classified.canonical_model)
@@ -323,11 +325,16 @@ export class PcShadowPipeline {
           : textAlias;
     const aliasMatched = Boolean(alias?.matched && !alias?.forbidden);
     const facetClassification = ["SSD", "HDD", "PSU"].includes(classified.category_code) ? publicClassified : classified;
-    const facetProduct = aliasMatched ? null : directoryFacetProduct(facetClassification, `${item.title || ""} ${item.description || ""}`);
+    // RAM aliases may contain a kit's total capacity. Its statistics identity must
+    // instead use the confirmed module brand, DDR generation and PER-MODULE size.
+    const facetProduct = aliasMatched && classified.category_code !== 'RAM' ? null
+      : directoryFacetProduct(facetClassification, `${item.title || ""} ${item.description || ""}`);
     let product = classified.category_code === "MOTHERBOARD"
       ? (publicClassified.canonical_product_id
         ? this.ledger.getCanonicalProduct(publicClassified.canonical_product_id, PC_PRODUCT_MASTER_V2_VERSION)
         : null)
+      : classified.category_code === 'RAM'
+        ? (facetProduct ? this.ledger.getCanonicalProduct(facetProduct.id, PC_PRODUCT_MASTER_V2_VERSION) : null)
       : aliasMatched
         ? this.ledger.getCanonicalProduct(alias.canonical_product_id, alias.master_version)
         : facetProduct ? this.ledger.getCanonicalProduct(facetProduct.id, PC_PRODUCT_MASTER_V2_VERSION) : null;
@@ -367,11 +374,16 @@ export class PcShadowPipeline {
     ));
     const statisticsExclusionReasons = [...new Set([
       ...statsExclusionReasons,
-      ...(publicClassified.statistics_exclusion_reasons || [])
+      ...(toolComparisonCategory ? [
+        ...(marketSegment !== 'CONSUMER_DESKTOP' ? ['MARKET_SEGMENT_OUT_OF_SCOPE'] : []),
+        ...(classified.condition !== 'USED_WORKING' ? ['NOT_USED_WORKING'] : []),
+        ...(!['SINGLE_COMPONENT', 'SAME_PRODUCT_LOT'].includes(classified.listing_kind) ? ['NOT_COMPARABLE_COMPONENT'] : [])
+      ] : publicClassified.statistics_exclusion_reasons || [])
     ])];
     let priceEligible = matched && prices.unitPrice !== null && statsExclusionReasons.length === 0;
-    let statisticsEligible = publicSupportedCategory && matched && prices.unitPrice !== null
-      && publicClassified.statistics_eligible === true && statsExclusionReasons.length === 0;
+    let statisticsEligible = matched && prices.unitPrice !== null && (toolComparisonCategory
+      ? statisticsExclusionReasons.length === 0
+      : publicSupportedCategory && publicClassified.statistics_eligible === true && statsExclusionReasons.length === 0);
     const exactSku = matched && product?.spec?.directory_node_type === "PRODUCT";
     let stats = null;
     if (exactSku && priceEligible && !options.reclassification) {
@@ -409,7 +421,7 @@ export class PcShadowPipeline {
         : product?.manufacturer || null,
       categoryCode: classified.category_code,
       publicCategoryCode: publicClassified.category_code,
-      marketSegment: publicClassified.market_segment,
+      marketSegment,
       listingType: publicClassified.listing_type,
       conditionGroup: publicClassified.condition_group,
       specGroupId: publicClassified.spec_group_id,

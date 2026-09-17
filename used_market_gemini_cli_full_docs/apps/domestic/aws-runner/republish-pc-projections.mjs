@@ -159,7 +159,7 @@ function localPublicRows(db, requestedSources) {
   });
 }
 
-function readLocalState(indexPath, requestedSources) {
+export function readLocalState(indexPath, requestedSources) {
   if (!existsSync(indexPath)) throw new Error(`RUNNER_INDEX_NOT_FOUND:${indexPath}`);
   const db = new DatabaseSync(indexPath, { readOnly: true });
   try {

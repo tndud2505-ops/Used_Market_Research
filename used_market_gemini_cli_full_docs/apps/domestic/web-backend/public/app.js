@@ -56,13 +56,13 @@ const COHORTS = [
   { marketPool: "KR_REFURB_RETAIL", condition: "REFURBISHED", currency: "KRW", label: "국내 리퍼비시" },
   { marketPool: "OVERSEAS_USED", condition: "USED_WORKING", currency: "USD", label: "해외 중고" },
 ];
-const mobileFacetMedia = window.matchMedia("(max-width: 640px)");
+const mobileFacetMedia = window.matchMedia("(max-width: 760px)");
 const stackedLayoutMedia = window.matchMedia("(max-width: 1120px)");
-const compactFilterMedia = window.matchMedia("(max-width: 1120px)");
+const compactFilterMedia = window.matchMedia("(max-width: 760px)");
 const stackedInsightMedia = window.matchMedia("(max-width: 1320px)");
 const PRICE_CHART_DAYS = 30;
 const PRICE_HISTORY_DAYS = 730;
-const FILTER_COLUMN_DEFAULT = 208;
+const FILTER_COLUMN_DEFAULT = 224;
 const ANALYSIS_COLUMN_DEFAULT = 500;
 let browseListingTimer = null;
 let catalogSearchTimer = null;
@@ -201,7 +201,7 @@ function setupColumnResizer({ resizer, container, target, property, minimum, max
   };
   const currentWidth = () => target.getBoundingClientRect().width || value;
   resizer.addEventListener("pointerdown", (event) => {
-    if (stackedInsightMedia.matches || event.button !== 0) return;
+    if (compactFilterMedia.matches || event.button !== 0) return;
     const startX = event.clientX;
     const startWidth = currentWidth();
     resizer.setPointerCapture(event.pointerId);
@@ -243,7 +243,7 @@ function setupColumnResizers() {
     minimum: 168,
     maximum: 320,
     defaultValue: FILTER_COLUMN_DEFAULT,
-    flexibleMinimum: 620,
+    flexibleMinimum: 500,
     onApply: () => analysisController?.reapply(),
   });
   analysisController = setupColumnResizer({
@@ -898,6 +898,37 @@ function renderCategories() {
     dom.categorySelect.append(option);
   });
   dom.categorySelect.disabled = state.categories.length === 0;
+  renderCategoryTabs();
+}
+
+function renderCategoryTabs() {
+  const rail = document.querySelector("#up-category-tabs");
+  if (!rail) return;
+  const active = document.activeElement;
+  const focusCode = rail.contains(active) ? active.dataset.category : null;
+  const icons = {
+    CPU: 'M7 7h10v10H7zM3 8h4M3 12h4M3 16h4M17 8h4M17 12h4M17 16h4M8 3v4M12 3v4M16 3v4M8 17v4M12 17v4M16 17v4',
+    GPU: 'M3 5h18v13H3zM7 18v3M11 18v3M6 9h4v5H6zM14 9h4v5h-4z',
+    RAM: 'M3 7h18v10H3zM6 10h3v4H6zM12 10h3v4h-3zM6 17v3M10 17v3M14 17v3M18 17v3',
+    MOTHERBOARD: 'M4 3h16v18H4zM7 6h6v6H7zM16 6v8M7 16h10',
+    SSD: 'M4 5h16v14H4zM7 8h4v4H7zM14 15h3M7 15h4',
+    HDD: 'M5 3h14v18H5zM8 7h8v8H8zM12 11l5 6M8 18h2',
+    PSU: 'M3 5h18v14H3zM7 9h6v6H7zM17 8v3M17 14v2',
+  };
+  rail.replaceChildren();
+  for (const category of state.categories) {
+    const code = categoryCode(category), button = createElement("button", "up-category-tab");
+    button.type = "button"; button.dataset.category = code;
+    button.setAttribute("aria-pressed", String(state.categoryCode === code));
+    const svg = createSvgElement("svg", { viewBox: "0 0 24 24", "aria-hidden": "true" });
+    svg.append(createSvgElement("path", { d: icons[code] || icons.CPU }));
+    button.append(svg, createElement("span", "", categoryLabel(category)));
+    button.addEventListener("click", () => selectCategory(code));
+    rail.append(button);
+  }
+  rail.hidden = state.categories.length === 0;
+  document.body.classList.toggle("has-category-tabs", !rail.hidden);
+  if (focusCode) [...rail.children].find(button => button.dataset.category === focusCode)?.focus({ preventScroll: true });
 }
 
 function makeFacetButton(label, value, active, onClick, disabled = false) {
@@ -1058,6 +1089,8 @@ function renderFacets() {
     dom.facetRows.append(createElement("p", "facet-empty", "선택 가능한 필터가 없습니다."));
   }
   dom.modelFilters.hidden = !state.categoryCode && definitions.length === 0;
+  const filterOpen = document.querySelector("#up-filter-open");
+  if (filterOpen) filterOpen.disabled = dom.modelFilters.hidden;
 
   updateFacetSelectionUi(definitions);
   renderSourceFilters();
@@ -1211,7 +1244,7 @@ function updateWorkspaceHeading() {
     ? `“${query}” 중고 PC 검색 결과`
     : categoryRoute
       ? `중고 ${label} 검색`
-      : "중고 PC 부품 검색";
+      : "중고 부품, 가격부터 비교하세요.";
   const intro = query
     ? `${query} 관련 중고 PC 부품 모델과 현재 매물을 비교합니다.`
     : categoryRoute
@@ -1220,6 +1253,8 @@ function updateWorkspaceHeading() {
 
   dom.workspaceTitle.textContent = heading;
   if (dom.workspaceIntro) dom.workspaceIntro.textContent = intro;
+  const queryInput = document.querySelector("#catalog-query");
+  if (queryInput && document.activeElement !== queryInput) queryInput.value = state.query;
   document.title = pageTitle;
   const descriptionMeta = document.querySelector('meta[name="description"]');
   const ogTitleMeta = document.querySelector('meta[property="og:title"]');
@@ -2907,7 +2942,8 @@ dom.resetFilters.addEventListener("click", () => {
 });
 
 dom.showMatchedModels?.addEventListener("click", () => {
-  revealSection(dom.listingSection);
+  document.querySelector("#up-filter-dialog")?.close();
+  requestAnimationFrame(() => revealSection(dom.listingSection));
 });
 dom.modelSelect.addEventListener("change", () => {
   if (!dom.modelSelect.value) {
@@ -2949,7 +2985,7 @@ dom.modelDetailOpen.addEventListener("click", () => {
   if (stackedInsightMedia.matches) revealSection(dom.modelDetailDialog);
 });
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape" && !dom.modelDetailDialog.hidden) closeModelDetail();
+  if (event.key === "Escape" && !document.querySelector("dialog[open]") && !dom.modelDetailDialog.hidden) closeModelDetail();
 });
 dom.backToModels.addEventListener("click", () => {
   showAllModels();
@@ -2992,6 +3028,42 @@ dom.chartSourceOptions.addEventListener("change", (event) => {
   renderStats();
 });
 
+function setupConceptAControls() {
+  const form = document.querySelector("#up-catalog-search"), query = document.querySelector("#catalog-query");
+  form?.addEventListener("submit", event => { event.preventDefault(); applyCatalogSearch(query.value, true); });
+  query?.addEventListener("input", () => {
+    clearTimeout(catalogSearchTimer);
+    catalogSearchTimer = window.setTimeout(() => applyCatalogSearch(query.value), 250);
+  });
+  const dialog = document.querySelector("#up-filter-dialog"), slot = document.querySelector("#up-filter-slot");
+  const opener = document.querySelector("#up-filter-open");
+  if (dialog && slot && opener) {
+    const home = document.createComment("filter panel home");
+    dom.modelFilters.before(home);
+    opener.addEventListener("click", () => {
+      if (dom.modelFilters.hidden || dialog.open) return;
+      slot.append(dom.modelFilters);
+      setModelFiltersCollapsed(false);
+      dialog.showModal();
+    });
+    dialog.addEventListener("close", () => {
+      home.after(dom.modelFilters);
+      setModelFiltersCollapsed(compactFilterMedia.matches);
+      if (compactFilterMedia.matches) opener.focus({ preventScroll: true });
+    });
+    document.querySelector("#up-filter-close")?.addEventListener("click", () => dialog.close());
+    document.querySelector("#up-filter-done")?.addEventListener("click", () => {
+      dialog.close();
+      requestAnimationFrame(() => revealSection(dom.listingSection));
+    });
+    compactFilterMedia.addEventListener("change", event => { if (!event.matches && dialog.open) dialog.close(); });
+  }
+  document.querySelector("#up-market-chart")?.addEventListener("toggle", event => {
+    if (event.currentTarget.open && state.selectedProduct) renderStats();
+  });
+}
+
+setupConceptAControls();
 setModelFiltersCollapsed(compactFilterMedia.matches);
 setListingOptionsCollapsed(mobileFacetMedia.matches);
 syncListingSortTabs();

@@ -37,8 +37,10 @@ export function evaluatePcQualityDataset(records) {
   const dedupeRows = rows.filter((row) => typeof row.truth.duplicate === "boolean" && typeof row.prediction.duplicate_merged === "boolean");
   const categoryCorrect = categoryRows.filter((row) => clean(row.prediction.category_code) === clean(row.truth.category_code)).length;
   const modelCorrect = modelRows.filter((row) => clean(row.prediction.canonical_model) === clean(row.truth.canonical_model)).length;
-  const ramCorrect = ramRows.filter((row) => Number(row.prediction.quantity) === Number(row.truth.quantity)
-    && clean(row.prediction.price_scope) === clean(row.truth.price_scope)).length;
+  const ramCorrect = ramRows.filter((row) => row.truth.quantity_unknown === true
+    ? row.prediction.quantity_unknown === true && row.prediction.price_eligible === false
+    : Number(row.prediction.quantity) === Number(row.truth.quantity)
+      && clean(row.prediction.price_scope) === clean(row.truth.price_scope)).length;
   const bundleContamination = bundleRows.filter((row) => row.prediction.price_eligible === true).length;
   const falseDedupe = dedupeRows.filter((row) => row.truth.duplicate === false && row.prediction.duplicate_merged === true).length;
   const falseSold = rows.filter((row) => clean(row.truth.lifecycle_status) !== "SOLD"

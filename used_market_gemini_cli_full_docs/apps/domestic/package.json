@@ -36,8 +36,11 @@
     "cloudflare:deploy:app": "node cloudflare/deploy.mjs --app-only",
     "cloudflare:release": "node cloudflare/release.mjs",
     "cloudflare:app-release": "node cloudflare/release.mjs --app-only",
-    "test:pc-tools": "node harness/pc-tools-contract.mjs",
-    "test": "npm run build && npm run test:pc && npm run test:pc-tools"
+    "test:pc-tools": "node harness/pc-tools-contract.mjs && node harness/pc-light-user-contract.mjs && node harness/pc-stored-price-publication-contract.mjs && node harness/pc-local-projection-contract.mjs && node harness/pc-catalog-ingestion-contract.mjs && node harness/pc-reclassification-alias-contract.mjs && node harness/pc-staged-normalization-import-contract.mjs && node harness/pc-full-publication-contract.mjs && node harness/pc-release-collection-contract.mjs",
+    "test:pc-release": "node harness/pc-agent1-publication-http-contract.mjs && node harness/pc-agent1-chunk-integrity-contract.mjs",
+    "test:pc-final": "node harness/pc-agent2-ui-contract.mjs && node harness/pc-agent2-resume-contract.mjs && node harness/pc-agent3-independent-price-contract.mjs && node harness/pc-agent3-publication-bootstrap-contract.mjs && node harness/pc-agent3-stats-readiness-contract.mjs && node harness/pc-final-price-readiness-contract.mjs",
+    "test:ui-a": "node harness/pc-ui-concept-a-contract.mjs",
+    "test": "npm run build && npm run test:pc && npm run test:pc-tools && npm run test:pc-release && npm run test:pc-final && npm run test:ui-a"
   },
   "dependencies": {
     "commander": "^14.0.0",

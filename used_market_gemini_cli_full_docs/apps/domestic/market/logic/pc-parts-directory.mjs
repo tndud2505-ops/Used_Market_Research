@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { pcProductMatchesQuery } from './pc-product-search.mjs';
 import {
   PC_PART_CATEGORY_SEEDS_V2,
   PC_PART_FACET_SCHEMA_V2,
@@ -63,38 +64,8 @@ function normalizeQuery(value) {
   return String(value || "").normalize("NFKC").trim().toLowerCase();
 }
 
-function termTokens(value) {
-  const normalized = normalizeQuery(value);
-  const tokens = normalized.split(/[^\p{L}\p{N}]+/gu).filter(Boolean);
-  return { normalized, tokens, compact: tokens.join("") };
-}
-
-function searchableValues(product) {
-  const values = [product.id, product.name, product.category, product.group, product.manufacturer, product.brand, ...product.aliases];
-  for (const value of Object.values(product.browse_facets)) {
-    for (const item of asArray(value)) values.push(item);
-  }
-  return values.filter((value) => value !== null && value !== undefined).map(termTokens);
-}
-
 function matchesQuery(product, query) {
-  if (!query) return true;
-  const requested = termTokens(query);
-  const searchable = searchableValues(product);
-  if (searchable.some((entry) => entry.normalized === requested.normalized || entry.compact === requested.compact)) return true;
-  // Marketplace titles commonly omit the separator in suffixes (e.g. 2080ti,
-  // 14700kf). Match the compact form against the compact facet/model value
-  // while keeping the normal token check for broad queries such as "3060".
-  if (requested.compact.length >= 4 && searchable.some((entry) => {
-    for (let start = 0; start < entry.tokens.length; start += 1) {
-      for (let end = start + 2; end <= entry.tokens.length; end += 1) {
-        if (entry.tokens.slice(start, end).join("") === requested.compact) return true;
-      }
-    }
-    return false;
-  })) return true;
-  const allTokens = new Set(searchable.flatMap((entry) => entry.tokens));
-  return requested.tokens.length > 0 && requested.tokens.every((token) => allTokens.has(token));
+  return pcProductMatchesQuery(product, query);
 }
 
 function knownFacetNames(categories) {

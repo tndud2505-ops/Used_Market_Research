@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { request as httpsRequest } from "node:https";
 import path from "node:path";
 
 import { compactStatsForPublication, statsChecksum, statsPublicationKey } from "../cloudflare/public-product-stats.mjs";
@@ -7,6 +6,10 @@ import { PC_DIRECTORY_PUBLICATION_SOURCE_KEYS } from "../collector/logic/pc-sour
 import { PcPartsLedger } from "./pc-parts-ledger.mjs";
 import { evaluatePipelineQualityReports, loadPipelineQualityReports } from "./pc-pipeline-governance.mjs";
 import { SearchIndex } from "./search-index.mjs";
+import { storeCompletedPricePublication, storedPricePublicationKey } from './pc-stored-price-publication.mjs';
+import { fullPublicationScopes, assertFullPublicationActivation } from './pc-publication-scopes.mjs';
+import { pcStatsTraceability } from './pc-stats-traceability.mjs';
+import { publishStatsInChunks, readActiveStatsScopes } from './pc-stats-publication-client.mjs';
 
 const indexValue = String(process.env.RUNNER_INDEX_PATH || "").trim();
 const importUrlValue = String(process.env.D1_STATS_IMPORT_URL || "").trim();
@@ -29,6 +32,7 @@ const statsProductIds = [...new Set(String(process.env.PC_STATS_PRODUCT_IDS || "
   .split(",")
   .map((value) => value.trim())
   .filter(Boolean))].sort();
+if (statsProductIds.length > 0) throw new Error('PC_STATS_PARTIAL_PUBLICATION_DISABLED: use the offline prepare/complete workflow');
 const sampleDropAcknowledgement = (() => {
   const raw = String(process.env.PC_STATS_SAMPLE_DROP_ACKNOWLEDGEMENT_JSON || "").trim();
   if (!raw) return null;
@@ -49,37 +53,6 @@ if (importUrl.protocol !== "https:" || importUrl.username || importUrl.password
   throw new Error("D1_STATS_IMPORT_URL must be an HTTPS /admin/import-product-stats endpoint without credentials");
 }
 
-function postJson(url, body) {
-  return new Promise((resolve, reject) => {
-    const request = httpsRequest(url, {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${importToken}`,
-        "content-type": "application/json",
-        "content-length": Buffer.byteLength(body)
-      }
-    }, (response) => {
-      const chunks = [];
-      let received = 0;
-      response.on("data", (chunk) => {
-        received += chunk.length;
-        if (received > 1_048_576) {
-          request.destroy(new Error("D1_STATS_IMPORT_RESPONSE_TOO_LARGE"));
-          return;
-        }
-        chunks.push(chunk);
-      });
-      response.on("end", () => resolve({
-        status: Number(response.statusCode || 0),
-        body: Buffer.concat(chunks).toString("utf8")
-      }));
-    });
-    request.setTimeout(publicationTimeoutMs, () => request.destroy(new Error("D1_STATS_IMPORT_TIMEOUT")));
-    request.once("error", reject);
-    request.end(body);
-  });
-}
-
 const indexPath = path.resolve(indexValue);
 const index = new SearchIndex({ filePath: indexPath, backupDir: path.join(path.dirname(indexPath), "backups") });
 const ledger = new PcPartsLedger({ db: index.db });
@@ -88,6 +61,7 @@ try {
   ledger.migrate();
   const asOf = new Date().toISOString();
   const integrityAudit = ledger.runIntegrityAudit(asOf);
+  if (integrityAudit.ok !== true) throw new Error('PC_STATS_LEDGER_INTEGRITY_FAILED');
   const aliasEvaluations = ledger.evaluateDueAliasShadows(asOf, aliasPromotionEvidence);
   const pipelineDecisions = evaluatePipelineQualityReports({
     ledger,
@@ -95,6 +69,7 @@ try {
     evaluatedAt: asOf
   });
   const activePipelineVersion = ledger.getActivePipelineVersion();
+  if (!activePipelineVersion) throw new Error('PC_STATS_ACTIVE_PIPELINE_REQUIRED');
   const versionOptions = activePipelineVersion ? {
     normalizationVersion: activePipelineVersion.normalization_version,
     parserVersion: activePipelineVersion.parser_version,
@@ -116,16 +91,8 @@ try {
       versionOptions.filterVersion || "pc-filter-v1",
       ...PC_DIRECTORY_PUBLICATION_SOURCE_KEYS
     );
-  const scopes = statsProductIds.length > 0
-    ? availableScopes.filter((scope) => statsProductIds.includes(String(scope.canonical_product_id || "")))
-    : availableScopes;
-  if (statsProductIds.length > 0) {
-    const foundProductIds = new Set(scopes.map((scope) => String(scope.canonical_product_id || "")));
-    const missingProductIds = statsProductIds.filter((productId) => !foundProductIds.has(productId));
-    if (missingProductIds.length > 0) {
-      throw new Error(`PC_STATS_PRODUCT_IDS_NOT_FOUND: ${missingProductIds.join(",")}`);
-    }
-  }
+  const externalActive = await readActiveStatsScopes({ importUrl, token: importToken });
+  const scopes = fullPublicationScopes(ledger.db, availableScopes, { externalActive });
   const rows = [];
   for (const scope of scopes) {
     const options = {
@@ -139,14 +106,14 @@ try {
       ...versionOptions
     };
     const stats = compactStatsForPublication(ledger.rebuildAndGetPriceStats(options));
-    const memberCount = ledger.traceStatMembers(options).length;
+    const traceability = pcStatsTraceability(ledger, options);
     rows.push({
       canonical_product_id: scope.canonical_product_id,
       market_pool: scope.market_pool,
       condition_code: scope.condition_code,
       currency: scope.currency,
       days: 30,
-      stats_json: { ...stats, traceability: { member_count: memberCount } },
+      stats_json: { ...stats, traceability },
       as_of: asOf
     });
   }
@@ -160,17 +127,27 @@ try {
     publication_id: randomUUID(),
     checksum: await statsChecksum(rows),
     expected_row_count: rows.length,
-    merge_with_active: true,
+    merge_with_active: false,
+    normalization_version: Number(activePipelineVersion?.normalization_version || 1),
     parser_version: versionOptions.parserVersion || "pc-parser-v1",
     rule_version: versionOptions.ruleVersion || "pc-rules-v1",
     filter_version: versionOptions.filterVersion || "pc-filter-v1",
     created_at: asOf,
     expected_non_empty_scope_count: nonEmptyScopeCount,
     expected_keys: rows.map(statsPublicationKey).sort(),
+    expected_previous_publication: { publication_id: externalActive.publication_id, checksum: externalActive.checksum },
     rows,
     ...(sampleDropAcknowledgement ? { sample_drop_acknowledgement: sampleDropAcknowledgement } : {})
   };
   const publicationBody = JSON.stringify(publication);
+  if (JSON.stringify(ledger.getActivePipelineVersion()) !== JSON.stringify(activePipelineVersion)) {
+    throw new Error('PC_STATS_PIPELINE_CHANGED_DURING_PREPARATION');
+  }
+  storeCompletedPricePublication(ledger.db, {
+    publicationId: publication.publication_id, rows, expectedRowCount: rows.length,
+    expectedKeys: rows.map(storedPricePublicationKey), allowedSourceIds: PC_DIRECTORY_PUBLICATION_SOURCE_KEYS,
+    validateOnly: true
+  });
   console.error(JSON.stringify({
     phase: "prepared",
     publication_id: publication.publication_id,
@@ -179,22 +156,22 @@ try {
     product_ids: statsProductIds,
     body_bytes: Buffer.byteLength(publicationBody)
   }));
-  const response = await postJson(importUrl, publicationBody);
-  let payload = {};
-  try { payload = JSON.parse(response.body); } catch {}
-  if (response.status < 200 || response.status >= 300) {
-    throw new Error(`D1_STATS_IMPORT_HTTP_${response.status}: ${JSON.stringify(payload)}`);
-  }
-  const activated = payload?.publication;
-  if (payload?.ok !== true || activated?.active !== true
-    || String(activated.publication_id || "") !== publication.publication_id
-    || !/^[a-f0-9]{64}$/iu.test(String(activated.checksum || ""))
-    || !Number.isInteger(Number(activated.row_count)) || Number(activated.row_count) < rows.length
-    || Number(activated.input_row_count) !== rows.length
-    || Number(activated.scope_key_count) !== Number(activated.row_count)) {
-    throw new Error("D1_STATS_IMPORT_ACTIVATION_MANIFEST_MISMATCH");
-  }
+  const activated = await publishStatsInChunks({
+    importUrl,
+    token: importToken,
+    publication,
+    timeoutMs: publicationTimeoutMs,
+    onProgress: ({ staged, total }) => {
+      if (staged === total || staged % 10 === 0) console.error(JSON.stringify({ phase: "staging", staged, total }));
+    }
+  });
+  assertFullPublicationActivation(publication, activated);
   const publishedAt = new Date().toISOString();
+  const localPublication = storeCompletedPricePublication(ledger.db, {
+    publicationId: activated.publication_id, rows, expectedRowCount: rows.length,
+    expectedKeys: rows.map(storedPricePublicationKey), publishedAt,
+    allowedSourceIds: PC_DIRECTORY_PUBLICATION_SOURCE_KEYS
+  });
   ledger.recordPublicationSuccess({
     publicationId: activated.publication_id,
     checksum: activated.checksum,
@@ -203,6 +180,7 @@ try {
   });
   console.log(JSON.stringify({
     published: true,
+    local_publication: localPublication,
     row_count: Number(activated.row_count),
     input_row_count: rows.length,
     preserved_row_count: Number(activated.preserved_row_count || 0),

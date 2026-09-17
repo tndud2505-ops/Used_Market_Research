@@ -1,4 +1,4 @@
-export const PC_PRODUCT_MASTER_V2_VERSION = 4;
+export const PC_PRODUCT_MASTER_V2_VERSION = 5;
 export const PC_UNCLASSIFIED_MANUFACTURER_V3 = "기타/미분류 제조사";
 
 export const PC_GPU_BOARD_MANUFACTURERS_V2 = Object.freeze([
@@ -607,6 +607,9 @@ const MOTHERBOARD_PRODUCTS = [
     }
   }),
   ...[
+    { manufacturer: "MSI", model: "MAG B650 TOMAHAWK WIFI", family: "MAG", platform: "AMD", socket: "AM5", chipset: "B650", formFactor: "ATX", ddr: "DDR5", wifi: true, edition: "TOMAHAWK WIFI", aliases: ["B650 토마호크 WIFI", "B650 토마호크 와이파이"], sourceUrl: "https://www.msi.com/Motherboard/MAG-B650-TOMAHAWK-WIFI/Specification" },
+    { manufacturer: "MSI", model: "PRO B760M-A WIFI DDR4", family: "PRO", platform: "Intel", socket: "LGA1700", chipset: "B760", formFactor: "Micro-ATX", ddr: "DDR4", wifi: true, edition: "A WIFI DDR4", sourceUrl: "https://www.msi.com/Motherboard/PRO-B760M-A-WIFI-DDR4/Specification" },
+    { manufacturer: "ASRock", model: "B550M Steel Legend", family: "Steel Legend", platform: "AMD", socket: "AM4", chipset: "B550", formFactor: "Micro-ATX", ddr: "DDR4", edition: "STEEL LEGEND", aliases: ["B550M 스틸레전드", "B550M 스틸 레전드"], sourceUrl: "https://www.asrock.com/mb/AMD/B550M%20Steel%20Legend/index.asp" },
     { manufacturer: "ASUS", model: "ROG CROSSHAIR VIII IMPACT", family: "ROG Crosshair", platform: "AMD", socket: "AM4", chipset: "X570", formFactor: "Mini-DTX", ddr: "DDR4", wifi: true, edition: "VIII IMPACT", sourceUrl: "https://rog.asus.com/motherboards/rog-crosshair/rog-crosshair-viii-impact-model/" },
     { manufacturer: "ASUS", model: "TUF GAMING B850M-PLUS II", family: "TUF Gaming", platform: "AMD", socket: "AM5", chipset: "B850", formFactor: "Micro-ATX", ddr: "DDR5", edition: "PLUS II", sourceUrl: "https://www.asus.com/motherboards-components/motherboards/tuf-gaming/tuf-gaming-b850m-plus-ii/" },
     { manufacturer: "ASUS", model: "PRIME H610M-E D4", family: "Prime", platform: "Intel", socket: "LGA1700", chipset: "H610", formFactor: "Micro-ATX", ddr: "DDR4", edition: "E D4", sourceUrl: "https://www.asus.com/motherboards-components/motherboards/prime/prime-h610m-e-d4/" },

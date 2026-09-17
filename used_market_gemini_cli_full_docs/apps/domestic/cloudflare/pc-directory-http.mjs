@@ -6,6 +6,7 @@ import {
 } from "../market/data/pc-product-master-v2.mjs";
 import { pcPartsDirectoryForApiV2 } from "../market/logic/pc-parts-directory.mjs";
 import { pcProductQueryVariants } from "../market/logic/pc-search-query-variants.mjs";
+import { pcBrandSearchAliases } from '../market/logic/pc-product-search.mjs';
 import {
   PUBLIC_PC_CATEGORY_CODES,
   publicPcCatalogForApi,
@@ -108,7 +109,7 @@ export function pcToolsCatalog(publicCatalog = publicPcCatalogForApi()) {
     category_code: p.category,
     brand: p.manufacturer || p.brand || null,
     key_specs: { ...(p.spec || {}), ...(p.browse_facets || {}) },
-    aliases: p.aliases || []
+    aliases: [...new Set([...(p.aliases || []), ...pcBrandSearchAliases(p.manufacturer || p.brand)])]
   }));
   return {
     categories: [...publicCatalog.categories, ...extraCodes.map((code) => ({ code, label: code === "CASE" ? "케이스" : "쿨러", model_count: products.filter((p) => p.category_code === code).length }))],
@@ -213,7 +214,7 @@ export function pcCollectionTargetSetV2() {
     ["ODD", "블루레이 ODD"]
   ];
   const categoryTargets = PC_PART_CATEGORY_SEEDS_V2.map((category, index) => ({
-    targetId: `pc-target:${PC_PRODUCT_MASTER_V2_VERSION}:category-v12:${category.code}`,
+    targetId: `pc-target:${PC_PRODUCT_MASTER_V2_VERSION}:category-v13:${category.code}`,
     canonicalProductId: null,
     categoryCode: category.code,
     queryText: category.label,
@@ -224,7 +225,7 @@ export function pcCollectionTargetSetV2() {
     enabled: true
   }));
   const generalTargets = generalQueries.map(([categoryCode, queryText], index) => ({
-    targetId: `pc-target:${PC_PRODUCT_MASTER_V2_VERSION}:market-v12:${categoryCode}:${index}`,
+    targetId: `pc-target:${PC_PRODUCT_MASTER_V2_VERSION}:market-v13:${categoryCode}:${index}`,
     canonicalProductId: null,
     categoryCode,
     queryText,
@@ -295,7 +296,7 @@ export function pcCollectionTargetSetV2() {
     for (let queryIndex = 0; queryIndex < uniquePlans.length; queryIndex += 1) {
       const plan = uniquePlans[queryIndex];
       exactTargets.push({
-        targetId: `pc-target:${PC_PRODUCT_MASTER_V2_VERSION}:master-v12:${product.id}:${plan.scope}:${queryIndex}`,
+        targetId: `pc-target:${PC_PRODUCT_MASTER_V2_VERSION}:master-v13:${product.id}:${plan.scope}:${queryIndex}`,
         canonicalProductId: product.id,
         categoryCode: product.category,
         queryText: plan.queryText,
@@ -309,9 +310,21 @@ export function pcCollectionTargetSetV2() {
     }
   }
   return {
-    targetSetVersion: `pc-targets:${PC_PRODUCT_MASTER_V2_VERSION}:full-master-v12`,
+    targetSetVersion: `pc-targets:${PC_PRODUCT_MASTER_V2_VERSION}:full-master-v13`,
     directoryVersion: PC_PRODUCT_MASTER_V2_VERSION,
-    targets: [...categoryTargets, ...generalTargets, ...exactTargets]
+    targets: [...categoryTargets, ...generalTargets, ...exactTargets,
+      ...collectionProducts.filter(product => product.category === 'RAM' && product.manufacturer === 'G.Skill')
+        .map((product, index) => ({
+          targetId: `pc-target:${PC_PRODUCT_MASTER_V2_VERSION}:master-v13:${product.id}:domestic:ko`,
+          canonicalProductId: product.id,
+          categoryCode: 'RAM',
+          queryText: `지스킬 ${product.spec.memory_generation} ${product.spec.module_capacity_gb}GB`,
+          sourceKeys: searchMarketplaceSources,
+          targetOrder: exactOrder + index,
+          cadenceClass: 'DAILY_MASTER',
+          minimumIntervalMinutes: 24 * 60,
+          enabled: true
+        }))]
   };
 }
 

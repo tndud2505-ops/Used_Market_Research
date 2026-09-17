@@ -9,7 +9,12 @@ import { spawn } from "node:child_process";
 
 import worker from "../cloudflare/worker.mjs";
 import { buildCacheKey, fetchThroughPcReadCache, isCacheableRequest } from "../cloudflare/free-tier.mjs";
-import { statsChecksum, statsPublicationKey } from "../cloudflare/public-product-stats.mjs";
+import {
+  statsChecksum,
+  statsChunkManifestChecksum,
+  statsPublicationBoundaryKey,
+  statsPublicationKey
+} from "../cloudflare/public-product-stats.mjs";
 import {
   comparePcListingRows,
   dedupePcListingRows,
@@ -1049,6 +1054,7 @@ assert.equal(nextTokenImportResponse.status, 200, "a secondary operator token su
 
 const publicationRouteD1 = new DatabaseSync(":memory:");
 publicationRouteD1.exec(await readFile(new URL("../cloudflare/migrations/0002_pc_public_stats.sql", import.meta.url), "utf8"));
+publicationRouteD1.exec(await readFile(new URL("../cloudflare/migrations/0015_pc_stats_chunk_staging.sql", import.meta.url), "utf8"));
 const publicationRouteEnv = {
   DB: d1Adapter(publicationRouteD1),
   MANUAL_RUN_TOKEN: "publication-route-token"
@@ -1062,7 +1068,8 @@ const publicationRouteStats = (sampleCount) => ({
     active: { sample_count: sampleCount }, sold: { sample_count: 0 },
     confirmed_transactions: { sample_count: 0 }, daily: []
   }],
-  versions: { parser: "pc-parser-v5", rule: "pc-rules-v5", filter: "pc-filter-v5" }
+  traceability: { member_count: sampleCount, member_checksum: "a".repeat(64) },
+  versions: { normalization: 5, parser: "pc-parser-v5", rule: "pc-rules-v5", filter: "pc-filter-v5" }
 });
 const publicationRouteRow = (canonicalProductId, sampleCount, asOf) => ({
   canonical_product_id: canonicalProductId,
@@ -1080,6 +1087,7 @@ const publicationRouteManifest = async (publicationId, rows, mergeWithActive = f
   expected_non_empty_scope_count: rows.length,
   checksum: await statsChecksum(rows),
   expected_keys: rows.map(statsPublicationKey),
+  normalization_version: 5,
   parser_version: "pc-parser-v5",
   rule_version: "pc-rules-v5",
   filter_version: "pc-filter-v5",
@@ -1099,6 +1107,63 @@ const publicationBaseResponse = await publicationRouteFetch(
   await publicationRouteManifest("route-base", publicationBaseRows)
 );
 assert.equal(publicationBaseResponse.status, 200, JSON.stringify(await publicationBaseResponse.clone().json()));
+const stagedRows = [...publicationBaseRows]
+  .map((row) => ({ ...row, stats_json: publicationRouteStats(2), as_of: "2026-09-01T00:00:00.000Z" }))
+  .sort((left, right) => statsPublicationKey(left).localeCompare(statsPublicationKey(right)));
+const stagedCommon = {
+  publication_id: "route-staged",
+  checksum: await statsChecksum(stagedRows),
+  expected_row_count: stagedRows.length,
+  expected_non_empty_scope_count: stagedRows.length,
+  normalization_version: 5,
+  parser_version: "pc-parser-v5",
+  rule_version: "pc-rules-v5",
+  filter_version: "pc-filter-v5",
+  created_at: "2026-09-01T00:00:00.000Z",
+  merge_with_active: false
+};
+const stagedDescriptors = [];
+for (const [chunkIndex, row] of stagedRows.entries()) {
+  const descriptor = {
+    chunk_index: chunkIndex,
+    expected_chunk_count: stagedRows.length,
+    chunk_checksum: await statsChecksum([row]),
+    row_count: 1,
+    non_empty_scope_count: 1,
+    first_scope_key: statsPublicationBoundaryKey(row),
+    last_scope_key: statsPublicationBoundaryKey(row)
+  };
+  stagedDescriptors.push(descriptor);
+  const response = await worker.fetch(new Request("https://used-pick.test/admin/stage-product-stats", {
+    method: "POST",
+    headers: { authorization: "Bearer publication-route-token", "content-type": "application/json" },
+    body: JSON.stringify({
+      ...stagedCommon,
+      ...descriptor,
+      chunk_row_count: 1,
+      chunk_non_empty_scope_count: 1,
+      rows: [row]
+    })
+  }), publicationRouteEnv);
+  assert.equal(response.status, 200, JSON.stringify(await response.clone().json()));
+}
+const stagedActivationResponse = await worker.fetch(new Request("https://used-pick.test/admin/activate-product-stats", {
+  method: "POST",
+  headers: { authorization: "Bearer publication-route-token", "content-type": "application/json" },
+  body: JSON.stringify({
+    ...stagedCommon,
+    expected_chunk_count: stagedDescriptors.length,
+    chunk_manifest_checksum: await statsChunkManifestChecksum(stagedDescriptors)
+  })
+}), publicationRouteEnv);
+const storedStagedDescriptors = publicationRouteD1.prepare(`SELECT chunk_index, expected_chunk_count, chunk_checksum,
+  row_count, non_empty_scope_count, first_scope_key, last_scope_key
+  FROM public_stats_publication_chunks WHERE publication_id = ? ORDER BY chunk_index`).all("route-staged");
+assert.equal(await statsChunkManifestChecksum(storedStagedDescriptors),
+  await statsChunkManifestChecksum(stagedDescriptors), "stored chunk descriptors must retain the complete manifest");
+assert.equal(stagedActivationResponse.status, 200, JSON.stringify(await stagedActivationResponse.clone().json()));
+assert.equal(publicationRouteD1.prepare("SELECT publication_id FROM public_stats_publications WHERE active = 1")
+  .get().publication_id, "route-staged", "chunk staging must remain invisible until complete activation");
 const publicationInputRows = [
   publicationRouteRow("gpu:route:overlap", 3, "2026-08-31T00:00:00.000Z"),
   publicationRouteRow("gpu:route:added", 1, "2026-08-31T00:00:00.000Z")
@@ -1500,6 +1565,8 @@ try {
   ), {}, statsOriginRead);
   assert.equal(firstCachedStats.headers.get("x-pc-read-cache"), "MISS");
   assert.equal(secondCachedStats.headers.get("x-pc-read-cache"), "HIT");
+  assert.ok([...listingCacheEntries.keys()].every(key => key.startsWith('https://used-market-pc-read-cache-v2.invalid/')),
+    'the repaired price cohort must never reuse pre-release v1 edge cache entries');
   assert.equal(statsReads, 1, "normalized price-stat reads must share a Worker cache entry");
 
   let failedReads = 0;
@@ -1879,9 +1946,9 @@ const d1ListingItemsBeforeFreshnessMirror = structuredClone(workerListingsPayloa
 const sourceRuntimeCollectedAt = new Date(Date.now() - 30_000).toISOString();
 const unrelatedSourceRuntimeCollectedAt = new Date(Date.now() - 5_000).toISOString();
 const freshnessTargetIds = Object.freeze({
-  bunjangGpu: "pc-target:4:market-v12:GPU:0",
-  joonggonaraGpu: "pc-target:4:market-v12:GPU:0",
-  joonggonaraCpu: "pc-target:4:market-v12:CPU:1"
+  bunjangGpu: "pc-target:5:market-v13:GPU:0",
+  joonggonaraGpu: "pc-target:5:market-v13:GPU:0",
+  joonggonaraCpu: "pc-target:5:market-v13:CPU:1"
 });
 const mirrorCollectionManifest = async (sourceId, asOf, successfulTargetIds) => {
   const response = await worker.fetch(new Request("https://used-pick.test/admin/import-listings", {
