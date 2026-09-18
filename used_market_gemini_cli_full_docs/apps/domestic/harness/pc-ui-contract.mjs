@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import vm from "node:vm";
+import { coherentStats, metricValue as representative, metricPresentation, shiftDate } from '../web-backend/public/pc-tools-core.mjs';
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const html = readFileSync(path.join(appRoot, "web-backend/public/index.html"), "utf8");
@@ -35,8 +36,9 @@ requireText(html, 'href="https://used-pick.com/"', "the listing home must publis
 
 assert.ok(analysisHtml.indexOf('id="analysis-categories"') < analysisHtml.indexOf('id="model-controls"'),
   "analysis component tabs must lead directly into the model filters");
-assert.ok(analysisHtml.indexOf('id="chart-title"') < analysisHtml.indexOf('id="tools-summary"'),
-  "selected-model prices must sit beside the model name");
+assert.equal(analysisHtml.includes('id="tools-summary"'), false,
+  "price analysis uses one source table, not duplicate summary cards");
+requireText(analysisHtml, 'id="analysis-title"', 'analysis needs its compact selected-model heading');
 assert.equal(analysisHtml.includes('tools-source-label'), false,
   "analysis source tabs stand alone without a redundant site label");
 assert.equal(analysisHtml.includes('id="overview-button"'), false, "overall trend must be removed");
@@ -49,8 +51,9 @@ requireText(toolsScript, "const link = el('a', 'model-name-link', nameOf(product
   "the visible model name must be the direct original-search link");
 assert.equal(toolsScript.includes("state.expanded"), false, "flat model rows must not retain expansion state");
 assert.equal(toolsScript.includes("동일 모델 묶기"), false, "flat model rows must not expose a grouping toggle");
-assert.equal(toolsScript.includes("'판매중 가격', '판매완료 표시가', ''"), false,
-  'the restored builder must not repeat price columns in the selection table');
+requireText(toolsScript, "makeTable(['부품', '선택 모델', '수량', '판매중 가격', '판매완료 표시가', '변경'])",
+  'the search-first builder has one six-column integrated table');
+requireText(toolsScript, "el('tfoot')", 'both totals must be integrated into the table footer');
 assert.equal(toolsScript.includes("'원문 검색'"), false,
   "the model name link must not repeat a separate original-search label");
 requireText(toolsScript, "[['', '국내 전체']", "analysis must keep an explicit domestic aggregate tab");
@@ -74,12 +77,10 @@ assert.ok(filterIndex > sourceIndex && listingIndex > filterIndex,
 for (const id of [
   "category-select", "model-select", "source-facet-row", "source-filters", "source-filter-summary",
   "model-filters", "model-filter-body", "model-filter-toggle", "facet-rows", "filter-context", "active-filter-summary",
-  "active-filter-chips", "reset-filters", "show-matched-models", "model-detail-dialog", "model-detail-close",
-  "price-panel-title", "detail-message", "chart-source-filter", "chart-source-options", "price-summary", "price-chart-disclosure", "stats-section", "stats-groups",
-  "active-latest", "active-mean", "active-count", "sold-latest", "sold-mean", "sold-count",
-  "filter-column-resizer", "analysis-column-resizer", "listing-section", "listing-rows",
+  "active-filter-chips", "reset-filters", "show-matched-models",
+  "filter-column-resizer", "listing-section", "listing-rows",
   "listing-options", "listing-options-toggle", "listing-pagination", "listing-page-numbers", "listing-page-prev", "listing-page-next",
-  "model-detail-open", "price-summary-scope", "price-reset", "price-error", "listing-count", "adfit-banner",
+  "model-detail-open", "price-reset", "price-error", "listing-count", "adfit-banner",
 ]) {
   requireText(html, `id="${id}"`, `missing required UI region #${id}`);
   requireText(script, `querySelector("#${id}")`, `app.js must bind #${id}`);
@@ -89,23 +90,20 @@ assert.equal(html.includes('id="model-directory"'), false, "the old persistent m
 assert.equal(html.includes('class="overview-panels"'), false, "the old two-panel model/price overview must be removed");
 assert.equal(html.includes('class="price-panel"'), false, "price insight must not occupy the main results layout");
 assert.equal(html.includes('id="model-pagination"'), false, "the removed model table must not retain pagination controls");
-requireText(html, '<aside class="model-detail-dialog"', "model insight must use an in-page analysis panel");
-assert.equal(html.includes('<dialog class="model-detail-dialog"'), false,
-  "the insight panel must not retain modal semantics");
-assert.equal(styles.includes(".model-detail-dialog::backdrop"), false,
-  "the inline insight panel must not retain backdrop styling");
-requireText(script, "dom.modelDetailDialog.hidden = false", "selecting a model must reveal the inline insight panel");
-requireText(script, "dom.modelDetailDialog.hidden = true", "the inline insight panel must be closable");
-requireText(script, 'document.addEventListener("keydown"', "the modeless panel must retain an Escape close action");
-requireText(script, 'event.key === "Escape"', "Escape must close the insight panel accessibly");
-requireText(script, 'dom.modelDetailOpen.focus({ preventScroll: true })', "closing analysis must restore focus to its reopen action");
+for (const removed of ['model-detail-dialog','price-summary','stats-section','analysis-column-resizer','up-market-chart']) {
+  assert.equal(html.includes(`id="${removed}"`), false, `${removed} must not remain in search`);
+}
+assert.doesNotMatch(script, /\/price-stats|has-model-insight|function openModelDetail/);
+assert.match(html, /<a class="model-detail-open"[^>]*target="_blank"[^>]*rel="noopener noreferrer"/);
+assert.equal([...html.matchAll(/가격 그래프 보기 ↗/g)].length, 1, 'one graph action in the result toolbar');
+requireText(script, 'params.set("return_to", window.location.pathname + window.location.search)', 'graph navigation retains the search URL');
 requireText(script, 'dom.modelSelect.addEventListener("change"', "the compact model selector must drive exact-model selection");
 requireText(script, 'createElement("option"', "matching models must populate native selector options");
 requireText(script, "productSpecText(product)", "model choices must retain useful distinguishing specifications");
 requireText(script, "availableFacets", "text search must replace whole-category facets with matching-model facets");
 requireText(script, "payload?.available_facets", "the model response must drive the visible facet choices");
 
-requireText(html, 'class="source-selector-label">사이트</span>', "site scope needs a short visible label");
+requireText(html, 'class="source-selector-label">거래 사이트</span>', "site scope needs a short visible label");
 requireText(script, 'input.type = "radio"', "site controls must use the same single-selection semantics as price analysis");
 requireText(script, 'input.name = "listing-source"', "main listing site tabs must form one radio group");
 requireText(script, '["ebay", "joonggonara", "bunjang"]',
@@ -124,7 +122,8 @@ requireText(script, "payload?.total", "listing result count must use the API tot
 requireText(script, 'source.id === "ebay" || source.currency === "KRW"',
   "switching market scope must not make the other site tabs disappear");
 
-requireText(script, "openSingleSearchResult", "a unique text result must still open directly");
+requireText(script, "openSingleSearchResult", "a unique model scopes listings without opening price analysis");
+requireText(script, "state.productTotal !== 1", "one loaded model must not be confused with a total of one");
 requireText(script, "showScopedListings", "category/facet search must return listings without choosing one model");
 requireText(script, "return total > 0;",
   "every non-empty category, facet, or text scope must load current listings without a model-count gate");
@@ -141,51 +140,25 @@ requireText(script, "listing-model-action", "broad listing rows must offer direc
 requireText(script, "state.listingRequest", "listing and stats requests need independent cancellation");
 requireText(script, "function cancelListingRequest", "scope changes must cancel stale listing requests");
 
-requireText(html, "등록 매물 평균과 판매완료 표시가", "the dialog must describe the two visible price concepts");
-requireText(html, "실제 체결가와 다를 수 있습니다", "sold last-ask disclosure is required");
-requireText(script, "sourceEvidenceRow", "site comparison must stay compact without another wide table");
-const compactStats = script.slice(script.indexOf("function sourceEvidenceRow("), script.indexOf("function combineSourceMetric("));
-requireText(compactStats, 'label: "판매완료"', "sold asking prices must stay visibly distinct from confirmed transactions");
-assert.equal(compactStats.includes("confirmed_transactions"), false,
-  "site evidence must show only listed and sold-complete price series");
-requireText(script, "sourceRows(data)", "site price rows and charts must use actual per-source evidence");
-requireText(script, "sourceRowsWithEvidence", "sites without price evidence must not render in analysis");
-requireText(script, "sourceRowsWithCoherentSummary", "contradictory source averages must stay out of the visible comparison");
-requireText(script, "metricHasCoherentSummary", "valid one- or two-listing site evidence must remain selectable without inventing an average");
-requireText(script, "statsWithCoherentSources", "invalid source summaries must be removed before chart and summary aggregation");
-requireText(script, "mean < minimum", "a source average below its minimum must be rejected");
-requireText(script, "renderPriceChart", "the dialog must retain the daily chart renderer");
-requireText(script, 'tabindex: -1', "chart points must use a roving keyboard focus target");
-requireText(script, 'focusNode.setAttribute("tabindex", isActiveTab ? "0" : "-1")',
-  "the selected chart date must remain keyboard reachable without creating dozens of tab stops");
-requireText(script, "event.stopPropagation()", "chart-point arrow keys must move only one evidence date");
-requireText(script, '"aria-label"', "chart points must expose exact values accessibly");
-requireText(script, "statsHasEvidence", "empty price data must not produce fake price values");
-requireText(script, "price-chart-scroll", "older dates need an intentional horizontal scroll region");
-requireText(script, "selectDate", "the chart must expose one selected date with all available price series");
-requireText(html, "30일 보기 · 최대 2년 기록", "the chart must explain its fixed window and maximum history");
-assert.equal(html.includes("data-chart-days"), false, "the fixed thirty-day window must not retain obsolete range toggles");
-const chartRenderer = script.slice(script.indexOf("function renderPriceChart("), script.indexOf("function renderChartSourceFilter("));
-requireText(chartRenderer, 'key: "active"', "the chart needs the listed-price series");
-requireText(chartRenderer, 'key: "sold"', "the chart needs the sold-complete series");
-assert.equal(chartRenderer.includes('key: "confirmed_transactions"'), false,
-  "confirmed transaction prices must not remain as a chart series");
-assert.equal(chartRenderer.includes('key: "reserved"'), false,
-  "reserved prices must not remain as a chart series");
-for (const label of ["−1개월", "−1일", "+1일", "+1개월"]) requireText(script, label, `missing chart navigation ${label}`);
-requireText(script, "PRICE_HISTORY_DAYS = 730", "chart history must be bounded to two years");
-requireText(script, 'params.set("as_of", state.chartAnchorDate)', "historical chart windows must request an explicit end date");
-requireText(script, "statsForChartSource", "chart site toggles must scope statistics independently from listing filters");
-requireText(script, 'input.name = "chart-source"', "chart sites must use single-selection radio semantics");
+// Price rendering now belongs exclusively to pc-tools.js and its existing
+// shared core/data contracts, not the retired search-only chart implementation.
+requireText(toolsScript, '판매완료 표시가는 실제 체결가가 아닙니다.', 'sold display price remains distinguished');
+requireText(toolsScript, "makeTable(['출처','통화','기간'", 'source table includes actual currency and window');
+requireText(toolsScript, 'scopedStats(sourceStats(record.data, id)', 'source rows do not repeat aggregate prices');
+requireText(toolsScript, 'metric.sample_count >= 0', 'sample counts must be valid before display');
+requireText(toolsScript, 'SERIES.slice(0, 2)', 'price chart keeps active and sold series');
+requireText(toolsChart, "svg.setAttribute('tabindex', '0')", 'one accessible chart focus target');
+requireText(toolsChart, "['ArrowLeft', 'ArrowRight', 'Enter', ' ']", 'chart remains keyboard operable');
+requireText(toolsChart, "if (point.value == null) { drawing = false; return; }", 'missing observations remain gaps');
+assert.doesNotMatch(analysisHtml, /up-analysis-aside|이 가격의 비교 기준|매물 조건도 확인하세요|가격 데이터 이용 안내/);
 
-for (const resizer of ["filter-column-resizer", "analysis-column-resizer"]) {
+for (const resizer of ["filter-column-resizer"]) {
   requireText(html, `id="${resizer}"`, `missing ${resizer}`);
 }
 requireText(html, 'role="separator"', "column resize handles need separator semantics");
 requireText(script, "setPointerCapture", "column resize handles must support pointer dragging");
 requireText(script, 'event.key === "Home"', "column resize handles must support keyboard reset");
 requireText(styles, "--filter-column-width", "the filter column width must be adjustable");
-requireText(styles, "--analysis-column-width", "the analysis column width must be adjustable");
 
 requireText(script, 'scope === "UNIT" ? "개당가격"', "RAM quantity/price-scope labels are required");
 requireText(script, 'quantity > 1 ? "일괄가격"', "RAM lot pricing must stay separate from unit pricing");
@@ -207,11 +180,7 @@ requireText(styles, ".model-selector", "the model selector needs a dedicated com
 requireText(styles, ".source-choice", "site tabs need a readable inline layout");
 requireText(styles, '.source-choice input:checked + span', "the selected site tab needs the same active underline treatment as analysis");
 requireText(styles, "grid-column: 1 / -1", "site filters must wrap below model controls instead of clipping at zoomed widths");
-requireText(styles, "body.has-selected-product .results-flow", "selected listings and analysis need a shared layout");
-requireText(styles, ".model-detail-dialog:not([hidden])", "the inline analysis panel needs explicit visible-state styling");
-requireText(styles, "position: sticky", "the desktop analysis panel must remain visible beside listings");
-assert.match(styles, /@media \(max-width: 1180px\)[\s\S]*?\.model-detail-dialog:not\(\[hidden\]\)\s*\{[\s\S]*?position: static/u,
-  "the analysis panel must return to document flow on narrower screens");
+requireText(script, 'dom.listingSection.hidden = false', 'selected-model listings stay in the results region');
 requireText(styles, ".model-facet-values", "catalog facet choices must keep their dedicated grid");
 requireText(script, "mobileFacetMedia", "facet disclosures must follow responsive layout");
 requireText(script, "setListingOptionsCollapsed", "mobile sort/price controls must remain collapsible");
@@ -243,48 +212,26 @@ assert.equal(context.metricValue({ mean: 150 }, ["mean"], "USD").currency, "USD"
   "a source metric without a nested currency must inherit its market currency");
 assert.equal(context.metricValue({ mean: null }, ["mean"], "USD"), null,
   "missing transaction evidence must not become a zero-priced transaction");
-const coherentStats = context.statsWithCoherentSources({
-  active: { sample_count: 2, min: 100, max: 200, mean: 125 },
+const validStats = coherentStats({
   by_source: [
-    {
-      source_id: "valid", active: { sample_count: 1, min: 100, max: 100, mean: 100 },
-      daily: [{ date: "2026-09-08", active: { sample_count: 1, min: 100, max: 100, mean: 100 } }],
-    },
-    {
-      source_id: "invalid", active: { sample_count: 1, min: 200, max: 200, mean: 50 },
-      daily: [{ date: "2026-09-08", active: { sample_count: 1, min: 200, max: 200, mean: 50 } }],
-    },
+    { source_id: 'valid', active: { sample_count: 5, min: 100, max: 100, mean: 100 } },
+    { source_id: 'invalid', active: { sample_count: 5, min: 200, max: 200, mean: 50 } },
   ],
 });
-assert.equal(coherentStats.active.sample_count, 1,
-  "invalid source summaries must not contribute samples to the visible average");
-assert.equal(coherentStats.active.mean, 100,
-  "invalid source summaries must not contribute prices to the visible average");
-assert.equal(coherentStats.by_source.length, 1,
-  "invalid sources must not remain in the visible source comparison");
-assert.equal(coherentStats.integrity_filtered_source_ids[0], "invalid",
-  "a removed source must remain identifiable as awaiting a statistics refresh");
-assert.equal(context.metricHasCoherentSummary({ sample_count: 1, min: 50000, max: 50000, mean: null, median: null }), true,
-  "one exact asking price is valid site evidence even when no aggregate average is published");
-assert.equal(context.metricHasCoherentSummary({
-  sample_count: 71, min: 9000, max: 200000, mean: null, average: 41777.47, median: null
-}), true, "a valid published average must remain usable when the legacy mean field is null");
-assert.equal(context.metricDisplayValue({ sample_count: 1, min: 50000, max: 50000, mean: null, median: null }, "KRW").amount, 50000,
-  "one exact asking price must be displayed as evidence without being promoted to an aggregate mean");
-const pendingStats = context.statsWithCoherentSources({
-  by_source: [{ source_id: "invalid", active: { sample_count: 1, min: 200, max: 200, mean: 50 } }],
-});
-assert.equal(pendingStats.by_source.length, 0,
-  "an entirely invalid source set must not leak into visible price statistics");
-assert.equal(pendingStats.integrity_filtered_source_ids[0], "invalid",
-  "an entirely invalid source set must remain visible as awaiting a refresh");
-context.state = { chartSourceId: "invalid" };
-assert.equal(context.statsForChartSource(pendingStats).selected_chart_source, "invalid",
-  "selecting only a pending source must retain its honest refresh state");
-assert.equal(context.shiftMonthKey("2024-03-31", -1), "2024-02-29",
-  "month navigation must clamp to the leap-year month end");
-assert.equal(context.shiftDateKey("2026-09-08", -1), "2026-09-07",
-  "day navigation must move exactly one UTC calendar day");
+assert.equal(validStats.active.sample_count, 5, 'invalid sources cannot contribute samples');
+assert.equal(validStats.active.mean, 100, 'invalid sources cannot contribute prices');
+assert.equal(validStats.by_source.length, 1);
+assert.equal(validStats.integrity_filtered_source_count, 1);
+const singleEvidence = { sample_count: 1, min: 50000, max: 50000, mean: null, median: null };
+assert.equal(representative(singleEvidence), null, 'one observed price cannot become an aggregate');
+assert.match(metricPresentation(singleEvidence).text, /50,000원/);
+assert.equal(metricPresentation(singleEvidence).state, 'insufficient');
+assert.equal(representative({sample_count:71,min:9000,max:200000,mean:null,average:41777.47,median:null}),41777.47);
+const pendingStats = coherentStats({ by_source: [{ source_id:'invalid', active:{ sample_count:5,min:200,max:200,mean:50 } }] });
+assert.equal(pendingStats.by_source.length,0);
+assert.equal(pendingStats.integrity_filtered_source_count,1);
+assert.equal(shiftDate('2024-03-31',-1,'month'),'2024-02-29');
+assert.equal(shiftDate('2026-09-08',-1),'2026-09-07');
 
 const node = () => ({ hidden: false, value: "", textContent: "", attributes: {},
   setAttribute(key, value) { this.attributes[key] = value; },
@@ -318,6 +265,7 @@ let listingLoads = 0;
 let statsRenders = 0;
 Object.assign(context, {
   updateFacetSelectionUi() {}, renderSourceFilters() {}, updateStatsMessage() {},
+  syncCatalogUrl() {}, updatePriceGraphLink() {},
   window: { requestAnimationFrame() {} },
   renderStats() { statsRenders += 1; },
   loadListings() { listingLoads += 1; },
@@ -331,24 +279,38 @@ context.reloadListingsForControls("ebay");
 assert.equal(listingLoads, 2);
 assert.equal(statsRenders, 0, "listing source filters must not change the independently selected chart site");
 
-const statsContext = vm.createContext({ Intl });
-vm.runInContext(declarations, statsContext);
-statsContext.COHORTS = [
-  { marketPool: "KR_C2C_USED", currency: "KRW", label: "국내 개인 중고" },
-  { marketPool: "OVERSEAS_USED", currency: "USD", label: "해외 중고" },
-];
-statsContext.state = { selectedProduct: {}, selectedSites: new Set(), detailStats: statsContext.COHORTS
-  .map((cohort) => ({ cohort, data: { active: { sample_count: 2, mean: 100 }, confirmed_transactions: { sample_count: 0, mean: null } } })).reverse() };
-statsContext.dom = Object.fromEntries(["statsGroups", "priceSummary", "priceSummaryScope", "statsSection", "priceChartDisclosure", "statsAsOf"]
-  .map((key) => [key, node()]));
-const summaryKeys = [];
-Object.assign(statsContext, { clearSelectedPriceTable() {}, renderStatsGroup() {}, renderChartSourceFilter() {},
-  renderPriceSummaryRow(key, block, data, currency) { summaryKeys.push([key, currency]); },
+const linkContext = vm.createContext({ Intl, URL, URLSearchParams });
+vm.runInContext(declarations, linkContext);
+const selected = { canonical_product_id:'cpu:synthetic:test',canonical_display_name:'Synthetic CPU',category_code:'CPU',key_specs:{directory_node_type:'PRODUCT'} };
+const searchUrl = new URL('https://example.test/?category_code=CPU&q=Synthetic&sort=price_asc&price_min=100');
+Object.assign(linkContext, {
+  state:{products:[selected],productTotal:1,selectedProduct:selected,selectedSites:new Set(['ebay']),facets:{},categoryCode:'CPU',query:'Synthetic',listingSort:'price_asc',priceMin:'100',priceMax:'900',
+    sources:[{id:'bunjang',currency:'KRW',marketPools:['KR_C2C_USED']},{id:'ebay',currency:'USD',marketPools:['OVERSEAS_USED']}]},
+  dom:{modelDetailOpen:node()}, PRODUCT_QUERY_KEYS:new Set(),
+  window:{location:searchUrl,history:{replaceState(_a,_b,url){searchUrl.href=new URL(url,searchUrl).href;}}},
 });
-statsContext.renderStats();
-assert.equal(statsContext.dom.priceSummaryScope.textContent, "국내 개인 중고 · KRW · 최근 30일",
-  "out-of-order HTTP responses must not select the overseas summary first");
-assert.deepEqual(summaryKeys, [["active", "KRW"], ["sold", "KRW"]]);
+linkContext.syncCatalogUrl();linkContext.updatePriceGraphLink();
+const graphUrl = new URL(linkContext.dom.modelDetailOpen.href,searchUrl);
+assert.equal(graphUrl.searchParams.get('model'),selected.canonical_product_id);
+assert.equal(graphUrl.searchParams.get('source'),'ebay');
+assert.equal(graphUrl.searchParams.get('return_to'),searchUrl.pathname+searchUrl.search);
+assert.equal(searchUrl.searchParams.get('q'),'Synthetic');
+assert.equal(searchUrl.searchParams.get('sort'),'price_asc');
+assert.equal(searchUrl.searchParams.get('price_min'),'100');
+assert.equal(linkContext.buildListingQuery().get('currency'),'USD');
+linkContext.state.selectedSites.clear();
+assert.equal(linkContext.buildListingQuery().get('currency'),'KRW');
+assert.equal(linkContext.buildListingQuery().get('sites'),'bunjang');
+linkContext.state.sources=[linkContext.state.sources[1]];
+assert.equal(linkContext.listingSourceScope().length,0,'domestic cannot fall back to eBay');
+linkContext.state.selectedProduct=null;linkContext.state.productTotal=2;
+linkContext.updatePriceGraphLink();assert.equal(linkContext.dom.modelDetailOpen.hidden,true);
+let singleSelections=0;linkContext.selectProduct=()=>{singleSelections++;};
+assert.equal(linkContext.openSingleSearchResult(),false);
+linkContext.state.productTotal=1;assert.equal(linkContext.openSingleSearchResult(),true);
+assert.equal(singleSelections,1);
+linkContext.state.products=[];linkContext.state.productTotal=0;
+linkContext.updatePriceGraphLink();assert.equal(linkContext.dom.modelDetailOpen.hidden,true);
 
 const requestContext = vm.createContext({ URLSearchParams, AbortController, clearTimeout });
 vm.runInContext(declarations, requestContext);

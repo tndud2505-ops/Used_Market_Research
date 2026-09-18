@@ -1,4 +1,4 @@
-import { SERIES, money } from './pc-tools-core.mjs?v=coverage-v4';
+import { SERIES, money } from './pc-tools-core.mjs?v=parts-ux-v4';
 const ns = 'http://www.w3.org/2000/svg';
 const cleanups = new WeakMap();
 const svgNode = (name, attrs = {}, text = '') => {
@@ -19,7 +19,7 @@ export function drawChart(container, series, { index = false, label = '가격 �
     container.append(empty);
     return;
   }
-  const width = Math.max(220, container.clientWidth), height = width < 420 ? 240 : 280;
+  const width = Math.max(220, container.clientWidth), height = width < 420 ? 260 : 360;
   const left = width < 420 ? 62 : 68, right = width < 420 ? 16 : 24, top = 24, bottom = 42;
   const values = points.map(p => p.value);
   let low = Math.min(...values), high = Math.max(...values);
@@ -28,7 +28,7 @@ export function drawChart(container, series, { index = false, label = '가격 �
   const dates = [...new Set(series.flatMap(s => s.points.map(p => p.date)))].sort();
   const x = date => left + dates.indexOf(date) / Math.max(1, dates.length - 1) * (width - left - right);
   const y = value => top + (high - value) / (high - low) * (height - top - bottom);
-  const svg = svgNode('svg', { viewBox: `0 0 ${width} ${height}`, role: 'img', 'aria-label': `${label} · 일별 평균 가격` });
+  const svg = svgNode('svg', { viewBox: `0 0 ${width} ${height}`, role: 'img', 'aria-label': `${label} · 일별 대표가격` });
   for (let i = 0; i < 5; i++) {
     const value = low + (high - low) * i / 4;
     svg.append(svgNode('line', { x1: left, x2: width - right, y1: y(value), y2: y(value), stroke: 'var(--line, #e4e8ed)' }));
@@ -64,7 +64,7 @@ export function drawChart(container, series, { index = false, label = '가격 �
   const legend = document.createElement('div'); legend.className = 'tools-chart-legend';
   series.forEach(({ key }) => {
     const item = document.createElement('span'); item.className = `series-${key}`;
-    item.textContent = `● ${SERIES.find(s => s.key === key).label}`; legend.append(item);
+    item.textContent = `● ${SERIES.find(s => s.key === key).label} (${currency})`; legend.append(item);
   });
   container.append(plot, legend);
   const hide = () => { pinned = false; detail.hidden = true; guide.setAttribute('visibility', 'hidden'); };

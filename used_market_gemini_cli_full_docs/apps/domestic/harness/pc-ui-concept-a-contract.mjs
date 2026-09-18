@@ -9,12 +9,12 @@ import * as catalog from '../web-backend/public/pc-tools-catalog.mjs';
 const read = name => readFileSync(new URL(`../web-backend/public/${name}`, import.meta.url), 'utf8');
 const script = read('pc-tools.js'), app = read('app.js'), css = read('ui-concept-a.css');
 const pages = ['index.html', 'computer-builder.html', 'price-analysis.html', 'guide.html', 'privacy.html', 'terms.html'];
-test('all six pages use the restored UI-A theme, unique IDs and common navigation', () => {
+test('all six pages use search-first v2 assets, unique IDs and common navigation', () => {
   for (const name of pages) {
     const html = read(name), ids = [...html.matchAll(/\bid="([^"]+)"/g)].map(m => m[1]);
     assert.equal(ids.length, new Set(ids).size, `${name}: duplicate IDs`);
-    assert.match(html, /ui-concept-a\.css\?v=ui-a-v2/);
-    assert.match(html, /data-ui-release="ui-a-v2"/);
+    assert.match(html, /ui-concept-a\.css\?v=search-first-v2/);
+    assert.match(html, /data-ui-release="search-first-v2"/);
     assert.doesNotMatch(html, /ui-refinement\.css/);
     assert.match(html, /class="skip-link" href="#main"/);
     assert.equal([...html.matchAll(/<h1\b/g)].length, 1);
@@ -27,13 +27,13 @@ test('all six pages use the restored UI-A theme, unique IDs and common navigatio
 test('restored UI assets use a fresh cache identity while data and calculation versions remain current', () => {
   for (const name of ['core', 'catalog']) assert.ok(script.includes(`pc-tools-${name}.mjs?v=parts-ux-v4`));
   assert.match(script, /pc-tools-data\.mjs\?v=parts-data-v5/);
-  assert.match(script, /pc-tools-chart\.mjs\?v=ui-a-v1/);
-  assert.match(read('index.html'), /app\.js\?v=ui-a-v2/);
+  assert.match(script, /pc-tools-chart\.mjs\?v=search-first-v2/);
+  assert.match(read('index.html'), /app\.js\?v=search-first-v2/);
 });
 test('native dialogs are wired without destructive hash navigation or inline handlers', () => {
   assert.match(read('computer-builder.html'), /<dialog id="builder-model-dialog"/);
   assert.match(read('index.html'), /<dialog id="up-filter-dialog"/);
-  assert.match(script, /if \(type === 'show-summary'\)/);
+  assert.match(read('price-analysis.html'), /<dialog id="analysis-model-dialog"/);
   assert.doesNotMatch(read('computer-builder.html'), /href="#build-summary"/);
   assert.match(app, /home\.after\(dom\.modelFilters\)/);
   assert.match(app, /dialog\.showModal\(\)/);
@@ -118,40 +118,43 @@ test('picker cannot open before the live catalog is ready', () => {
   const t = setup({ builder: true }); t.state.ready = false; t.context.openModelPicker();
   assert.equal(t.nodes.get('#builder-model-dialog').showCount, 0);
 });
-test('analysis details are visible and preserve mean label, sample and date scope', () => {
-  const t = setup(); t.context.renderSummary(); const text = t.nodes.get('#tools-summary').textContent;
-  assert.match(text, /평균 · 표본 5건 · KRW · 2026-08-19 ~ 2026-09-17/);
-  assert.equal(t.nodes.get('#tools-summary').children[0].children.at(-1).className, 'tools-summary-detail');
+test('analysis details move into the source table without duplicate summary cards', () => {
+  const t = setup(); t.context.renderSummary(); t.context.renderAnalysisContext(t.record, t.record.data, 'KRW');
+  assert.equal(t.nodes.get('#tools-summary').children.length, 0);
+  const text = t.nodes.get('#analysis-source-comparison').textContent;
+  assert.match(text, /KRW2026-08-19 ~ 2026-09-17/);
+  assert.match(text, /102원평균5/);
 });
 test('missing/error publication does not display an invented zero-sample count', () => {
   for (const record of [{ state: 'loading' }, { state: 'error', error: 'HTTP 503' }, { state: 'ready', data: { availability: { status: 'UNAVAILABLE' } } }]) {
-    const t = setup({ record }); t.context.renderSummary(); const text = t.nodes.get('#tools-summary').textContent;
-    assert.match(text, /표본 미확인/); assert.doesNotMatch(text, /표본 0건/);
+    const t = setup({ record }); t.context.renderAnalysisContext(t.record, t.record.data, 'KRW');
+    const text = t.nodes.get('#analysis-source-comparison').textContent;
+    assert.match(text, /출처별 가격 자료 없음/); assert.doesNotMatch(text, /표본 0건|0원/);
   }
 });
 test('source comparison uses individual source values rather than repeating aggregate prices', () => {
   const t = setup(); t.context.renderAnalysisContext(t.record, t.record.data, 'KRW');
   const text = t.nodes.get('#analysis-source-comparison').textContent;
-  assert.match(text, /번개장터102원/); assert.match(text, /중고나라100원/);
-  assert.doesNotMatch(text, /101원/); assert.match(text, /평균 · 5건/);
+  assert.match(text, /번개장터[\s\S]*102원/); assert.match(text, /중고나라[\s\S]*100원/);
+  assert.doesNotMatch(text, /101원/); assert.match(text, /평균5/);
 });
 test('selected source and missing manufacturer cannot fall back to aggregate prices', () => {
   const t = setup({ source: 'bunjang' }); t.context.renderAnalysisContext(t.record, core.sourceStats(t.record.data, 'bunjang'), 'KRW');
   assert.doesNotMatch(t.nodes.get('#analysis-source-comparison').textContent, /중고나라/);
   t.state.selectedManufacturer = 'not-published'; t.context.renderAnalysisContext(t.record, null, 'KRW');
-  assert.match(t.nodes.get('#analysis-source-comparison').textContent, /통계가 제공되지/);
+  assert.match(t.nodes.get('#analysis-source-comparison').textContent, /선택 범위 미제공/);
   assert.doesNotMatch(t.nodes.get('#analysis-source-comparison').textContent, /102원|101원/);
 });
 test('reference buckets are labelled and models outside public listings have no false link', () => {
   const t = setup(); const p = { ...product, category_code: 'CASE', key_specs: { directory_node_type: 'FACET' } };
   t.state.byId.set(product.canonical_product_id, p);
   t.context.renderAnalysisContext(t.record, t.record.data, 'KRW');
-  assert.match(t.nodes.get('#analysis-scope').textContent, /제조사·규격 구간 참고/);
+  assert.match(t.nodes.get('#analysis-source-comparison').textContent, /제조사·규격 구간 참고/);
   assert.equal(t.nodes.get('#analysis-listing-link').hidden, true);
 });
 test('empty model selection clears the context instead of retaining another model price', () => {
   const t = setup(); t.state.selectedId = ''; t.context.renderAnalysisContext(null, null, 'KRW');
-  assert.match(t.nodes.get('#analysis-scope').textContent, /선택 모델 없음/);
+  assert.match(t.nodes.get('#analysis-source-comparison').textContent, /선택 모델 없음/);
   assert.match(t.nodes.get('#analysis-source-comparison').textContent, /조건에 맞는 모델이 없습니다/);
   assert.equal(t.nodes.get('#analysis-listing-link').hidden, true);
 });

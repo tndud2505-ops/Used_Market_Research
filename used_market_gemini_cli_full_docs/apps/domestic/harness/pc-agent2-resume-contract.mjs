@@ -28,8 +28,9 @@ function node(text = '') {
 }
 function allText(value) { return [value.textContent || '', ...(value.children || []).map(allText)].join(''); }
 function setup({ builder = true, data = raw() } = {}) {
-  const priceNode = node(); priceNode.dataset.buildPrice = ram.canonical_product_id;
-  const summary = node(), table = Object.assign(node(), { querySelectorAll: selector => selector === '[data-build-price]' ? [priceNode] : [] });
+  const priceNode = node(); priceNode.dataset.buildPrice = ram.canonical_product_id; priceNode.dataset.series = 'sold';
+  const memoryNode = node(); memoryNode.dataset.memoryTotal = ram.canonical_product_id;
+  const summary = node(), table = Object.assign(node(), { querySelectorAll: selector => selector === '[data-build-price]' ? [priceNode] : selector === '[data-memory-total]' ? [memoryNode] : [] });
   const state = { products: [ram], byId: new Map([[ram.canonical_product_id, ram]]), categories: [{ code: 'RAM', label: 'RAM' }],
     category: 'RAM', manufacturer: 'G.Skill', generation: 'DDR4', capacity: '16', query: '지스킬', sort: 'price', page: 3,
     selectedId: ram.canonical_product_id, selectedManufacturer: '', entries: [{ id: ram.canonical_product_id, quantity: 2, category: 'RAM', manufacturer: '' }],
@@ -43,18 +44,20 @@ function setup({ builder = true, data = raw() } = {}) {
     location: { href: 'https://example.test/price-analysis.html' }, history: { replaceState() {} } });
   vm.runInContext(`${factories}\n${declarations}`, sandbox);
   vm.runInContext('render = () => {}; refreshPrices = () => {};', sandbox);
-  return { sandbox, state, priceNode, summary };
+  return { sandbox, state, priceNode, summary, memoryNode };
 }
 
 test('RAM displayed sold unit × 2 preserves fractional-won arithmetic', () => {
-  const { sandbox, priceNode } = setup(); sandbox.refreshBuildPriceDetails();
-  assert.match(allText(priceNode), /단가 126,237\.5원 × 2 = 252,475원/);
-  assert.match(allText(priceNode), /16GB × 2개 = 총 32GB/);
+  const { sandbox, priceNode, memoryNode } = setup(); sandbox.refreshBuildPriceDetails();
+  assert.match(priceNode.title, /단가 126,237\.5원 × 2 = 252,475원/);
+  assert.match(allText(priceNode), /252,475원/);
+  assert.match(allText(memoryNode), /16GB × 2개 = 총 32GB/);
 });
 test('higher precision statistical means use an approximation sign, not a false equality', () => {
   const { sandbox, priceNode } = setup({ data: { ...raw(), sold: metric(100.335) } });
   sandbox.refreshBuildPriceDetails();
-  assert.match(allText(priceNode), /단가 100\.34원 × 2 ≈ 200\.67원/);
+  assert.match(priceNode.title, /단가 100\.34원 × 2 ≈ 200\.67원/);
+  assert.match(allText(priceNode), /200\.67원/);
 });
 test('reset clears maker/spec/query/sort but preserves saved build and site', () => {
   const { sandbox, state } = setup();
