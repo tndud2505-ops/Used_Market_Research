@@ -130,7 +130,15 @@ export async function runBrowserChecks({browser,origin,out,fixture=false}) {
   };
   try {
     page=await context.newPage();attach(page);
-    await page.goto(origin+'/?category_code=CPU',{waitUntil:'domcontentloaded'});await readySearch();
+    await page.goto(origin+'/?category_code=CPU',{waitUntil:'domcontentloaded'});
+    const actualOrigin=new URL(page.url()).origin;
+    if(actualOrigin!==origin) {
+      assert.equal(origin,'https://www.used-pick.com');assert.equal(actualOrigin,'https://used-pick.com');
+      report.canonical_redirect={from:origin,to:actualOrigin};origin=actualOrigin;
+      addCheck('www alias redirects to the canonical HTTPS host without changing the category query');
+      assert.equal(new URL(page.url()).searchParams.get('category_code'),'CPU');
+    }
+    await readySearch();
     assert.equal(await page.locator('#model-detail-dialog,#price-summary,#stats-section').count(),0);
     assert.equal(await page.locator('#model-detail-open:not([hidden])').count(),0);
     await layout('search-multiple');

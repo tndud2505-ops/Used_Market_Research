@@ -28,6 +28,7 @@
 ## 배포 전 확인
 
 - `npm test`: 전체 결정론 테스트 통과. 기존 데이터/분류/수집 정책/게시/가격 안전성 테스트를 유지하고 폐기한 화면 배치에 대한 UI 계약만 새 요구사항으로 갱신했다.
+- 저장소 루트 `scripts/verify.ps1`: 전체 결정론 테스트 재실행 통과. `git diff --check`도 통과했다.
 - `node cloudflare/deploy.mjs --preflight-only`: AWS 수집·게시 준비 상태 통과.
 - `harness/pc-search-first-browser.mjs`: loopback에서 통제된 합성 응답을 사용하는 13개 브라우저 검증 묶음 통과. 실제 브라우저에서 여러 모델/한 모델/매물 0·1건, 새 탭, 키보드 사이트 전환, 기간 오류, 통화·게시기간 불일치, 503 재시도, 부분 합계, 서로 다른 publication 거부, 인쇄 lifecycle, 저장 거부를 확인했다. 합성 503 한 건은 의도한 오류 검사이며 운영 장애가 아니다.
 - 같은 하네스를 실제 공개 API에 연결한 후보 화면에서도 통과했다. 운영 데이터를 변경하거나 매물·가격 API를 모의 응답으로 대체하지 않았다. 9종/10개 선택의 실제 API 단가와 화면 합계를 별도로 대조했고, 미확인 가격은 판매중/판매완료 각각 부분 합계로 제외됨을 확인했다.
@@ -39,7 +40,18 @@
 
 UI/정적 자산 변경이므로 기존 `cloudflare:app-release` 경로를 사용한다. D1 migration, AWS Runner 교체, 원장/통계 재게시, 수집·분류 로직 변경은 이번 범위에 포함하지 않는다. 기존 release 스크립트의 하네스·dry-run·이전 Worker 버전 확보·두 도메인 smoke 및 실패 시 정확 버전 rollback을 유지한다.
 
-운영 배포 ID와 배포 후 검수 결과는 실제 배포 후 아래에 기록한다.
+### 실제 배포 및 운영 재검증 완료
+
+- 배포 소스 커밋: `3e4a5e81541ce6ad137e3ba831a6c8133fc48c77` (`feat: implement search-first v2 listing and PC tools UI`).
+- 명령: `npm run cloudflare:app-release`, 종료 코드 0, 최종 `status: released`.
+- 활성 Worker 버전: `e9ff46f1-e61f-413f-a850-7234e62a7a84`. 배포 후 `wrangler deployments status`에서 해당 버전이 트래픽 100%를 담당하는 것을 재확인했다.
+- `https://used-pick.com`: health, HTML, 보안 헤더, 카테고리 API 검사 통과. 실제 운영 브라우저의 검색/페이지 이동/별도 그래프/원래 검색 조건 유지/사이트 키보드 선택/eBay USD 분리/모델 선택/가격 표/구성 저장·수량·제거/모바일 검수 8개 묶음 통과.
+- `https://www.used-pick.com`: 기존 canonical HTTPS 주 도메인으로의 301 이동을 유지한다. 경로·검색 조건 보존을 확인하고 주 도메인에서 같은 운영 브라우저 흐름까지 확인하여 9개 묶음 통과했다. 두 개의 별도 앱이 아니라 같은 앱의 별칭이다.
+- 각 주소로 요청한 변경 자산과 핵심 가격 모듈 12개씩, 총 24개 응답의 SHA-256이 검수한 로컬 파일과 일치했다. www에서는 검증된 동일 경로의 주 도메인 이동만 허용했다. 검사에 cache-bypass용 query를 추가하지 않았다.
+- 운영 두 경로의 page error, 콘솔 error, 1차 정적 자산 오류, 1차 API 오류는 모두 0건이었다. 운영값으로 합성 수치나 예시 가격을 삽입하지 않았다.
+- 배포 후에도 1440/1024/768/390/360px의 페이지 전체 가로 넘침과 수량 조작부 가림을 검사했다. 실제 운영 390px 캡처에서 부분 합계, RAM 수량, 가격 미확인 표시, 변경·제거·호환성 정보가 읽히는 것을 직접 확인했다.
+
+증거: `tmp/search-first-production-release.log`, `tmp/search-first-worker-status.json`, `tmp/search-first-v2/release-asset-audit.json`, `tmp/search-first-v2/used-pick-com-report.json`, `tmp/search-first-v2/www-used-pick-com-report.json`. 운영 보고서와 캡처는 생성 결과이므로 커밋하지 않는다. 배포 후 문서 및 www 검증 하네스의 변경은 서비스 자산을 바꾸지 않는다.
 
 ## 재현 방법
 
