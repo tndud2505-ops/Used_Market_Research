@@ -240,29 +240,9 @@ function persistBuild() {
   const feedback = $('#build-save-status');
   if (feedback) feedback.textContent = saved ? '이 브라우저에 저장되었습니다. 선택을 바꾸면 자동 저장됩니다.'
     : urlSaved ? '브라우저 저장을 사용할 수 없습니다. 현재 주소의 구성 정보는 유지됩니다.'
-      : '브라우저 저장과 주소 갱신을 사용할 수 없습니다. 공유 주소를 별도로 보관하세요.';
-  if (feedback && saved && !urlSaved) feedback.textContent += ' 현재 주소 갱신은 실패했습니다. 공유 주소를 이용하세요.';
-  const share = $('#share-output');
-  if (share) share.value = url.href;
-  const shareStatus = $('#build-share-status');
-  if (shareStatus) shareStatus.textContent = '';
+      : '브라우저 저장과 주소 갱신을 사용할 수 없습니다. 현재 구성을 다시 확인해 주세요.';
+  if (feedback && saved && !urlSaved) feedback.textContent += ' 현재 주소 갱신은 실패했습니다.';
   return saved;
-}
-function shareBuild() {
-  persistBuild();
-  const box = $('#build-share'), field = $('#share-output');
-  box.hidden = false; field.focus(); field.select();
-}
-async function copyBuildLink() {
-  const field = $('#share-output'), feedback = $('#build-share-status');
-  try {
-    if (!navigator.clipboard?.writeText) throw new Error('CLIPBOARD_UNAVAILABLE');
-    await navigator.clipboard.writeText(field.value);
-    feedback.textContent = '공유 주소를 복사했습니다.';
-  } catch {
-    feedback.textContent = '자동 복사에 실패했습니다. 선택된 주소를 직접 복사해 주세요.';
-    field.focus(); field.select();
-  }
 }
 
 let pickerReturnCategory = '';
@@ -280,24 +260,19 @@ function closeModelPicker() {
 function renderSummary() {
   const summary = $('#tools-summary'); summary.replaceChildren();
   if (builder) {
-    const total = buildTotals(state.entries, buildEntryData).active;
-    const label = !total.total ? '선택 없음' : total.complete ? '합계(판매중)' : total.covered ? '부분 합계' : '합계 계산 불가';
-    const item = summaryItem(label, total.covered ? displayPrice(total.amount) : '');
-    item.dataset.totalState = !total.total ? 'empty' : total.complete ? 'complete' : total.covered ? 'partial' : 'unavailable';
-    if (total.total) item.append(el('span', 'up-total-coverage', `가격 확인 ${total.covered}/${total.total}개`));
-    if (!total.total) item.append(el('span', 'up-total-coverage', '부품을 선택하세요.'));
-    const issues = [...new Set(state.entries.map(entry => {
-      const record = chartRecord(entry.id), data = buildEntryData(entry);
-      if (metricValue(data?.active) != null) return '';
-      if (buildScopeConflict()) return '게시 기준 불일치 · 재조회 필요';
-      const presentation = pricePresentation(data?.active, 'active', 'KRW', record);
-      return presentation.state === 'missing' ? '가격 자료 없음'
-        : presentation.state === 'insufficient' ? '표본 부족' : presentation.text;
-    }).filter(Boolean))];
-    if (issues.length) item.append(el('span', 'up-total-reasons', issues.join(' · ')));
-    summary.append(item);
-    if ((issues.length && state.entries.some(entry => chartRecord(entry.id)?.state === 'error')) || buildScopeConflict()) {
-      summary.append(action('가격 재조회', 'retry'));
+    const totals = buildTotals(state.entries, buildEntryData);
+    summary.append(summaryItem('선택', `${state.entries.length}종`, `${state.entries.reduce((n, e) => n + e.quantity, 0)}개`));
+    [['active', '판매중 합계'], ['sold', '판매완료 합계']].forEach(([key, label]) => {
+      const total = totals[key];
+      const title = total.total > 0 && !total.complete ? label.replace('합계', '부분 합계') : label;
+      summary.append(summaryItem(`${title} · 가격 확인 ${total.covered}/${total.total}개`, displayPrice(total.amount), '', `series-${key}`));
+    });
+    if (state.entries.length) summary.append(el('p', 'tools-quote-status', '단가와 부품별 금액은 소수 둘째자리까지 반올림해 표시하며, 최종 합계는 원 단위로 반올림합니다.'));
+    const issues = [...new Set(state.entries.map(entry => priceRecordIssue(chartRecord(entry.id), buildEntryData(entry))).filter(Boolean))];
+    if (buildScopeConflict()) issues.unshift('서로 다른 게시 기준의 가격은 합산하지 않습니다. 가격을 다시 조회해 주세요.');
+    if (issues.length) summary.append(el('p', 'tools-quote-status', issues.join(' ')));
+    if (state.entries.length && (!totals.active.complete || !totals.sold.complete)) {
+      summary.append(el('p', 'tools-quote-status', '대표가격이 있는 부품만 합산합니다. 표본 3건 미만·통계 미제공·조회 실패·게시 준비 중인 부품은 합계에서 제외됩니다.'));
     }
   } else if (state.selectedId) {
     const record = analysisRecord(state.selectedId);
@@ -313,9 +288,7 @@ function renderSummary() {
   }
 }
 function refreshBuildPriceDetails() {
-  const nodes = [...$('#build-table').querySelectorAll('[data-build-price]'),
-    ...($('#build-detail-content')?.querySelectorAll('[data-build-price]') || [])];
-  for (const node of nodes) {
+  for (const node of $('#build-table').querySelectorAll('[data-build-price]')) {
     const entry = state.entries.find(item => item.id === node.dataset.buildPrice);
     if (!entry) continue;
     const record = chartRecord(entry.id), data = buildEntryData(entry), product = state.byId.get(entry.id);
@@ -341,117 +314,40 @@ function refreshBuildPriceDetails() {
       node.append(line);
     }
   }
-  refreshBuildUnitPrices();
-}
-function refreshBuildUnitPrices() {
-  for (const cell of $('#build-table').querySelectorAll('[data-unit-price]')) {
-    const entry = state.entries.find(item => item.id === cell.dataset.unitPrice);
-    if (!entry) continue;
-    const record = chartRecord(entry.id), data = buildEntryData(entry), key = cell.dataset.series;
-    const presentation = pricePresentation(data?.[key], key, 'KRW', record);
-    const value = metricValue(data?.[key]);
-    const text = buildScopeConflict() ? '게시 기준 불일치' : value != null ? quotePrice(value)
-      : presentation.state === 'missing' ? '자료 없음'
-        : presentation.state === 'insufficient' && presentation.text === '—' ? '표본 부족' : presentation.text;
-    const button = action(text, 'build-detail', { id: entry.id, category: entry.category }, 'up-unit-detail');
-    button.title = `${presentation.label} · 상세·재시도 보기`;
-    button.setAttribute('aria-label', `${labelOf(entry.category)} ${key === 'active' ? '판매중 단가' : '판매완료 표시가'} ${text}. 상세 보기`);
-    cell.dataset.priceState = buildScopeConflict() ? 'scope-mismatch' : presentation.state;
-    cell.replaceChildren(button);
-  }
-}
-function renderBuildDetail() {
-  const dialog = $('#build-detail-dialog'), container = $('#build-detail-content');
-  if (!dialog?.open || !container) return;
-  const focused = container.contains(document.activeElement) ? document.activeElement : null;
-  const focusAction = focused?.dataset.action, focusHref = focused?.href;
-  const entry = state.entries.find(item => item.id === dialog.dataset.modelId);
-  if (!entry) { dialog.close(); return; }
-  const product = state.byId.get(entry.id), record = chartRecord(entry.id), data = buildEntryData(entry);
-  $('#build-detail-title').textContent = nameOf(product);
-  container.replaceChildren();
-  const detail = el('div', 'tools-build-price'); detail.dataset.buildPrice = entry.id; container.append(detail);
-  container.append(el('p', '', toolScopeNote(product.category_code)));
-  const params = new URLSearchParams({ days: '30', market_pool: 'KR_C2C_USED', condition: 'USED_WORKING', currency: 'KRW' });
-  const request = record?.requestUrl || `/api/products/${encodeURIComponent(entry.id)}/price-stats?${params}`;
-  const rows = [['모델 ID', entry.id], ['시장·출처·통화', 'KR_C2C_USED · 국내 전체 · KRW'],
-    ['집계 기간', record?.data?.window ? `${record.data.window.from} ~ ${record.data.window.to}` : '최근 30일 요청 · 응답 기간 미확인'],
-    ['게시 기준', record?.data?.publication_id ? `${record.data.as_of} · ${record.data.publication_id}` : '미확인'],
-    ['HTTP·오류', record?.state === 'error' ? `${record.httpStatus ?? '미확인'} · ${record.errorCode || 'REQUEST_FAILED'}`
-      : record?.state === 'ready' ? `${record.httpStatus ?? '미확인'} · 검증 응답` : '요청 중']];
-  const list = el('dl', 'up-detail-scope');
-  for (const [label, value] of rows) { list.append(el('dt', '', label), el('dd', '', value)); }
-  container.append(list);
-  for (const { key, label } of SERIES.slice(0, 2)) {
-    const count = data?.[key]?.sample_count;
-    const presentation = pricePresentation(data?.[key], key, 'KRW', record);
-    container.append(el('p', '', `${label} · ${presentation.label} · ${Number.isInteger(count) ? `표본 ${count}건` : '표본 미확인'}`));
-  }
-  const issue = buildScopeConflict() ? '여러 게시 기준이 섞여 합계를 중지했습니다. 가격을 다시 조회하세요.' : priceRecordIssue(record, data);
-  if (issue) container.append(el('p', 'up-detail-error', issue));
-  const link = el('a', '', '요청한 공개 API 확인'); link.href = request; link.target = '_blank'; link.rel = 'noopener noreferrer';
-  container.append(link, action('가격 다시 시도', 'retry'));
-  refreshBuildPriceDetails();
-  if (focusAction) [...container.querySelectorAll('button')].find(button => button.dataset.action === focusAction)?.focus({ preventScroll: true });
-  else if (focusHref) [...container.querySelectorAll('a')].find(link => link.href === focusHref)?.focus({ preventScroll: true });
-}
-function openBuildDetail(id) {
-  const dialog = $('#build-detail-dialog');
-  if (!dialog || !state.entries.some(entry => entry.id === id)) return;
-  dialog.dataset.modelId = id;
-  if (!dialog.open) dialog.showModal();
-  renderBuildDetail(); $('#build-detail-title').focus({ preventScroll: true });
 }
 function renderBuild() {
   const container = $('#build-table'), focus = document.activeElement;
   const quantityFocus = container.contains(focus) && focus.dataset.quantity;
-  if (quantityFocus) { refreshBuildPriceDetails(); renderBuildDetail(); return; }
-  const focusKey = container.contains(focus) ? { ...focus.dataset } : null;
-  const { table, body } = makeTable(['부품', '모델명', '수량', '판매중 단가', '판매완료 표시가(단가)', '변경', '×']);
+  if (quantityFocus) { refreshBuildPriceDetails(); return; }
+  const { table, body } = makeTable(['부품 / 수량', '선택 모델', '']);
   const columns = el('colgroup');
-  ['part', 'model', 'quantity', 'active', 'sold', 'change', 'remove'].forEach(name => columns.append(el('col', `build-col-${name}`)));
+  ['part', 'model', 'action'].forEach(name => columns.append(el('col', `build-col-${name}`)));
   table.prepend(columns);
   state.categories.forEach(category => {
     const entry = state.entries.find(e => e.category === category.code), p = state.byId.get(entry?.id);
     const row = el('tr', state.category === category.code ? 'is-selected' : ''), part = el('td', '', category.label);
-    row.dataset.category = category.code;
     if (!entry) {
-      const choose = action('부품 선택', 'category', { category: category.code });
-      choose.setAttribute('aria-label', `${category.label} 부품 선택`);
-      const empty = el('td', 'build-empty'); empty.append(el('span', '', '미선택 / '), choose);
-      row.append(part, empty, el('td', '', '—'), el('td', '', '—'), el('td', '', '—'), el('td'), el('td'));
-      body.append(row); return;
+      const empty = el('td', 'build-empty'); empty.colSpan = 2;
+      const choose = action('+ 부품 선택', 'category', { category: category.code });
+      choose.setAttribute('aria-label', `${category.label} 부품 선택`); empty.append(choose);
+      row.append(part, empty); body.append(row); return;
     }
-    const name = el('td', 'model-name');
-    const modelText = `${p ? nameOf(p) : '모델 미확인'}${entry.manufacturer ? ` · ${entry.manufacturer}` : ''}`;
-    const details = action(modelText, 'build-detail', { id: entry.id, category: category.code }, 'up-model-detail');
-    details.title = `${modelText} · 부품·가격 상세 보기`; details.setAttribute('aria-label', details.title); name.append(details);
-    const quantity = el('td', 'build-quantity'), input = el('input');
-    input.type = 'number'; input.min = '1'; input.max = '16'; input.step = '1'; input.value = entry.quantity;
-    input.dataset.quantity = entry.id; input.setAttribute('aria-label', `${category.label} 수량`);
-    const capacity = Number(p?.key_specs?.module_capacity_gb);
-    if (p?.category_code === 'RAM' && capacity > 0) input.title = `모듈 1개당 ${capacity}GB · 용량 합계는 모델명 상세에서 확인`;
-    quantity.append(input); row.append(part, name, quantity);
-    for (const key of ['active', 'sold']) {
-      const price = el('td', `price series-${key}`); price.dataset.unitPrice = entry.id; price.dataset.series = key; row.append(price);
+    if (entry) {
+      const input = el('input'); input.type = 'number'; input.min = '1'; input.max = '16'; input.value = entry.quantity; input.dataset.quantity = entry.id; input.setAttribute('aria-label', `${category.label} 수량`); part.append(input);
     }
-    const change = el('td', 'build-change'); change.append(action('변경', 'category', { category: category.code }));
-    const removeCell = el('td', 'build-remove'), remove = action('×', 'remove', { id: entry.id, category: category.code });
-    remove.setAttribute('aria-label', `${category.label} 제거`); removeCell.append(remove);
-    row.append(change, removeCell); body.append(row);
+    const name = el('td', 'model-name', p ? nameOf(p) : '—');
+    if (entry?.manufacturer) name.append(el('small', '', `${entry.manufacturer} · 제조사 기준`));
+    const detail = el('small', 'tools-build-price'); detail.dataset.buildPrice = entry.id; name.append(detail);
+    row.append(part, name);
+    const control = el('td'); control.append(action(entry ? '변경' : '선택', 'category', { category: category.code }));
+    if (entry) { const remove = action('×', 'remove', { id: entry.id }); remove.setAttribute('aria-label', `${category.label} 제거`); control.append(remove); }
+    row.append(control); body.append(row);
   });
   container.replaceChildren(table);
   refreshBuildPriceDetails();
-  if (focusKey) {
-    const buttons = [...container.querySelectorAll('button')];
-    const target = buttons.find(button => Object.entries(focusKey).every(([key, value]) => button.dataset[key] === value))
-      || buttons.find(button => button.dataset.action === 'category' && button.dataset.category === focusKey.category);
-    target?.focus({ preventScroll: true });
-  }
   const result = compatibility(state.entries, state.byId), box = $('#build-compatibility'); box.replaceChildren();
   box.hidden = !result.checks.length; box.title = result.note;
   result.checks.forEach(c => box.append(el('span', c.status, `${c.label} ${c.status === 'match' ? '일치' : c.status === 'conflict' ? '충돌' : '미확인'} · ${c.detail}`)));
-  renderBuildDetail();
 }
 function renderAnalysis() {
   const record = analysisRecord(state.selectedId), base = record?.data;
@@ -594,10 +490,6 @@ document.addEventListener('click', event => {
   if (type === 'open-picker') { openModelPicker(); return; }
   if (type === 'close-picker') { closeModelPicker(); return; }
   if (type === 'save-build') { persistBuild(); return; }
-  if (type === 'share-build') { shareBuild(); return; }
-  if (type === 'copy-build-link') { void copyBuildLink(); return; }
-  if (type === 'build-detail') { openBuildDetail(id); return; }
-  if (type === 'close-build-detail') { $('#build-detail-dialog')?.close(); return; }
   if (type === 'print-build') { window.print(); return; }
   if (type === 'show-summary') { $('#build-summary').scrollIntoView({ block: 'start' }); $('#build-summary-title').focus({ preventScroll: true }); return; }
   if (type === 'category') { selectCategory(category); return; }
@@ -719,12 +611,6 @@ async function start() {
   }
 }
 if (builder) {
-  $('#build-detail-dialog')?.addEventListener('close', () => {
-    const id = $('#build-detail-dialog').dataset.modelId;
-    const target = [...document.querySelectorAll('#build-table button[data-action="build-detail"]')].find(button => button.dataset.id === id)
-      || document.querySelector('[data-action="open-picker"]');
-    target?.focus({ preventScroll: true });
-  });
   $('#builder-model-dialog')?.addEventListener('close', () => {
     const target = [...document.querySelectorAll('#build-table button[data-action="category"]')]
       .find(button => button.dataset.category === pickerReturnCategory)

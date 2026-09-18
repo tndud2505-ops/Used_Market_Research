@@ -85,9 +85,9 @@ for (const name of ['computer-builder.html', 'price-analysis.html']) {
   const html = readFileSync(new URL(`../web-backend/public/${name}`, import.meta.url), 'utf8');
   // Approved UI-A candidate preserves the parts-ux-v4 data/calculation modules.
   // This is a source manifest assertion, NOT a claim of public deployment.
-  assert.match(html, /pc-tools\.js\?v=compact-ui-v1/);
+  assert.match(html, /pc-tools\.js\?v=ui-a-v2/);
   assert.match(html, /pc-tools\.css\?v=parts-ux-v4/);
-  assert.match(html, /ui-concept-a\.css\?v=compact-ui-v1/);
+  assert.match(html, /ui-concept-a\.css\?v=ui-a-v2/);
 }
 console.log(JSON.stringify({ status: 'PASS', kind: 'deterministic frontend; synthetic responses; no browser/live claim',
   price_products: priceProducts.length, exploration_excluded: exploration.length, category_counts: groups,

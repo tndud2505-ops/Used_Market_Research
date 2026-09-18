@@ -1244,12 +1244,12 @@ function updateWorkspaceHeading() {
     ? `“${query}” 중고 PC 검색 결과`
     : categoryRoute
       ? `중고 ${label} 검색`
-      : "중고 PC 부품 검색";
+      : "중고 부품, 가격부터 비교하세요.";
   const intro = query
     ? `${query} 관련 중고 PC 부품 모델과 현재 매물을 비교합니다.`
     : categoryRoute
       ? `중고 ${label} 모델을 검색하고 출처별 매물과 중고시세를 비교하세요.`
-      : "모델별 매물과 표시가격 검색 결과";
+      : "중고 컴퓨터 부품을 모델별로 검색하고 현재 매물과 최근 중고 시세를 비교하세요.";
 
   dom.workspaceTitle.textContent = heading;
   if (dom.workspaceIntro) dom.workspaceIntro.textContent = intro;
