@@ -139,6 +139,18 @@ await check('failed pointer transaction preserves the previous publication', asy
   await assert.rejects(() => activateStagedProductStats(db, next), /fixture pointer failure/u);
   assert.equal(db.active(), 'previous');
 });
+await check('successful activation prunes superseded and abandoned publications', async db => {
+  await activateStagedProductStats(db, await stage(db, 'previous'));
+  await stage(db, 'abandoned');
+  await activateStagedProductStats(db, await stage(db, 'next'));
+  assert.equal(db.active(), 'next');
+  assert.deepEqual(
+    db.sqlite.prepare('SELECT publication_id FROM public_stats_publications ORDER BY publication_id').all()
+      .map(row => ({ ...row })),
+    [{ publication_id: 'next' }]
+  );
+  assert.equal(db.sqlite.prepare('SELECT COUNT(*) AS count FROM public_product_stats').get().count, rows.length);
+});
 await check('empty D1 is explicitly attested with no copied prices', async db => {
   const proof = await readActiveProductStatsScopes(db);
   assert.equal(proof.publication_id, null);

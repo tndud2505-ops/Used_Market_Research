@@ -426,7 +426,10 @@ export async function activateStagedProductStats(db, input) {
     db.prepare(`UPDATE public_stats_publications SET active = 1, activated_at = ?
       WHERE publication_id = ? AND checksum = ? AND expected_row_count = ?`).bind(
       new Date().toISOString(), metadata.publicationId, metadata.checksum, metadata.expectedRowCount
-    )
+    ),
+    // Readers only use the active pointer. Prune superseded and abandoned
+    // staging rows in the same transaction so daily publications cannot fill D1.
+    db.prepare("DELETE FROM public_stats_publications WHERE active = 0")
   ]);
   return {
     publication_id: metadata.publicationId,
@@ -610,8 +613,9 @@ export async function publishProductStats(db, input) {
       db.prepare(`UPDATE public_stats_publications
         SET active = 1, activated_at = ?
         WHERE publication_id = ? AND checksum = ? AND expected_row_count = ?`).bind(
-        new Date().toISOString(), publicationId, actualChecksum, actualRowCount
-      )
+          new Date().toISOString(), publicationId, actualChecksum, actualRowCount
+      ),
+      db.prepare("DELETE FROM public_stats_publications WHERE active = 0")
     ]);
     return {
       publication_id: publicationId,

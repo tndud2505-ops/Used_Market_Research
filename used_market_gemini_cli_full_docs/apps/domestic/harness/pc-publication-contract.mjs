@@ -225,6 +225,13 @@ class FakeD1 {
         const [, publicationId, checksum, expectedRowCount] = statement.values;
         const publication = publications.get(String(publicationId));
         if (publication && publication.checksum === checksum && publication.expected_row_count === expectedRowCount) publication.active = 1;
+      } else if (/DELETE FROM public_stats_publications WHERE active = 0/u.test(statement.sql)) {
+        for (const [publicationId, publication] of publications) {
+          if (publication.active === 0) {
+            publications.delete(publicationId);
+            rows.delete(publicationId);
+          }
+        }
       } else {
         throw new Error(`unsupported batch statement: ${statement.sql}`);
       }
