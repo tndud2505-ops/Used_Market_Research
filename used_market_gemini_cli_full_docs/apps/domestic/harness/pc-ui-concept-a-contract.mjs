@@ -8,13 +8,13 @@ import * as catalog from '../web-backend/public/pc-tools-catalog.mjs';
 
 const read = name => readFileSync(new URL(`../web-backend/public/${name}`, import.meta.url), 'utf8');
 const script = read('pc-tools.js'), app = read('app.js'), css = read('ui-concept-a.css');
-const pages = ['index.html', 'computer-builder.html', 'price-analysis.html', 'guide.html', 'privacy.html', 'terms.html'];
-test('all six pages use one approved theme, unique IDs and common navigation', () => {
+const pages = ['index.html', 'computer-builder.html', 'price-analysis.html', 'guide.html', 'privacy.html', 'terms.html', 'used-market-categories.html'];
+test('all seven pages use one compact theme, unique IDs and common navigation', () => {
   for (const name of pages) {
     const html = read(name), ids = [...html.matchAll(/\bid="([^"]+)"/g)].map(m => m[1]);
     assert.equal(ids.length, new Set(ids).size, `${name}: duplicate IDs`);
-    assert.match(html, /ui-concept-a\.css\?v=ui-a-v1/);
-    assert.match(html, /data-ui-release="ui-a-v1"/);
+    assert.match(html, /ui-concept-a\.css\?v=compact-ui-v1/);
+    assert.match(html, /data-ui-release="compact-ui-v1"/);
     assert.doesNotMatch(html, /ui-refinement\.css/);
     assert.match(html, /class="skip-link" href="#main"/);
     assert.equal([...html.matchAll(/<h1\b/g)].length, 1);
@@ -24,10 +24,11 @@ test('all six pages use one approved theme, unique IDs and common navigation', (
     }
   }
 });
-test('functional data modules retain their existing cache identity', () => {
-  for (const name of ['core', 'data', 'catalog']) assert.ok(script.includes(`pc-tools-${name}.mjs?v=parts-ux-v4`));
+test('only changed assets receive new cache identities; calculation/catalog/chart versions remain unchanged', () => {
+  for (const name of ['core', 'catalog']) assert.ok(script.includes(`pc-tools-${name}.mjs?v=parts-ux-v4`));
+  assert.match(script, /pc-tools-data\.mjs\?v=parts-data-v5/);
   assert.match(script, /pc-tools-chart\.mjs\?v=ui-a-v1/);
-  assert.match(read('index.html'), /app\.js\?v=ui-a-v1/);
+  assert.match(read('index.html'), /app\.js\?v=compact-ui-v1/);
 });
 test('native dialogs are wired without destructive hash navigation or inline handlers', () => {
   assert.match(read('computer-builder.html'), /<dialog id="builder-model-dialog"/);

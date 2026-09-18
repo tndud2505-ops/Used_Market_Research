@@ -1,5 +1,10 @@
 # UI Concept A implementation — 2026-09-17
 
+> Historical implementation record. The 2026-09-18 compact UI request supersedes
+> the introductory blocks and right-hand builder summary described below.
+> Current implementation, verified results and unresolved browser/release gates:
+> [2026-09-18 compact UI result](../../reviews/2026-09-18-compact-ui-result.md).
+
 ## Current decision
 
 **IMPLEMENTED IN LOCAL WORKING TREE / BROWSER VERIFICATION BLOCKED / NOT RELEASED.**

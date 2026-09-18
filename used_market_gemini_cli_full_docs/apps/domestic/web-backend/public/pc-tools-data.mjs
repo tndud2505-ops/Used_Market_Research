@@ -1,6 +1,6 @@
 import { idOf, coherentStats } from './pc-tools-core.mjs?v=parts-ux-v4';
 
-export async function readJson(url, signal) {
+export async function readJson(url, signal, onStatus) {
   const request = new AbortController();
   const abort = () => request.abort();
   signal?.addEventListener('abort', abort, { once: true });
@@ -8,6 +8,7 @@ export async function readJson(url, signal) {
   const timeout = setTimeout(() => request.abort(), 20000);
   try {
     const response = await fetch(url, { signal: request.signal, credentials: 'same-origin', cache: 'no-store', headers: { accept: 'application/json' } });
+    onStatus?.(response.status);
     const payload = await response.json().catch(() => null);
     if (!response.ok || payload?.status === 'error') {
       const rawCode = payload?.error?.code || payload?.code || (typeof payload?.error === 'string' ? payload.error : '');
@@ -46,12 +47,13 @@ export function createPriceStore(onChange, options = {}) {
         const key = keyOf(id, days, asOf);
         const previous = cache.get(key);
         if (previous?.state === 'ready' && Date.now() - previous.loadedAt < 300000) continue;
-        cache.set(key, { state: 'loading' });
+        const params = new URLSearchParams({ days: String(days), market_pool: marketPool, condition, currency });
+        if (asOf) params.set('as_of', asOf);
+        const diagnostics = { requestUrl: `/api/products/${encodeURIComponent(id)}/price-stats?${params}`, httpStatus: null };
+        cache.set(key, { state: 'loading', ...diagnostics });
         onChange();
         try {
-          const params = new URLSearchParams({ days: String(days), market_pool: marketPool, condition, currency });
-          if (asOf) params.set('as_of', asOf);
-          const data = await readJson(`/api/products/${encodeURIComponent(id)}/price-stats?${params}`, signal);
+          const data = await readJson(diagnostics.requestUrl, signal, code => { diagnostics.httpStatus = code; });
           if (signal.aborted) break;
           if (data.canonical_product_id !== id) throw new Error('모델이 일치하지 않는 가격 응답입니다.');
           const scope = data.methodology || {};
@@ -63,10 +65,10 @@ export function createPriceStore(onChange, options = {}) {
           }
           if ((scope.currency && scope.currency !== currency) || (scope.market_pool && scope.market_pool !== marketPool)
             || (scope.condition && scope.condition !== condition)) throw new Error('가격 집계 범위가 일치하지 않습니다.');
-          cache.set(key, { state: 'ready', data: coherentStats(data), loadedAt: Date.now() });
+          cache.set(key, { state: 'ready', data: coherentStats(data), loadedAt: Date.now(), ...diagnostics });
         } catch (error) {
           if (signal.aborted) { if (current === generation && cache.get(key)?.state === 'loading') cache.delete(key); break; }
-          cache.set(key, { state: 'error', error: error.message, errorCode: error.code || '', httpStatus: error.httpStatus || null });
+          cache.set(key, { state: 'error', error: error.message, errorCode: error.code || '', ...diagnostics, httpStatus: error.httpStatus || diagnostics.httpStatus });
         }
         if (current === generation) onChange();
       }

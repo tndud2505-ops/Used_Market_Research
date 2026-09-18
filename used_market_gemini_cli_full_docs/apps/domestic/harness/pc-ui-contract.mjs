@@ -15,8 +15,10 @@ const toolsChart = readFileSync(path.join(appRoot, "web-backend/public/pc-tools-
 const toolsStyles = readFileSync(path.join(appRoot, "web-backend/public/pc-tools.css"), "utf8");
 const requireText = (source, value, message) => assert.ok(source.includes(value), message);
 requireText(toolsScript, 'buildTotals(state.entries', 'builder summary must derive totals from the shared price state');
-requireText(toolsScript, '판매중 합계', 'builder must visibly label the active-price partial total');
-requireText(toolsScript, '판매완료 합계', 'builder must visibly label the sold-price partial total');
+requireText(toolsScript, '합계(판매중)', 'builder must visibly label its single active-price total');
+requireText(toolsScript, '부분 합계', 'incomplete active-price coverage cannot be presented as a complete estimate');
+requireText(toolsScript, '합계 계산 불가', 'no coverage cannot be presented as a zero-price estimate');
+assert.equal(toolsScript.includes('판매완료 합계'), false, 'sold asking prices stay in rows, not a second estimate');
 requireText(toolsScript, '가격 확인', 'builder totals must disclose price-covered quantity');
 requireText(toolsScript, 'compactBuild(state.entries', 'builder writes must persist compact validated entries');
 requireText(toolsScript, 'localStorage.setItem(STORAGE_KEY, raw)', 'builder selection changes must write local storage');
@@ -48,8 +50,8 @@ requireText(toolsScript, "const link = el('a', 'model-name-link', nameOf(product
   "the visible model name must be the direct original-search link");
 assert.equal(toolsScript.includes("state.expanded"), false, "flat model rows must not retain expansion state");
 assert.equal(toolsScript.includes("동일 모델 묶기"), false, "flat model rows must not expose a grouping toggle");
-assert.equal(toolsScript.includes("'판매중 가격', '판매완료 표시가', ''"), false,
-  "the builder selection table must not repeat price columns");
+requireText(toolsScript, "'판매중 단가', '판매완료 표시가(단가)'",
+  'the compact builder needs both unit-price comparisons in the same row');
 assert.equal(toolsScript.includes("'원문 검색'"), false,
   "the model name link must not repeat a separate original-search label");
 requireText(toolsScript, "[['', '국내 전체']", "analysis must keep an explicit domestic aggregate tab");
