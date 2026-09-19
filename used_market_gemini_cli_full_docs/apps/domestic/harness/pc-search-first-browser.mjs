@@ -111,11 +111,11 @@ export async function runBrowserChecks({browser,origin,out,fixture=false}) {
   const layout=async(name,target=page)=>{
     await target.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
     const value=await target.evaluate(()=>({width:innerWidth,scroll:document.documentElement.scrollWidth,
-      boxes:Object.fromEntries(['.sf-search-tools','.workspace-heading','.up-search-row','.model-filters','.listing-section','.sf-analysis-chart','.sf-source-comparison','#build-table','#build-summary'].map(s=>{const e=document.querySelector(s),b=e?.getBoundingClientRect();return[s,b?{x:b.x,y:b.y,w:b.width,h:b.height,display:getComputedStyle(e).display}:null]}))}));
+      boxes:Object.fromEntries(['.sf-search-tools','.workspace-heading','#source-facet-row','.model-filters','.listing-section','.sf-analysis-chart','.sf-source-comparison','#build-table','#build-summary'].map(s=>{const e=document.querySelector(s),b=e?.getBoundingClientRect();return[s,b?{x:b.x,y:b.y,w:b.width,h:b.height,display:getComputedStyle(e).display}:null]}))}));
     assert.ok(value.scroll<=value.width,`${name}: page overflow ${value.scroll}/${value.width}`);
     if(value.width>=1181&&value.boxes['.sf-search-tools']){
-      assert.ok(value.boxes['.sf-search-tools'].h<130,'controls must be a compact unified row');
-      assert.ok(Math.abs(value.boxes['.workspace-heading'].y-value.boxes['.up-search-row'].y)<8,'model/site/search controls must align');
+      assert.ok(value.boxes['.sf-search-tools'].h<190,'model and site controls remain compact');
+      assert.ok(value.boxes['#source-facet-row'].y>=value.boxes['.workspace-heading'].y+value.boxes['.workspace-heading'].h,'sites must be below model selection');
       assert.ok(value.boxes['.listing-section'].w>value.width*.65,'selected listings must use all available right-column width');
     }
     if(value.boxes['#build-table']) {
@@ -146,27 +146,27 @@ export async function runBrowserChecks({browser,origin,out,fixture=false}) {
     if(await page2.count()) { await page2.click();await readySearch();assert.equal(await page.locator('#listing-page-numbers [aria-current="page"]').textContent(),'2');await page.locator('#listing-page-prev').click();await readySearch();addCheck('listing pagination 1 → 2 → 1'); }
     if(fixture) {
       for(const [q,rows,graph] of [['sf-one-model',3,1],['sf-zero-listings',0,1],['sf-one-listing',1,1],['sf-one-listing-many-models',1,0],['sf-no-model',0,0]]) {
-        await page.fill('#catalog-query',q);
-        await page.waitForTimeout(350);await readySearch();
+        await page.goto(origin+'/?category_code=CPU&q='+encodeURIComponent(q));await readySearch();
         assert.equal(await page.locator('#listing-rows .listing-row').count(),rows,q);
         assert.equal(await page.locator('#model-detail-open:not([hidden])').count(),graph,q);
-        assert.equal(await page.evaluate(()=>document.activeElement.id),'catalog-query','automatic model selection cannot steal typing focus');
+        assert.equal(await page.locator('#catalog-query').count(),0,'legacy query URLs cannot restore the removed input');
       }
       addCheck('multiple models, one model with multiple/zero/one listings, one listing with multiple models, and zero models');
-      await page.fill('#catalog-query','sf-one-model');await page.waitForTimeout(350);await readySearch();
+      await page.goto(origin+'/?category_code=CPU&q=sf-one-model');await readySearch();
     } else { await page.selectOption('#model-select',ids[0][1]);await readySearch(); }
     await page.locator('.listing-sort-tab[data-sort="price_asc"]').click();await readySearch();
-    await page.fill('#price-min','1');await page.fill('#price-max','9999999');
-    await page.locator('#listing-controls button[type="submit"]').click();await readySearch();
+    assert.equal(await page.locator('#price-min,#price-max,#listing-controls button[type="submit"]').count(),0);
     assert.equal(await page.locator('#model-detail-open:not([hidden])').count(),1);
     await layout('search-single');await screenshot('search-desktop');
-    const before={url:page.url(),rows:await page.locator('#listing-rows .listing-title').allTextContents(),min:await page.locator('#price-min').inputValue(),sort:await page.locator('#listing-sort').inputValue()};
-    const opened=context.waitForEvent('page');await page.locator('#model-detail-open').click();const popup=await opened;attach(popup);await popup.waitForLoadState('domcontentloaded');await readyChart(popup);
-    assert.equal(new URL(popup.url()).searchParams.get('model'),ids[0][1]);
-    assert.equal(await popup.evaluate(()=>window.opener===null),true);
-    assert.deepEqual({url:page.url(),rows:await page.locator('#listing-rows .listing-title').allTextContents(),min:await page.locator('#price-min').inputValue(),sort:await page.locator('#listing-sort').inputValue()},before);
-    assert.equal(new URL(await popup.locator('#analysis-listing-link').getAttribute('href'),origin).searchParams.get('price_min'),'1');
-    await screenshot('analysis-popup',popup);await popup.close();addCheck('one safe new-tab graph link; original URL, listings, sorting and bounds unchanged');
+    const before={url:page.url(),rows:await page.locator('#listing-rows .listing-title').allTextContents(),sort:await page.locator('#listing-sort').inputValue(),pages:context.pages().length};
+    await page.locator('#model-detail-open').click();
+    await page.waitForFunction(()=>{const n=document.querySelector('#listing-price-chart');return n?.getAttribute('aria-busy')==='false'&&['ready','empty','unavailable'].includes(n.dataset.priceState);},null,{timeout:45000});
+    assert.equal(await page.locator('#listing-price-chart').getAttribute('data-model-id'),ids[0][1]);
+    assert.deepEqual({url:page.url(),rows:await page.locator('#listing-rows .listing-title').allTextContents(),sort:await page.locator('#listing-sort').inputValue(),pages:context.pages().length},before);
+    await screenshot('price-preview');await page.keyboard.press('Escape');
+    await page.waitForFunction(()=>!document.querySelector('#listing-price-dialog').open);
+    assert.equal(await page.evaluate(()=>document.activeElement.id),'model-detail-open');
+    addCheck('in-page price preview; original URL, listings and sorting unchanged; Escape returns focus');
     await page.locator('.listing-favorite').first().click();assert.equal(await page.locator('.listing-favorite').first().getAttribute('aria-pressed'),'true');
     await page.locator('.listing-favorite').first().click();addCheck('browser-local favorite toggle and original listing links');
     assert.equal(await page.locator('.listing-title').first().getAttribute('target'),'_blank');
@@ -174,11 +174,13 @@ export async function runBrowserChecks({browser,origin,out,fixture=false}) {
     await page.keyboard.press('Space');await readySearch();
     assert.equal(await page.evaluate(()=>document.activeElement.dataset.value),'joonggonara');
     assert.ok((await page.locator('#listing-rows .listing-source').allTextContents()).every(v=>v==='중고나라'));
-    await page.keyboard.press('ArrowLeft');await readySearch();
+    await page.keyboard.press('ArrowRight');await readySearch();
+    assert.equal(await page.evaluate(()=>document.activeElement.dataset.value),'bunjang');
+    await page.keyboard.press('ArrowRight');await readySearch();
     assert.equal(await page.evaluate(()=>document.activeElement.dataset.value),'ebay');
     assert.ok((await page.locator('#listing-rows .listing-source').allTextContents()).every(v=>/eBay/.test(v)));
     assert.doesNotMatch((await page.locator('#listing-rows .listing-price').allTextContents()).join(' '),/원|₩/);
-    await page.keyboard.press('ArrowLeft');await readySearch();
+    await page.keyboard.press('ArrowRight');await readySearch();
     assert.equal(await page.evaluate(()=>document.activeElement.dataset.value),'');
     addCheck('keyboard site radios retain focus after reload; eBay listings stay USD-only');
     for(const width of [1440,1024,768,390,360]) {

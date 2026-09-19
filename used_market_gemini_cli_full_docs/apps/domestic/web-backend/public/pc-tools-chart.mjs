@@ -8,7 +8,7 @@ const svgNode = (name, attrs = {}, text = '') => {
   return element;
 };
 
-export function drawChart(container, series, { index = false, label = '가격 변화', selectedDate = '', currency = 'KRW' } = {}) {
+export function drawChart(container, series, { index = false, label = '가격 변화', selectedDate = '', currency = 'KRW', compact = false } = {}) {
   cleanups.get(container)?.();
   container.replaceChildren();
   const points = series.flatMap(s => s.points).filter(p => p.value != null);
@@ -19,7 +19,7 @@ export function drawChart(container, series, { index = false, label = '가격 �
     container.append(empty);
     return;
   }
-  const width = Math.max(220, container.clientWidth), height = width < 420 ? 260 : 360;
+  const width = Math.max(220, container.clientWidth), height = compact ? 250 : width < 420 ? 260 : 360;
   const left = width < 420 ? 62 : 68, right = width < 420 ? 16 : 24, top = 24, bottom = 42;
   const values = points.map(p => p.value);
   let low = Math.min(...values), high = Math.max(...values);

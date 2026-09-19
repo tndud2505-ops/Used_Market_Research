@@ -33,8 +33,9 @@
     <link rel="stylesheet" href="/styles.css?v=adfit-v1" />
     <link rel="stylesheet" href="/pc-tools.css?v=6" />
     <link rel="stylesheet" href="/ui-concept-a.css?v=search-first-v2" />
+    <link rel="stylesheet" href="/search-controls.css?v=search-modal-v3" />
   </head>
-  <body class="ui-a" data-ui-release="search-first-v2">
+  <body class="ui-a" data-ui-release="search-modal-v3">
     <a class="skip-link" href="#main">본문으로 건너뛰기</a>
 
     <header class="site-header">
@@ -86,6 +87,8 @@
               <option value="">검색된 모델</option>
             </select>
           </div>
+          <button id="up-filter-open" class="up-button up-filter-open" type="button" aria-haspopup="dialog" aria-controls="up-filter-dialog" disabled>상세 필터</button>
+        </div>
           <div class="workspace-source-facet source-selector" id="source-facet-row" hidden>
             <span class="source-selector-label">거래 사이트</span>
             <span class="sr-only" id="source-filter-summary">사이트 전체</span>
@@ -93,18 +96,6 @@
               <div class="facet-values" id="source-filters" role="group" aria-label="검색 사이트"></div>
             </div>
           </div>
-        </div>
-
-        <div class="up-search-row">
-          <label class="sf-query-label" for="catalog-query">모델명 / 브랜드 검색</label>
-          <form id="up-catalog-search" class="up-catalog-search" role="search">
-            <label class="sr-only" for="catalog-query">모델·브랜드 검색</label>
-            <input id="catalog-query" name="q" type="search" maxlength="160" placeholder="모델·브랜드 검색 (지스킬, RTX 3060…)" autocomplete="off" />
-            <button type="submit">검색</button>
-          </form>
-          <button id="up-filter-open" class="up-button up-filter-open" type="button" aria-haspopup="dialog" aria-controls="up-filter-dialog" disabled>상세 필터</button>
-        </div>
-
         </div>
         <div class="workspace-content">
         <section class="model-filters" id="model-filters" aria-label="상품 필터">
@@ -144,34 +135,18 @@
               </div>
             </div>
             <section class="contextual-offer" id="contextual-offer" aria-label="쿠팡 파트너스 광고" hidden></section>
-            <a class="model-detail-open" id="model-detail-open" href="/price-analysis.html" target="_blank" rel="noopener noreferrer" hidden>가격 그래프 보기 ↗</a>
+            <button class="model-detail-open" id="model-detail-open" type="button" aria-haspopup="dialog" aria-controls="listing-price-dialog" hidden>가격 그래프 보기</button>
           </div>
           <div class="listing-message" id="listing-message" role="status" aria-live="polite" hidden></div>
-          <button class="listing-options-toggle" id="listing-options-toggle" type="button" aria-expanded="true" aria-controls="listing-options">정렬·가격</button>
           <div class="listing-options" id="listing-options">
-            <form class="listing-controls" id="listing-controls">
+            <div class="listing-controls" id="listing-controls">
               <div class="listing-sort-tabs" role="group" aria-label="매물 정렬">
                 <button class="listing-sort-tab" type="button" data-sort="recent" aria-pressed="true">최근 수집순</button>
                 <button class="listing-sort-tab" type="button" data-sort="price_asc" aria-pressed="false">낮은 가격순</button>
                 <button class="listing-sort-tab" type="button" data-sort="price_desc" aria-pressed="false">높은 가격순</button>
                 <input id="listing-sort" name="sort" type="hidden" value="recent" />
               </div>
-              <div class="listing-price-range" role="group" aria-labelledby="price-range-label">
-                <span class="price-range-label" id="price-range-label">가격</span>
-                <label>
-                  <span class="sr-only">최저가</span>
-                  <input id="price-min" name="price_min" inputmode="numeric" placeholder="최저가" aria-describedby="price-error" />
-                </label>
-                <span class="price-range-separator" aria-hidden="true">–</span>
-                <label>
-                  <span class="sr-only">최고가</span>
-                  <input id="price-max" name="price_max" inputmode="numeric" placeholder="최고가" aria-describedby="price-error" />
-                </label>
-                <button type="submit">적용</button>
-                <button class="price-reset" id="price-reset" type="button" hidden>가격 해제</button>
-              </div>
-            </form>
-            <p class="price-error" id="price-error" role="alert" hidden></p>
+            </div>
           </div>
           </div>
           <div id="listing-rows" class="listing-rows"></div>
@@ -199,6 +174,19 @@
       <button id="up-filter-done" class="up-button up-primary" type="button">현재 조건으로 결과 보기</button>
     </dialog>
 
+    <dialog id="listing-price-dialog" class="listing-price-dialog" aria-labelledby="listing-price-title" aria-describedby="listing-price-model listing-price-scope">
+      <div class="price-preview-heading">
+        <h2 id="listing-price-title">가격 그래프</h2>
+        <button id="listing-price-close" type="button" aria-label="가격 그래프 닫기" autofocus>×</button>
+      </div>
+      <p id="listing-price-model" class="price-preview-model"></p>
+      <p id="listing-price-scope" class="price-preview-scope"></p>
+      <p id="listing-price-status" class="price-preview-status" role="status" aria-live="polite"></p>
+      <button id="listing-price-retry" class="up-button" type="button" hidden>다시 시도</button>
+      <div id="listing-price-chart" class="price-preview-chart" aria-busy="false"></div>
+      <p class="price-preview-note">판매완료 표시가는 실제 체결가가 아닙니다. 자료가 없는 날짜는 공백으로 표시합니다.</p>
+    </dialog>
+
     <footer class="site-footer">
       <p>USED PICK은 중고 PC와 컴퓨터 부품의 공개 표시가격을 비교하며 거래를 중개하지 않습니다.</p>
       <nav aria-label="정책 문서">
@@ -209,6 +197,6 @@
       </nav>
     </footer>
 
-    <script type="module" src="/app.js?v=search-first-v2"></script>
+    <script type="module" src="/app.js?v=search-modal-v3"></script>
   </body>
 </html>

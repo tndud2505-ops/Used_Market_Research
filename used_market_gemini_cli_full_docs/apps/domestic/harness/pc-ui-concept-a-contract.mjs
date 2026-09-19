@@ -14,7 +14,7 @@ test('all six pages use search-first v2 assets, unique IDs and common navigation
     const html = read(name), ids = [...html.matchAll(/\bid="([^"]+)"/g)].map(m => m[1]);
     assert.equal(ids.length, new Set(ids).size, `${name}: duplicate IDs`);
     assert.match(html, /ui-concept-a\.css\?v=search-first-v2/);
-    assert.match(html, /data-ui-release="search-first-v2"/);
+    assert.ok(html.includes(`data-ui-release="${name === 'index.html' ? 'search-modal-v3' : 'search-first-v2'}"`));
     assert.doesNotMatch(html, /ui-refinement\.css/);
     assert.match(html, /class="skip-link" href="#main"/);
     assert.equal([...html.matchAll(/<h1\b/g)].length, 1);
@@ -28,7 +28,8 @@ test('restored UI assets use a fresh cache identity while data and calculation v
   for (const name of ['core', 'catalog']) assert.ok(script.includes(`pc-tools-${name}.mjs?v=parts-ux-v4`));
   assert.match(script, /pc-tools-data\.mjs\?v=parts-data-v5/);
   assert.match(script, /pc-tools-chart\.mjs\?v=search-first-v2/);
-  assert.match(read('index.html'), /app\.js\?v=search-first-v2/);
+  assert.match(read('index.html'), /app\.js\?v=search-modal-v3/);
+  assert.match(read('index.html'), /search-controls\.css\?v=search-modal-v3/);
 });
 test('native dialogs are wired without destructive hash navigation or inline handlers', () => {
   assert.match(read('computer-builder.html'), /<dialog id="builder-model-dialog"/);
@@ -37,7 +38,9 @@ test('native dialogs are wired without destructive hash navigation or inline han
   assert.doesNotMatch(read('computer-builder.html'), /href="#build-summary"/);
   assert.match(app, /home\.after\(dom\.modelFilters\)/);
   assert.match(app, /dialog\.showModal\(\)/);
-  assert.match(app, /event\.preventDefault\(\); applyCatalogSearch\(query\.value, true\)/);
+  assert.match(read('index.html'), /<dialog id="listing-price-dialog"/);
+  assert.match(read('listing-price-preview.mjs'), /dialog\.showModal\(\)/);
+  assert.doesNotMatch(read('index.html'), /id="catalog-query"|id="price-min"|id="price-max"/);
   for (const page of pages) assert.doesNotMatch(read(page), /\bon(?:click|change|input|submit)\s*=/i);
 });
 test('responsive theme does not hide whole-page overflow and preserves focus/reduced motion', () => {

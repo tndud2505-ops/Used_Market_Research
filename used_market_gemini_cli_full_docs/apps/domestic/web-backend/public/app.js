@@ -1,5 +1,6 @@
 import { createContextualAffiliate } from "./affiliate.js?v=compact-ad-v2";
 import { createAdfitSlot } from "./adfit.js?v=adfit-v2";
+import { createListingPricePreview } from "./listing-price-preview.mjs?v=search-modal-v3";
 
 const PRODUCT_QUERY_KEYS = new Set([
   "manufacturer", "model", "gpu_model", "board_brand", "usage", "configuration", "socket", "chipset", "form_interface", "capacity", "purpose", "rated_wattage",
@@ -56,7 +57,6 @@ const FILTER_COLUMN_DEFAULT = 224;
 let browseListingTimer = null;
 let browseGeneration = 0;
 let catalogSearchTimer = null;
-let catalogSearchComposing = false;
 
 const state = {
   catalog: null,
@@ -89,12 +89,9 @@ const state = {
   listingScopeKey: "",
   listingTotal: null,
   listingSort: "recent",
-  priceMin: "",
-  priceMax: "",
   productRequest: null,
   listingRequest: null,
   modelFiltersCollapsed: false,
-  listingOptionsCollapsed: false,
   returnFocusProductId: "",
 };
 
@@ -124,17 +121,10 @@ const dom = {
   listingTitle: document.querySelector("#listing-title"),
   listingCount: document.querySelector("#listing-count"),
   listingMessage: document.querySelector("#listing-message"),
-  listingOptions: document.querySelector("#listing-options"),
-  listingOptionsToggle: document.querySelector("#listing-options-toggle"),
   backToModels: document.querySelector("#back-to-models"),
   modelDetailOpen: document.querySelector("#model-detail-open"),
-  listingControls: document.querySelector("#listing-controls"),
   listingSort: document.querySelector("#listing-sort"),
   listingSortTabs: [...document.querySelectorAll(".listing-sort-tab")],
-  priceMin: document.querySelector("#price-min"),
-  priceMax: document.querySelector("#price-max"),
-  priceReset: document.querySelector("#price-reset"),
-  priceError: document.querySelector("#price-error"),
   listingRows: document.querySelector("#listing-rows"),
   listingEmpty: document.querySelector("#listing-empty"),
   listingPagination: document.querySelector("#listing-pagination"),
@@ -1055,15 +1045,6 @@ function setModelFiltersCollapsed(collapsed) {
   dom.modelFilterToggle.textContent = state.modelFiltersCollapsed ? "옵션 전체보기" : "옵션 접기";
 }
 
-function setListingOptionsCollapsed(collapsed) {
-  // Sorting and price inputs remain visible in the compact, wrapping toolbar.
-  state.listingOptionsCollapsed = false;
-  dom.listingOptions.hidden = state.listingOptionsCollapsed;
-  dom.listingOptionsToggle.setAttribute("aria-expanded", String(!state.listingOptionsCollapsed));
-  const suffix = listingPriceControlsActive() ? " · 적용 중" : "";
-  dom.listingOptionsToggle.textContent = (state.listingOptionsCollapsed ? "정렬·가격 열기" : "정렬·가격 닫기") + suffix;
-}
-
 function syncListingSortTabs() {
   const activeSort = state.listingSort || dom.listingSort.value || "recent";
   dom.listingSort.value = activeSort;
@@ -1086,8 +1067,6 @@ function reloadListingsForControls(focusSourceValue) {
   syncCatalogUrl();
   updatePriceGraphLink();
   updateFacetSelectionUi();
-  dom.priceReset.hidden = !state.priceMin && !state.priceMax;
-  setListingOptionsCollapsed(state.listingOptionsCollapsed);
   renderSourceFilters();
   if (focusSourceValue !== undefined) {
     window.requestAnimationFrame(() => {
@@ -1108,7 +1087,7 @@ function renderSourceFilters() {
   dom.sourceFacetRow.hidden = state.sources.length === 0;
   syncSourceFilterSummary();
   if (!state.sources.length) return;
-  const priority = ["ebay", "joonggonara", "bunjang"];
+  const priority = ["joonggonara", "bunjang", "ebay"];
   const compactLabels = {
     joonggonara: "중고나라",
     bunjang: "번개장터",
@@ -1391,7 +1370,6 @@ function resetDetail() {
   dom.listingSection.hidden = false;
   dom.backToModels.hidden = true;
   dom.modelDetailOpen.hidden = true;
-  dom.modelDetailOpen.removeAttribute("href");
   dom.listingRows.replaceChildren();
   dom.listingEmpty.hidden = true;
   showListingMessage("");
@@ -1449,16 +1427,15 @@ async function refreshBrowseScope(listingDelayMs = 0) {
 }
 
 function updatePriceGraphLink() {
-  const candidates = state.products.filter(isSelectableModel);
-  const product = state.selectedProduct || (state.productTotal === 1 && candidates.length === 1 ? candidates[0] : null);
+  const product = pricePreviewProduct();
   dom.modelDetailOpen.hidden = !product;
-  if (!product) { dom.modelDetailOpen.removeAttribute("href"); return; }
-  const params = new URLSearchParams({ model: productId(product) });
-  const source = [...state.selectedSites][0];
-  if (source) params.set("source", source);
-  params.set("return_to", window.location.pathname + window.location.search);
-  dom.modelDetailOpen.href = "/price-analysis.html?" + params;
-  dom.modelDetailOpen.setAttribute("aria-label", productName(product) + " 가격 그래프 보기 (새 탭)");
+  if (!product) { dom.modelDetailOpen.removeAttribute("aria-label"); return; }
+  dom.modelDetailOpen.setAttribute("aria-label", productName(product) + " 가격 그래프 보기");
+}
+
+function pricePreviewProduct() {
+  const candidates = state.products.filter(isSelectableModel);
+  return state.selectedProduct || (state.productTotal === 1 && candidates.length === 1 ? candidates[0] : null);
 }
 
 function revealSection(section) {
@@ -1471,7 +1448,7 @@ function revealSection(section) {
 }
 
 function listingPriceControlsActive() {
-  return state.listingSort !== "recent" || Boolean(state.priceMin || state.priceMax);
+  return state.listingSort !== "recent";
 }
 
 function listingSourceScope() {
@@ -1528,8 +1505,6 @@ function buildListingQuery(cursor = "") {
     selectedFacetValues(key).sort().forEach((value) => params.append(key, value));
   });
   if (state.listingSort) params.set("sort", state.listingSort);
-  if (state.priceMin) params.set("price_min", state.priceMin);
-  if (state.priceMax) params.set("price_max", state.priceMax);
   const sourceScope = listingSourceScope();
   const sourceIds = sourceScope.map((source) => source.id).filter(Boolean);
   if (sourceIds.length && sourceIds.length < state.sources.length) params.set("sites", sourceIds.join(","));
@@ -1889,45 +1864,9 @@ async function loadListings(append = false) {
   if (cursor) return requestListingPage(nextPage, cursor);
 }
 
-function digitsOnly(value) {
-  return normalizeText(value).replace(/[^0-9]/g, "");
-}
-
-function readPriceRange(minimum, maximum) {
-  const range = { min: digitsOnly(minimum), max: digitsOnly(maximum), error: "", field: "" };
-  for (const [field, raw] of [["min", minimum], ["max", maximum]]) {
-    const text = normalizeText(raw);
-    if (text && (!/^\d[\d,\s]*$/u.test(text) || !Number.isSafeInteger(Number(range[field])))) {
-      return { ...range, error: "가격은 0 이상의 숫자로 입력해 주세요.", field };
-    }
-  }
-  if (range.min && range.max && Number(range.min) > Number(range.max)) {
-    return { ...range, error: "최고가는 최저가 이상이어야 합니다.", field: "max" };
-  }
-  return range;
-}
-
-function clearPriceError() {
-  dom.priceError.hidden = true;
-  dom.priceError.textContent = "";
-  dom.priceMin.removeAttribute("aria-invalid");
-  dom.priceMax.removeAttribute("aria-invalid");
-}
-
-function resetPriceRange() {
-  state.priceMin = "";
-  state.priceMax = "";
-  dom.priceMin.value = "";
-  dom.priceMax.value = "";
-  dom.priceReset.hidden = true;
-  clearPriceError();
-}
-
 function resetListingControls() {
-  resetPriceRange();
   state.listingSort = "recent";
   syncListingSortTabs();
-  setListingOptionsCollapsed(state.listingOptionsCollapsed);
 }
 
 function showAllModels() {
@@ -1950,8 +1889,6 @@ function syncCatalogUrl() {
   const source = [...state.selectedSites][0];
   if (source) url.searchParams.set("sites", source);
   if (state.listingSort !== "recent") url.searchParams.set("sort", state.listingSort);
-  if (state.priceMin) url.searchParams.set("price_min", state.priceMin);
-  if (state.priceMax) url.searchParams.set("price_max", state.priceMax);
   window.history.replaceState({}, "", url.pathname + url.search + url.hash);
 }
 
@@ -1983,10 +1920,6 @@ async function loadCatalog() {
     const requestedSource = initialParams.get("sites");
     if (state.sources.some(source => source.id === requestedSource)) state.selectedSites.add(requestedSource);
     if (["recent", "price_asc", "price_desc"].includes(initialParams.get("sort"))) state.listingSort = initialParams.get("sort");
-    const initialRange = readPriceRange(initialParams.get("price_min") || "", initialParams.get("price_max") || "");
-    if (!initialRange.error) { state.priceMin = initialRange.min; state.priceMax = initialRange.max; }
-    dom.priceMin.value = state.priceMin; dom.priceMax.value = state.priceMax;
-    dom.priceReset.hidden = !state.priceMin && !state.priceMax;
     syncListingSortTabs();
     state.query = initialQuery;
     state.categoryCode = initialQuery && !requestedCategory ? "" : categoryCode(initialCategory);
@@ -2086,11 +2019,9 @@ dom.modelSelect.addEventListener("change", () => {
 });
 mobileFacetMedia.addEventListener("change", (event) => {
   renderFacets();
-  setListingOptionsCollapsed(event.matches);
 });
 compactFilterMedia.addEventListener("change", (event) => setModelFiltersCollapsed(event.matches));
 dom.modelFilterToggle.addEventListener("click", () => setModelFiltersCollapsed(!state.modelFiltersCollapsed));
-dom.listingOptionsToggle.addEventListener("click", () => setListingOptionsCollapsed(!state.listingOptionsCollapsed));
 dom.listingPageNumbers.addEventListener("click", (event) => {
   const button = event.target.closest("[data-page]");
   if (!button) return;
@@ -2113,45 +2044,13 @@ dom.backToModels.addEventListener("click", () => {
   window.requestAnimationFrame(() => dom.modelSelect.focus({ preventScroll: true }));
 });
 
-dom.listingControls.addEventListener("submit", (event) => {
-  event.preventDefault();
-  const range = readPriceRange(dom.priceMin.value, dom.priceMax.value);
-  clearPriceError();
-  if (range.error) {
-    dom.priceError.textContent = range.error;
-    dom.priceError.hidden = false;
-    const input = range.field === "min" ? dom.priceMin : dom.priceMax;
-    input.setAttribute("aria-invalid", "true");
-    input.focus({ preventScroll: true });
-    return;
-  }
-  state.listingSort = dom.listingSort.value || state.listingSort || "recent";
-  dom.listingSort.value = state.listingSort;
-  syncListingSortTabs();
-  state.priceMin = range.min;
-  state.priceMax = range.max;
-  dom.priceMin.value = state.priceMin;
-  dom.priceMax.value = state.priceMax;
-  reloadListingsForControls();
-});
-dom.priceMin.addEventListener("input", clearPriceError);
-dom.priceMax.addEventListener("input", clearPriceError);
-dom.priceReset.addEventListener("click", () => {
-  resetPriceRange();
-  reloadListingsForControls();
-  dom.priceMin.focus({ preventScroll: true });
+const pricePreview = createListingPricePreview(document.querySelector("#listing-price-dialog"), dom.modelDetailOpen);
+dom.modelDetailOpen.addEventListener("click", () => {
+  const product = pricePreviewProduct();
+  if (product) pricePreview.open(product, [...state.selectedSites][0] || "");
 });
 
 function setupConceptAControls() {
-  const form = document.querySelector("#up-catalog-search"), query = document.querySelector("#catalog-query");
-  form?.addEventListener("submit", event => { event.preventDefault(); applyCatalogSearch(query.value, true); });
-  query?.addEventListener("compositionstart", () => { catalogSearchComposing = true; clearTimeout(catalogSearchTimer); });
-  query?.addEventListener("compositionend", () => { catalogSearchComposing = false; applyCatalogSearch(query.value); });
-  query?.addEventListener("input", () => {
-    if (catalogSearchComposing) return;
-    clearTimeout(catalogSearchTimer);
-    catalogSearchTimer = window.setTimeout(() => applyCatalogSearch(query.value), 250);
-  });
   const dialog = document.querySelector("#up-filter-dialog"), slot = document.querySelector("#up-filter-slot");
   const opener = document.querySelector("#up-filter-open");
   if (dialog && slot && opener) {
@@ -2179,7 +2078,6 @@ function setupConceptAControls() {
 
 setupConceptAControls();
 setModelFiltersCollapsed(compactFilterMedia.matches);
-setListingOptionsCollapsed(mobileFacetMedia.matches);
 syncListingSortTabs();
 setupColumnResizers();
 loadCatalog();
