@@ -266,7 +266,8 @@ export function compactBuild(input, products, categories) {
 }
 export function dailySeries(data, key, days = 30) {
   const rows = Array.isArray(data?.daily) ? data.daily : [];
-  const date = String(data?.window?.to || data?.as_of || rows.at(-1)?.date || rows.at(-1)?.stat_date || '').slice(0, 10);
+  const latestPublished = String(data?.availability?.status || '').toUpperCase() === 'LAST_PUBLISHED';
+  const date = String((latestPublished ? data?.published_window?.to : '') || data?.window?.to || data?.as_of || rows.at(-1)?.date || rows.at(-1)?.stat_date || '').slice(0, 10);
   const end = Date.parse(`${date}T00:00:00Z`);
   if (!Number.isFinite(end)) return [];
   const start = end - (days - 1) * 86400000;

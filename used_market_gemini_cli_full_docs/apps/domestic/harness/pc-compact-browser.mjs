@@ -65,7 +65,7 @@ const assets = [
   ['index.html', '/'], ['computer-builder.html', '/computer-builder.html'], ['price-analysis.html', '/price-analysis.html'],
   ['guide.html', '/guide.html'], ['privacy.html', '/privacy.html'], ['terms.html', '/terms.html'], ['used-market-categories.html', '/categories'],
   ['app.js', '/app.js?v=compact-ui-v1'], ['pc-tools.js', '/pc-tools.js?v=compact-ui-v1'], ['ui-concept-a.css', '/ui-concept-a.css?v=compact-ui-v1'],
-  ['pc-tools-data.mjs', '/pc-tools-data.mjs?v=parts-data-v5'], ['pc-tools-core.mjs', '/pc-tools-core.mjs?v=parts-ux-v4'],
+  ['pc-tools-data.mjs', '/pc-tools-data.mjs?v=parts-data-v5'], ['pc-tools-core.mjs', '/pc-tools-core.mjs?v=parts-ux-v5'],
   ['pc-tools-catalog.mjs', '/pc-tools-catalog.mjs?v=parts-ux-v4'], ['pc-tools.css', '/pc-tools.css?v=parts-ux-v4'], ['pc-tools-chart.mjs', '/pc-tools-chart.mjs?v=ui-a-v1']
 ];
 for (const [name, route] of assets) {

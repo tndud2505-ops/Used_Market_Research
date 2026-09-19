@@ -1,4 +1,4 @@
-import { SERIES, idOf, nameOf, sourceStats, dailySeries, priceRecordIssue } from './pc-tools-core.mjs?v=parts-ux-v4';
+import { SERIES, idOf, nameOf, sourceStats, dailySeries, priceRecordIssue } from './pc-tools-core.mjs?v=parts-ux-v5';
 import { createPriceStore } from './pc-tools-data.mjs?v=parts-data-v5';
 import { drawChart } from './pc-tools-chart.mjs?v=search-modal-v3';
 

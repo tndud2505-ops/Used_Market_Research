@@ -25,7 +25,8 @@ test('all six pages use search-first v2 assets, unique IDs and common navigation
   }
 });
 test('restored UI assets use a fresh cache identity while data and calculation versions remain current', () => {
-  for (const name of ['core', 'catalog']) assert.ok(script.includes(`pc-tools-${name}.mjs?v=parts-ux-v4`));
+  assert.ok(script.includes('pc-tools-core.mjs?v=parts-ux-v5'));
+  assert.ok(script.includes('pc-tools-catalog.mjs?v=parts-ux-v4'));
   assert.match(script, /pc-tools-data\.mjs\?v=parts-data-v5/);
   assert.match(script, /pc-tools-chart\.mjs\?v=search-first-v2/);
   assert.match(read('index.html'), /app\.js\?v=search-modal-v4/);

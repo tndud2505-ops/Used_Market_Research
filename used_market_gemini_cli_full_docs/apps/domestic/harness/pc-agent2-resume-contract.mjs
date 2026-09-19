@@ -106,6 +106,12 @@ test('an implicit current request may show the latest completed daily publicatio
     store.clear();
   } finally { globalThis.fetch = original; }
 });
+test('the latest completed publication ends its chart at the published date', () => {
+  const to = new Date().toISOString().slice(0, 10), previous = new Date(Date.parse(`${to}T00:00:00.000Z`) - 86_400_000).toISOString().slice(0, 10);
+  const points = core.dailySeries({ availability: { status: 'LAST_PUBLISHED' }, window: { to }, published_window: { to: previous },
+    daily: [{ date: previous, active: metric(129500) }] }, 'active', 30);
+  assert.equal(points.at(-1).date, previous);
+});
 test('historical readiness error keeps a useful message without raw payload', async () => {
   const original = globalThis.fetch;
   try {

@@ -1,4 +1,4 @@
-import { SERIES, idOf, nameOf, naturalCompare, money, metricValue, metricPresentation, statsUnavailable, priceRecordIssue, analysisSelectionUrl, groupProducts, scopedStats, sourceStats, priceDateRange, modelPageItems, buildTotals, compactBuild, compatibility, validateBuild, dailySeries, percentChange } from './pc-tools-core.mjs?v=parts-ux-v4';
+import { SERIES, idOf, nameOf, naturalCompare, money, metricValue, metricPresentation, statsUnavailable, priceRecordIssue, analysisSelectionUrl, groupProducts, scopedStats, sourceStats, priceDateRange, modelPageItems, buildTotals, compactBuild, compatibility, validateBuild, dailySeries, percentChange } from './pc-tools-core.mjs?v=parts-ux-v5';
 import { readJson, createPriceStore } from './pc-tools-data.mjs?v=parts-data-v5';
 import { drawChart } from './pc-tools-chart.mjs?v=search-first-v2';
 import { createDatePicker } from './pc-tools-calendar.mjs?v=coverage-v4';

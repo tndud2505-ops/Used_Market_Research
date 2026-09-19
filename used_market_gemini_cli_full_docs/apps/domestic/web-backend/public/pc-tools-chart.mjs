@@ -1,4 +1,4 @@
-import { SERIES, money } from './pc-tools-core.mjs?v=parts-ux-v4';
+import { SERIES, money } from './pc-tools-core.mjs?v=parts-ux-v5';
 const ns = 'http://www.w3.org/2000/svg';
 const cleanups = new WeakMap();
 const svgNode = (name, attrs = {}, text = '') => {
