@@ -115,7 +115,7 @@ export async function runBrowserChecks({browser,origin,out,fixture=false}) {
     assert.ok(value.scroll<=value.width,`${name}: page overflow ${value.scroll}/${value.width}`);
     if(value.width>=1181&&value.boxes['.sf-search-tools']){
       assert.ok(value.boxes['.sf-search-tools'].h<190,'model and site controls remain compact');
-      assert.ok(value.boxes['#source-facet-row'].y>=value.boxes['.workspace-heading'].y+value.boxes['.workspace-heading'].h,'sites must be below model selection');
+      assert.ok(Math.abs((value.boxes['#source-facet-row'].y+value.boxes['#source-facet-row'].h)-(value.boxes['.workspace-heading'].y+value.boxes['.workspace-heading'].h))<=4,'model selection and sites share one desktop row');
       assert.ok(value.boxes['.listing-section'].w>value.width*.65,'selected listings must use all available right-column width');
     }
     if(value.boxes['#build-table']) {

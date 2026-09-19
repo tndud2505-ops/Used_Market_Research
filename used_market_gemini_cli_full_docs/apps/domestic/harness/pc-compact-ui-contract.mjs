@@ -47,17 +47,24 @@ test('category landing page shares the functional navigation and stylesheet', ()
 const date = offset => new Date(Date.now() + offset * 86400000).toISOString().slice(0, 10);
 const path = 'https://example.test/api/products/cpu%3Asynthetic/price-stats?days=30&currency=KRW&market_pool=KR_C2C_USED&condition=USED_WORKING';
 const response = data => new Response(JSON.stringify({ status: 'success', data }), { headers: { 'content-type': 'application/json', 'cache-control': 'public,max-age=300' } });
-test('today and implicit-current requests cannot return a stale publication as HTTP 200', async () => {
+test('implicit current requests may use only the latest complete daily publication', async () => {
   for (const suffix of ['', `&as_of=${date(0)}`]) {
     const request = new Request(path + suffix), query = parsePriceStatsRequest(new URL(request.url));
-    const oldQuery = parsePriceStatsRequest(new URL(path + `&as_of=${date(-1)}`));
+    const oldQuery = parsePriceStatsRequest(new URL(path + `&as_of=${date(-2)}`));
     const result = await guardPriceStatsResponse(request, response({ canonical_product_id: 'cpu:synthetic', publication_id: 'synthetic-old',
-      window: query.window, published_window: oldQuery.window, as_of: `${date(-1)}T05:00:00Z`,
+      window: query.window, published_window: oldQuery.window, as_of: `${date(-2)}T18:05:00Z`,
       active: { sample_count: 5, mean: 123.45, median: 123.45, min: 123.45, max: 123.45 } }));
     assert.equal(result.status, 503); assert.equal(result.headers.get('cache-control'), 'no-store');
     const data = await result.json(); assert.equal(data.error, 'EXACT_STATS_NOT_READY'); assert.equal(data.data, undefined);
     assert.equal(data.availability.reason, 'PUBLISHED_WINDOW_MISMATCH');
   }
+  const request = new Request(path), query = parsePriceStatsRequest(new URL(request.url));
+  const latest = parsePriceStatsRequest(new URL(path + `&as_of=${date(-1)}`));
+  const result = await guardPriceStatsResponse(request, response({ canonical_product_id: 'cpu:synthetic', publication_id: 'synthetic-latest',
+    window: query.window, published_window: latest.window, as_of: `${date(-1)}T18:05:00Z`,
+    active: { sample_count: 5, mean: 123.45, median: 123.45, min: 123.45, max: 123.45 } }));
+  assert.equal(result.status, 200);
+  assert.equal((await result.json()).data.availability.status, 'LAST_PUBLISHED');
 });
 test('a different current-period length also requires its own exact publication', async () => {
   const request = new Request(path.replace('days=30', 'days=7')), query = parsePriceStatsRequest(new URL(request.url));

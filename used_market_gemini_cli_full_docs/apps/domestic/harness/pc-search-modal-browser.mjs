@@ -11,7 +11,7 @@ import { pcCatalogResponse } from '../cloudflare/pc-directory-http.mjs';
 if (!process.argv.includes('--run')) throw new Error('Explicit --run is required. Read external-ai-orchestrator/SKILL.md first.');
 const arg = name => { const i = process.argv.indexOf(name); return i < 0 ? '' : process.argv[i + 1] || ''; };
 const root = fileURLToPath(new URL('../web-backend/public/', import.meta.url));
-const out = path.resolve(arg('--out') || 'tmp/search-modal-v3');
+const out = path.resolve(arg('--out') || 'tmp/search-modal-v4');
 const live = arg('--origin');
 if (live) assert.ok(['https://used-pick.com','https://www.used-pick.com'].includes(live));
 await fs.mkdir(out, { recursive:true });
@@ -105,13 +105,16 @@ try {
     await page.setViewportSize({width,height:1000});
     const boxes=await page.evaluate(()=>{
       const box=s=>{const b=document.querySelector(s).getBoundingClientRect();return{x:b.x,y:b.y,w:b.width,h:b.height,bottom:b.bottom};};
-      return {width:innerWidth,scroll:document.documentElement.scrollWidth,model:box('#model-select'),source:box('#source-facet-row'),
+      return {width:innerWidth,scroll:document.documentElement.scrollWidth,model:box('#model-select'),source:box('#source-facet-row'),back:box('#back-to-models'),graph:box('#model-detail-open'),
         sites:[...document.querySelectorAll('.source-choice span')].map(n=>{const b=n.getBoundingClientRect();return{y:b.y,h:b.height};}),
         sorts:[...document.querySelectorAll('.listing-sort-tab')].map(n=>{const b=n.getBoundingClientRect(),s=getComputedStyle(n);return{y:b.y,h:b.height,line:s.lineHeight,padding:s.padding,border:s.borderWidth};})};
     });
     assert.ok(boxes.scroll<=width,`overflow at ${width}: ${boxes.scroll}`);
-    assert.ok(boxes.source.y>=boxes.model.bottom,'sources are below the model selector');
+    if(width>=1181) assert.ok(Math.abs(boxes.source.bottom-boxes.model.bottom)<=4,'model selection and sites share one desktop row');
+    else assert.ok(boxes.source.y>=boxes.model.bottom,'sites move below the model selector at constrained widths');
     assert.equal(new Set(boxes.sites.map(b=>b.y)).size,1,'sites stay in one row');
+    assert.equal(boxes.back.h,40,'return button matches control height');
+    if(width>=1181) assert.ok(Math.abs(boxes.back.y-boxes.graph.y)<=4,'return and price-graph controls share a baseline');
     assert.equal(new Set(boxes.sorts.map(b=>b.h)).size,1,'sort heights match');
     assert.equal(new Set(boxes.sorts.map(b=>b.y)).size,1,'sort vertical positions match');
     for(const k of ['line','padding','border']) assert.equal(new Set(boxes.sorts.map(b=>b[k])).size,1,`sort ${k} matches`);

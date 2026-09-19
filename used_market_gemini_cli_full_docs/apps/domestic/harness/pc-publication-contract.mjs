@@ -463,9 +463,12 @@ await publishProductStats(db, {
 assert.equal(db.activePublicationId(), "large-publication");
 assert.ok(db.maximumBatchSize <= 50, "large publications must stay within bounded D1 batches");
 
+const workerPublicationAsOf = new Date().toISOString();
 const workerDb = {
   prepare() {
-    return { bind() { return { async first() { return { stats_json: JSON.stringify(stats) }; } }; } };
+    return { bind() { return { async first() {
+      return { stats_json: JSON.stringify(stats), publication_id: "fixture-products", as_of: workerPublicationAsOf, days: 30 };
+    } }; } };
   }
 };
 const workerUrl = `${baseUrl}?days=30&market_pool=KR_C2C_USED&condition=USED_WORKING&currency=KRW`;

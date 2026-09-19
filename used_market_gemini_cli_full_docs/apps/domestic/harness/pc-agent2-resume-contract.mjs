@@ -94,6 +94,18 @@ test('mismatched published period is not plotted as the requested period', async
     store.clear();
   } finally { globalThis.fetch = original; }
 });
+test('an implicit current request may show the latest completed daily publication only when the edge marks it', async () => {
+  const original = globalThis.fetch;
+  try {
+    const to = new Date().toISOString().slice(0, 10), previous = new Date(Date.parse(`${to}T00:00:00.000Z`) - 86_400_000).toISOString().slice(0, 10);
+    const from = new Date(Date.parse(`${previous}T00:00:00.000Z`) - 29 * 86_400_000).toISOString().slice(0, 10);
+    globalThis.fetch = async () => new Response(JSON.stringify({ ...raw(), window: { from: new Date(Date.parse(`${to}T00:00:00.000Z`) - 29 * 86_400_000).toISOString().slice(0, 10), to },
+      published_window: { from, to: previous, days: 30 }, as_of: `${previous}T18:05:00.000Z`, availability: { status: 'LAST_PUBLISHED' } }));
+    const store = createPriceStore(() => {}); await store.load([ram], 30);
+    assert.equal(store.get(ram.canonical_product_id, 30).state, 'ready');
+    store.clear();
+  } finally { globalThis.fetch = original; }
+});
 test('historical readiness error keeps a useful message without raw payload', async () => {
   const original = globalThis.fetch;
   try {

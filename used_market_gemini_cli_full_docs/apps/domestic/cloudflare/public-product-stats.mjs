@@ -640,7 +640,7 @@ export async function publishProductStats(db, input) {
 }
 
 export async function readPublishedProductStats(db, query) {
-  const row = await db.prepare(`SELECT s.stats_json
+  const row = await db.prepare(`SELECT s.stats_json, s.publication_id, s.as_of, s.days
     FROM public_product_stats s
     JOIN public_stats_publications p ON p.publication_id = s.publication_id AND p.active = 1
     WHERE s.canonical_product_id = ? AND s.market_pool = ? AND s.condition_code = ?
@@ -648,5 +648,22 @@ export async function readPublishedProductStats(db, query) {
     LIMIT 1`).bind(
     query.canonicalProductId, query.marketPool, query.condition, query.currency, query.days
   ).first();
-  return row ? JSON.parse(row.stats_json) : null;
+  if (!row) return null;
+  const stats = JSON.parse(row.stats_json);
+  const publishedWindow = stats?.published_window || publicationWindow(row.as_of, row.days);
+  return {
+    ...stats,
+    publication_id: String(row.publication_id),
+    ...(publishedWindow ? { published_window: publishedWindow } : {})
+  };
+}
+
+function publicationWindow(asOf, days) {
+  const count = Number(days);
+  const timestamp = Date.parse(String(asOf || ""));
+  if (!Number.isInteger(count) || count < 1 || !Number.isFinite(timestamp)) return null;
+  const to = new Date(timestamp).toISOString().slice(0, 10);
+  const from = new Date(Date.parse(`${to}T00:00:00.000Z`) - (count - 1) * 86_400_000)
+    .toISOString().slice(0, 10);
+  return { from, to, days: count };
 }

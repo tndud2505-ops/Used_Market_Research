@@ -23,6 +23,12 @@ const valid = { status: 'success', data: { publication_id: 'test-exact', publish
   active: { sample_count: 2, mean: null, median: null }, sold: { sample_count: 0 }, as_of: `${past}T05:00:00.000Z` } };
 assert.equal((await guardPriceStatsResponse(request, response(valid))).status, 200); passed++;
 assert.equal((await guardPriceStatsResponse(request, response({ ...valid, data: { ...valid.data, as_of: `${today}T05:00:00.000Z` } }))).status, 503); passed++;
+const currentQuery = parsePriceStatsRequest(new URL(route));
+const completedDaily = { status: 'success', data: { publication_id: 'test-latest-daily',
+  published_window: { ...currentQuery.window, from: new Date(Date.parse(`${currentQuery.window.from}T00:00:00.000Z`) - 86_400_000).toISOString().slice(0, 10), to: past },
+  active: { sample_count: 2, mean: null, median: null }, sold: { sample_count: 0 }, as_of: `${past}T18:05:00.000Z` } };
+const completedDailyResponse = await guardPriceStatsResponse(new Request(route), response(completedDaily));
+assert.equal(completedDailyResponse.status, 200); assert.equal((await completedDailyResponse.json()).data.availability.status, 'LAST_PUBLISHED'); passed++;
 assert.equal(pcPriceReadinessProblem(validQuery, { active: { sample_count: 0 }, sold: { sample_count: 0 } }), null); passed++;
 const originalFetch = globalThis.fetch;
 try {

@@ -59,7 +59,8 @@ export function createPriceStore(onChange, options = {}) {
           const scope = data.methodology || {};
           if (scope.days != null && Number(scope.days) !== days) throw new Error('가격 집계 기간이 일치하지 않습니다.');
           if (asOf && data.window?.to !== asOf) throw new Error('요청한 날짜의 가격 기록이 아닙니다.');
-          if (data.published_window && data.window && ['from', 'to'].some(key => data.published_window[key] !== data.window[key])) {
+          const latestCompletedDailyPublication = !asOf && String(data?.availability?.status || '').toUpperCase() === 'LAST_PUBLISHED';
+          if (!latestCompletedDailyPublication && data.published_window && data.window && ['from', 'to'].some(key => data.published_window[key] !== data.window[key])) {
             const error = new Error('선택 기간과 게시 요약기간이 다릅니다. 현재 가격으로 대체하지 않습니다.');
             error.code = 'HISTORICAL_PRICE_STATS_UNAVAILABLE'; throw error;
           }

@@ -1,5 +1,5 @@
 import { parsePriceStatsRequest } from '../aws-runner/pc-price-stats-http.mjs';
-import { pcPriceReadinessProblem } from '../market/logic/pc-price-readiness.mjs';
+import { isLatestCompletedDailyPublication, pcPriceReadinessProblem } from '../market/logic/pc-price-readiness.mjs';
 
 export async function guardPriceStatsResponse(request, response) {
   if (response.status !== 200) return response;
@@ -8,8 +8,26 @@ export async function guardPriceStatsResponse(request, response) {
   let payload;
   try { payload = await response.clone().json(); } catch { return response; }
   const data = payload?.data ?? payload;
+  const latestCompletedDailyPublication = isLatestCompletedDailyPublication(query, data);
   const problem = pcPriceReadinessProblem(query, data);
-  if (!problem) return response;
+  if (!problem) {
+    if (!latestCompletedDailyPublication) return response;
+    const updatedData = {
+      ...data,
+      availability: {
+        ...(data?.availability || {}),
+        status: 'LAST_PUBLISHED',
+        reason: 'LATEST_COMPLETE_DAILY_PUBLICATION',
+        counts_are_unique_period_listings: true
+      }
+    };
+    const updatedPayload = payload?.data ? { ...payload, data: updatedData } : updatedData;
+    const headers = new Headers(response.headers);
+    headers.delete('content-length');
+    headers.delete('content-encoding');
+    headers.delete('etag');
+    return new Response(JSON.stringify(updatedPayload), { status: response.status, statusText: response.statusText, headers });
+  }
   const headers = new Headers(response.headers);
   headers.delete('content-length');
   headers.delete('content-encoding');

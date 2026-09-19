@@ -1214,39 +1214,46 @@ assert.deepEqual(
   [],
   "the edge search-only catalog must not advertise denied sources"
 );
+const currentPublicationAsOf = new Date().toISOString();
+const currentPublicationDate = currentPublicationAsOf.slice(0, 10);
+const currentPublicationWindow = {
+  from: new Date(Date.parse(`${currentPublicationDate}T00:00:00.000Z`) - 29 * 86_400_000).toISOString().slice(0, 10),
+  to: currentPublicationDate,
+  days: 30
+};
 d1.prepare(`INSERT INTO public_stats_publications(publication_id, checksum, expected_row_count,
   expected_non_empty_scope_count, parser_version, rule_version, filter_version, created_at, activated_at, active)
   VALUES ('fixture-products', 'fixture-checksum', 1, 1, 'pc-parser-v5', 'pc-rules-v5', 'pc-filter-v5', ?, ?, 1)`)
-  .run("2026-08-29T00:00:00.000Z", "2026-08-29T00:00:00.000Z");
+  .run(currentPublicationAsOf, currentPublicationAsOf);
 const publishedRtx3080Stats = {
   active: { sample_count: 5, mean: 500000, median: 490000 },
   sold: { sample_count: 3, mean: null, median: 470000 },
   confirmed_transactions: { sample_count: 0, mean: null, median: null },
-  daily: [{ date: "2026-08-29", active: { sample_count: 5, mean: 500000, median: 490000 }, sold: { sample_count: 3, mean: null, median: 470000 } }],
+  daily: [{ date: currentPublicationDate, active: { sample_count: 5, mean: 500000, median: 490000 }, sold: { sample_count: 3, mean: null, median: 470000 } }],
   by_source: [{
     source_id: "bunjang",
     active: { sample_count: 2, mean: null, median: null },
     sold: { sample_count: 1, mean: null, median: null },
     confirmed_transactions: { sample_count: 0, mean: null, median: null },
-    daily: [{ date: "2026-08-29", active: { sample_count: 2, mean: null, median: null }, sold: { sample_count: 1, mean: null, median: null } }]
+    daily: [{ date: currentPublicationDate, active: { sample_count: 2, mean: null, median: null }, sold: { sample_count: 1, mean: null, median: null } }]
   }, {
     source_id: "joonggonara",
     active: { sample_count: 3, mean: null, median: 490000 },
     sold: { sample_count: 2, mean: null, median: null },
     confirmed_transactions: { sample_count: 0, mean: null, median: null },
-    daily: [{ date: "2026-08-29", active: { sample_count: 3, mean: null, median: 490000 }, sold: { sample_count: 2, mean: null, median: null } }]
+    daily: [{ date: currentPublicationDate, active: { sample_count: 3, mean: null, median: 490000 }, sold: { sample_count: 2, mean: null, median: null } }]
   }]
 };
 d1.prepare(`INSERT INTO public_product_stats(publication_id, canonical_product_id, market_pool,
   condition_code, currency, days, stats_json, as_of) VALUES ('fixture-products', 'gpu:nvidia:rtx-3080',
   'KR_C2C_USED', 'USED_WORKING', 'KRW', 30, ?, ?)`)
-  .run(JSON.stringify(publishedRtx3080Stats), "2026-08-29T00:00:00.000Z");
+  .run(JSON.stringify(publishedRtx3080Stats), currentPublicationAsOf);
 const ssdBucketId = "ssd:samsung:capacity-bucket:960-gb-1-tb";
 d1.prepare(`INSERT INTO public_product_stats(publication_id, canonical_product_id, market_pool,
   condition_code, currency, days, stats_json, as_of) VALUES ('fixture-products', ?,
   'KR_DEALER_USED', 'USED_WORKING', 'KRW', 30, ?, ?)`)
   .run(ssdBucketId, JSON.stringify({ active: { sample_count: 0 }, sold: { sample_count: 0 }, daily: [], by_source: [] }),
-    "2026-08-29T00:00:00.000Z");
+    currentPublicationAsOf);
 const inconsistentCpuId = "cpu:amd:ryzen-3-3200g";
 const inconsistentCpuStats = {
   active: { sample_count: 20, min: 45_000, max: 110_000, mean: 44_400 },
@@ -1260,14 +1267,14 @@ const inconsistentCpuStats = {
 d1.prepare(`INSERT INTO public_product_stats(publication_id, canonical_product_id, market_pool,
   condition_code, currency, days, stats_json, as_of) VALUES ('fixture-products', ?,
   'KR_C2C_USED', 'USED_WORKING', 'KRW', 30, ?, ?)`)
-  .run(inconsistentCpuId, JSON.stringify(inconsistentCpuStats), "2026-08-29T00:00:00.000Z");
+  .run(inconsistentCpuId, JSON.stringify(inconsistentCpuStats), currentPublicationAsOf);
 d1.prepare(`INSERT INTO listings(item_id, site, category_id, title, search_text, price_value, currency, url, updated_at, active,
   canonical_product_id, canonical_display_name, canonical_manufacturer, listing_kind, pc_category_code, quantity, price_scope,
   condition_code, lifecycle_status, market_pool, price_eligible, exclusion_reasons_json)
   VALUES ('joonggonara:3200g-current', 'joonggonara', 'pc', 'AMD 라이젠3 3200G CPU', 'AMD 라이젠3 3200G CPU',
-    50000, 'KRW', 'https://web.joongna.com/product/3200', '2026-08-31T00:00:00.000Z', 1, ?,
+    50000, 'KRW', 'https://web.joongna.com/product/3200', ?, 1, ?,
     'AMD Ryzen 3 3200G', 'AMD', 'SINGLE_COMPONENT', 'CPU', 1, 'TOTAL', 'USED_WORKING', 'ACTIVE',
-    'KR_C2C_USED', 1, '[]')`).run(inconsistentCpuId);
+    'KR_C2C_USED', 1, '[]')`).run(currentPublicationAsOf, inconsistentCpuId);
 for (const [index, price] of [90_000, 100_000, 110_000].entries()) {
   d1.prepare(`INSERT INTO listings(item_id, site, category_id, title, search_text, price_value, currency, url, updated_at, active,
     canonical_product_id, canonical_display_name, canonical_manufacturer, listing_kind, pc_category_code, quantity, price_scope,
@@ -1276,7 +1283,7 @@ for (const [index, price] of [90_000, 100_000, 110_000].entries()) {
       'SINGLE_COMPONENT', 'SSD', 1, 'TOTAL', 'USED_WORKING', 'ACTIVE', 'KR_DEALER_USED', 1, '[]')`).run(
     `danawa:ssd-bucket-${index}`, `Samsung SSD 1TB ${index}`, `Samsung SSD 1TB ${index}`, price,
     `https://dmall.danawa.com/v3/?controller=sale&methods=blog&seq=80000${index}`,
-    "2026-08-31T00:00:00.000Z", ssdBucketId
+    currentPublicationAsOf, ssdBucketId
   );
 }
 d1.prepare("UPDATE listings SET listing_facets_json = ? WHERE item_id IN (?, ?)")
@@ -1291,7 +1298,7 @@ for (const [index, price] of [280_000, 300_000, 320_000].entries()) {
       'SINGLE_COMPONENT', 'GPU', 1, 'TOTAL', 'USED_WORKING', 'ACTIVE', 'KR_C2C_USED', 1, '[]')`).run(
     `joonggonara:rtx-3060-${index}`, `MSI RTX 3060 ${index}`, `MSI RTX 3060 ${index}`, price,
     `https://web.joongna.com/product/3060${index}`,
-    "2026-08-31T00:00:00.000Z"
+    currentPublicationAsOf
   );
 }
 for (const [index, price] of [290_000, 310_000, 330_000].entries()) {
@@ -1302,7 +1309,7 @@ for (const [index, price] of [290_000, 310_000, 330_000].entries()) {
       'SINGLE_COMPONENT', 'GPU', 1, 'TOTAL', 'USED_WORKING', 'ACTIVE', 'KR_C2C_USED', 1, '[]')`).run(
     `bunjang:rtx-3060-${index}`, `ZOTAC RTX 3060 ${index}`, `ZOTAC RTX 3060 ${index}`, price,
     `https://m.bunjang.co.kr/products/3061${index}`,
-    "2026-08-31T00:00:00.000Z"
+    currentPublicationAsOf
   );
 }
 const workerCatalog = await worker.fetch(new Request("https://used-pick.test/api/pc/catalog"), importEnv);
@@ -1324,7 +1331,7 @@ assert.equal(workerProductsPayload.data.products.items[0].id, "gpu:nvidia:rtx-30
 assert.equal(workerProductsPayload.data.products.items[0].price_stats.active.median, 490000);
 assert.equal(workerProductsPayload.data.products.items[0].price_stats_market_pool, "KR_C2C_USED");
 const publishedStatsResponse = await worker.fetch(new Request(
-  "https://used-pick.test/api/products/gpu%3Anvidia%3Artx-3080/price-stats?days=30&market_pool=KR_C2C_USED&condition=USED_WORKING&currency=KRW"
+  `https://used-pick.test/api/products/gpu%3Anvidia%3Artx-3080/price-stats?days=30&as_of=${currentPublicationDate}&market_pool=KR_C2C_USED&condition=USED_WORKING&currency=KRW`
 ), importEnv);
 assert.equal(publishedStatsResponse.status, 200);
 const customRangeFallback = await worker.fetch(new Request(
@@ -1332,11 +1339,17 @@ const customRangeFallback = await worker.fetch(new Request(
 ), importEnv);
 assert.equal(customRangeFallback.status, 503, 'custom ranges must never reuse the current 30-day D1 projection');
 const publishedStatsPayload = (await publishedStatsResponse.json()).data;
+assert.equal(publishedStatsPayload.publication_id, "fixture-products",
+  "an active D1 publication must remain identifiable at the public price endpoint");
+assert.deepEqual(publishedStatsPayload.published_window, currentPublicationWindow,
+  "an active D1 publication must expose its actual date window when stored JSON predates that field");
+assert.equal(publishedStatsPayload.availability.status, "EXACT_PUBLISHED",
+  "an active D1 publication must not be mislabeled as unavailable");
 assert.deepEqual(publishedStatsPayload.by_source.map((source) => source.source_id), ["bunjang", "joonggonara"],
   "retired sources must not remain selectable in public price statistics");
 assert.equal(publishedStatsPayload.active.sample_count, 5,
   "the published aggregate must remain ledger-member based instead of summing per-source projections");
-assert.equal(publishedStatsPayload.as_of, "2026-08-29T00:00:00.000Z",
+assert.equal(publishedStatsPayload.as_of, currentPublicationAsOf,
   "adding a current source projection must not relabel the published aggregate with a newer timestamp");
 assert.equal(publishedStatsPayload.by_source.find((source) => source.source_id === "joonggonara").active.median, 490_000,
   "stored per-source statistics must remain independently selectable by the UI site filter");
@@ -1565,7 +1578,7 @@ try {
   ), {}, statsOriginRead);
   assert.equal(firstCachedStats.headers.get("x-pc-read-cache"), "MISS");
   assert.equal(secondCachedStats.headers.get("x-pc-read-cache"), "HIT");
-  assert.ok([...listingCacheEntries.keys()].every(key => key.startsWith('https://used-market-pc-read-cache-v2.invalid/')),
+  assert.ok([...listingCacheEntries.keys()].every(key => key.startsWith('https://used-market-pc-read-cache-v3.invalid/')),
     'the repaired price cohort must never reuse pre-release v1 edge cache entries');
   assert.equal(statsReads, 1, "normalized price-stat reads must share a Worker cache entry");
 

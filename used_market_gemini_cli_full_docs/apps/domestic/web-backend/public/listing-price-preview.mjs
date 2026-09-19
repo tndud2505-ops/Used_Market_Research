@@ -34,7 +34,7 @@ export function createListingPricePreview(dialog, opener) {
     chart.dataset.source = source;
     chart.dataset.priceState = loading ? 'loading' : record.state === 'error' ? 'error' : issue ? 'unavailable' : hasPoints ? 'ready' : 'empty';
     chart.setAttribute('aria-busy', String(loading));
-    const window = record?.data?.window;
+    const window = record?.data?.published_window || record?.data?.window;
     find('scope').textContent = `${labels[source] || source} · ${currency} · ${window?.from && window?.to ? `${window.from} ~ ${window.to}` : '최근 30일'}`;
     status.textContent = issue || (hasPoints ? '' : '이 기간에 표시할 일별 대표가격 자료가 없습니다.');
     status.hidden = !status.textContent;

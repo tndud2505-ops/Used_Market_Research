@@ -14,7 +14,7 @@ test('all six pages use search-first v2 assets, unique IDs and common navigation
     const html = read(name), ids = [...html.matchAll(/\bid="([^"]+)"/g)].map(m => m[1]);
     assert.equal(ids.length, new Set(ids).size, `${name}: duplicate IDs`);
     assert.match(html, /ui-concept-a\.css\?v=search-first-v2/);
-    assert.ok(html.includes(`data-ui-release="${name === 'index.html' ? 'search-modal-v3' : 'search-first-v2'}"`));
+    assert.ok(html.includes(`data-ui-release="${name === 'index.html' ? 'search-modal-v4' : 'search-first-v2'}"`));
     assert.doesNotMatch(html, /ui-refinement\.css/);
     assert.match(html, /class="skip-link" href="#main"/);
     assert.equal([...html.matchAll(/<h1\b/g)].length, 1);
@@ -28,8 +28,8 @@ test('restored UI assets use a fresh cache identity while data and calculation v
   for (const name of ['core', 'catalog']) assert.ok(script.includes(`pc-tools-${name}.mjs?v=parts-ux-v4`));
   assert.match(script, /pc-tools-data\.mjs\?v=parts-data-v5/);
   assert.match(script, /pc-tools-chart\.mjs\?v=search-first-v2/);
-  assert.match(read('index.html'), /app\.js\?v=search-modal-v3/);
-  assert.match(read('index.html'), /search-controls\.css\?v=search-modal-v3/);
+  assert.match(read('index.html'), /app\.js\?v=search-modal-v4/);
+  assert.match(read('index.html'), /search-controls\.css\?v=search-modal-v4/);
 });
 test('native dialogs are wired without destructive hash navigation or inline handlers', () => {
   assert.match(read('computer-builder.html'), /<dialog id="builder-model-dialog"/);

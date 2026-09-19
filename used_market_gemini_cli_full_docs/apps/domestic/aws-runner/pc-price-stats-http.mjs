@@ -49,6 +49,7 @@ export function parsePriceStatsRequest(url, now = Date.now()) {
     days,
     asOf: `${requestedAsOf}T23:59:59.999Z`,
     asOfDate: requestedAsOf,
+    asOfExplicit: url.searchParams.has("as_of"),
     isHistorical: requestedAsOf !== today,
     window: {
       days,
