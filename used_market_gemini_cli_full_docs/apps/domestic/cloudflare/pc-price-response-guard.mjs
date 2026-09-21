@@ -14,6 +14,13 @@ export async function guardPriceStatsResponse(request, response) {
     if (!latestCompletedDailyPublication) return response;
     const updatedData = {
       ...data,
+      // A completed daily publication is not today's still-open window.
+      // Keep the requested period separately and expose the actual price dates
+      // to charts, tooltips and cross-component quote consistency checks.
+      requested_window: query.window,
+      window: { ...query.window, ...data.published_window,
+        can_go_previous: data.published_window.from > query.window.history_from,
+        can_go_next: data.published_window.to < query.window.history_to },
       availability: {
         ...(data?.availability || {}),
         status: 'LAST_PUBLISHED',

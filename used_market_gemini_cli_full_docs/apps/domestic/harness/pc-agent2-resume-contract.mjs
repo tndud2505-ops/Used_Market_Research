@@ -75,7 +75,8 @@ test('uppercase UNAVAILABLE suppresses quote even if diagnostic central values e
   assert.equal(sandbox.buildEntryData({ id: ram.canonical_product_id }), null);
   sandbox.refreshBuildPriceDetails(); sandbox.renderSummary();
   assert.doesNotMatch(allText(priceNode), /단가 129,500/);
-  assert.match(allText(summary), /가격 확인 0\/2개/);
+  assert.doesNotMatch(allText(summary), /가격 확인/);
+  assert.match(allText(summary), /—/);
   assert.match(core.priceRecordIssue({ state: 'ready', data }), /게시|통계|준비/);
 });
 test('uppercase NO_EXACT_PUBLICATION is not genuine zero market samples', () => {

@@ -6,7 +6,7 @@
   <meta name="description" content="PC 부품의 판매중 가격, 판매완료 표시가와 확인 거래가의 변화를 모델별로 비교하세요.">
   <link rel="canonical" href="https://used-pick.com/price-analysis.html">
   <link rel="icon" href="/assets/mark.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css?v=pc-tools-v1"><link rel="stylesheet" href="/pc-tools.css?v=parts-ux-v4"><link rel="stylesheet" href="/ui-concept-a.css?v=search-first-v2">
+  <link rel="stylesheet" href="/styles.css?v=pc-tools-v1"><link rel="stylesheet" href="/pc-tools.css?v=price-workspace-v5"><link rel="stylesheet" href="/ui-concept-a.css?v=price-workspace-v1">
 </head>
 <body class="pc-tools ui-a" data-page="analysis" data-ui-release="search-first-v2">
   <a class="skip-link" href="#main">본문으로 건너뛰기</a>
@@ -23,11 +23,29 @@
       <div id="chart-sources" class="tools-tabs" role="group" aria-label="차트 사이트"></div>
       <div id="chart-navigation" class="tools-chart-controls chart-period" role="group" aria-label="분석 기간"></div>
     </div>
-    <section class="sf-analysis-chart" aria-labelledby="chart-title">
-      <h2 id="chart-title">가격 추이</h2>
-      <div id="price-chart" class="tools-chart"></div><p id="chart-coverage" class="tools-caption" hidden></p>
+    <section id="analysis-workspace" class="sf-analysis-workspace" aria-label="분석 작업영역">
+      <header class="sf-analysis-workspace-bar">
+        <strong>분석 보기</strong>
+        <div class="sf-analysis-pane-toggles" role="group" aria-label="분석 영역 표시">
+          <button class="up-button" type="button" data-action="analysis-pane" data-pane="chart" aria-controls="analysis-chart-pane" aria-pressed="true" aria-expanded="true">차트</button>
+          <button class="up-button" type="button" data-action="analysis-pane" data-pane="table" aria-controls="analysis-table-pane" aria-pressed="true" aria-expanded="true">출처 표</button>
+        </div>
+      </header>
+      <div class="sf-analysis-workspace-grid">
+        <section id="analysis-chart-pane" class="sf-analysis-pane sf-analysis-chart" aria-labelledby="chart-title">
+          <header class="sf-analysis-pane-heading">
+            <div><h2 id="chart-title">가격 추이</h2><span id="chart-window-status" class="sf-chart-window-status"></span></div>
+          </header>
+          <div class="analysis-chart-controls">
+            <div id="price-chart" class="tools-chart"></div>
+          </div><p id="chart-coverage" class="tools-caption" hidden></p>
+        </section>
+        <section id="analysis-table-pane" class="sf-analysis-pane sf-source-comparison" aria-labelledby="source-table-title">
+          <h2 id="source-table-title">사이트별 평균 가격</h2>
+          <div id="analysis-source-comparison" class="sf-source-table-scroll" tabindex="0" aria-live="polite" aria-label="가로 세로 스크롤 가능한 평균 가격 표"></div>
+        </section>
+      </div>
     </section>
-    <section class="sf-source-comparison" aria-label="출처별 가격 비교"><div id="analysis-source-comparison" aria-live="polite"></div></section>
     <dialog id="analysis-model-dialog" class="up-dialog up-picker-dialog" aria-labelledby="analysis-picker-title">
       <div class="up-dialog-heading"><h2 id="analysis-picker-title" tabindex="-1">분석 모델 선택</h2><button class="up-button" type="button" data-action="close-analysis-picker">닫기</button></div>
       <nav id="analysis-categories" class="tools-tabs" aria-label="분석 부품"></nav>
@@ -42,6 +60,6 @@
     </aside>
   </main>
   <footer class="tools-footer"><a href="/guide.html">이용 안내</a><a href="/privacy.html">개인정보처리방침</a><a href="/terms.html">이용약관</a></footer>
-  <script type="module" src="/pc-tools.js?v=search-first-v2"></script>
+  <script type="module" src="/pc-tools.js?v=price-workspace-v11"></script>
 </body>
 </html>

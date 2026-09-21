@@ -1,6 +1,6 @@
-import { SERIES, idOf, nameOf, naturalCompare, money, metricValue, metricPresentation, statsUnavailable, priceRecordIssue, analysisSelectionUrl, groupProducts, scopedStats, sourceStats, priceDateRange, modelPageItems, buildTotals, compactBuild, compatibility, validateBuild, dailySeries, percentChange } from './pc-tools-core.mjs?v=parts-ux-v5';
-import { readJson, createPriceStore } from './pc-tools-data.mjs?v=parts-data-v5';
-import { drawChart } from './pc-tools-chart.mjs?v=search-first-v2';
+import { SERIES, idOf, nameOf, naturalCompare, money, metricValue, soldMeanValue, metricPresentation, statsUnavailable, priceRecordIssue, analysisSelectionUrl, groupProducts, scopedStats, sourceStats, priceDateRange, modelPageItems, buildTotals, compactBuild, compatibility, validateBuild, dailySeries, percentChange, buildAnalysisSeries } from './pc-tools-core.mjs?v=parts-ux-v10';
+import { readJson, createPriceStore } from './pc-tools-data.mjs?v=parts-data-v6';
+import { drawChart } from './pc-tools-chart.mjs?v=price-workspace-v5';
 import { createDatePicker } from './pc-tools-calendar.mjs?v=coverage-v4';
 import { createAdfitSlot } from './adfit.js?v=adfit-v2';
 import { createContextualAffiliate } from './affiliate.js?v=compact-ad-v2';
@@ -17,7 +17,10 @@ const state = {
   manufacturer: '', generation: '', capacity: '', query: '', sort: 'name', page: 1,
   entries: [], selectedId: '', selectedManufacturer: '',
   days: 30, range: priceDateRange(), chartDate: '', source: '', ready: false,
+  analysisPanes: { chart: true, table: !window.matchMedia('(max-width: 760px)').matches },
+  chartZoomX: 1, chartZoomY: 1,
 };
+let analysisWasNarrow = window.matchMedia('(max-width: 760px)').matches;
 let repaintTimer, statusTimer;
 const displayPrice = (value, currency = 'KRW') => value == null ? '—' : money(value, currency);
 function quotePrice(value, currency = 'KRW') {
@@ -37,6 +40,10 @@ function pricePresentation(metric, seriesKey = 'active', currency = 'KRW', recor
   if (!record || record.state === 'loading') return { text: '확인 중', label: '자료 요청 중', empty: true, state: 'loading' };
   if (statsUnavailable(record?.data)) return { text: '통계 미제공', label: '표본 부족 여부 미확인', empty: true, state: 'unavailable' };
   if (!metric) return { text: '통계 미제공', label: '선택 범위의 통계가 제공되지 않았습니다.', empty: true, state: 'unavailable' };
+  if (builder && seriesKey === 'sold') {
+    const value = soldMeanValue(metric);
+    if (value != null) return { text: money(value, currency), label: '판매완료 표시가 평균', empty: false, state: 'ready' };
+  }
   return metricPresentation(metric, seriesKey, currency);
 }
 const scheduleRepaint = () => {
@@ -66,14 +73,15 @@ function labelOf(code) { return state.categories.find(c => c.code === code)?.lab
 function specOf(p) { return p.key_specs || {}; }
 const brandOf = toolBrand;
 function generationOf(p) { return toolFacetValues(p, toolFilterSchema(p.category_code)[0]?.[0])[0] || ''; }
-function chartRecord(id) { return prices.get(id, builder ? 30 : state.days, builder ? '' : state.range.to); }
+function requestedPriceAsOf() { return builder || state.range.to === state.range.latest ? '' : state.range.to; }
+function chartRecord(id) { return prices.get(id, builder ? 30 : state.days, requestedPriceAsOf()); }
 function payload(id) {
   const record = chartRecord(id);
   return record?.state === 'ready' && !statsUnavailable(record.data) ? record.data : null;
 }
 function analysisRecord(id) {
   return !builder && state.source === 'ebay'
-    ? overseasPrices?.get(id, state.days, state.range.to)
+    ? overseasPrices?.get(id, state.days, requestedPriceAsOf())
     : chartRecord(id);
 }
 function analysisData(id) {
@@ -146,7 +154,7 @@ function renderControls() {
     controls.append(selectControl(label, index === 0 ? 'tool-generation' : 'tool-capacity',
       [['', `전체 ${label}`], ...options.map(value => [value, toolFacetLabel(key, value)])], index === 0 ? state.generation : state.capacity));
   });
-  controls.append(selectControl('정렬', 'tool-sort', [['name', '모델명순'], ['price', !builder && state.source === 'ebay' ? 'eBay 낮은가격순 (USD)' : '판매중 낮은가격순']], state.sort));
+  controls.append(selectControl('정렬', 'tool-sort', [['name', '모델명순'], ['price', !builder && state.source === 'ebay' ? 'eBay 낮은가격순 (전체·USD)' : '판매중 낮은가격순 (전체)']], state.sort));
   controls.append(action('조건 초기화', 'reset-filters', {}, 'tools-reset'));
   $('#model-controls').replaceChildren(controls, el('p', 'tools-scope-note', toolScopeNote(state.category)));
   if (builder) $('#picker-title').textContent = `${labelOf(state.category)} 모델 선택`;
@@ -166,7 +174,9 @@ function priceCell(data, key, record, { showChange = false } = {}) {
   const td = el('td', `price series-${key}`);
   const currency = record?.data?.methodology?.currency || 'KRW';
   const metric = data?.[key], presentation = pricePresentation(metric, key, currency, record);
-  if (record?.state === 'error') td.append(action(`${presentation.text} · 재시도`, 'retry'));
+  // One retry action above the picker is enough; do not fill every price cell
+  // with duplicate buttons when the publication is temporarily unavailable.
+  if (record?.state === 'error' && !builder) td.append(action(`${presentation.text} · 재시도`, 'retry'));
   else td.append(document.createTextNode(record?.state === 'loading' ? '확인 중' : presentation.text));
   td.classList.toggle('is-empty', presentation.empty);
   const sample = record?.state === 'ready' && !statsUnavailable(record.data) && Number.isInteger(metric?.sample_count)
@@ -182,6 +192,19 @@ function priceCell(data, key, record, { showChange = false } = {}) {
 function chosen(id, manufacturer = '') { return state.entries.some(e => e.id === id && e.manufacturer === manufacturer); }
 function renderModelTable() {
   const container = $('#model-table');
+  const priceStatus = $('#model-price-status');
+  if (priceStatus) {
+    const hadFocus = priceStatus.contains(document.activeElement);
+    const failed = pageGroups().filter(group => chartRecord(idOf(group.products[0]))?.state === 'error');
+    priceStatus.replaceChildren();
+    priceStatus.hidden = !failed.length;
+    if (failed.length) {
+      priceStatus.append(el('span', '', `${failed.length}개 모델의 가격 통계를 확인하지 못했습니다. 가격 없이도 부품을 선택할 수 있습니다.`));
+      const retry = action('가격 다시 조회', 'retry');
+      priceStatus.append(retry);
+      if (hadFocus) retry.focus({ preventScroll: true });
+    }
+  }
   // Price completion must not interrupt a focused row action.
   const focus = document.activeElement;
   const focusKey = container.contains(focus) ? { ...focus.dataset } : null;
@@ -203,8 +226,10 @@ function renderModelTable() {
     row.append(name);
     visibleSeries.forEach(s => { const cell = priceCell(data, s.key, record, { showChange: !builder }); cell.dataset.label = s.label; row.append(cell); });
     const control = el('td');
-    const button = action(builder ? chosen(id) ? '선택됨' : '선택' : state.selectedId === id && !state.selectedManufacturer ? '분석중' : '분석', builder ? 'choose' : 'analyze', { id });
+    const currentAnalysisModel = !builder && state.selectedId === id;
+    const button = action(builder ? chosen(id) ? '선택됨' : '선택' : currentAnalysisModel ? '현재 모델' : '보기', builder ? 'choose' : 'analyze', { id });
     if (builder && chosen(id)) button.classList.add('primary');
+    if (currentAnalysisModel) { button.disabled = true; button.setAttribute('aria-current', 'true'); }
     control.append(button); row.append(control); body.append(row);
   }
   if (!body.children.length) { const tr = el('tr'), td = el('td', 'tools-empty', '해당 조건의 모델이 없습니다.'); td.colSpan = visibleSeries.length + 2; tr.append(td); body.append(tr); }
@@ -267,21 +292,30 @@ function renderSummary() {
   if (!summary) return;
   summary.replaceChildren();
   const totals = buildTotals(state.entries, buildEntryData);
-  summary.append(summaryItem('선택', `${state.entries.length}종`, `${state.entries.reduce((n,e) => n + e.quantity, 0)}개`));
+  const row = el('tr', 'build-total-row'); row.id = 'build-summary';
+  const heading = el('th', 'build-total-heading', '합계'); heading.scope = 'row';
+  const selection = el('td', 'build-total-selection', `선택 ${state.entries.length}종`);
+  const quantity = el('td', 'build-total-quantity', `${state.entries.reduce((n,e) => n + e.quantity, 0)}개`);
+  row.append(heading, selection, quantity);
   [['active', '판매중 합계'], ['sold', '판매완료 합계']].forEach(([key, label]) => {
     const total = totals[key];
     const title = total.total > 0 && !total.complete ? label.replace('합계', '부분 합계') : label;
-    summary.append(summaryItem(title, displayPrice(total.amount), `가격 확인 ${total.covered}/${total.total}개`, `series-${key}`));
+    const item = summaryItem(title, displayPrice(total.amount), '', `series-${key}`);
+    item.title = title;
+    if (key === 'sold') item.title += ' · 판매완료 매물의 마지막 표시가격 합계이며 실제 체결가격이 아닙니다.';
+    item.children[0].className = 'sr-only';
+    const cell = el('td', 'build-total-price'); cell.dataset.label = label;
+    cell.append(item); row.append(cell);
   });
+  row.append(el('td', 'build-total-spacer'));
+  summary.append(row);
   const issues = [...new Set(state.entries.map(entry => priceRecordIssue(chartRecord(entry.id), buildEntryData(entry))).filter(Boolean))];
   if (buildScopeConflict()) issues.unshift('서로 다른 게시 기준의 가격은 합산하지 않습니다.');
   if (issues.length) {
     const note = el('p', 'tools-quote-status', issues.join(' '));
     if (buildScopeConflict() || state.entries.some(e => chartRecord(e.id)?.state === 'error')) note.append(action('가격 다시 조회', 'retry'));
-    summary.append(note);
-  }
-  if (state.entries.length && (!totals.active.complete || !totals.sold.complete)) {
-    summary.append(el('p', 'tools-quote-status', '대표가격이 확인된 부품만 합산합니다. 미확인·표본 3건 미만 가격은 제외합니다.'));
+    const issueRow = el('tr', 'build-total-issues'), cell = el('td'); cell.colSpan = 6;
+    cell.append(note); issueRow.append(cell); summary.append(issueRow);
   }
 }
 function refreshBuildPriceDetails() {
@@ -290,19 +324,24 @@ function refreshBuildPriceDetails() {
     if (!entry) continue;
     const key = node.dataset.series, record = chartRecord(entry.id), data = buildEntryData(entry);
     const currency = record?.data?.methodology?.currency || 'KRW';
-    const value = metricValue(data?.[key]), presentation = pricePresentation(data?.[key], key, currency, record);
+    const value = key === 'sold' ? soldMeanValue(data?.sold) : metricValue(data?.[key]);
+    const presentation = pricePresentation(data?.[key], key, currency, record);
     node.replaceChildren();
     node.dataset.priceState = buildScopeConflict() ? 'scope-conflict' : presentation.state;
     if (value == null || record?.state !== 'ready' || statsUnavailable(record.data)) {
       node.append(el('strong', '', '—'));
-      node.append(el('small', '', buildScopeConflict() ? '게시 기준 불일치' :
-        presentation.text === '—' ? '대표가격 없음' : presentation.text + (presentation.state === 'insufficient' ? ' · 합계 제외' : '')));
-      node.title = presentation.label;
+      node.title = buildScopeConflict() ? '게시 기준 불일치' : presentation.label;
     } else {
       const relation = Number(value.toFixed(2)) === value ? '=' : '≈';
       node.append(el('strong', '', quotePrice(value * entry.quantity, currency)));
-      node.append(el('small', 'tools-line-price', `단가 ${quotePrice(value, currency)} × ${entry.quantity}`));
-      node.title = `단가 ${quotePrice(value, currency)} × ${entry.quantity} ${relation} ${quotePrice(value * entry.quantity, currency)} · ${presentation.label} · 표본 ${data[key].sample_count}건 · ${data.window?.from || '—'} ~ ${data.window?.to || '—'}`;
+      if (key === 'sold') {
+        const minimum = data.sold.min, maximum = data.sold.max;
+        if (typeof minimum === 'number' && typeof maximum === 'number' && minimum > 0 && maximum >= minimum) {
+          node.append(el('small', 'build-price-range', `${quotePrice(minimum * entry.quantity, currency)}~${quotePrice(maximum * entry.quantity, currency)}`));
+        }
+        node.dataset.priceState = 'ready';
+      }
+      node.title = `단가 ${quotePrice(value, currency)} × ${entry.quantity} ${relation} ${quotePrice(value * entry.quantity, currency)} · ${key === 'sold' ? '판매완료 표시가 평균' : presentation.label} · 표본 ${data[key].sample_count}건 · ${data.window?.from || '—'} ~ ${data.window?.to || '—'}`;
     }
   }
   for (const node of $('#build-table').querySelectorAll('[data-memory-total]')) {
@@ -320,11 +359,8 @@ function renderBuild() {
   if (container.contains(focus) && focus.dataset.quantity) { refreshBuildPriceDetails(); return; }
   const focusKey = container.contains(focus) ? { ...focus.dataset } : null;
   const focusedCategory = focus?.closest?.('tr[data-category]')?.dataset.category;
-  const summary = $('#build-summary');
-  const { table, body } = makeTable(['부품', '선택 모델', '수량', '판매중 가격', '판매완료 표시가', '변경']);
+  const { table, body } = makeTable(['부품', '선택 모델', '수량', '판매중 가격', '판매완료 평균', '변경']);
   table.className = 'sf-build-table'; table.setAttribute('aria-label', 'PC 부품 구성 및 수량 반영 가격');
-  const caption = el('caption', 'sf-build-caption', '수량 반영 금액 · KRW · 단가·부품 금액은 소수 둘째 자리, 합계는 원 단위 반올림 · 판매완료 표시가는 실제 체결가가 아닙니다.');
-  table.prepend(caption);
   const columns = el('colgroup');
   ['part','model','quantity','active','sold','action'].forEach(name => columns.append(el('col', `build-col-${name}`)));
   table.prepend(columns);
@@ -352,7 +388,7 @@ function renderBuild() {
     } else quantity.append(el('span', '', '—'));
     row.append(part, name, quantity);
     for (const {key,label} of SERIES.slice(0,2)) {
-      const cell = el('td', `build-price series-${key}`); cell.dataset.label = label; cell.dataset.series = key;
+      const cell = el('td', `build-price series-${key}`); cell.dataset.label = key === 'sold' ? '판매완료 평균' : label; cell.dataset.series = key;
       if (entry) cell.dataset.buildPrice = entry.id; else cell.textContent = '—';
       row.append(cell);
     }
@@ -364,8 +400,10 @@ function renderBuild() {
     }
     row.append(control); body.append(row);
   });
-  if (summary) { const foot=el('tfoot'), row=el('tr'), cell=el('td'); cell.colSpan=6; cell.append(summary); row.append(cell); foot.append(row); table.append(foot); }
+  const footer = el('tfoot'); footer.id = 'tools-summary'; footer.setAttribute('aria-live', 'polite');
+  table.append(footer);
   container.replaceChildren(table);
+  renderSummary();
   refreshBuildPriceDetails();
   const result = compatibility(state.entries, state.byId), box = $('#build-compatibility'); box.replaceChildren();
   box.hidden = !result.checks.length;
@@ -377,7 +415,36 @@ function renderBuild() {
     replacement?.focus({preventScroll:true});
   }
 }
+function renderAnalysisPaneState() {
+  const workspace = $('#analysis-workspace');
+  if (!workspace) return;
+  const chartOpen = Boolean(state.analysisPanes.chart), tableOpen = Boolean(state.analysisPanes.table);
+  workspace.dataset.layout = chartOpen && tableOpen ? 'split' : chartOpen ? 'chart' : 'table';
+  $('#analysis-chart-pane').hidden = !chartOpen;
+  $('#analysis-table-pane').hidden = !tableOpen;
+  for (const button of workspace.querySelectorAll('[data-action="analysis-pane"]')) {
+    const open = Boolean(state.analysisPanes[button.dataset.pane]);
+    button.setAttribute('aria-pressed', String(open));
+    button.setAttribute('aria-expanded', String(open));
+    button.title = `${button.textContent} ${open ? '접기' : '펼치기'}`;
+  }
+}
+function resetChartView() {
+  state.chartZoomX = 1;
+  state.chartZoomY = 1;
+  $('#price-chart .tools-chart-viewport')?.scrollTo(0, 0);
+}
+function analysisSources() {
+  const allowedSources = new Set(state.sources.map(source => String(source.source_id || source.id || source.key || '')));
+  return (state.source ? [state.source] : ['ebay', 'joonggonara', 'bunjang']).filter(id => allowedSources.has(id)).map(id => {
+    const record = id === 'ebay' ? overseasPrices?.get(state.selectedId, state.days, requestedPriceAsOf()) : chartRecord(state.selectedId);
+    const data = record?.state === 'ready' && !statsUnavailable(record.data)
+      ? scopedStats(sourceStats(record.data, id), state.selectedManufacturer) : null;
+    return { id, record, data, currency: id === 'ebay' ? 'USD' : 'KRW' };
+  });
+}
 function renderAnalysis() {
+  renderAnalysisPaneState();
   const record = analysisRecord(state.selectedId), base = record?.data;
   const data = scopedStats(sourceStats(base, state.source), state.selectedManufacturer);
   const currency = base?.methodology?.currency || (state.source === 'ebay' ? 'USD' : 'KRW');
@@ -398,32 +465,63 @@ function renderAnalysis() {
   const availableSources = new Set(state.sources.map(source => String(source.source_id || source.id || source.key || '')));
   const sourceIds = [...sourceOrder.filter(id => availableSources.has(id)),
     ...[...availableSources].filter(id => id && !sourceOrder.includes(id)).sort(naturalCompare)];
-  [['', '국내 전체'], ...sourceIds.map(id => [id, id === 'ebay' ? 'eBay (USD)' : SOURCE_LABELS[id] || id])].forEach(([id, label]) => {
+  [['', '전체'], ...sourceIds.map(id => [id, id === 'ebay' ? 'eBay (USD)' : SOURCE_LABELS[id] || id])].forEach(([id, label]) => {
     const button = action(label, 'chart-source', { source: id }); button.setAttribute('aria-pressed', String(state.source === id)); sourceControls.append(button);
   });
   if (sourceFocus != null) [...sourceControls.children].find(b => b.dataset.source === sourceFocus)?.focus({ preventScroll: true });
   const coverage = $('#chart-coverage'); coverage.replaceChildren(); coverage.hidden = true;
-  const chartData = record?.state !== 'ready' || statsUnavailable(base) || statsUnavailable(data) ? null : data;
-  const series = SERIES.slice(0, 2).map(s => ({ key: s.key, points: dailySeries(chartData, s.key, state.days) }));
+  const sources = analysisSources();
+  const series = sources.flatMap(item => buildAnalysisSeries(statsUnavailable(item.data) ? null : item.data, {
+    source: item.id, allowedSourceIds: [item.id], days: state.days, sourceLabels: SOURCE_LABELS,
+  }).map(line => ({ ...line, currency: item.currency })));
+  // Put KRW on the left and USD on the right; never combine the currencies.
+  series.sort((a, b) => Number(a.currency === 'USD') - Number(b.currency === 'USD'));
+  const dates = [...new Set(series.flatMap(item => item.points.map(point => point.date)))].sort();
+  const totalDates = dates.length;
+  const workspace = $('#analysis-workspace');
+  if (workspace) workspace.dataset.chartPointCount = String(totalDates);
+  const windowStatus = $('#chart-window-status');
+  if (windowStatus) windowStatus.textContent = totalDates ? `${totalDates}일 · 가로 ${state.chartZoomX.toFixed(1)}× · 세로 ${state.chartZoomY.toFixed(1)}×` : '';
   const product = state.byId.get(state.selectedId), modelName = product ? nameOf(product) : '선택 모델 없음';
   $('#analysis-title').textContent = product ? `가격 분석 · ${modelName}` : '가격 분석';
   $('#analysis-model-select').textContent = `${modelName} ▾`;
   $('#chart-title').textContent = '가격 추이';
-  $('#price-chart').setAttribute('aria-busy', String(Boolean(state.selectedId) && (!record || record.state === 'loading')));
+  const pending = sources.some(item => !item.record || item.record.state === 'loading');
+  const failedSource = sources.find(item => item.record?.state === 'error');
+  $('#price-chart').setAttribute('aria-busy', String(Boolean(state.selectedId) && pending));
   $('#price-chart').dataset.modelId = state.selectedId;
-  $('#price-chart').dataset.priceState = !state.selectedId ? 'empty' : record?.state === 'error' ? 'error'
-    : !record || record.state === 'loading' ? 'loading' : priceRecordIssue(record, data) ? 'unavailable' : 'ready';
-  const issue = !state.selectedId ? '선택 조건에 맞는 모델이 없습니다.' : priceRecordIssue(record, data);
+  $('#price-chart').dataset.priceState = !state.selectedId ? 'empty' : pending ? 'loading'
+    : series.length ? 'ready' : failedSource ? 'error' : 'unavailable';
+  const issue = !state.selectedId ? '선택 조건에 맞는 모델이 없습니다.'
+    : failedSource ? `${SOURCE_LABELS[failedSource.id] || failedSource.id} · ${priceRecordIssue(failedSource.record, failedSource.data)}`
+    : priceRecordIssue(record, data);
   if (issue) {
     coverage.append(document.createTextNode(issue));
-    if (record?.state === 'error') coverage.append(action('다시 시도', 'retry'));
+    if (failedSource) coverage.append(action('다시 시도', 'retry'));
     coverage.hidden = false;
   } else {
     const excluded = Number(base?.integrity_filtered_source_count || base?.integrity_repaired_source_ids?.length || 0);
     if (excluded) { coverage.textContent = `집계값이 불일치하는 출처 ${excluded}곳 제외`; coverage.hidden = false; }
   }
   renderAnalysisContext(record, data, currency);
-  drawChart($('#price-chart'), series, { label: `${modelName} 가격 추이`, selectedDate: state.chartDate || window.to, currency });
+  drawChart($('#price-chart'), series, { label: `${modelName} 가격 추이`, selectedDate: state.chartDate || dates.at(-1) || window.to, currency, scrollable: true, zoomX: state.chartZoomX, zoomY: state.chartZoomY,
+    onZoom(axis, factor, anchor) {
+      const viewport = $('#price-chart .tools-chart-viewport');
+      const key = axis === 'x' ? 'chartZoomX' : 'chartZoomY', previous = state[key];
+      const offset = axis === 'x' ? viewport.scrollLeft : viewport.scrollTop;
+      const origin = axis === 'x' ? 68 : 28;
+      const size = axis === 'x' ? viewport.clientWidth : viewport.clientHeight;
+      const point = anchor ?? size / 2;
+      state[key] = factor === 0 ? 1 : Math.max(1, Math.min(axis === 'x' ? 6 : 4, previous * factor));
+      if (state[key] === previous) return;
+      const oldExtent = (axis === 'x' ? viewport.scrollWidth - 68 - (new Set(series.map(s => s.currency)).size > 1 ? 70 : 24) : viewport.scrollHeight - 28 - 42);
+      renderAnalysis();
+      const next = $('#price-chart .tools-chart-viewport');
+      const newExtent = axis === 'x' ? next.scrollWidth - 68 - (new Set(series.map(s => s.currency)).size > 1 ? 70 : 24) : next.scrollHeight - 28 - 42;
+      const position = factor === 0 ? 0 : (offset + point - origin) * newExtent / oldExtent + origin - point;
+      next.scrollTo(axis === 'x' ? { left: position } : { top: position });
+    }
+  });
 }
 
 function searchReturnPath(product) {
@@ -454,35 +552,31 @@ function renderAnalysisContext(record, data, currency) {
   const type = product?.key_specs?.directory_node_type;
   const unit = !product ? '선택 모델 없음' : type === 'PRODUCT' ? '등록 모델'
     : ['FACET','BROWSE_FACET'].includes(type) ? '제조사·규격 구간 참고' : '카탈로그 비교 단위';
-  const rows = record?.state === 'ready' && !statsUnavailable(record.data)
-    ? (record.data.by_source || []).filter(row => !state.source || String(row.source_id || row.site || row.source) === state.source) : [];
-  const showConfirmed = rows.some(row => Number(row.confirmed_transactions?.sample_count) > 0);
+  const rows = state.selectedId ? analysisSources() : [];
+  const showConfirmed = rows.some(row => Number(row.data?.confirmed_transactions?.sample_count) > 0);
   const keys = showConfirmed ? SERIES : SERIES.slice(0,2);
-  const {table,body} = makeTable(['출처','통화','기간',...keys.flatMap(s => [s.label,'표본'])]);
+  const {table,body} = makeTable(['출처','통화','기간',...keys.flatMap(s => [s.label + ' 평균','표본'])]);
   table.className = 'sf-price-table'; table.setAttribute('aria-label','출처별 가격 비교');
   const caption = el('caption','sf-source-caption',`${product ? nameOf(product) + ' · ' : ''}비교 단위: ${unit}${state.selectedManufacturer ? ' · ' + state.selectedManufacturer : ''}`);
-  const scope = record?.data?.methodology;
-  if (scope?.market_pool) caption.append(el('span','sf-price-method',' · ' + ({ KR_C2C_USED:'국내 개인 중고',OVERSEAS_USED:'해외 중고',KR_DEALER_USED:'국내 업자 중고',KR_REFURB_RETAIL:'국내 리퍼비시' }[scope.market_pool] || scope.market_pool)));
   caption.append(el('span','sf-price-method',' · 판매완료 표시가는 실제 체결가가 아닙니다.'));
   table.prepend(caption);
   for (const item of rows) {
-    const id = String(item.source_id || item.site || item.source || '');
-    const scoped = scopedStats(sourceStats(record.data, id), state.selectedManufacturer);
+    const { id, data: scoped, record: sourceRecord, currency: rowCurrency } = item;
     const row = el('tr'); row.dataset.source = id;
     const sourceName = el('th','source-name',SOURCE_LABELS[id] || id); sourceName.scope = 'row'; row.append(sourceName);
-    const rowCurrency = scoped?.methodology?.currency || record.data.methodology?.currency;
     const code = el('td','source-currency',rowCurrency || '—'); code.dataset.label = '통화'; row.append(code);
-    const period = scoped?.window || record.data.window;
+    const period = scoped?.window || sourceRecord?.data?.window;
     const date = el('td','source-period',period?.from && period?.to ? `${period.from} ~ ${period.to}` : '—'); date.dataset.label = '기간'; row.append(date);
     for (const {key,label} of keys) {
-      const metric = scoped?.[key], presentation = pricePresentation(metric,key,rowCurrency || currency,record);
+      const metric = scoped?.[key], presentation = pricePresentation(metric,key,rowCurrency,sourceRecord);
       const cell = el('td','source-price series-' + key); cell.dataset.label = label; cell.dataset.series = key;
       const usable = Boolean(scoped) && !statsUnavailable(scoped);
-      cell.append(el('strong','',usable ? presentation.text : '—'));
-      if (usable && !presentation.empty && presentation.state !== 'insufficient') cell.append(el('small','',presentation.label));
-      else if (!usable) cell.append(el('small','','선택 범위 미제공'));
-      else if (presentation.state === 'insufficient') cell.append(el('small','','대표가격 없음'));
-      cell.title = presentation.label; row.append(cell);
+      const average = usable ? soldMeanValue(metric) : null;
+      const unavailable = sourceRecord?.state === 'error' ? '조회 실패'
+        : !sourceRecord || sourceRecord.state === 'loading' ? '확인 중'
+        : !usable ? '선택 범위 미제공' : Number(metric?.sample_count) === 0 ? '자료 없음' : '평균 미제공';
+      cell.append(el('strong','',average != null ? money(average, rowCurrency) : unavailable));
+      cell.title = average != null ? `평균 · 표본 ${metric.sample_count}건` : presentation.label; row.append(cell);
       const count = usable && metric?.aggregate_incomplete !== true && Number.isInteger(metric?.sample_count) && metric.sample_count >= 0
         ? metric.sample_count.toLocaleString('ko-KR') : '—';
       const sample = el('td','source-sample',count); sample.dataset.label = label + ' 표본'; sample.dataset.series = key; row.append(sample);
@@ -502,11 +596,12 @@ function refreshPrices() {
   if (selected) targets.push(selected);
   if (builder) targets.push(...state.entries.map(e => state.byId.get(e.id)).filter(Boolean));
   const overseas = !builder && state.source === 'ebay';
-  void prices.load(overseas ? [] : targets, builder ? 30 : state.days, builder ? '' : state.range.to);
-  if (!builder) void overseasPrices.load(overseas ? targets : [], state.days, state.range.to);
+  const asOf = requestedPriceAsOf();
+  void prices.load(overseas ? [] : targets, builder ? 30 : state.days, asOf);
+  if (!builder) void overseasPrices.load(overseas ? targets : !state.source && selected ? [selected] : [], state.days, asOf);
 }
 function selectCategory(category) {
-  state.category = category; state.manufacturer = ''; state.generation = ''; state.capacity = ''; state.query = ''; state.page = 1; state.selectedManufacturer = ''; state.chartDate = '';
+  state.category = category; state.manufacturer = ''; state.generation = ''; state.capacity = ''; state.query = ''; state.page = 1; state.selectedManufacturer = ''; state.chartDate = ''; resetChartView();
   state.source = '';
   if (builder) {
     const entry = state.entries.find(e => e.category === category);
@@ -530,6 +625,20 @@ document.addEventListener('click', event => {
   if (type === 'close-picker') { closeModelPicker(); return; }
   if (type === 'save-build') { persistBuild(); return; }
   if (type === 'print-build') { window.print(); return; }
+  if (type === 'analysis-pane') {
+    const pane = button.dataset.pane;
+    if (!['chart','table'].includes(pane)) return;
+    if (window.matchMedia('(max-width: 760px)').matches) {
+      state.analysisPanes = { chart: pane === 'chart', table: pane === 'table' };
+    } else {
+      const other = pane === 'chart' ? 'table' : 'chart';
+      state.analysisPanes[pane] = !state.analysisPanes[pane];
+      if (!state.analysisPanes[pane] && !state.analysisPanes[other]) state.analysisPanes[other] = true;
+    }
+    renderAnalysisPaneState();
+    if (state.analysisPanes.chart) requestAnimationFrame(renderAnalysis);
+    return;
+  }
   if (type === 'quantity-step') {
     const entry = state.entries.find(e => e.id === id), delta = Number(button.dataset.quantityStep);
     if (!entry || ![-1,1].includes(delta) || entry.quantity + delta < 1 || entry.quantity + delta > 16) return;
@@ -545,7 +654,7 @@ document.addEventListener('click', event => {
       const from = $('#chart-from').value, to = $('#chart-to').value;
       if (!from || !to) throw new Error('시작일과 종료일을 선택하세요.');
       const range = priceDateRange(from, to);
-      state.range = range; state.days = range.days; state.chartDate = ''; syncAnalysisUrl();
+      state.range = range; state.days = range.days; state.chartDate = ''; resetChartView(); syncAnalysisUrl();
       status(''); renderSummary(); renderModelTable(); renderAnalysis(); refreshPrices();
     } catch (error) { status(error.message, true); }
     return;
@@ -558,7 +667,10 @@ document.addEventListener('click', event => {
   }
   if (type === 'page') {
     state.page = Math.max(1, Math.min(Math.ceil(groups().length / PAGE_SIZE) || 1, Number(button.dataset.page)));
-    renderModelTable(); $('#model-table').scrollTop = 0; refreshPrices(); return;
+    renderModelTable(); $('#model-table').scrollTop = 0;
+    // 전체 가격 정렬은 이미 필터 결과 전부를 조회 중이므로 페이지 이동으로 다시 시작하지 않습니다.
+    if (state.sort !== 'price') refreshPrices();
+    return;
   }
   if (type === 'choose') {
     const product = state.byId.get(id); if (!product) return;
@@ -569,12 +681,12 @@ document.addEventListener('click', event => {
   }
   if (type === 'remove') { state.entries = state.entries.filter(e => e.id !== id); persistBuild(); status(''); }
   if (type === 'analyze') {
-    state.selectedId = id; state.selectedManufacturer = manufacturer; state.chartDate = '';
+    $('#analysis-model-dialog')?.close();
+    state.selectedId = id; state.selectedManufacturer = manufacturer; state.chartDate = ''; resetChartView();
     syncAnalysisUrl();
   }
   renderSummary(); renderModelTable(); if (builder) renderBuild(); else renderAnalysis(); refreshPrices();
   if (type === 'choose') closeModelPicker();
-  if (type === 'analyze') $('#analysis-model-dialog')?.close();
 });
 document.addEventListener('change', event => {
   const target = event.target;
@@ -602,7 +714,7 @@ function applyModelFilters({ renderFilterControls = true } = {}) {
   state.page = 1;
   if (!builder) {
     state.selectedId = visibleSelection(currentProducts(), state.selectedId);
-    state.selectedManufacturer = ''; state.chartDate = '';
+    state.selectedManufacturer = ''; state.chartDate = ''; resetChartView();
     syncAnalysisUrl();
   }
   if (renderFilterControls) renderControls();
@@ -627,9 +739,10 @@ document.addEventListener('input', event => {
 async function start() {
   try {
     const catalog = await readJson('/api/pc/catalog');
-    state.products = catalog.tools_catalog?.products || catalog.public_catalog?.products || catalog.products || [];
-    state.categories = (catalog.tools_catalog?.categories || catalog.categories || []).map(c => ({ code: c.code || c.category_code, label: c.label || c.display_name || c.code }));
-    state.sources = (catalog.sources || []).filter(source => source.public_enabled !== false);
+    const pageCatalog = builder ? catalog.tools_catalog : catalog.public_catalog;
+    state.products = pageCatalog?.products || catalog.products || [];
+    state.categories = (pageCatalog?.categories || catalog.categories || []).map(c => ({ code: c.code || c.category_code, label: c.label || c.display_name || c.code }));
+    state.sources = (catalog.sources || []).filter(source => source.public_enabled === true);
     state.byId = new Map(state.products.map(p => [idOf(p), p]));
     if (!state.products.length || !state.categories.length) throw new Error('공개 카탈로그가 비어 있습니다.');
     if (!state.categories.some(c => c.code === state.category)) state.category = state.categories[0].code;
@@ -691,5 +804,10 @@ document.addEventListener('visibilitychange', () => {
 let resizeFrame;
 window.addEventListener('resize', () => {
   if (builder || !state.ready) return;
+  const analysisIsNarrow = window.matchMedia('(max-width: 760px)').matches;
+  if (analysisIsNarrow && !analysisWasNarrow && state.analysisPanes.chart && state.analysisPanes.table) {
+    state.analysisPanes.table = false;
+  }
+  analysisWasNarrow = analysisIsNarrow;
   cancelAnimationFrame(resizeFrame); resizeFrame = requestAnimationFrame(renderAnalysis);
 });

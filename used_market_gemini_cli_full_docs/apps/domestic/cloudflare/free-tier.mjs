@@ -639,11 +639,16 @@ function isPcReadCacheable(url) {
     || /^\/api\/products\/[^/]+\/price-stats$/u.test(url.pathname);
 }
 
-export async function fetchThroughPcReadCache(request, env, originFetch) {
+export async function fetchThroughPcReadCache(request, env, originFetch, validateResponse = (_request, response) => response) {
+  // A cached HTTP 200 can predate today's publication boundary or a stricter
+  // readiness contract. Validate before serving it, not after cache selection.
+  const readOrigin = async () => validateResponse(request, await originFetch(request));
+  const reusable = response => response.status >= 200 && response.status < 300
+    && !/\bno-store\b/i.test(response.headers.get('cache-control') || '');
   const url = new URL(request.url);
   if (request.method !== "GET" || !isPcReadCacheable(url)
     || url.searchParams.has("reconciliation_audit") || !globalThis.caches?.default) {
-    return originFetch(request);
+    return readOrigin();
   }
   const normalizedUrl = new URL(url);
   const normalizedEntries = [...url.searchParams.entries()]
@@ -662,10 +667,17 @@ export async function fetchThroughPcReadCache(request, env, originFetch) {
   } catch (error) {
     console.warn("PC read cache lookup failed", error);
   }
-  if (cached) return responseWithHeader(cached, "x-pc-read-cache", "HIT");
+  if (cached) {
+    const checked = await validateResponse(request, cached);
+    if (reusable(checked)) return responseWithHeader(checked, "x-pc-read-cache", "HIT");
+    // Do not turn a stale successful response into a sticky 503. Evict it and
+    // make exactly one stored-data read; never collect or rebuild on this path.
+    try { await globalThis.caches.default.delete?.(cacheKey); }
+    catch (error) { console.warn("PC read cache eviction failed", error); }
+  }
 
-  const response = await originFetch(request);
-  if (response.status < 200 || response.status >= 300) return response;
+  const response = await readOrigin();
+  if (!reusable(response)) return response;
   const ttlSeconds = readPositiveInteger(
     env.PC_READ_CACHE_TTL_SECONDS,
     PC_READ_CACHE_TTL_SECONDS,

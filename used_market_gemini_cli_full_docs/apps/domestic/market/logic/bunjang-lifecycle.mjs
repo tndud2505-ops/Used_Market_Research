@@ -6,6 +6,14 @@ export function bunjangLifecycleStatus(value) {
     "3": "SOLD", SOLD_OUT: "SOLD", SOLD: "SOLD" })[status] || "UNAVAILABLE_UNKNOWN";
 }
 
+export function bunjangProductIdFromListing({ url, sourceListingId } = {}) {
+  for (const value of [url, sourceListingId]) {
+    const match = String(value || '').match(/(?:^|\/)products\/(\d+)(?:\/?(?:[?#].*)?$)/iu);
+    if (match) return match[1];
+  }
+  return null;
+}
+
 export function parseBunjangDetailLifecycle(payload, expectedId) {
   const product = payload?.data?.product;
   if (!/^\d+$/.test(String(expectedId)) || String(product?.pid) !== String(expectedId)) {

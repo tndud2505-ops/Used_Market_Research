@@ -23,6 +23,8 @@ import { publicPcCatalogForApi, publicPcFacetsForApi, publicPcModelsForApi, publ
 import { resolvePcCanonicalIdV3 } from '../../../market/data/pc-product-master-v2.mjs';
 // @ts-ignore canonical PC-directory source policy is authored as shared ESM JavaScript
 import { OPERATIONAL_PC_DIRECTORY_SITES } from '../../../cloudflare/target-sites.mjs';
+// @ts-ignore shared request validation is authored as runtime ESM JavaScript
+import { parsePcListingsRequest } from '../../../cloudflare/pc-listings-contract.mjs';
 import { getPriceHistory } from './price-history-service.js';
 import { getEngineStatus } from './engine-status-service.js';
 import { getRunnerState, runNamedSchedulerJobs, RunnerIdempotencyConflictError, RunnerValidationError } from './runner-service.js';
@@ -245,6 +247,8 @@ export function createServer(
       sort: string;
       minPrice: number | null;
       maxPrice: number | null;
+      marketPool: string | null;
+      currency: string | null;
       limit: number;
       cursor: string | null;
     }) => Promise<Record<string, unknown>> | Record<string, unknown>;
@@ -503,64 +507,34 @@ export function createServer(
       }
 
       if (pathname === '/api/pc/listings') {
-        const sites = [...new Set([...urlObj.searchParams.getAll('sites'), ...urlObj.searchParams.getAll('site')]
-          .flatMap((value) => value.split(',')).map((value) => value.trim()).filter(Boolean))];
-        const allowedSites = new Set<string>(OPERATIONAL_PC_DIRECTORY_SITES);
-        if (sites.some((site) => !allowedSites.has(site))) throw new ApiError(400, 'unsupported site filter');
-        const sort = urlObj.searchParams.get('sort') || 'recent';
-        if (!new Set(['recent', 'price_asc', 'price_desc']).has(sort)) throw new ApiError(400, 'invalid sort');
-        const parsePrice = (name: string) => {
-          const raw = urlObj.searchParams.get(name);
-          if (raw === null || raw === '') return null;
-          const value = Number(raw);
-          if (!Number.isFinite(value) || value < 0) throw new ApiError(400, `${name} must be a non-negative number`);
-          return value;
-        };
-        const parseCanonicalPrice = (canonical: string, alias: string) => {
-          const canonicalValue = urlObj.searchParams.get(canonical);
-          return canonicalValue !== null ? parsePrice(canonical) : parsePrice(alias);
-        };
-        const minPrice = parseCanonicalPrice('price_min', 'min_price');
-        const maxPrice = parseCanonicalPrice('price_max', 'max_price');
-        if (minPrice !== null && maxPrice !== null && minPrice > maxPrice) throw new ApiError(400, 'price_min must be <= price_max');
-        const requestedLimit = Number(urlObj.searchParams.get('limit') || 30);
-        if (!Number.isInteger(requestedLimit) || requestedLimit < 1) throw new ApiError(400, 'limit must be a positive integer');
-        const requestedCanonicalProductId = urlObj.searchParams.get('canonical_product_id');
-        const hasCatalogScope = urlObj.searchParams.has('category_code')
-          || urlObj.searchParams.has('q') || urlObj.searchParams.has('query');
-        if (requestedCanonicalProductId && hasCatalogScope) {
-          throw new ApiError(400, 'canonical_product_id cannot be combined with catalog scope filters');
+        let listingQuery;
+        try {
+          listingQuery = parsePcListingsRequest(urlObj, { allowedSites: OPERATIONAL_PC_DIRECTORY_SITES });
+        } catch (error) {
+          throw new ApiError(400, error instanceof Error ? error.message : String(error));
         }
+        const requestedCanonicalProductId = listingQuery.canonicalProductId || null;
+        const hasCatalogScope = Boolean(listingQuery.catalogScope);
         const legacyResolution = requestedCanonicalProductId ? resolvePcCanonicalIdV3(requestedCanonicalProductId) : null;
         const isLegacyId = legacyResolution?.status === 'alias' || legacyResolution?.status === 'ambiguous';
         const canonicalProductId = isLegacyId ? null : requestedCanonicalProductId;
         const catalogModels = hasCatalogScope ? publicPcModelsForApi(urlObj.searchParams).models : null;
-        const listingFacetValues: Record<string, { category: string; values: Set<string> }> = {
-          product_kind: { category: 'SSD', values: new Set(['M2_NVME', 'SATA_2_5', 'M2_SATA', 'EXTERNAL', 'OTHER_UNKNOWN']) },
-          placement: { category: 'HDD', values: new Set(['INTERNAL', 'EXTERNAL', 'UNKNOWN']) },
-          form_factor: { category: 'PSU', values: new Set(['ATX', 'SFX', 'SFX-L']) }
-        };
-        const listingFacetCategory = (urlObj.searchParams.get('category_code') || requestedCanonicalProductId?.split(':', 1)[0] || '').toUpperCase();
-        const listingFacets = Object.fromEntries(Object.entries(listingFacetValues).flatMap(([key, definition]) => {
-          if (listingFacetCategory !== definition.category) return [];
-          const values = [...new Set(urlObj.searchParams.getAll(key).flatMap((value) => value.split(',')).map((value) => value.trim().toUpperCase()).filter(Boolean))];
-          if (values.some((value) => !definition.values.has(value))) throw new ApiError(400, `unsupported ${key} listing filter`);
-          return values.length ? [[key, values]] : [];
-        }));
         const data = await resolvedOptions.listPcListings({
           canonicalProductId,
           canonicalProductIds: isLegacyId
             ? [legacyResolution.requestedId, ...legacyResolution.canonicalProductIds]
             : catalogModels?.map((model: Record<string, unknown>) => String(model.canonical_product_id)) ?? null,
-          manufacturer: hasCatalogScope ? null : urlObj.searchParams.get('manufacturer'),
-          boardManufacturer: urlObj.searchParams.get('board_manufacturer'),
-          listingFacets,
-          sites,
-          sort,
-          minPrice,
-          maxPrice,
-          limit: Math.min(100, requestedLimit),
-          cursor: urlObj.searchParams.get('cursor')
+          manufacturer: listingQuery.manufacturer || null,
+          boardManufacturer: listingQuery.boardManufacturer || null,
+          listingFacets: listingQuery.listingFacets,
+          sites: listingQuery.sites,
+          sort: listingQuery.sort,
+          minPrice: listingQuery.minPrice,
+          maxPrice: listingQuery.maxPrice,
+          marketPool: listingQuery.marketPool,
+          currency: listingQuery.currency,
+          limit: listingQuery.limit,
+          cursor: listingQuery.cursor
         });
         return sendJson(200, { status: 'success', data });
       }

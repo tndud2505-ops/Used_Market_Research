@@ -38,7 +38,7 @@ export function migrateStoredPricePublications(db) {
 function validateMetric(metric) {
   if (!metric || !Number.isInteger(metric.sample_count) || metric.sample_count < 0) throw new Error('PUBLISHED_METRIC_COUNT_INVALID');
   const n = metric.sample_count;
-  for (const field of ['mean', 'median', 'average', 'trimmed_mean', 'min', 'max', 'p25', 'p75']) {
+  for (const field of ['mean', 'arithmetic_mean', 'median', 'average', 'trimmed_mean', 'min', 'max', 'p25', 'p75']) {
     const value = metric[field];
     if (value == null) continue;
     if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0 || n === 0) throw new Error(`PUBLISHED_METRIC_INVALID:${field}`);

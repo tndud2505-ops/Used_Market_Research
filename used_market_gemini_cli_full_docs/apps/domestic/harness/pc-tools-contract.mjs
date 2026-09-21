@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { SERIES, money, metricValue, metricIsConsistent, buildTotals, compactBuild, compatibility, groupProducts, validateBuild, dailySeries, percentChange, overviewIndex, priceDateRange, shiftDate, sourceStats, coherentStats, modelPageItems } from '../web-backend/public/pc-tools-core.mjs';
+import { SERIES, money, metricValue, soldMeanValue, metricIsConsistent, buildTotals, compactBuild, compatibility, groupProducts, validateBuild, dailySeries, percentChange, overviewIndex, priceDateRange, shiftDate, sourceStats, coherentStats, modelPageItems, buildAnalysisSeries } from '../web-backend/public/pc-tools-core.mjs';
 import { createPriceStore } from '../web-backend/public/pc-tools-data.mjs';
 import { pcCatalogResponse } from '../cloudflare/pc-directory-http.mjs';
 const p = (id, category, name, specs = {}) => ({ canonical_product_id: id, category_code: category, canonical_display_name: name, key_specs: specs });
@@ -29,6 +29,13 @@ assert.equal(totals.sold.covered, 1, 'partial sold coverage must count only pric
 assert.equal(totals.sold.total, 3);
 assert.equal(totals.sold.complete, false);
 assert.equal(totals.confirmed_transactions.amount, null);
+assert.equal(soldMeanValue({sample_count:1,min:15000,max:15000,mean:null}),15000);
+assert.equal(soldMeanValue({sample_count:2,min:15000,max:17000,mean:null}),16000);
+assert.equal(soldMeanValue({sample_count:3,min:100,max:900,median:100,arithmetic_mean:366.67}),366.67);
+assert.equal(soldMeanValue({sample_count:3,min:100,max:900,median:100}),null,'never use the midpoint or median for three sold samples');
+assert.equal(soldMeanValue({sample_count:3,min:100,max:900,median:100,arithmetic_mean:1000}),null);
+assert.equal(soldMeanValue({sample_count:2,min:100,max:900,aggregate_incomplete:true}),null);
+assert.equal(buildTotals([{id:'cpu',quantity:2}],()=>({sold:{sample_count:2,min:15000,max:17000}})).sold.amount,32000);
 assert.deepEqual(compactBuild([{ id: 'cpu', quantity: 1, manufacturer: '', category: 'CPU' }, { id: 'board', quantity: 2, manufacturer: ' ASUS ', category: 'MOTHERBOARD' }], products, categories), [{ id: 'cpu' }, { id: 'board', quantity: 2, manufacturer: 'ASUS' }],
   'persisted builds must retain only validated fields needed to restore the selection');
 assert.equal(compatibility([...entries, { id: 'ram' }], products).checks.filter(c => c.status === 'conflict').length, 2);
@@ -59,6 +66,40 @@ assert.throws(() => priceDateRange('2026-02-30', '2026-03-01', '2026-09-08'));
 assert.equal(shiftDate('2026-03-31', -1, 'month'), '2026-02-28');
 assert.equal(shiftDate('2024-03-31', -1, 'month'), '2024-02-29');
 assert.equal(sourceStats({ active: { mean: 100, sample_count: 10 }, by_source: [] }, 'bunjang'), null, 'missing site must not fall back to overall averages');
+const analysisFixture = {
+  as_of: '2026-09-08',
+  daily: [{ date: '2026-09-08', active: { sample_count: 5, mean: 100 }, sold: { sample_count: 3, median: 80 } }],
+  by_source: [
+    { source_id: 'joonggonara', daily: [{ date: '2026-09-08', active: { sample_count: 5, mean: 95 }, sold: { sample_count: 1, min: 30000, max: 30000 } }] },
+    { source_id: 'bunjang', daily: [{ date: '2026-09-08', active: { sample_count: 5, mean: 105 }, sold: { sample_count: 3, median: 85 } }] },
+    { source_id: 'hellomarket', daily: [{ date: '2026-09-08', active: { sample_count: 5, mean: 90 } }] },
+  ],
+};
+const analysisSeries = buildAnalysisSeries(analysisFixture, {
+  allowedSourceIds: ['joonggonara', 'bunjang', 'ebay'], days: 30,
+  sourceLabels: { joonggonara: '중고나라', bunjang: '번개장터', ebay: 'eBay' },
+});
+assert.deepEqual(analysisSeries.map(series => series.id), [
+  'overall:active', 'overall:sold', 'joonggonara:active', 'joonggonara:sold', 'bunjang:active', 'bunjang:sold'
+], 'the domestic chart must show the published aggregate and enabled source series while hiding empty sold and retired sources');
+assert.notEqual(analysisSeries.find(series => series.id === 'overall:active').color,
+  analysisSeries.find(series => series.id === 'overall:sold').color,
+  'active and sold must be distinct by color as well as line style');
+assert.equal(analysisSeries.find(series => series.id === 'joonggonara:sold').points.at(-1).value, 30000);
+assert.equal(dailySeries({ as_of: '2026-09-08', daily: [{ date: '2026-09-08', sold: { sample_count: 2, min: 100, max: 200 } }] }, 'sold', 1)[0].value, 150);
+assert.equal(dailySeries({ as_of: '2026-09-08', daily: [{ date: '2026-09-08', sold: { sample_count: 3, min: 100, max: 200 } }] }, 'sold', 1)[0].value, null, 'do not invent a midpoint for three samples');
+assert.equal(new Set(['overall:active', 'joonggonara:active', 'bunjang:active']
+  .map(id => analysisSeries.find(series => series.id === id).color)).size, 3,
+  'aggregate and marketplace lines must use distinct colors');
+assert.equal(analysisSeries.some(series => series.id.startsWith('hellomarket:')), false);
+assert.deepEqual(buildAnalysisSeries(sourceStats(analysisFixture, 'bunjang'), {
+  source: 'bunjang', allowedSourceIds: ['joonggonara', 'bunjang'], days: 30,
+  sourceLabels: { bunjang: '번개장터' },
+}).map(series => series.id), ['bunjang:active', 'bunjang:sold'],
+'a selected site must show only its own available metrics');
+assert.deepEqual(buildAnalysisSeries(sourceStats(analysisFixture, 'bunjang'), {
+  source: 'hellomarket', allowedSourceIds: ['joonggonara', 'bunjang'], days: 30,
+}), [], 'a retired source must not be revived by stale payload data');
 const scoped = coherentStats({ active: { mean: 41862.5, sample_count: 64 }, by_manufacturer: [{ manufacturer: 'Intel' }], by_source: [
   { source_id: 'bunjang', active: { mean: 43269.39, sample_count: 49, min: 9000, max: 200000 }, daily: data.daily },
   { source_id: 'joonggonara', active: { mean: 15866.67, sample_count: 15, min: 20000, max: 45000 }, daily: data.daily },
@@ -115,8 +156,10 @@ assert.equal(mixedLowSamples.active.max, 70_000);
 assert.equal(mixedLowSamples.active.aggregate_incomplete, true);
 assert.equal(metricIsConsistent(mixedLowSamples.active), true,
   'a combined low-sample range must stay usable after an invalid source is removed');
-assert.deepEqual(modelPageItems(1, 18), [1, 2, 3, 4, 5, 'ellipsis', 18]);
-assert.deepEqual(modelPageItems(18, 18), [1, 'ellipsis', 14, 15, 16, 17, 18]);
+assert.deepEqual(modelPageItems(1, 18), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+assert.deepEqual(modelPageItems(10, 18), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+assert.deepEqual(modelPageItems(11, 18), [11, 12, 13, 14, 15, 16, 17, 18]);
+assert.deepEqual(modelPageItems(18, 18), [11, 12, 13, 14, 15, 16, 17, 18]);
 assert.deepEqual(modelPageItems(3, 4), [1, 2, 3, 4]);
 const catalog = pcCatalogResponse();
 assert.ok(catalog.tools_catalog.products.some(p => p.category_code === 'CASE'));

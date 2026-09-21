@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { once } from "node:events";
-import { access, mkdtemp, readFile, rm } from "node:fs/promises";
+import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -914,6 +914,14 @@ child.stderr.on("data", (chunk) => { stderr += chunk; });
 try {
   const baseUrl = `http://127.0.0.1:${port}`;
   await waitForHealth(baseUrl, child);
+  const runnerHealth = await (await fetch(`${baseUrl}/health`)).json();
+  assert.equal(runnerHealth.search_index.max_active_listings, 100_000);
+  assert.equal(typeof runnerHealth.search_index.database_soft_usage_ratio, "number");
+  assert.equal(typeof runnerHealth.search_index.active_listing_usage_ratio, "number");
+  assert.equal(runnerHealth.pc_parts.bunjang_lifecycle_recheck.source_id, "bunjang");
+  assert.equal(typeof runnerHealth.pc_parts.bunjang_lifecycle_recheck.due_count, "number");
+  assert.equal(runnerHealth.pc_parts.bunjang_lifecycle_recheck.operational_sla_hours, 24);
+  assert.equal(typeof runnerHealth.pc_parts.bunjang_lifecycle_recheck.operational_overdue_count, "number");
   const unauthorized = await fetch(`${baseUrl}/api/search`, {
     method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(pcRequest)
   });
@@ -1042,6 +1050,15 @@ d1.prepare(`INSERT INTO listings(item_id, site, category_id, title, search_text,
   "joonggonara:d1-pc", "joonggonara", "pc", "RTX 3080 D1 백업", "RTX 3080 D1 백업", 490_000, "KRW",
   "https://web.joongna.com/product/d1-pc", "https://images.example.test/d1-pc.jpg", "2026-08-29T00:00:00.000Z",
   "gpu:nvidia:rtx-3080", "NVIDIA GeForce RTX 3080", null, "ASUS", "SINGLE_COMPONENT", "GPU", 1, "TOTAL",
+  "USED_WORKING", "ACTIVE", "KR_C2C_USED"
+);
+d1.prepare(`INSERT INTO listings(item_id, site, category_id, title, search_text, price_value, currency, url, image_url, updated_at, active,
+  canonical_product_id, canonical_display_name, canonical_manufacturer, board_manufacturer, listing_kind, pc_category_code, quantity, price_scope, condition_code,
+  lifecycle_status, market_pool, price_eligible, exclusion_reasons_json)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, '[]')`).run(
+  "hellomarket:retired-d1-pc", "hellomarket", "pc", "RTX 3080 비활성 출처 잔존 행", "RTX 3080 비활성 출처 잔존 행", 450_000, "KRW",
+  "https://www.hellomarket.com/item/retired-d1-pc", null, "2026-08-29T00:00:00.000Z",
+  "gpu:nvidia:rtx-3080", "NVIDIA GeForce RTX 3080", null, null, "SINGLE_COMPONENT", "GPU", 1, "TOTAL",
   "USED_WORKING", "ACTIVE", "KR_C2C_USED"
 );
 const importEnv = { DB: d1Adapter(d1), MANUAL_RUN_TOKEN: "import-fixture-token", FREE_TIER_MODE: "true" };
@@ -1279,17 +1296,17 @@ for (const [index, price] of [90_000, 100_000, 110_000].entries()) {
   d1.prepare(`INSERT INTO listings(item_id, site, category_id, title, search_text, price_value, currency, url, updated_at, active,
     canonical_product_id, canonical_display_name, canonical_manufacturer, listing_kind, pc_category_code, quantity, price_scope,
     condition_code, lifecycle_status, market_pool, price_eligible, exclusion_reasons_json)
-    VALUES (?, 'danawa', 'pc', ?, ?, ?, 'KRW', ?, ?, 1, ?, 'Samsung SSD 960GB-1TB', 'Samsung',
+    VALUES (?, 'joonggonara', 'pc', ?, ?, ?, 'KRW', ?, ?, 1, ?, 'Samsung SSD 960GB-1TB', 'Samsung',
       'SINGLE_COMPONENT', 'SSD', 1, 'TOTAL', 'USED_WORKING', 'ACTIVE', 'KR_DEALER_USED', 1, '[]')`).run(
-    `danawa:ssd-bucket-${index}`, `Samsung SSD 1TB ${index}`, `Samsung SSD 1TB ${index}`, price,
-    `https://dmall.danawa.com/v3/?controller=sale&methods=blog&seq=80000${index}`,
+    `joonggonara:ssd-bucket-${index}`, `Samsung SSD 1TB ${index}`, `Samsung SSD 1TB ${index}`, price,
+    `https://web.joongna.com/product/ssd-bucket-${index}`,
     currentPublicationAsOf, ssdBucketId
   );
 }
 d1.prepare("UPDATE listings SET listing_facets_json = ? WHERE item_id IN (?, ?)")
-  .run(JSON.stringify({ product_kind: "M2_NVME", placement: "INTERNAL", form_factor: "M.2" }), "danawa:ssd-bucket-0", "danawa:ssd-bucket-1");
+  .run(JSON.stringify({ product_kind: "M2_NVME", placement: "INTERNAL", form_factor: "M.2" }), "joonggonara:ssd-bucket-0", "joonggonara:ssd-bucket-1");
 d1.prepare("UPDATE listings SET listing_facets_json = ? WHERE item_id = ?")
-  .run(JSON.stringify({ product_kind: "SATA_2_5", placement: "INTERNAL", form_factor: "2.5-INCH" }), "danawa:ssd-bucket-2");
+  .run(JSON.stringify({ product_kind: "SATA_2_5", placement: "INTERNAL", form_factor: "2.5-INCH" }), "joonggonara:ssd-bucket-2");
 for (const [index, price] of [280_000, 300_000, 320_000].entries()) {
   d1.prepare(`INSERT INTO listings(item_id, site, category_id, title, search_text, price_value, currency, url, updated_at, active,
     canonical_product_id, canonical_display_name, canonical_manufacturer, listing_kind, pc_category_code, quantity, price_scope,
@@ -2437,6 +2454,36 @@ try {
 }
 
 const { createServer } = await import("../dist/web-backend/logic/server.js");
+const { createLocalPcPublicationReader } = await import("../dist/web-backend/logic/pc-local-publication.js");
+const localPublicationPath = path.join(directory, "pc-listings-publication.json");
+await writeFile(localPublicationPath, JSON.stringify({ items: [
+  { ...items[0], item_id: "joonggonara:c2c", market_pool: "KR_C2C_USED", currency: "KRW", price_value: 480_000 },
+  { ...items[0], item_id: "joonggonara:dealer", market_pool: "KR_DEALER_USED", currency: "KRW", price_value: 480_000 },
+  { ...items[0], item_id: "joonggonara:mismatched", market_pool: "KR_C2C_USED", currency: "USD", price_value: 480_000 },
+  { ...items[0], item_id: "ebay:overseas", site: "ebay", market_pool: "OVERSEAS_USED", currency: "USD", price_value: 350 }
+] }), "utf8");
+const previousLocalPublicationPath = process.env.PC_LISTINGS_PUBLICATION_PATH;
+process.env.PC_LISTINGS_PUBLICATION_PATH = localPublicationPath;
+try {
+  const localPublication = createLocalPcPublicationReader();
+  const localScopeResult = localPublication.listPcListings({
+    canonicalProductId: "gpu:nvidia:rtx-3080", canonicalProductIds: null, manufacturer: null,
+    boardManufacturer: null, listingFacets: {}, sites: [], sort: "recent", minPrice: null, maxPrice: null,
+    marketPool: "KR_C2C_USED", currency: "KRW", limit: 10, cursor: null
+  });
+  assert.deepEqual(localScopeResult.items.map((item) => item.item_id), ["joonggonara:c2c"],
+    "local publications must filter market_pool and currency instead of only validating them");
+  const unscopedLocalResult = localPublication.listPcListings({
+    canonicalProductId: "gpu:nvidia:rtx-3080", canonicalProductIds: null, manufacturer: null,
+    boardManufacturer: null, listingFacets: {}, sites: [], sort: "recent", minPrice: null, maxPrice: null,
+    marketPool: null, currency: null, limit: 10, cursor: null
+  });
+  assert.equal(unscopedLocalResult.items.some((item) => item.item_id === "joonggonara:mismatched"), false,
+    "local publications must fail closed on an invalid stored market/currency pair");
+} finally {
+  if (previousLocalPublicationPath === undefined) delete process.env.PC_LISTINGS_PUBLICATION_PATH;
+  else process.env.PC_LISTINGS_PUBLICATION_PATH = previousLocalPublicationPath;
+}
 const assetPaths = [];
 const routeAssets = {
   ASSETS: {
@@ -2459,19 +2506,22 @@ assert.equal(assetPaths.at(-1), "/index.html", "the default home must serve the 
 
 const internalSecret = "database-password=must-not-leak";
 let localSearchCalls = 0;
+const localListingQueries = [];
 const server = createServer(0, {
   initializeStorage: false,
   exposeInternalErrorDetails: false,
   publicApiOnly: true,
   corsAllowedOrigins: ["https://frontend.example"],
   runWebSearch: async () => { localSearchCalls += 1; throw new Error(internalSecret); },
-  listPcListings: async (query) => ({
+  listPcListings: async (query) => {
+    localListingQueries.push(query);
+    return ({
     items: [{ ...items[0], canonical_product_id: query.canonicalProductId, canonical_manufacturer: query.manufacturer }],
     total: 1,
     pagination: { has_more: false, next_cursor: null },
     as_of: "2026-08-29T00:00:00.000Z",
     freshness: { as_of: "2026-08-29T00:00:00.000Z", last_collected_at: "2026-08-29T00:00:00.000Z", age_seconds: 0, state: "FRESH" }
-  }),
+  }); },
   getPcPriceStats: (query) => {
     assert.equal(query.canonicalProductId, "cpu:amd:ryzen-3-2200g");
     return {
@@ -2513,10 +2563,16 @@ try {
     "the local category catalog must not retain disabled source plans");
   const localProducts = await fetch(`${baseUrl}/api/pc/products?category_code=GPU&query=RTX%203080`);
   assert.equal((await localProducts.json()).data.products.items[0].id, "gpu:nvidia:rtx-3080");
-  const localListings = await fetch(`${baseUrl}/api/pc/listings?canonical_product_id=gpu%3Anvidia%3Artx-3080&manufacturer=ASUS&sites=joonggonara&price_min=400000&price_max=600000`);
+  const localListings = await fetch(`${baseUrl}/api/pc/listings?canonical_product_id=gpu%3Anvidia%3Artx-3080&manufacturer=ASUS&sites=joonggonara&price_min=400000&price_max=600000&market_pool=KR_C2C_USED&currency=KRW`);
   const localListingItem = (await localListings.json()).data.items[0];
   assert.equal(localListingItem.canonical_product_id, "gpu:nvidia:rtx-3080");
   assert.equal(localListingItem.canonical_manufacturer, "ASUS");
+  assert.equal(localListingQueries.at(-1).marketPool, "KR_C2C_USED");
+  assert.equal(localListingQueries.at(-1).currency, "KRW");
+  const invalidLocalListingScope = await fetch(`${baseUrl}/api/pc/listings?market_pool=OVERSEAS_USED&currency=KRW`);
+  assert.equal(invalidLocalListingScope.status, 400, "local Node must reject the same market/currency mismatch as the Worker");
+  const unsupportedLocalListingScope = await fetch(`${baseUrl}/api/pc/listings?market_pool=NOT_REAL&currency=KRW`);
+  assert.equal(unsupportedLocalListingScope.status, 400, "local Node must reject unsupported market pools");
   const localStats = await fetch(`${baseUrl}/api/products/cpu%3Aamd%3Aryzen-3-2200g/price-stats?days=30&market_pool=KR_C2C_USED&condition=USED_WORKING&currency=KRW&as_of=2026-09-10`);
   assert.equal(localStats.status, 200);
   const localStatsData = (await localStats.json()).data;

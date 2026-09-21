@@ -50,6 +50,19 @@ export function metricPresentation(metric, seriesKey = 'active', currency = 'KRW
   }
   return { text: '—', label: count > 0 ? '표본 부족 · 대표가격 없음' : '가격 자료 없음', empty: true, state: count > 0 ? 'insufficient' : 'missing' };
 }
+// Builder sold prices are arithmetic means, including small exact samples.
+// Older publications with exactly one/two values can be recovered from their
+// extrema; for three or more values the midpoint is NOT an arithmetic mean.
+export function soldMeanValue(metric) {
+  const count = Number(metric?.sample_count);
+  if (!Number.isInteger(count) || count < 1 || metric?.aggregate_incomplete === true || !metricIsConsistent(metric)) return null;
+  let value = metric.arithmetic_mean ?? (count >= 5 ? metric.mean ?? metric.average : null);
+  if (value == null && count === 1 && metric.min === metric.max) value = metric.min;
+  if (value == null && count === 2 && typeof metric.min === 'number' && typeof metric.max === 'number') value = (metric.min + metric.max) / 2;
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return null;
+  if (typeof metric.min === 'number' && value < metric.min || typeof metric.max === 'number' && value > metric.max) return null;
+  return value;
+}
 export function statsUnavailable(data) {
   // Runner and Worker expose uppercase and legacy lowercase readiness states.
   // Missing publication is unknown coverage, not proof of zero market samples.
@@ -144,6 +157,50 @@ export function sourceStats(data, source = '') {
   const row = data?.by_source?.find(row => sourceId(row) === source);
   return row ? inheritStatsScope(data, row) : null;
 }
+const ANALYSIS_SOURCE_COLORS = Object.freeze({
+  overall: { active: '#1f2937', sold: '#64748b' },
+  joonggonara: { active: '#c2410c', sold: '#15803d' },
+  bunjang: { active: '#1d4ed8', sold: '#be185d' },
+  ebay: { active: '#7c3aed', sold: '#0e7490' },
+});
+export function buildAnalysisSeries(data, {
+  source = '', allowedSourceIds = [], days = 30, sourceLabels = {}
+} = {}) {
+  if (!data) return [];
+  const allowed = new Set((Array.isArray(allowedSourceIds) ? allowedSourceIds : [])
+    .map(value => String(value || '')).filter(Boolean));
+  if (source && !allowed.has(source)) return [];
+  const output = [];
+  const appendPair = (scope, scopeId, scopeLabel, colors) => {
+    for (const metric of SERIES.slice(0, 2)) {
+      const points = dailySeries(scope, metric.key, days);
+      if (!points.some(point => point.value != null)) continue;
+      output.push({
+        id: `${scopeId}:${metric.key}`,
+        key: metric.key,
+        metricKey: metric.key,
+        label: `${scopeLabel} · ${metric.key === 'active' ? '판매중 대표가격' : metric.label}`,
+        color: colors[metric.key],
+        dash: metric.key === 'sold' ? '6 3' : 'none',
+        points,
+      });
+    }
+  };
+  if (source) {
+    appendPair(data, source, sourceLabels[source] || source, ANALYSIS_SOURCE_COLORS[source] || { active: '#526071', sold: '#15803d' });
+    return output;
+  }
+  appendPair(data, 'overall', '전체', ANALYSIS_SOURCE_COLORS.overall);
+  const rows = new Map((Array.isArray(data.by_source) ? data.by_source : [])
+    .map(row => [sourceId(row), row]).filter(([id]) => allowed.has(id)));
+  for (const sourceIdValue of allowedSourceIds) {
+    const id = String(sourceIdValue || '');
+    const row = rows.get(id);
+    if (!row) continue;
+    appendPair(row, id, sourceLabels[id] || id, ANALYSIS_SOURCE_COLORS[id] || { active: '#526071', sold: '#15803d' });
+  }
+  return output;
+}
 // Match the existing marketplace's exclusion of internally inconsistent source summaries.
 export function coherentStats(data) {
   if (!data) return data;
@@ -202,17 +259,18 @@ export function priceDateRange(from = '', to = '', today = new Date().toISOStrin
   if (start > end) throw new Error('종료일은 시작일보다 빠를 수 없습니다.');
   return { from: start, to: end, days: (Date.parse(end) - Date.parse(start)) / 86400000 + 1, earliest, latest: today };
 }
-export function modelPageItems(page, count) {
-  if (count <= 7) return Array.from({ length: count }, (_, i) => i + 1);
-  const start = Math.max(1, Math.min(count - 4, page - 2));
-  const pages = [...new Set([1, ...Array.from({ length: 5 }, (_, i) => start + i), count])].sort((a, b) => a - b);
-  return pages.flatMap((n, i) => i && n > pages[i - 1] + 1 ? ['ellipsis', n] : [n]);
+export function modelPageItems(page, count, windowSize = 10) {
+  const size = Math.max(1, Math.floor(windowSize));
+  const current = Math.max(1, Math.min(count, Math.floor(page)));
+  const start = Math.floor((current - 1) / size) * size + 1;
+  return Array.from({ length: Math.min(size, Math.max(0, count - start + 1)) }, (_, index) => start + index);
 }
 export function buildTotals(entries, getStats) {
   return Object.fromEntries(SERIES.map(({ key }) => {
     let sum = 0, covered = 0;
     for (const entry of entries) {
-      const value = metricValue(getStats(entry)?.[key]);
+      const metric = getStats(entry)?.[key];
+      const value = key === 'sold' ? soldMeanValue(metric) : metricValue(metric);
       if (value != null) { sum += value * entry.quantity; covered += entry.quantity; }
     }
     const total = entries.reduce((count, entry) => count + entry.quantity, 0);
@@ -271,7 +329,8 @@ export function dailySeries(data, key, days = 30) {
   const end = Date.parse(`${date}T00:00:00Z`);
   if (!Number.isFinite(end)) return [];
   const start = end - (days - 1) * 86400000;
-  const map = new Map(rows.map(row => [String(row.date || row.stat_date).slice(0, 10), metricValue(row[key])]));
+  const map = new Map(rows.map(row => [String(row.date || row.stat_date).slice(0, 10),
+    key === 'sold' ? soldMeanValue(row[key]) ?? metricValue(row[key]) : metricValue(row[key])]));
   return Array.from({ length: days }, (_, i) => {
     const day = new Date(start + i * 86400000).toISOString().slice(0, 10);
     return { date: day, value: map.get(day) ?? null };

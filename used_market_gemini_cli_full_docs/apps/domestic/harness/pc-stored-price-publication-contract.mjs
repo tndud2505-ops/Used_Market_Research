@@ -25,7 +25,14 @@ try {
       title: '지스킬 DDR5 32GB (16GBx2) KIT 정상 작동', price: price * 2, currency: 'KRW', status: 'ACTIVE' },
     `2026-09-${String(10 + i).padStart(2, '0')}T12:00:00.000Z`);
   }
+  for (const [i, price] of [15000,17000,25000].entries()) {
+    pipeline.recordItem({site:'bunjang', source_listing_id:`sold-mean-${i}`,
+      title:'지스킬 DDR5 32GB (16GBx2) KIT 정상 작동',price:price*2,currency:'KRW',status:'SOLD'},'2026-09-15T18:00:00.000Z');
+  }
   const exact = ledger.rebuildAndGetPriceStats(options);
+  assert.equal(exact.sold.arithmetic_mean,19000);
+  assert.equal(exact.sold.median,17000);
+  assert.equal(exact.sold.mean,null,'legacy representative thresholds stay unchanged');
   const memberTrace = pcStatsTraceability(ledger, options);
   assert.ok(memberTrace.member_count >= 7, 'the earlier changed-price snapshot belongs to the historical daily member trace');
   assert.equal(exact.active.sample_count, 6);
@@ -45,6 +52,8 @@ try {
   assert.equal(storeCompletedPricePublication(db, publication).unchanged, true);
   const persisted = ledger.getStoredDailyPriceStats(options);
   assert.deepEqual(persisted.active, exact.active, 'published read keeps the actual cohort, not the sum of daily counts');
+  assert.equal(persisted.sold.arithmetic_mean,19000);
+  assert.equal(buildTotals([{id,quantity:2}],()=>persisted).sold.amount,38000);
   assert.deepEqual(persisted.by_source, exact.by_source);
   assert.equal(coherentStats(persisted).integrity_filtered_source_count, undefined, 'four valid samples no longer disappear');
   assert.equal(metricValue(persisted.active), 100_000);
@@ -67,6 +76,7 @@ try {
   ledger.compactStorage({ asOf: '2026-09-17T12:00:00.000Z', statsRetentionDays: 30,
     pruneObservationDetails: true, observationRetentionDays: 30 });
   assert.equal(ledger.getStoredDailyPriceStats(options).active.mean, 100_000, 'compaction preserves the exact summary');
+  assert.equal(ledger.getStoredDailyPriceStats(options).sold.arithmetic_mean,19000,'compaction preserves the true sold mean');
   assert.deepEqual(pcStatsTraceability(ledger, options), memberTrace, 'post-publication compaction preserves the complete member count AND checksum');
   console.log(JSON.stringify({ status: 'passed', contract: 'pc-stored-price-publication', gskill_samples: 6, bunjang_median: 70_000, mean: 100_000 }));
 } finally { db.close(); }

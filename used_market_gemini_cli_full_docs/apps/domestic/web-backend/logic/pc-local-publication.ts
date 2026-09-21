@@ -14,6 +14,8 @@ export interface LocalPcListingQuery {
   sort: string;
   minPrice: number | null;
   maxPrice: number | null;
+  marketPool: string | null;
+  currency: string | null;
   limit: number;
   cursor: string | null;
 }
@@ -45,6 +47,13 @@ function normalize(value: unknown): string {
 
 function same(left: unknown, right: unknown): boolean {
   return normalize(left).toUpperCase() === normalize(right).toUpperCase();
+}
+
+function validMarketScope(item: JsonRecord): boolean {
+  const marketPool = normalize(item.market_pool).toUpperCase();
+  const currency = normalize(item.currency).toUpperCase();
+  if (['KR_C2C_USED', 'KR_DEALER_USED', 'KR_REFURB_RETAIL'].includes(marketPool)) return currency === 'KRW';
+  return marketPool === 'OVERSEAS_USED' && currency === 'USD';
 }
 
 function optionalPath(value: unknown): string | null {
@@ -176,9 +185,12 @@ export function createLocalPcPublicationReader() {
       ? new Set(query.canonicalProductIds.map(normalize).filter(Boolean))
       : null;
     let items = allItems.filter((item: JsonRecord) => {
+      if (!validMarketScope(item)) return false;
       if (query.canonicalProductId && !same(item.canonical_product_id, query.canonicalProductId)) return false;
       if (canonicalProductIds && !canonicalProductIds.has(normalize(item.canonical_product_id))) return false;
       if (sites.size && !sites.has(normalize(item.site))) return false;
+      if (query.marketPool && !same(item.market_pool, query.marketPool)) return false;
+      if (query.currency && !same(item.currency, query.currency)) return false;
       if (query.manufacturer && !same(item.canonical_manufacturer || item.manufacturer, query.manufacturer)) return false;
       if (query.boardManufacturer && !same(item.board_manufacturer, query.boardManufacturer)) return false;
       if (!Object.entries(query.listingFacets || {}).every(([key, expected]) => expected.some((value) => same(item[key], value)))) return false;

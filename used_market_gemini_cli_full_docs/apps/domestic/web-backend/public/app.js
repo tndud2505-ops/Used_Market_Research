@@ -1056,7 +1056,7 @@ function syncListingSortTabs() {
 function syncSourceFilterSummary() {
   if (!dom.sourceFilterSummary) return;
   if (state.selectedSites.size === 0) {
-    dom.sourceFilterSummary.textContent = "국내 전체";
+    dom.sourceFilterSummary.textContent = "국내 개인 중고";
     return;
   }
   const sourceId = [...state.selectedSites][0];
@@ -1113,7 +1113,7 @@ function renderSourceFilters() {
     choice.append(input, createElement("span", "", label));
     dom.sourceFilters.append(choice);
   };
-  appendChoice("국내 전체", "", state.selectedSites.size === 0, () => {
+  appendChoice("국내 개인 중고", "", state.selectedSites.size === 0, () => {
     state.selectedSites.clear();
     reloadListingsForControls("");
   });
@@ -1464,6 +1464,14 @@ function listingCurrencyScope() {
   return listingPriceControlsActive() && currencies.includes("KRW") ? "KRW" : "";
 }
 
+function listingMarketPoolScope() {
+  const sourceScope = listingSourceScope();
+  if (!sourceScope.length) return "";
+  if (sourceScope.every((source) => source.currency === "USD")) return "OVERSEAS_USED";
+  if (sourceScope.every((source) => source.currency === "KRW")) return "KR_C2C_USED";
+  return "";
+}
+
 function selectProduct(product) {
   if (!productId(product) || !isSelectableModel(product)) return;
   cancelListingRequest();
@@ -1490,7 +1498,8 @@ function selectProduct(product) {
 
 function buildListingQuery(cursor = "") {
   const params = new URLSearchParams();
-  params.set("limit", "10");
+  // One bounded read prepares ten 10-item UI pages in the server's global order.
+  params.set("limit", "100");
   if (state.selectedProduct) {
     params.set("canonical_product_id", productId(state.selectedProduct));
   } else {
@@ -1508,31 +1517,34 @@ function buildListingQuery(cursor = "") {
   const sourceScope = listingSourceScope();
   const sourceIds = sourceScope.map((source) => source.id).filter(Boolean);
   if (sourceIds.length && sourceIds.length < state.sources.length) params.set("sites", sourceIds.join(","));
-  const marketPools = [...new Set(sourceScope.flatMap((source) => source.marketPools).filter(Boolean))];
   const currencyScope = listingCurrencyScope();
   if (currencyScope) params.set("currency", currencyScope);
-  if (marketPools.length === 1) params.set("market_pool", marketPools[0]);
+  const marketPoolScope = listingMarketPoolScope();
+  if (marketPoolScope) params.set("market_pool", marketPoolScope);
   if (cursor) params.set("cursor", cursor);
   return params;
 }
 
 function applyListingPayload(payload, pageNumber = 1) {
   const items = toArray(firstDefined(payload?.items, payload?.listings, payload?.results));
-  state.listings = items;
+  const pageCount = Math.max(1, Math.ceil(items.length / 10));
+  const nextCursor = normalizeText(firstDefined(payload?.next_cursor, payload?.nextCursor, payload?.pagination?.next_cursor, payload?.pagination?.nextCursor));
+  for (let offset = 0; offset < pageCount; offset += 1) {
+    const number = pageNumber + offset;
+    state.listingPages.set(number, items.slice(offset * 10, (offset + 1) * 10));
+    state.listingNextCursors.set(number, offset === pageCount - 1 ? nextCursor : "");
+  }
+  state.listings = state.listingPages.get(pageNumber);
   state.listingPage = pageNumber;
-  state.listingPages.set(pageNumber, items);
-  state.listingCursor = normalizeText(firstDefined(payload?.next_cursor, payload?.nextCursor, payload?.pagination?.next_cursor, payload?.pagination?.nextCursor));
-  state.listingNextCursors.set(pageNumber, state.listingCursor);
-  if (state.listingCursor) state.listingPageCursors.set(pageNumber + 1, state.listingCursor);
-  else state.listingPageCursors.delete(pageNumber + 1);
+  state.listingCursor = state.listingNextCursors.get(pageNumber) || "";
+  if (nextCursor) state.listingPageCursors.set(pageNumber + pageCount, nextCursor);
+  else state.listingPageCursors.delete(pageNumber + pageCount);
   if (pageNumber === 1) {
     const rawCounts = firstDefined(payload?.source_counts, payload?.sourceCounts, {});
     state.availableSourceCounts = rawCounts && typeof rawCounts === "object" && !Array.isArray(rawCounts) ? rawCounts : null;
-    const sourceTotal = state.availableSourceCounts
-      ? Object.values(state.availableSourceCounts).reduce((total, count) => total + Math.max(0, Number(count) || 0), 0)
-      : 0;
-    const explicitTotal = Number(firstDefined(payload?.total, payload?.total_count, payload?.totalCount));
-    state.listingTotal = Number.isFinite(explicitTotal) && explicitTotal >= 0 ? explicitTotal : sourceTotal || items.length;
+    const rawTotal = firstDefined(payload?.total, payload?.total_count, payload?.totalCount);
+    const explicitTotal = rawTotal == null || rawTotal === '' ? null : Number(rawTotal);
+    state.listingTotal = explicitTotal != null && Number.isFinite(explicitTotal) && explicitTotal >= 0 ? explicitTotal : null;
     dom.listingCount.textContent = Number.isFinite(state.listingTotal) ? `${state.listingTotal.toLocaleString("ko-KR")}건` : "";
     renderSourceFilters();
   }
@@ -1762,7 +1774,7 @@ function renderListingPagination() {
     button.dataset.page = String(pageNumber);
     button.setAttribute("aria-label", `${pageNumber}페이지`);
     if (pageNumber === state.listingPage) button.setAttribute("aria-current", "page");
-    button.disabled = !state.listingPages.has(pageNumber) && !state.listingPageCursors.has(pageNumber);
+    button.disabled = !state.listingPages.has(pageNumber) && (Boolean(state.listingRequest) || !state.listingPageCursors.has(pageNumber));
     dom.listingPageNumbers.append(button);
     previousPageNumber = pageNumber;
   });
@@ -1770,16 +1782,13 @@ function renderListingPagination() {
   const previousPage = state.listingPage - 1;
   const nextPage = state.listingPage + 1;
   dom.listingPagePrev.disabled = previousPage < 1 || !state.listingPages.has(previousPage);
-  dom.listingPageNext.disabled = !state.listingPages.has(nextPage) && !state.listingPageCursors.has(nextPage);
+  dom.listingPageNext.disabled = !state.listingPages.has(nextPage) && (Boolean(state.listingRequest) || !state.listingPageCursors.has(nextPage));
   dom.listingPagination.hidden = maxKnownPage === 1;
 }
 
 function listingPaginationWindow(maxPage, currentPage) {
-  if (maxPage <= 5) return Array.from({ length: maxPage }, (_, index) => index + 1);
-  const pages = new Set([1, maxPage, currentPage - 1, currentPage, currentPage + 1]);
-  if (currentPage <= 3) [2, 3, 4].forEach((page) => pages.add(page));
-  if (currentPage >= maxPage - 2) [maxPage - 3, maxPage - 2, maxPage - 1].forEach((page) => pages.add(page));
-  return [...pages].filter((page) => page >= 1 && page <= maxPage).sort((left, right) => left - right);
+  const start = Math.floor((currentPage - 1) / 10) * 10 + 1;
+  return Array.from({ length: Math.min(10, Math.max(0, maxPage - start + 1)) }, (_, index) => start + index);
 }
 
 async function showListingPage(pageNumber) {
@@ -1829,6 +1838,7 @@ async function requestListingPage(pageNumber, cursor = "") {
     showListingMessage("현재 매물을 불러오는 중입니다.");
   } else {
     showListingMessage(`${pageNumber}페이지 매물을 불러오는 중입니다.`);
+    renderListingPagination();
   }
   try {
     const payload = await fetchJson(`/api/pc/listings?${scopeKey}`, { signal: controller.signal });
@@ -1850,6 +1860,7 @@ async function requestListingPage(pageNumber, cursor = "") {
     if (state.listingRequest === controller) {
       state.listingRequest = null;
       dom.listingSection.removeAttribute("aria-busy");
+      renderListingPagination();
     }
   }
 }
@@ -1859,9 +1870,7 @@ async function loadListings(append = false) {
     resetListingPagination();
     return requestListingPage(1);
   }
-  const nextPage = state.listingPage + 1;
-  const cursor = state.listingPageCursors.get(nextPage);
-  if (cursor) return requestListingPage(nextPage, cursor);
+  return showListingPage(state.listingPage + 1);
 }
 
 function resetListingControls() {

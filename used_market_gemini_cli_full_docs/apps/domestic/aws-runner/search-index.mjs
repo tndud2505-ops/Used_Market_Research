@@ -1978,7 +1978,12 @@ export class SearchIndex {
       hard_limit_bytes: this.limits.hardBytes,
       soft_limit_reached: size >= this.limits.softBytes,
       hard_limit_reached: size >= this.limits.hardBytes,
+      database_soft_usage_ratio: this.limits.softBytes > 0 ? Number((size / this.limits.softBytes).toFixed(4)) : null,
+      database_hard_usage_ratio: this.limits.hardBytes > 0 ? Number((size / this.limits.hardBytes).toFixed(4)) : null,
       active_listings: activeListings,
+      max_active_listings: this.limits.maxActiveListings,
+      active_listing_usage_ratio: this.limits.maxActiveListings > 0
+        ? Number((activeListings / this.limits.maxActiveListings).toFixed(4)) : null,
       inactive_listings: inactiveListings,
       query_count: queryCount,
       active_search_snapshots: activeSnapshots,

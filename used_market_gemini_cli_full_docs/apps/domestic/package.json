@@ -18,7 +18,7 @@
     "sites": "node dist/MCP/logic/index.js sites",
     "web": "node --env-file-if-exists=.env dist/web-backend/logic/index.js",
     "scheduler": "node --env-file-if-exists=.env dist/scheduler/logic/index.js",
-    "test:pc": "node harness/pc-domain-contract.mjs && node harness/pc-public-catalog-contract.mjs && node harness/pc-directory-contract.mjs && node harness/pc-browse-flow-contract.mjs && node harness/ssd-browse-flow-contract.mjs && node harness/psu-browse-flow-contract.mjs && node harness/pc-collection-matrix-contract.mjs && node harness/pc-source-coverage-contract.mjs && node harness/pc-source-policy-contract.mjs && node harness/pc-publication-contract.mjs && node harness/pc-service-contract.mjs && node harness/aws-runner-deploy-contract.mjs && node harness/pc-ui-contract.mjs",
+    "test:pc": "node harness/pc-domain-contract.mjs && node harness/pc-public-catalog-contract.mjs && node harness/pc-directory-contract.mjs && node harness/pc-browse-flow-contract.mjs && node harness/ssd-browse-flow-contract.mjs && node harness/psu-browse-flow-contract.mjs && node harness/pc-collection-matrix-contract.mjs && node harness/pc-source-coverage-contract.mjs && node harness/pc-source-policy-contract.mjs && node harness/bunjang-lifecycle-contract.mjs && node harness/pc-publication-contract.mjs && node harness/pc-service-contract.mjs && node harness/aws-runner-deploy-contract.mjs && node harness/pc-ui-contract.mjs",
     "test:pc:live-specialist": "node harness/pc-specialist-live.mjs",
     "pc:probe-source": "node aws-runner/probe-pc-source-coverage.mjs",
     "pc:collect-local": "node --env-file-if-exists=.env aws-runner/collect-pc-local.mjs",
@@ -38,7 +38,7 @@
     "cloudflare:app-release": "node cloudflare/release.mjs --app-only",
     "test:pc-tools": "node harness/pc-tools-contract.mjs && node harness/pc-light-user-contract.mjs && node harness/pc-stored-price-publication-contract.mjs && node harness/pc-local-projection-contract.mjs && node harness/pc-catalog-ingestion-contract.mjs && node harness/pc-reclassification-alias-contract.mjs && node harness/pc-staged-normalization-import-contract.mjs && node harness/pc-full-publication-contract.mjs && node harness/pc-release-collection-contract.mjs",
     "test:pc-release": "node harness/pc-agent1-publication-http-contract.mjs && node harness/pc-agent1-chunk-integrity-contract.mjs",
-    "test:pc-final": "node harness/pc-agent2-ui-contract.mjs && node harness/pc-agent2-resume-contract.mjs && node harness/pc-agent3-independent-price-contract.mjs && node harness/pc-agent3-publication-bootstrap-contract.mjs && node harness/pc-agent3-stats-readiness-contract.mjs && node harness/pc-final-price-readiness-contract.mjs",
+    "test:pc-final": "node harness/pc-agent2-ui-contract.mjs && node harness/pc-agent2-resume-contract.mjs && node harness/pc-agent3-independent-price-contract.mjs && node harness/pc-agent3-publication-bootstrap-contract.mjs && node harness/pc-agent3-stats-readiness-contract.mjs && node harness/pc-final-price-readiness-contract.mjs && node harness/pc-price-recovery-contract.mjs",
     "test:ui-a": "node harness/pc-ui-concept-a-contract.mjs && node harness/pc-search-modal-contract.mjs",
     "test": "npm run build && npm run test:pc && npm run test:pc-tools && npm run test:pc-release && npm run test:pc-final && npm run test:ui-a"
   },

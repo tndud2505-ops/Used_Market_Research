@@ -366,11 +366,12 @@ function firstFiniteValue(...values) {
   return null;
 }
 
-function summarize(values, unitCount = null) {
+function summarize(values, unitCount = null, soldArithmetic = false) {
   const sorted = values.filter(Number.isFinite).sort((left, right) => left - right);
   const sampleCount = sorted.length;
   const median = sampleCount >= 3 ? percentile(sorted, 0.5) : null;
   const mean = sampleCount >= 5 ? sorted.reduce((sum, value) => sum + value, 0) / sampleCount : null;
+  const arithmeticMean = sampleCount ? sorted.reduce((sum, value) => sum + value, 0) / sampleCount : null;
   let trimmedMean = null;
   let p25 = null;
   let p75 = null;
@@ -394,6 +395,7 @@ function summarize(values, unitCount = null) {
     min: sampleCount > 0 ? round(sorted[0]) : null,
     max: sampleCount > 0 ? round(sorted.at(-1)) : null,
     mean: round(mean),
+    ...(soldArithmetic ? { arithmetic_mean: round(arithmeticMean) } : {}),
     median: round(median),
     trimmed_mean: round(trimmedMean),
     p25: round(p25),
@@ -2043,6 +2045,41 @@ export class PcPartsLedger {
     `).all(requireValue(sourceId, "sourceId"), cutoff, boundedLimit);
   }
 
+  lifecycleRecheckStatus({ sourceId, asOf } = {}) {
+    const resolvedSourceId = requireValue(sourceId, "sourceId");
+    const now = asOf instanceof Date ? asOf : new Date(asOf || this.now());
+    if (!Number.isFinite(now.getTime())) throw new TypeError("invalid lifecycle recheck asOf");
+    const cutoff = new Date(now.getTime() - 6 * HOUR_MS).toISOString();
+    const operationalCutoff = new Date(now.getTime() - 24 * HOUR_MS).toISOString();
+    const row = this.db.prepare(`
+      SELECT COUNT(*) AS due_count, MIN(r.last_checked_at) AS oldest_last_checked_at,
+             SUM(CASE WHEN r.last_checked_at <= ? THEN 1 ELSE 0 END) AS operational_overdue_count,
+             MIN(CASE WHEN r.last_checked_at <= ? THEN r.last_checked_at ELSE NULL END) AS oldest_operational_overdue_at
+        FROM listing_snapshots s
+        JOIN raw_listings r ON r.id = s.raw_listing_id
+       WHERE s.source_id = ? AND (s.lifecycle_status IN ('ACTIVE', 'RESERVED')
+         OR (s.source_id = 'bunjang' AND s.lifecycle_status = 'UNAVAILABLE_UNKNOWN'))
+         AND r.last_checked_at <= ?
+         AND NOT EXISTS (
+           SELECT 1 FROM listing_snapshots newer
+            WHERE newer.source_id = s.source_id AND newer.source_listing_id = s.source_listing_id
+              AND (newer.observed_at > s.observed_at OR (newer.observed_at = s.observed_at AND newer.id > s.id))
+         )
+    `).get(operationalCutoff, operationalCutoff, resolvedSourceId, cutoff) || {};
+    const oldest = String(row.oldest_last_checked_at || '');
+    const oldestMs = Date.parse(oldest);
+    return {
+      source_id: resolvedSourceId,
+      due_after_hours: 6,
+      due_count: Number(row.due_count || 0),
+      oldest_last_checked_at: oldest || null,
+      oldest_age_seconds: Number.isFinite(oldestMs) ? Math.max(0, Math.floor((now.getTime() - oldestMs) / 1000)) : null,
+      operational_sla_hours: 24,
+      operational_overdue_count: Number(row.operational_overdue_count || 0),
+      oldest_operational_overdue_at: row.oldest_operational_overdue_at || null,
+    };
+  }
+
   reconcileSourceObservation({ sourceId, sourceKey, observedListingIds, checkedAt }) {
     const resolvedSourceId = requireValue(sourceId || sourceKey, "sourceId");
     const timestamp = iso(checkedAt || new Date(this.now()));
@@ -2508,7 +2545,8 @@ export class PcPartsLedger {
       unit_count: unitCount,
       min: round(finiteOrNull(row.min_value)),
       max: round(finiteOrNull(row.max_value)),
-      mean: round(finiteOrNull(row.mean_value)),
+      mean: round(average),
+      ...(row.metric_scope === "SOLD" ? { arithmetic_mean: round(finiteOrNull(row.mean_value)) } : {}),
       average: round(average),
       median: round(finiteOrNull(row.median_value)),
       trimmed_mean: round(finiteOrNull(row.trimmed_mean_value)),
@@ -2562,6 +2600,7 @@ export class PcPartsLedger {
       min: round(minValue),
       max: round(maxValue),
       mean: sampleCount >= 5 && meanWeight === sampleCount ? round(meanWeightedSum / meanWeight) : null,
+      ...(sampleRows.every(row => row.metric_scope === "SOLD") ? { arithmetic_mean: meanWeight === sampleCount ? round(meanWeightedSum / meanWeight) : null } : {}),
       average: sampleCount >= 5 && averageWeight === sampleCount ? round(averageWeightedSum / averageWeight) : null,
       aggregate_incomplete: sampleRows.length > 1 && (meanWeight !== sampleCount || sampleCount < 5),
       median: singleDayMetric?.median ?? null,
@@ -2764,7 +2803,7 @@ export class PcPartsLedger {
     const reserved = summarize(reservedRows.map((row) => Number(row.comparable_price ?? row.price_value)), unitCount(reservedRows));
     const sold = summarize(
       soldRows.map((row) => comparableScopePrice(row.sold_last_ask_price, row.quantity, row.price_scope)),
-      unitCount(soldRows)
+      unitCount(soldRows), true
     );
     const confirmed = summarize(
       transactionRows.map((row) => comparableScopePrice(row.transaction_price, row.quantity, row.price_scope)),
@@ -2845,7 +2884,7 @@ export class PcPartsLedger {
       const sourceUnitCount = (entries) => entries.reduce((sum, row) => sum + Math.max(1, Number(row.quantity) || 1), 0);
       const sourceActive = summarize(sourceActiveRows.map((row) => Number(row.comparable_price ?? row.price_value)), sourceUnitCount(sourceActiveRows));
       const sourceReserved = summarize(sourceReservedRows.map((row) => Number(row.comparable_price ?? row.price_value)), sourceUnitCount(sourceReservedRows));
-      const sourceSold = summarize(sourceSoldRows.map((row) => comparableScopePrice(row.sold_last_ask_price, row.quantity, row.price_scope)), sourceUnitCount(sourceSoldRows));
+      const sourceSold = summarize(sourceSoldRows.map((row) => comparableScopePrice(row.sold_last_ask_price, row.quantity, row.price_scope)), sourceUnitCount(sourceSoldRows), true);
       const sourceConfirmed = summarize(sourceTransactionRows.map((row) => comparableScopePrice(row.transaction_price, row.quantity, row.price_scope)), sourceUnitCount(sourceTransactionRows));
       sourceReserved.disclosure = "예약중 매물에 표시된 가격이며 실제 거래가격이 아닙니다.";
       sourceSold.disclosure = "판매완료 매물에 마지막으로 표시된 가격이며 실제 거래가격이 아닙니다.";
@@ -2905,7 +2944,7 @@ export class PcPartsLedger {
       const countUnits = (entries) => entries.reduce((sum, row) => sum + Math.max(1, Number(row.quantity) || 1), 0);
       const activeForManufacturer = summarize(activeRowsForManufacturer.map((row) => Number(row.comparable_price ?? row.price_value)), countUnits(activeRowsForManufacturer));
       const reservedForManufacturer = summarize(reservedRowsForManufacturer.map((row) => Number(row.comparable_price ?? row.price_value)), countUnits(reservedRowsForManufacturer));
-      const soldForManufacturer = summarize(soldRowsForManufacturer.map((row) => comparableScopePrice(row.sold_last_ask_price, row.quantity, row.price_scope)), countUnits(soldRowsForManufacturer));
+      const soldForManufacturer = summarize(soldRowsForManufacturer.map((row) => comparableScopePrice(row.sold_last_ask_price, row.quantity, row.price_scope)), countUnits(soldRowsForManufacturer), true);
       reservedForManufacturer.disclosure = "예약중 매물에 표시된 가격이며 실제 거래가격이 아닙니다.";
       soldForManufacturer.disclosure = "판매완료 매물에 마지막으로 표시된 가격이며 실제 거래가격이 아닙니다.";
       return {

@@ -79,15 +79,15 @@ try {
 const script = readFileSync(new URL('../web-backend/public/pc-tools.js', import.meta.url), 'utf8');
 assert.match(script, /state\.selectedId = idOf\(currentProducts\(\)\[0\]\);\s+syncAnalysisUrl\(\)/);
 assert.match(script, /const sortData = builder \? payload : analysisData/);
-assert.match(script, /overseasPrices\.load\(overseas \? targets : \[\]/);
+assert.match(script, /overseasPrices\.load\(overseas \? targets : !state\.source && selected \? \[selected\] : \[\]/);
 assert.match(script, /refreshBuildPriceDetails\(\)/);
 for (const name of ['computer-builder.html', 'price-analysis.html']) {
   const html = readFileSync(new URL(`../web-backend/public/${name}`, import.meta.url), 'utf8');
   // Approved UI-A candidate preserves the parts-ux-v4 data/calculation modules.
   // This is a source manifest assertion, NOT a claim of public deployment.
-  assert.match(html, /pc-tools\.js\?v=search-first-v2/);
-  assert.match(html, /pc-tools\.css\?v=parts-ux-v4/);
-  assert.match(html, /ui-concept-a\.css\?v=search-first-v2/);
+  assert.match(html, name === 'price-analysis.html' ? /pc-tools\.js\?v=price-workspace-v11/ : /pc-tools\.js\?v=price-workspace-v9/);
+  assert.match(html, name === 'price-analysis.html' ? /pc-tools\.css\?v=price-workspace-v5/ : /pc-tools\.css\?v=parts-ux-v6/);
+  assert.match(html, name === 'price-analysis.html' ? /ui-concept-a\.css\?v=price-workspace-v1/ : /ui-concept-a\.css\?v=search-first-v2/);
 }
 console.log(JSON.stringify({ status: 'PASS', kind: 'deterministic frontend; synthetic responses; no browser/live claim',
   price_products: priceProducts.length, exploration_excluded: exploration.length, category_counts: groups,

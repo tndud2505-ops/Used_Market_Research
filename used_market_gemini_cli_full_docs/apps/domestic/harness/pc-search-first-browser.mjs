@@ -243,7 +243,17 @@ export async function runBrowserChecks({browser,origin,out,fixture=false}) {
     await page.setViewportSize({width:1440,height:1000});
     await page.goto(origin+'/computer-builder.html');await page.waitForSelector('#build-table tbody tr');
     assert.equal(await page.locator('#build-table tbody tr').count(),9);
-    assert.equal(await page.locator('#build-table tfoot #tools-summary').count(),1);
+    assert.equal(await page.locator('.sf-builder-bar #tools-summary').count(),0);
+    assert.equal(await page.locator('.sf-builder-bar #contextual-offer').count(),1);
+    assert.equal(await page.locator('#tools-summary').count(),1,'one live total, not a cloned header');
+    assert.equal(await page.locator('#build-table tfoot').count(),1,'one integrated footer summary');
+    const headerBoxes=await page.evaluate(()=>{
+      const title=document.querySelector('#build-table tbody').getBoundingClientRect();
+      const summary=document.querySelector('#build-summary').getBoundingClientRect();
+      const table=document.querySelector('#build-table').getBoundingClientRect();
+      return {title:{x:title.x,right:title.right,y:title.y,bottom:title.bottom},summary:{x:summary.x,y:summary.y,bottom:summary.bottom},tableY:table.y};
+    });
+    assert.ok(headerBoxes.summary.y>=headerBoxes.title.bottom-1,'summary follows all component rows');
     assert.equal(await page.locator('#build-table thead th').count(),6);
     for(const [code,id] of ids) {
       const product=products.find(p=>p.canonical_product_id===id);assert.ok(product,id);
@@ -272,7 +282,8 @@ export async function runBrowserChecks({browser,origin,out,fixture=false}) {
       fixtureState.priceMode='partial';await page.reload();await page.waitForFunction(()=>document.querySelectorAll('#build-table [data-build-price]').length===18&&[...document.querySelectorAll('#build-table [data-build-price]')].every(n=>n.dataset.priceState!=='loading'));
       assert.match(await page.locator('#tools-summary').textContent(),/부분 합계/);
       for(const key of ['active','sold']) {
-        assert.match(await page.locator(`#tools-summary .series-${key}`).locator('..').textContent(),/가격 확인 9\/10개/);
+        assert.match(await page.locator(`#tools-summary .series-${key}`).locator('..').getAttribute('title'),/부분 합계/);
+        assert.doesNotMatch(await page.locator(`#tools-summary .series-${key}`).locator('..').innerText(),/가격 확인|부분 합계/);
         assert.equal(await page.locator(`#tools-summary .series-${key}`).textContent(),currencyMoney(9*(key==='active'?120000.5:115000.5)));
       }
       fixtureState.priceMode='mixed-publication';await page.reload();await page.waitForFunction(()=>document.querySelectorAll('#build-table [data-build-price]').length===18&&[...document.querySelectorAll('#build-table [data-build-price]')].every(n=>n.dataset.priceState==='scope-conflict'));

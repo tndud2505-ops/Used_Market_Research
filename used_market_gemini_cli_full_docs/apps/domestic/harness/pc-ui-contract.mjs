@@ -9,6 +9,7 @@ const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 const html = readFileSync(path.join(appRoot, "web-backend/public/index.html"), "utf8");
 const analysisHtml = readFileSync(path.join(appRoot, "web-backend/public/price-analysis.html"), "utf8");
 const builderHtml = readFileSync(path.join(appRoot, "web-backend/public/computer-builder.html"), "utf8");
+const guideHtml = readFileSync(path.join(appRoot, "web-backend/public/guide.html"), "utf8");
 const script = readFileSync(path.join(appRoot, "web-backend/public/app.js"), "utf8");
 const styles = readFileSync(path.join(appRoot, "web-backend/public/styles.css"), "utf8");
 const toolsScript = readFileSync(path.join(appRoot, "web-backend/public/pc-tools.js"), "utf8");
@@ -18,7 +19,7 @@ const requireText = (source, value, message) => assert.ok(source.includes(value)
 requireText(toolsScript, 'buildTotals(state.entries', 'builder summary must derive totals from the shared price state');
 requireText(toolsScript, '판매중 합계', 'builder must visibly label the active-price partial total');
 requireText(toolsScript, '판매완료 합계', 'builder must visibly label the sold-price partial total');
-requireText(toolsScript, '가격 확인', 'builder totals must disclose price-covered quantity');
+assert.equal(toolsScript.includes('가격 확인 ${total.covered}'), false, 'builder omits repetitive coverage copy');
 requireText(toolsScript, 'buildScopeConflict()', 'builder totals must reject mixed publication scopes');
 requireText(toolsScript, 'compactBuild(state.entries', 'builder writes must persist compact validated entries');
 requireText(toolsScript, 'localStorage.setItem(STORAGE_KEY, raw)', 'builder selection changes must write local storage');
@@ -39,6 +40,11 @@ assert.ok(analysisHtml.indexOf('id="analysis-categories"') < analysisHtml.indexO
 assert.equal(analysisHtml.includes('id="tools-summary"'), false,
   "price analysis uses one source table, not duplicate summary cards");
 requireText(analysisHtml, 'id="analysis-title"', 'analysis needs its compact selected-model heading');
+requireText(analysisHtml, 'id="analysis-workspace"', 'analysis chart and source table must share one workspace');
+requireText(analysisHtml, 'data-action="analysis-pane" data-pane="chart"', 'chart pane must be collapsible');
+requireText(analysisHtml, 'data-action="analysis-pane" data-pane="table"', 'source table pane must be collapsible');
+requireText(analysisHtml, 'class="sf-source-table-scroll" tabindex="0"', 'source table must scroll inside its own keyboard-focusable region');
+assert.equal(analysisHtml.includes('id="chart-scale-'), false, 'zoom belongs to the date and price axes, not separate sliders');
 assert.equal(analysisHtml.includes('tools-source-label'), false,
   "analysis source tabs stand alone without a redundant site label");
 assert.equal(analysisHtml.includes('id="overview-button"'), false, "overall trend must be removed");
@@ -51,14 +57,42 @@ requireText(toolsScript, "const link = el('a', 'model-name-link', nameOf(product
   "the visible model name must be the direct original-search link");
 assert.equal(toolsScript.includes("state.expanded"), false, "flat model rows must not retain expansion state");
 assert.equal(toolsScript.includes("동일 모델 묶기"), false, "flat model rows must not expose a grouping toggle");
-requireText(toolsScript, "makeTable(['부품', '선택 모델', '수량', '판매중 가격', '판매완료 표시가', '변경'])",
+requireText(toolsScript, "makeTable(['부품', '선택 모델', '수량', '판매중 가격', '판매완료 평균', '변경'])",
   'the search-first builder has one six-column integrated table');
-requireText(toolsScript, "el('tfoot')", 'both totals must be integrated into the table footer');
+assert.match(builderHtml, /<header class="sf-page-bar sf-builder-bar">[\s\S]*?id="contextual-offer"[\s\S]*?<\/header>/,
+  'the contextual ad stays with the builder actions');
+assert.equal(toolsScript.includes("el('tfoot')"), true, 'totals share the component table footer');
 assert.equal(toolsScript.includes("'원문 검색'"), false,
   "the model name link must not repeat a separate original-search label");
-requireText(toolsScript, "[['', '국내 전체']", "analysis must keep an explicit domestic aggregate tab");
+requireText(toolsScript, "[['', '전체']", "analysis must offer all sources with currencies kept separate");
+requireText(toolsScript, "state.range.to === state.range.latest ? '' : state.range.to",
+  "today must use the latest price publication without an explicit as_of contract");
+const requestedPriceAsOfSource = toolsScript.match(/function requestedPriceAsOf\(\) \{[^}]+\}/u)?.[0];
+assert.ok(requestedPriceAsOfSource, 'price as_of selection must remain directly testable');
+const evaluatePriceAsOf = ({ builder, to, latest }) => {
+  const context = vm.createContext({ builder, state: { range: { to, latest } } });
+  vm.runInContext(requestedPriceAsOfSource, context);
+  return vm.runInContext('requestedPriceAsOf()', context);
+};
+assert.equal(evaluatePriceAsOf({ builder: false, to: '2026-09-21', latest: '2026-09-21' }), '');
+assert.equal(evaluatePriceAsOf({ builder: false, to: '2026-09-20', latest: '2026-09-21' }), '2026-09-20');
+assert.equal(evaluatePriceAsOf({ builder: true, to: '2026-09-20', latest: '2026-09-21' }), '');
+requireText(toolsScript, "const pageCatalog = builder ? catalog.tools_catalog : catalog.public_catalog",
+  "price analysis must use the public catalog while the builder uses the tools catalog");
 requireText(toolsScript, "state.sources = (catalog.sources || [])",
   "analysis source tabs must follow the operational catalog instead of per-model evidence");
+requireText(toolsScript, "sources.flatMap(item => buildAnalysisSeries",
+  "the chart must build each source from its own published currency scope");
+requireText(toolsScript, ".filter(id => allowedSources.has(id))",
+  "the source table must not revive a disabled source from stale projection rows");
+requireText(toolsChart, "item.label || metric?.label",
+  "site-specific chart descriptors must provide stable legend and tooltip labels");
+requireText(toolsChart, "filter(item => item.points.some(point => point.value != null))",
+  "empty sold series must not leave a misleading legend entry");
+requireText(guideHtml, '현재 운영 중인 중고나라·번개장터·eBay',
+  'the guide must describe the current three-source operating set');
+assert.doesNotMatch(guideHtml, /다나와 장터|헬로마켓|리씽크몰|쿨엔조이/u,
+  'the guide must not advertise retired sources as currently collected');
 assert.equal(toolsScript.includes('state.overview'), false, "removed overall-trend state must not remain reachable");
 assert.equal(toolsScript.includes("target.id === 'chart-mode'"), false, "removed index-mode control must not retain an event path");
 requireText(toolsChart, "empty.textContent = '가격 자료 없음'", "a source without evidence needs an honest empty state");
@@ -138,7 +172,7 @@ requireText(script, 'if (state.categoryCode) url.searchParams.set("category_code
 requireText(script, 'params.set("category_code", state.categoryCode)', "broad listing search must preserve the category");
 requireText(script, "params.append(key, value)", "broad listing search must preserve repeated facets");
 requireText(script, 'params.set("canonical_product_id", productId(state.selectedProduct))', "model selection must use an exact listing query");
-requireText(script, 'params.set("limit", "10")', "listing pages must stay compact enough to expose numbered navigation");
+requireText(script, 'params.set("limit", "100")', "one bounded request preloads ten compact listing pages");
 requireText(script, "listing-model-action", "broad listing rows must offer direct model insight");
 requireText(script, "state.listingRequest", "listing and stats requests need independent cancellation");
 requireText(script, "function cancelListingRequest", "scope changes must cancel stale listing requests");
@@ -148,7 +182,6 @@ requireText(toolsScript, '판매완료 표시가는 실제 체결가가 아닙�
 requireText(toolsScript, "makeTable(['출처','통화','기간'", 'source table includes actual currency and window');
 requireText(toolsScript, 'scopedStats(sourceStats(record.data, id)', 'source rows do not repeat aggregate prices');
 requireText(toolsScript, 'metric.sample_count >= 0', 'sample counts must be valid before display');
-requireText(toolsScript, 'SERIES.slice(0, 2)', 'price chart keeps active and sold series');
 requireText(toolsChart, "svg.setAttribute('tabindex', '0')", 'one accessible chart focus target');
 requireText(toolsChart, "['ArrowLeft', 'ArrowRight', 'Enter', ' ']", 'chart remains keyboard operable');
 requireText(toolsChart, "if (point.value == null) { drawing = false; return; }", 'missing observations remain gaps');
@@ -244,6 +277,18 @@ context.applyListingPayload({ items: [{ id: "page-item" }], total: 42, source_co
 assert.equal(context.state.listingTotal, 42,
   "the displayed listing total must come from the API rather than the current page length");
 assert.equal(context.dom.listingCount.textContent, "42건");
+context.applyListingPayload({ items: Array.from({length:100}, (_,id)=>({id})), total:115, next_cursor:'next-batch' }, 1);
+assert.equal(context.state.listingPages.size,10);
+assert.equal(context.state.listings.length,10);
+assert.equal(context.state.listingPages.get(10)[9].id,99);
+assert.equal(context.state.listingPageCursors.get(11),'next-batch');
+assert.deepEqual([...context.listingPaginationWindow(11,1)], [1,2,3,4,5,6,7,8,9,10]);
+context.applyListingPayload({items:Array.from({length:15},(_,id)=>({id:id+100})),total:115},11);
+assert.equal(context.state.listingPages.get(12).length,5);
+assert.equal(context.state.listingPageCursors.has(13),false);
+context.applyListingPayload({items:[{id:'unknown-total'}],total:null,source_counts:{bunjang:999}},1);
+assert.equal(context.state.listingTotal,null,'an unknown D1 scoped count must not become a fake exact total');
+assert.equal(context.dom.listingCount.textContent,'');
 
 context.state = { listingSort: "price_asc" };
 context.dom = { listingSort: node() };
@@ -291,8 +336,10 @@ assert.equal(searchUrl.searchParams.has('price_max'),false);
 assert.equal(linkContext.buildListingQuery().has('price_min'),false);
 assert.equal(linkContext.buildListingQuery().has('price_max'),false);
 assert.equal(linkContext.buildListingQuery().get('currency'),'USD');
+assert.equal(linkContext.buildListingQuery().get('market_pool'),'OVERSEAS_USED');
 linkContext.state.selectedSites.clear();
 assert.equal(linkContext.buildListingQuery().get('currency'),'KRW');
+assert.equal(linkContext.buildListingQuery().get('market_pool'),'KR_C2C_USED');
 assert.equal(linkContext.buildListingQuery().get('sites'),'bunjang');
 linkContext.state.sources=[linkContext.state.sources[1]];
 assert.equal(linkContext.listingSourceScope().length,0,'domestic cannot fall back to eBay');
@@ -314,7 +361,7 @@ Object.assign(requestContext, {
   dom: { listingSection: node(), listingEmpty: node() },
   buildListingQuery: () => new URLSearchParams({ canonical_product_id: "cpu:intel:i5-7400" }),
   fetchJson: () => new Promise((resolve, reject) => pending.push({ resolve, reject })),
-  renderListings() {}, showListingMessage() {},
+  renderListings() {}, renderListingPagination() {}, showListingMessage() {},
   applyListingPayload: (payload) => applied.push(payload.id),
 });
 const oldRequest = requestContext.requestListingPage(1);

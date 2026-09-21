@@ -1,0 +1,6 @@
+interface:
+  display_name: "External AI Orchestrator"
+  short_description: "Route external AI accounts, CLI agents, and browser checks"
+  default_prompt: "Use $external-ai-orchestrator to select an available external AI provider from current account and quota data, then run the scoped task through the safest suitable route."
+policy:
+  allow_implicit_invocation: true

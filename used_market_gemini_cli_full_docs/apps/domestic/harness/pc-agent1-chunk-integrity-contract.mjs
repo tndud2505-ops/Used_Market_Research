@@ -96,6 +96,16 @@ await check('all 41 rows activate only after both complete chunks', async db => 
   assert.equal(activated.row_count, rows.length);
   assert.equal(db.active(), 'complete');
 });
+await check('large multi-page statistics keep the same exact checksum', async db => {
+  const largeRows=Array.from({length:201},(_,i)=>({...rows[0],canonical_product_id:`ram:fixture:large-${String(i).padStart(3,'0')}`,
+    stats_json:{...rows[0].stats_json,fixture_detail:'가격 관측 '.repeat(4000)}}));
+  const largeChecksum=await statsChecksum(largeRows);
+  const manifest=await stage(db,'large-pages',{checksum:largeChecksum,expected_row_count:largeRows.length,expected_non_empty_scope_count:largeRows.length},largeRows);
+  const activated=await activateStagedProductStats(db,manifest);
+  assert.equal(activated.checksum,largeChecksum);
+  assert.equal(activated.row_count,largeRows.length);
+  assert.ok(activated.verification_pages>=4,'verification remains bounded across several payload-sized pages');
+});
 await check('wrong claimed overall checksum is rejected', async db => {
   const manifest = await stage(db, 'wrong-checksum', { checksum: 'b'.repeat(64) });
   await assert.rejects(() => activateStagedProductStats(db, manifest), /checksum/u);

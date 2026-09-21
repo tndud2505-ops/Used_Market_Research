@@ -126,6 +126,11 @@ function validateStatsRows(rows, parserVersion, ruleVersion, filterVersion, cont
   for (const row of rows) {
     let parsedStats;
     try { parsedStats = JSON.parse(row.stats_json); } catch { throw new Error(`${context} stats_json is invalid`); }
+    validateParsedStats(parsedStats, parserVersion, ruleVersion, filterVersion, context);
+  }
+}
+
+function validateParsedStats(parsedStats, parserVersion, ruleVersion, filterVersion, context) {
     const versions = parsedStats?.versions;
     if (versions?.parser !== parserVersion
       || versions?.rule !== ruleVersion
@@ -140,7 +145,6 @@ function validateStatsRows(rows, parserVersion, ruleVersion, filterVersion, cont
     if (sourceIds.some((sourceId, index) => index > 0 && sourceIds[index - 1].localeCompare(sourceId) > 0)) {
       throw new Error(`${context} source statistics must be sorted`);
     }
-  }
 }
 
 function publicationMetadata(input) {
@@ -181,20 +185,25 @@ function assertPublicationMetadata(input, stored) {
 function validateChunkRowContract(rows, input, metadata) {
   const normalization = Number(input.normalization_version);
   if (!Number.isSafeInteger(normalization) || normalization < 1) throw new Error("invalid publication normalization version");
-  validateStatsRows(rows, metadata.parserVersion, metadata.ruleVersion, metadata.filterVersion, "publication chunk");
+  let sampled = 0;
   for (const row of rows) {
     if (row.days !== 30 || ['canonical_product_id', 'market_pool', 'condition_code', 'currency']
       .some(key => !row[key] || row[key] !== row[key].trim() || row[key].includes('\u0000'))) {
       throw new Error("invalid publication scope identity");
     }
     if (row.as_of !== metadata.createdAt) throw new Error("publication as_of timestamp mismatch");
-    const stats = JSON.parse(row.stats_json);
+    let stats;
+    try { stats = JSON.parse(row.stats_json); } catch { throw new Error("publication chunk stats_json is invalid"); }
+    validateParsedStats(stats, metadata.parserVersion, metadata.ruleVersion, metadata.filterVersion, "publication chunk");
     if (stats?.versions?.normalization !== normalization) throw new Error("publication normalization version mismatch");
     if (!Number.isSafeInteger(stats?.traceability?.member_count) || stats.traceability.member_count < 0
       || !/^[a-f0-9]{64}$/u.test(stats?.traceability?.member_checksum || '')) {
       throw new Error("publication member traceability is incomplete");
     }
+    if (Number(stats?.active?.sample_count || 0) + Number(stats?.sold?.sample_count || 0)
+      + Number(stats?.reserved?.sample_count || 0) + Number(stats?.confirmed_transactions?.sample_count || 0) > 0) sampled += 1;
   }
+  return sampled;
 }
 
 async function verifyStagedContent(db, input, metadata) {
@@ -243,8 +252,9 @@ async function verifyStagedContent(db, input, metadata) {
       statsPublicationKey(row) !== statsPublicationKey(identitiesPage[i]))) {
       throw new Error("staged publication scope changed during verification");
     }
-    validateChunkRowContract(storedRows, input, metadata);
-    sampled += nonEmptyScopeCount(storedRows);
+    // Parse each stored JSON document once, not separately for versions,
+    // traceability and sample coverage. The full byte checksum is unchanged.
+    sampled += validateChunkRowContract(storedRows, input, metadata);
     for (const row of storedRows) {
       if (count > 0) digest.update(',');
       digest.update(JSON.stringify(row));

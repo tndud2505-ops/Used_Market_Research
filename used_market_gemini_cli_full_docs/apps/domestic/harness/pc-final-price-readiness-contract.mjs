@@ -48,9 +48,11 @@ try {
   const oldCaches = globalThis.caches;
   try {
     globalThis.caches = { default: { match: async () => response(incomplete), put: async () => { throw new Error('Cannot cache incomplete prices'); } } };
-    globalThis.fetch = async () => { throw new Error('Must reject the existing incomplete cache entry before fetching anything'); };
+    let refreshes = 0;
+    globalThis.fetch = async () => { refreshes++; return response(incomplete); };
     const cached = await worker.fetch(request, { SEARCH_RUNNER_URL: 'https://runner.test/api/search', RUNNER_TOKEN: 'synthetic-token' });
-    assert.equal(cached.status, 503); assert.equal(cached.headers.get('cache-control'), 'no-store'); passed++;
+    assert.equal(cached.status, 503); assert.equal(cached.headers.get('cache-control'), 'no-store');
+    assert.equal(refreshes, 1, 'invalid cached prices get one bounded stored-data refresh, not a sticky error or a retry loop'); passed++;
   } finally { globalThis.caches = oldCaches; }
 } finally { globalThis.fetch = originalFetch; }
 console.log(JSON.stringify({ status: 'passed', contract: 'final-price-readiness', passed, synthetic_only: true, production_writes: 0 }));

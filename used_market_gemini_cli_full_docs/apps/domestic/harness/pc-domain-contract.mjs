@@ -886,6 +886,10 @@ assert.deepEqual(filteredSourceStats.by_source.map((entry) => entry.source_id), 
   "publication statistics can exclude sources that are not part of the PC directory");
 assert.equal(filteredSourceStats.sold.sample_count, 3,
   "aggregate statistics must contain only samples from explicitly allowed publication sources");
+assert.equal(filteredSourceStats.sold.arithmetic_mean, 610_000,
+  "the builder gets the actual sold mean even below the representative threshold");
+assert.equal(filteredSourceStats.sold.mean, null, "legacy representative policy stays unchanged");
+assert.equal(filteredSourceStats.by_source[0].sold.arithmetic_mean, 610_000);
 assert.equal(db.prepare("SELECT COUNT(*) AS count FROM daily_source_price_stats").get().count > 0, true);
 assert.equal(db.prepare("SELECT COUNT(*) AS count FROM daily_source_price_stat_members").get().count > 0, true);
 

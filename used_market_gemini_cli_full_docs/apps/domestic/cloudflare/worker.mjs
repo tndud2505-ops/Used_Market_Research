@@ -227,7 +227,8 @@ async function currentProjectionRows(db, query, productIds = null) {
   const result = await bound.all();
   const rows = Array.isArray(result?.results) ? result.results : [];
   return rows.filter((row) => {
-    return Number(row.price_eligible) === 1
+    return OPERATIONAL_PC_DIRECTORY_SITES.includes(String(row.site || ""))
+      && Number(row.price_eligible) === 1
       && Number.isInteger(Number(row.quantity))
       && Number(row.quantity) > 0
       && ["TOTAL", "UNIT"].includes(String(row.price_scope || ""))
@@ -661,7 +662,11 @@ async function readPcListingsFromPreferredStore(request, env) {
 
 async function readPriceStatsFromPreferredStore(request, env, runnerPath) {
   if (searchRunnerIsConfigured(env)) {
-    const runnerResponse = await proxyToSearchRunner(request, env, runnerPath);
+    // Older runners may return incomplete/stale statistics with HTTP 200.
+    // Validate first so a complete, same-scope D1 publication can recover an
+    // implicit current read. Explicit dates must still never fall back to D1.
+    const runnerResponse = await guardPriceStatsResponse(request,
+      await proxyToSearchRunner(request, env, runnerPath));
     if (runnerResponse.status < 500 || !hasD1(env)) return runnerResponse;
     if (new URL(request.url).searchParams.has("as_of")) {
       const unavailable = noStoreJson(503, {
@@ -1436,9 +1441,9 @@ export default {
       if (requestedProduct?.category === "MOTHERBOARD" && requestedProduct.spec?.directory_node_type !== "PRODUCT") {
         return serveProductPriceStats(request, env);
       }
-      const response = await fetchThroughPcReadCache(request, env, async statsRequest =>
-        guardPriceStatsResponse(statsRequest, await readPriceStatsFromPreferredStore(statsRequest, env, url.pathname)));
-      return guardPriceStatsResponse(request, response);
+      return fetchThroughPcReadCache(request, env,
+        statsRequest => readPriceStatsFromPreferredStore(statsRequest, env, url.pathname),
+        guardPriceStatsResponse);
     }
     if (isPriceStatsPath && searchRunnerIsConfigured(env)) {
       return proxyToSearchRunner(request, env, url.pathname);

@@ -29,7 +29,7 @@ import { pcPriceReadinessProblem } from '../market/logic/pc-price-readiness.mjs'
 import { schedulerReadDeferral } from "./pc-scheduler-admission.mjs";
 import { PcShadowPipeline } from "./pc-shadow-pipeline.mjs";
 import { explicitSoldText, structuredSoldEvidenceFromHtml } from "../market/logic/listing-lifecycle.mjs";
-import { parseBunjangDetailLifecycle } from "../market/logic/bunjang-lifecycle.mjs";
+import { bunjangProductIdFromListing, parseBunjangDetailLifecycle } from "../market/logic/bunjang-lifecycle.mjs";
 import {
   pcCatalogResponse,
   pcCollectionCapacityPlan,
@@ -985,6 +985,12 @@ function computePcOperationalReadiness() {
     && Number(indexStatus.active_listings || 0) > 0
     && Number(legacyProjection?.query_count || 0) > 0);
   const publicationRecent = recentTimestamp(pcPublicationLastSucceededAt, PC_PUBLICATION_RECENT_MS, now);
+  let bunjangLifecycleRecheck = null;
+  try {
+    bunjangLifecycleRecheck = pcLedger?.lifecycleRecheckStatus({ sourceId: "bunjang", asOf: new Date(now) }) || null;
+  } catch (error) {
+    bunjangLifecycleRecheck = { source_id: "bunjang", error: error instanceof Error ? error.message : String(error) };
+  }
 
   return {
     collection_targets: pcLedger?.getActiveCollectionTargetSummary() || null,
@@ -1000,6 +1006,7 @@ function computePcOperationalReadiness() {
       && allSourcesReady
       && reviewRequiredActiveSources.length === 0),
     rollback_projection_ready: rollbackProjectionReady,
+    bunjang_lifecycle_recheck: bunjangLifecycleRecheck,
     publication_last_success_at: pcPublicationLastSucceededAt,
     publication_recent: publicationRecent
   };
@@ -1424,10 +1431,9 @@ async function recheckKnownListings(sourceKey, checkedAt, parentSignal) {
     const url = String(raw.url || raw.item_url || "").trim();
     if (!/^https?:\/\//iu.test(url)) continue;
     if (sourceKey === "bunjang") {
-      const parsedUrl = new URL(url);
-      const pid = /^(?:m\.)?bunjang\.co\.kr$/i.test(parsedUrl.hostname)
-        ? parsedUrl.pathname.match(/^\/products\/(\d+)\/?$/)?.[1] : null;
+      const pid = bunjangProductIdFromListing({ url, sourceListingId: listing.source_listing_id });
       if (!pid) continue;
+      const canonicalUrl = `https://m.bunjang.co.kr/products/${pid}`;
       await new Promise((resolve) => setTimeout(resolve, 200));
       let response;
       try {
@@ -1448,7 +1454,7 @@ async function recheckKnownListings(sourceKey, checkedAt, parentSignal) {
       if (unavailableStatus) {
         captureProjection(listing.source_listing_id, pcLedger.recordObservation({
           sourceId: sourceKey, sourceListingId: listing.source_listing_id, observedAt: checkedAt,
-          title: listing.title, description: listing.description, rawPayload: raw,
+          title: listing.title, description: listing.description, rawPayload: { ...raw, url: canonicalUrl },
           price: listing.price_value, currency: listing.currency, status: unavailableStatus,
           statusEvidence: { type: "STRUCTURED_STATUS", value: unavailableStatus },
           availability: unavailableStatus === "BLOCKED_OR_PRIVATE" ? "BLOCKED_OR_PRIVATE" : "UNAVAILABLE"
@@ -1473,7 +1479,7 @@ async function recheckKnownListings(sourceKey, checkedAt, parentSignal) {
       const result = pcLedger.recordObservation({
         sourceId: sourceKey, sourceListingId: listing.source_listing_id, observedAt: checkedAt,
         title: listing.title, description: listing.description,
-        rawPayload: { ...raw, status: detail.status, bunjang_sale_status: detail.sourceStatus },
+        rawPayload: { ...raw, url: canonicalUrl, status: detail.status, bunjang_sale_status: detail.sourceStatus },
         price: detail.price ?? listing.price_value, currency: listing.currency,
         status: detail.status, statusEvidence: detail.evidence,
         availability: ["ACTIVE", "RESERVED"].includes(detail.status) ? "AVAILABLE" : "UNAVAILABLE"

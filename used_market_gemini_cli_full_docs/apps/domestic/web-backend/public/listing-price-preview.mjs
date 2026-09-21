@@ -7,7 +7,7 @@ import { drawChart } from './pc-tools-chart.mjs?v=search-modal-v3';
 export function createListingPricePreview(dialog, opener) {
   const find = id => dialog.querySelector(`#listing-price-${id}`);
   const chart = find('chart'), status = find('status'), retry = find('retry');
-  const labels = { '': '국내 전체', joonggonara: '중고나라', bunjang: '번개장터', ebay: 'eBay' };
+  const labels = { '': '국내 개인 중고', joonggonara: '중고나라', bunjang: '번개장터', ebay: 'eBay' };
   let selection = null, frame = 0, lastWidth = 0;
   const schedule = () => {
     if (!dialog.open || frame) return;

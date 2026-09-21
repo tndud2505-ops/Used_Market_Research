@@ -136,7 +136,7 @@ try {
   const before = {url:page.url(),rows:await page.locator('.listing-title').allTextContents(),sort:await page.locator('#listing-sort').inputValue(),pages:context.pages().length};
   await page.locator('#model-detail-open').click(); await readyChart();
   assert.equal(await page.locator('#listing-price-chart').getAttribute('data-model-id'),id);
-  assert.match(await page.locator('#listing-price-scope').innerText(),/국내 전체 · KRW/);
+  assert.match(await page.locator('#listing-price-scope').innerText(),/국내 개인 중고 · KRW/);
   assert.equal(context.pages().length,before.pages);
   await shot('modal-desktop');
   await close('X');
