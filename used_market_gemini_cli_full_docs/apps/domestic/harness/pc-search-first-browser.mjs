@@ -45,6 +45,8 @@ export async function runBrowserChecks({browser,origin,out,fixture=false}) {
   const report={mode:fixture?'synthetic browser fixtures':'real browser and public API',origin,started_at:new Date().toISOString(),checks:[],screenshots:[],page_errors:[],console_errors:[],network_errors:[],static_errors:[],layouts:[]};
   const fixtureState={query:'',priceMode:'normal'}, pending=[],records=new Map();
   const context=await browser.newContext({viewport:{width:1440,height:1000},locale:'ko-KR'});
+  // Product QA must not create synthetic AdFit impressions or Web Analytics visits.
+  await context.route(/https:\/\/(?:t1\.kakaocdn\.net\/kas\/static\/ba\.min\.js|static\.cloudflareinsights\.com\/beacon\.min\.js)/,route=>route.abort());
   let page;
   const catalog=pcCatalogResponse(),products=catalog.tools_catalog.products;
   const addCheck=name=>report.checks.push(name);

@@ -119,6 +119,8 @@ const { chromium } = await import('playwright');
 browser = await chromium.launch({ headless: true, ...(browserPath ? { executablePath: browserPath } : {}) });
 report.browser_started = true;
   const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, locale: 'ko-KR' });
+  // Product QA must not create synthetic AdFit impressions or Web Analytics visits.
+  await context.route(/https:\/\/(?:t1\.kakaocdn\.net\/kas\/static\/ba\.min\.js|static\.cloudflareinsights\.com\/beacon\.min\.js)/, route => route.abort());
   page = await context.newPage();
   const recordBrowserErrors = target => {
     target.on('pageerror', error => report.browser_errors.push(error.message));
@@ -246,6 +248,7 @@ report.browser_started = true;
   // would not prove that the generated URL restores anything.
   await context.close();
   const shareContext = await browser.newContext({ viewport: { width: 1440, height: 1000 }, locale: 'ko-KR' });
+  await shareContext.route(/https:\/\/(?:t1\.kakaocdn\.net\/kas\/static\/ba\.min\.js|static\.cloudflareinsights\.com\/beacon\.min\.js)/, route => route.abort());
   page = await shareContext.newPage(); recordBrowserErrors(page);
   await page.goto(generatedShareUrl);
   await page.waitForFunction(() => document.querySelectorAll('#build-table [data-quantity]').length === 9, null, { timeout: 30000 });

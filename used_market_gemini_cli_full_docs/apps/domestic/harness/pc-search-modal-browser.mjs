@@ -54,6 +54,8 @@ const shot = async name => { const filename = path.join(out,`${tag}-${name}.png`
 try {
   browser = await chromium.launch({headless:true,...(browserPath?{executablePath:browserPath}:{})});
   context = await browser.newContext({viewport:{width:1440,height:1000},locale:'ko-KR'});
+  // Product QA must not create synthetic AdFit impressions or Web Analytics visits.
+  await context.route(/https:\/\/(?:t1\.kakaocdn\.net\/kas\/static\/ba\.min\.js|static\.cloudflareinsights\.com\/beacon\.min\.js)/,route=>route.abort());
   const requests = [];
   if (!live) {
     const catalog = pcCatalogResponse();
