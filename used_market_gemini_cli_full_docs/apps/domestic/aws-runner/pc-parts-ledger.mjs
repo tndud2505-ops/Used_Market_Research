@@ -2040,7 +2040,8 @@ export class PcPartsLedger {
             WHERE newer.source_id = s.source_id AND newer.source_listing_id = s.source_listing_id
               AND (newer.observed_at > s.observed_at OR (newer.observed_at = s.observed_at AND newer.id > s.id))
          )
-       ORDER BY r.last_checked_at, s.source_listing_id
+       ORDER BY CASE WHEN r.missing_check_count > 0 THEN 0 ELSE 1 END,
+                r.last_checked_at, s.source_listing_id
        LIMIT ?
     `).all(requireValue(sourceId, "sourceId"), cutoff, boundedLimit);
   }
