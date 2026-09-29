@@ -943,17 +943,16 @@ export class SearchIndex {
     const itemId = cleanText(item?.item_id || item?.id, 700);
     if (!itemId) return 0;
     const row = this.db.prepare("SELECT pc_metadata_json FROM listings WHERE item_id = ?").get(itemId);
-    if (!row) return 0;
-    const metadata = { ...jsonObject(row.pc_metadata_json), ...pcProjection(item) };
+    const metadata = { ...jsonObject(row?.pc_metadata_json), ...pcProjection(item) };
     const pcColumns = pcListingColumnValues(metadata);
     const active = String(item.lifecycle_status || "ACTIVE").toUpperCase() === "ACTIVE" ? 1 : 0;
     const timestamp = cleanText(item.updated_at, 80) || iso(this.now());
-    const changed = this.db.prepare(`UPDATE listings SET active = ?, inactive_at = ?, last_checked_at = ?,
+    const changed = row ? this.db.prepare(`UPDATE listings SET active = ?, inactive_at = ?, last_checked_at = ?,
       pc_metadata_json = ?, pc_canonical_product_id = ?, pc_category_code = ?, pc_listing_kind = ?,
       pc_lifecycle_status = ?, pc_price_eligible = ?, pc_condition_code = ?, pc_quantity = ?,
       pc_price_scope = ?, pc_market_pool = ?, pc_canonical_manufacturer = ?,
       pc_board_manufacturer = ? WHERE item_id = ?`)
-      .run(active, active ? null : timestamp, timestamp, JSON.stringify(metadata), ...pcColumns, itemId).changes;
+      .run(active, active ? null : timestamp, timestamp, JSON.stringify(metadata), ...pcColumns, itemId).changes : 0;
     const site = cleanText(item.site, 40);
     const url = cleanText(item.url, 2_000);
     if (site === "joonggonara" && /^https:\/\/web\.joongna\.com\/product\/\d+\/?$/iu.test(url)) {

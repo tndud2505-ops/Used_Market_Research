@@ -823,6 +823,21 @@ assert.ok(!currentProjection.items.some((item) => item.id === "joonggonara:sold-
 const storedProjection = index.db.prepare("SELECT title, search_text, description FROM listings WHERE item_id = ?")
   .get("joonggonara:pii-projection");
 assert.doesNotMatch(JSON.stringify(storedProjection), /010-1234-5678|seller@example\.com/u);
+const numericJoongnaId = "joonggonara:232316045";
+const joongnaUrl = "https://web.joongna.com/product/232316045";
+const legacyJoongnaId = `joonggonara:${joongnaUrl}`;
+index.upsertPublicProjections([{ ...items[0], id: numericJoongnaId, item_id: numericJoongnaId,
+  url: joongnaUrl, lifecycle_status: "ACTIVE" }], { observedAt: "2026-08-29T12:00:00.000Z" });
+assert.equal(index.db.prepare("SELECT active FROM listings WHERE item_id = ?").get(legacyJoongnaId), undefined,
+  "only the numeric Joongna identity is indexed");
+assert.equal(index.applyLifecycleProjection({ ...items[0], id: legacyJoongnaId, item_id: legacyJoongnaId,
+  site: "joonggonara", url: joongnaUrl, lifecycle_status: "SOLD",
+  updated_at: "2026-08-29T13:00:00.000Z" }), 1,
+"a legacy ledger identity updates its numeric public alias without a legacy index row");
+const updatedJoongnaAlias = index.db.prepare("SELECT active, pc_lifecycle_status FROM listings WHERE item_id = ?")
+  .get(numericJoongnaId);
+assert.equal(updatedJoongnaAlias.active, 0);
+assert.equal(updatedJoongnaAlias.pc_lifecycle_status, "SOLD");
 const legacyRequest = { keyword: "아이폰 15", category_id: "mobile", sites: ["joonggonara"] };
 index.registerQuery(legacyRequest);
 index.ingest(legacyRequest, [{
