@@ -986,10 +986,16 @@ function computePcOperationalReadiness() {
     && Number(legacyProjection?.query_count || 0) > 0);
   const publicationRecent = recentTimestamp(pcPublicationLastSucceededAt, PC_PUBLICATION_RECENT_MS, now);
   let bunjangLifecycleRecheck = null;
+  let joonggonaraLifecycleRecheck = null;
   try {
     bunjangLifecycleRecheck = pcLedger?.lifecycleRecheckStatus({ sourceId: "bunjang", asOf: new Date(now) }) || null;
   } catch (error) {
     bunjangLifecycleRecheck = { source_id: "bunjang", error: error instanceof Error ? error.message : String(error) };
+  }
+  try {
+    joonggonaraLifecycleRecheck = pcLedger?.lifecycleRecheckStatus({ sourceId: "joonggonara", asOf: new Date(now) }) || null;
+  } catch (error) {
+    joonggonaraLifecycleRecheck = { source_id: "joonggonara", error: error instanceof Error ? error.message : String(error) };
   }
 
   return {
@@ -1007,6 +1013,7 @@ function computePcOperationalReadiness() {
       && reviewRequiredActiveSources.length === 0),
     rollback_projection_ready: rollbackProjectionReady,
     bunjang_lifecycle_recheck: bunjangLifecycleRecheck,
+    joonggonara_lifecycle_recheck: joonggonaraLifecycleRecheck,
     publication_last_success_at: pcPublicationLastSucceededAt,
     publication_recent: publicationRecent
   };

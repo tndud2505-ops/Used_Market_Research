@@ -146,7 +146,8 @@ try {
   const items = await collectOne("joonggonara", "i5 6600K", "pc", 20,
     "i5 6600K", "recent", { min: null, max: null });
   assert.equal(items.length, 1);
-  assert.equal(items[0].source_listing_id, "229402788");
+  assert.equal(items[0].source_listing_id, "joonggonara:https://web.joongna.com/product/229402788",
+    "existing ledger identity must survive the public numeric-ID repair");
   assert.equal(items[0].item_id, "joonggonara:229402788");
 } finally {
   globalThis.fetch = originalFetch;

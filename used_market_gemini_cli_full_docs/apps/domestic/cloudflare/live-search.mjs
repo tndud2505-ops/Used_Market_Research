@@ -381,10 +381,11 @@ function sourceItem({ site, categoryId, sourceListingId, title, price, currency 
   if (!cleanTitle || !cleanUrl) return null;
   const stableSourceListingId = clean(sourceListingId, 500);
   const stableItemId = stableSourceListingId ? `${site}:${stableSourceListingId}` : `${site}:${cleanUrl}`;
+  const ledgerSourceListingId = site === "joonggonara" ? `${site}:${cleanUrl}` : stableSourceListingId;
   return {
     id: stableItemId,
     item_id: stableItemId,
-    ...(stableSourceListingId ? { source_listing_id: stableSourceListingId } : {}),
+    ...(ledgerSourceListingId ? { source_listing_id: ledgerSourceListingId } : {}),
     site,
     category_id: categoryId,
     title: cleanTitle,
