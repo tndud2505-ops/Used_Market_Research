@@ -1535,7 +1535,7 @@ async function recheckKnownListings(sourceKey, checkedAt, parentSignal) {
       statusEvidence: soldEvidence
         ? soldEvidence
         : { type: "STRUCTURED_STATUS", value: listing.lifecycle_status },
-      availability: "AVAILABLE"
+      availability: soldEvidence ? "SOLD_TERMINAL" : "AVAILABLE"
     });
     captureProjection(listing.source_listing_id, result);
   }
@@ -1697,7 +1697,7 @@ function pcSourceAdapter(sourceKey) {
       const soldEvidence = structuredSoldEvidenceFromHtml(body, input);
       return {
         source_key: sourceKey, mode: "recheck", checked_at: checkedAt,
-        source_listing_id: input.source_listing_id, availability: "AVAILABLE",
+        source_listing_id: input.source_listing_id, availability: soldEvidence ? "SOLD_TERMINAL" : "AVAILABLE",
         status: soldEvidence ? "SOLD" : "ACTIVE",
         evidence: [soldEvidence
           ? { kind: soldEvidence.type, value: soldEvidence.value }
