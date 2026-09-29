@@ -2026,7 +2026,7 @@ export class PcPartsLedger {
 
   dueRechecks({ sourceId, checkedBefore, limit = 20 }) {
     const cutoff = iso(checkedBefore || new Date(this.now() - 6 * HOUR_MS));
-    const boundedLimit = Math.min(sourceId === "bunjang" ? 1500 : 100, Math.max(1, Number(limit) || 20));
+    const boundedLimit = Math.min(sourceId === "bunjang" ? 1500 : 600, Math.max(1, Number(limit) || 20));
     return this.db.prepare(`
       SELECT s.source_id, s.source_listing_id, s.lifecycle_status, s.price_value, s.currency,
              r.raw_json, r.title, r.description, r.seller_ref_masked, r.last_checked_at
