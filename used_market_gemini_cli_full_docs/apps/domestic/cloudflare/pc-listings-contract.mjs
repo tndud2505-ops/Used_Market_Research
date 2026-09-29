@@ -259,7 +259,8 @@ export function dedupePcListingRows(rows) {
     const candidateLegacy = isLegacyUrlIdentity(row);
     const previousUpdated = text(previous.updated_at ?? previous.last_checked_at, 80);
     const candidateUpdated = text(row.updated_at ?? row.last_checked_at, 80);
-    if ((previousLegacy && !candidateLegacy) || (previousLegacy === candidateLegacy && candidateUpdated > previousUpdated)) {
+    if (candidateUpdated > previousUpdated
+      || (candidateUpdated === previousUpdated && previousLegacy && !candidateLegacy)) {
       selected.set(identity, row);
     }
   }

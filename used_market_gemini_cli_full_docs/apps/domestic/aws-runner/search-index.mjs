@@ -948,12 +948,22 @@ export class SearchIndex {
     const pcColumns = pcListingColumnValues(metadata);
     const active = String(item.lifecycle_status || "ACTIVE").toUpperCase() === "ACTIVE" ? 1 : 0;
     const timestamp = cleanText(item.updated_at, 80) || iso(this.now());
-    return this.db.prepare(`UPDATE listings SET active = ?, inactive_at = ?, last_checked_at = ?,
+    const changed = this.db.prepare(`UPDATE listings SET active = ?, inactive_at = ?, last_checked_at = ?,
       pc_metadata_json = ?, pc_canonical_product_id = ?, pc_category_code = ?, pc_listing_kind = ?,
       pc_lifecycle_status = ?, pc_price_eligible = ?, pc_condition_code = ?, pc_quantity = ?,
       pc_price_scope = ?, pc_market_pool = ?, pc_canonical_manufacturer = ?,
       pc_board_manufacturer = ? WHERE item_id = ?`)
       .run(active, active ? null : timestamp, timestamp, JSON.stringify(metadata), ...pcColumns, itemId).changes;
+    const site = cleanText(item.site, 40);
+    const url = cleanText(item.url, 2_000);
+    if (site === "joonggonara" && /^https:\/\/web\.joongna\.com\/product\/\d+\/?$/iu.test(url)) {
+      return changed + this.db.prepare(`UPDATE listings SET active = ?, inactive_at = ?, last_checked_at = ?,
+        pc_lifecycle_status = ?, pc_metadata_json = json_set(COALESCE(pc_metadata_json, '{}'), '$.lifecycle_status', ?)
+        WHERE site = ? AND url = ? AND item_id <> ? AND last_checked_at <= ?`)
+        .run(active, active ? null : timestamp, timestamp, metadata.lifecycle_status,
+          metadata.lifecycle_status, site, url, itemId, timestamp).changes;
+    }
+    return changed;
   }
 
   upsertPublicProjections(items, options = {}) {

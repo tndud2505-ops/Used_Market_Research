@@ -5,6 +5,7 @@ import { collectOne, pcSearchQueryVariants } from "../cloudflare/live-search.mjs
 import { OPERATIONAL_PC_DIRECTORY_SITES } from "../cloudflare/target-sites.mjs";
 import { PC_PART_CATEGORY_CODES } from "../collector/logic/pc-specialist-targets.mjs";
 import { PC_SOURCE_REGISTRY, listSourceCadenceEvents } from "../collector/logic/pc-source-registry.mjs";
+import { SearchIndex } from "../aws-runner/search-index.mjs";
 import { publicPcProducts } from "../market/logic/pc-public-catalog.mjs";
 
 const targetSet = pcCollectionTargetSetV2();
@@ -139,6 +140,40 @@ try {
 } finally {
   globalThis.fetch = originalFetch;
 }
+
+try {
+  globalThis.fetch = async () => new Response('"items":[{"seq":229402788,"title":"인텔 i5-6600K CPU 판매","price":30000,"articleUrl":"https://web.joongna.com/product/229402788","sortDate":"2026-09-29T00:00:00Z","state":"0"}],"changedProductFilterType"', { status: 200 });
+  const items = await collectOne("joonggonara", "i5 6600K", "pc", 20,
+    "i5 6600K", "recent", { min: null, max: null });
+  assert.equal(items.length, 1);
+  assert.equal(items[0].source_listing_id, "229402788");
+  assert.equal(items[0].item_id, "joonggonara:229402788");
+} finally {
+  globalThis.fetch = originalFetch;
+}
+
+const index = new SearchIndex({ filePath: ":memory:", now: () => Date.parse("2026-09-29T12:00:00Z") });
+const joongnaUrl = "https://web.joongna.com/product/229402788";
+const projection = {
+  site: "joonggonara", category_id: "pc", title: "인텔 i5-6600K CPU 판매",
+  price: 30_000, currency: "KRW", url: joongnaUrl,
+  canonical_product_id: "cpu:intel:i5-6600k", category_code: "CPU",
+  listing_kind: "SINGLE_COMPONENT", quantity: 1, price_scope: "TOTAL",
+  condition_code: "USED_WORKING", lifecycle_status: "ACTIVE",
+  market_pool: "KR_C2C_USED", price_eligible: true
+};
+index.upsertPublicProjections([
+  { ...projection, item_id: "joonggonara:229402788" },
+  { ...projection, item_id: `joonggonara:${joongnaUrl}` }
+], { observedAt: "2026-09-29T00:00:00Z" });
+assert.equal(index.browsePcListings({ canonicalProductId: projection.canonical_product_id,
+  asOf: "2026-09-29T12:00:00Z" }).total, 1);
+index.applyLifecycleProjection({ ...projection, item_id: `joonggonara:${joongnaUrl}`,
+  lifecycle_status: "UNAVAILABLE_UNKNOWN", updated_at: "2026-09-29T06:00:00Z" });
+assert.equal(index.browsePcListings({ canonicalProductId: projection.canonical_product_id,
+  asOf: "2026-09-29T12:00:00Z" }).total, 0,
+"a lifecycle recheck must also retire the old numeric-ID projection of the same Joongna URL");
+index.close();
 
 console.log(JSON.stringify({
   status: "passed",

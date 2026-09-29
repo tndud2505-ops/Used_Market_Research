@@ -130,7 +130,7 @@ const PC_PARTS_SCHEDULER_ENABLED = String(process.env.PC_PARTS_SCHEDULER_ENABLED
 const PC_SOURCE_RECENT_MS = 2 * 60 * 60 * 1000;
 const PC_SHADOW_READY_MS = 7 * 24 * 60 * 60 * 1000;
 const PC_PUBLICATION_RECENT_MS = 26 * 60 * 60 * 1000;
-const PC_RECHECK_LIMIT_PER_RUN = 20;
+const PC_RECHECK_LIMIT_PER_RUN = 100;
 const PC_SOURCE_TARGETS_PER_RUN = Math.min(128, Math.max(4,
   Number.parseInt(process.env.PC_SOURCE_TARGETS_PER_RUN || "85", 10) || 85));
 const PC_SOURCE_TARGET_CONCURRENCY = Math.min(8, Math.max(1,
@@ -1424,7 +1424,7 @@ async function recheckKnownListings(sourceKey, checkedAt, parentSignal) {
   });
   const recheckDeadline = Date.now() + 8 * 60 * 1000;
   for (const listing of due) {
-    if (sourceKey === "bunjang" && Date.now() >= recheckDeadline) break;
+    if (Date.now() >= recheckDeadline) break;
     throwIfAborted(parentSignal);
     let raw;
     try { raw = JSON.parse(listing.raw_json); } catch { raw = {}; }

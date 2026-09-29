@@ -186,8 +186,9 @@ const duplicateIdentityFixture = dedupePcListingRows([{
   updated_at: "2026-08-28T00:00:00.000Z"
 }]);
 assert.equal(duplicateIdentityFixture.length, 1);
-assert.equal(duplicateIdentityFixture[0].item_id, "danawa:998877",
-  "the stable same-site identity wins over its legacy URL identity without deleting either source row");
+assert.equal(duplicateIdentityFixture[0].item_id,
+  "danawa:https://dmall.danawa.com/v3/?controller=sale&methods=blog&seq=998877",
+  "the latest same-site projection wins even when it uses a legacy URL identity");
 assert.deepEqual(DEFAULT_PC_REPUBLISH_SOURCES, [...OPERATIONAL_PC_DIRECTORY_SITES],
   "projection republication must cover every approved public directory source by default");
 const eligibleRepublishProjection = {

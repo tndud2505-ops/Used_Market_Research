@@ -50,6 +50,7 @@ const liveCanary = Object.freeze({
   captcha_count: 0
 });
 const activationClock = Object.freeze({ now: "2026-08-29T01:00:00.000Z" });
+const runtimeCanary = { ...liveCanary, observed_at: new Date().toISOString() };
 
 assert.equal(new Set(PC_SOURCE_REGISTRY.map((source) => source.key)).size, PC_SOURCE_REGISTRY.length);
 assert.deepEqual(Object.fromEntries(PC_SOURCE_REGISTRY.map((source) => [source.key, source.cadence.kst_minutes])), {
@@ -296,6 +297,7 @@ assert.match(`${helloPcDetail.description} ${helloPcDetail.keywords}`, /본체|�
 assert.deepEqual(pcSearchQueryVariants("Intel i5-7400"), ["Intel i5-7400", "Intel i5 7400", "i5-7400"],
   "PC keyword collection must use bounded punctuation and manufacturer variants");
 
+const recentLifecycleFixtureDate = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 const lifecycleSeparatedPayload = buildLivePayload({
   keyword: "i5 7400",
   category_id: "pc",
@@ -305,11 +307,11 @@ const lifecycleSeparatedPayload = buildLivePayload({
 }, [{
   site: "joonggonara",
   items: [
-    { id: "active", site: "joonggonara", title: "i5 7400 판매중", price: 10_000, currency: "KRW", status: "ACTIVE", posted_at: "2026-09-07", seller_name: "a", image_url: "https://img.example/a.jpg", url: "https://web.joongna.com/product/active" },
-    { id: "sold", site: "joonggonara", title: "i5 7400 판매완료", price: 50_000, currency: "KRW", status: "SOLD", posted_at: "2026-09-07", seller_name: "b", image_url: "https://img.example/b.jpg", url: "https://web.joongna.com/product/sold" },
-    { id: "unknown", site: "joonggonara", title: "i5 7400 판매완료 아님", price: 90_000, currency: "KRW", posted_at: "2026-09-07", seller_name: "c", image_url: "https://img.example/c.jpg", url: "https://web.joongna.com/product/unknown" },
+    { id: "active", site: "joonggonara", title: "i5 7400 판매중", price: 10_000, currency: "KRW", status: "ACTIVE", posted_at: recentLifecycleFixtureDate, seller_name: "a", image_url: "https://img.example/a.jpg", url: "https://web.joongna.com/product/active" },
+    { id: "sold", site: "joonggonara", title: "i5 7400 판매완료", price: 50_000, currency: "KRW", status: "SOLD", posted_at: recentLifecycleFixtureDate, seller_name: "b", image_url: "https://img.example/b.jpg", url: "https://web.joongna.com/product/sold" },
+    { id: "unknown", site: "joonggonara", title: "i5 7400 판매완료 아님", price: 90_000, currency: "KRW", posted_at: recentLifecycleFixtureDate, seller_name: "c", image_url: "https://img.example/c.jpg", url: "https://web.joongna.com/product/unknown" },
     { id: "stale", site: "joonggonara", title: "i5 7400 오래된 판매글", price: 70_000, currency: "KRW", status: "ACTIVE", posted_at: "2020-01-01", seller_name: "d", image_url: "https://img.example/d.jpg", url: "https://web.joongna.com/product/stale" },
-    { id: "system", site: "joonggonara", title: "i5 7400 램8GB SSD 사양 컴퓨터", price: 300_000, currency: "KRW", status: "ACTIVE", posted_at: "2026-09-07", seller_name: "e", image_url: "https://img.example/e.jpg", url: "https://web.joongna.com/product/system" }
+    { id: "system", site: "joonggonara", title: "i5 7400 램8GB SSD 사양 컴퓨터", price: 300_000, currency: "KRW", status: "ACTIVE", posted_at: recentLifecycleFixtureDate, seller_name: "e", image_url: "https://img.example/e.jpg", url: "https://web.joongna.com/product/system" }
   ]
 }], { items: [] });
 assert.equal(lifecycleSeparatedPayload.items.length, 5, "sold, unknown, stale, and price-scope-unclear listings remain visible");
@@ -473,7 +475,7 @@ const noopResult = await runSourceCollection({
     policy_reviewed_at: "2026-08-29T00:00:00.000Z",
     activation_checked_at: "2026-08-29T01:00:00.000Z",
     approved_access_mode: getPcSource("ebay").access.strategy,
-    live_canary: liveCanary,
+    live_canary: runtimeCanary,
     operator_enabled: true
   },
   input: { now: "2026-08-30T00:00:00.000Z" },
@@ -548,7 +550,7 @@ const joonggonaraGovernance = {
   policy_reviewed_at: "2026-08-29T00:00:00.000Z",
   activation_checked_at: "2026-08-29T01:00:00.000Z",
   approved_access_mode: getPcSource("joonggonara").access.strategy,
-  live_canary: liveCanary,
+  live_canary: runtimeCanary,
   operator_enabled: true
 };
 const partialAdapter = createSourceAdapter({

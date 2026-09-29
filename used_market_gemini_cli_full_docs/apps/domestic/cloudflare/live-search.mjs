@@ -898,6 +898,7 @@ async function collectJoongna(keyword, categoryId, limit, queryKeyword = "", sor
       referenceItems = recentRows.map((row) => sourceItem({
         site: "joonggonara",
         categoryId,
+        sourceListingId: String(row?.seq ?? ""),
         title: row?.title,
         price: row?.price,
         url: row?.articleUrl || (row?.seq ? `/product/${row.seq}` : ""),
@@ -943,6 +944,7 @@ async function collectJoongna(keyword, categoryId, limit, queryKeyword = "", sor
   const items = pages.flat().map((row) => sourceItem({
     site: "joonggonara",
     categoryId,
+    sourceListingId: String(row?.seq ?? ""),
     title: row?.title,
     price: row?.price,
     url: row?.articleUrl || (row?.seq ? `/product/${row.seq}` : ""),
