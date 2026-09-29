@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 
 import { pcCollectionCapacityPlan, pcCollectionTargetSetV2 } from "../cloudflare/pc-directory-http.mjs";
+import { collectOne, pcSearchQueryVariants } from "../cloudflare/live-search.mjs";
 import { OPERATIONAL_PC_DIRECTORY_SITES } from "../cloudflare/target-sites.mjs";
 import { PC_PART_CATEGORY_CODES } from "../collector/logic/pc-specialist-targets.mjs";
 import { PC_SOURCE_REGISTRY, listSourceCadenceEvents } from "../collector/logic/pc-source-registry.mjs";
@@ -112,6 +113,32 @@ assert.ok(targets.some((target) => target.canonicalProductId === "ssd:samsung:ca
 assert.ok(targets.some((target) => target.canonicalProductId === "psu:seasonic:watts-bucket:501-650"
   && target.sourceKeys.length === 1 && target.sourceKeys[0] === "ebay" && target.queryText === "Seasonic 650W computer power supply"),
 "eBay PSU collection must use a common rated-wattage representative");
+
+const kingstonTarget = targets.find((target) => target.canonicalProductId === "ram:kingston:ddr3:4gb"
+  && target.sourceKeys.includes("bunjang"));
+assert.equal(kingstonTarget?.queryText, "Kingston DDR3 4GB 램");
+assert.deepEqual(pcSearchQueryVariants(kingstonTarget.queryText), [
+  "Kingston DDR3 4GB 램", "Kingston DDR3 4GB RAM"
+]);
+const originalFetch = globalThis.fetch;
+const kingstonQueries = [];
+try {
+  globalThis.fetch = async (url) => {
+    const query = new URL(url).searchParams.get("q");
+    kingstonQueries.push(query);
+    return new Response(JSON.stringify({ list: query === "Kingston DDR3 4GB RAM" ? [{
+      pid: "422738661", name: "Kingston DDR3 PC3-10600U 4GB RAM 6개 개당 판매",
+      price: "10000", status: "0", update_time: "2026-09-29T00:00:00.000Z"
+    }] : [] }), { status: 200 });
+  };
+  const items = await collectOne("bunjang", kingstonTarget.queryText, "pc", 20,
+    kingstonTarget.queryText, "recent", { min: null, max: null });
+  assert.deepEqual(kingstonQueries, ["Kingston DDR3 4GB 램", "Kingston DDR3 4GB RAM"]);
+  assert.equal(items.length, 1, "the RAM spelling variant must recover the matching listing");
+  assert.equal(items[0].source_listing_id, "422738661");
+} finally {
+  globalThis.fetch = originalFetch;
+}
 
 console.log(JSON.stringify({
   status: "passed",

@@ -866,7 +866,11 @@ export function pcSearchQueryVariants(value) {
   const spaced = original.replace(/(?<=[a-z0-9])[-_](?=[a-z0-9])/giu, " ").replace(/\s+/gu, " ").trim();
   const optionalManufacturerPattern = /^(?:ASUS|GIGABYTE|MSI|ASROCK|ZOTAC|PALIT|GALAX|SAPPHIRE|POWERCOLOR|PNY|EVGA|XFX|SAMSUNG|삼성|SK\s*HYNIX|하이닉스|CRUCIAL|MICRON|CORSAIR|SEASONIC|MICRONICS|마이크로닉스|INTEL|인텔|AMD)\s+/iu;
   const withoutManufacturer = original.replace(optionalManufacturerPattern, "").trim();
-  return [...new Set([original, spaced, withoutManufacturer].filter(Boolean))].slice(0, 3);
+  const englishRam = /\bDDR[345]\b/iu.test(original)
+    ? original.replace(/(^|\s)램(?=\s|$)/gu, "$1RAM")
+    : original;
+  return [...new Set([original, englishRam, spaced, withoutManufacturer].filter(Boolean))]
+    .slice(0, englishRam === original ? 3 : 4);
 }
 
 export function joongnaPagePlan(limit) {
