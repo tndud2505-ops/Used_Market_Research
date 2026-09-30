@@ -367,11 +367,12 @@ export async function browsePcListingsD1(request, env) {
   const publicIndexHint = broadRecentBrowse
     ? (query.sites.length > 0 ? " INDEXED BY idx_listings_pc_public_site_recent" : " INDEXED BY idx_listings_pc_public_recent")
     : "";
+  const postedSortSql = "COALESCE(strftime('%Y-%m-%dT%H:%M:%fZ', posted_at), '')";
   const orderBy = query.sort === "price_asc"
     ? "price_value ASC, updated_at DESC, item_id ASC"
     : query.sort === "price_desc"
       ? "price_value DESC, updated_at DESC, item_id ASC"
-      : "updated_at DESC, item_id ASC";
+      : `${postedSortSql} DESC, updated_at DESC, item_id ASC`;
   const selectListings = (boardManufacturerColumn, selectedWhere, selectedBindings, suffix = "", indexHint = "") => env.DB.prepare(`SELECT item_id, site, category_id, title, price_value, currency, url,
       image_url, posted_at, updated_at, canonical_product_id, canonical_display_name, canonical_manufacturer,
       ${boardManufacturerColumn}, listing_kind, pc_category_code, quantity, price_scope, condition_code, lifecycle_status, market_pool,
@@ -399,7 +400,7 @@ export async function browsePcListingsD1(request, env) {
   // so normal and audit reads can share bounded raw keyset pagination without request-time deduplication.
   let anchor = null;
   if (cursorState?.after?.item_id) {
-    anchor = await env.DB.prepare(`SELECT item_id, price_value, updated_at
+    anchor = await env.DB.prepare(`SELECT item_id, price_value, updated_at, ${postedSortSql} AS posted_sort_at
       FROM listings WHERE item_id = ? AND ${whereClause} LIMIT 1`)
       .bind(cursorState.after.item_id, ...bindings).first();
     if (!anchor) return cursorExpired();
@@ -413,8 +414,10 @@ export async function browsePcListingsD1(request, env) {
   const pageConditions = [...conditions];
   const pageBindings = [...bindings];
   if (anchor && query.sort === "recent") {
-    pageConditions.push("(updated_at < ? OR (updated_at = ? AND item_id > ?))");
-    pageBindings.push(anchor.updated_at, anchor.updated_at, anchor.item_id);
+    pageConditions.push(`(${postedSortSql} < ? OR (${postedSortSql} = ?
+      AND (updated_at < ? OR (updated_at = ? AND item_id > ?))))`);
+    pageBindings.push(anchor.posted_sort_at, anchor.posted_sort_at,
+      anchor.updated_at, anchor.updated_at, anchor.item_id);
   } else if (anchor) {
     const priceOperator = query.sort === "price_desc" ? "<" : ">";
     pageConditions.push(`(price_value ${priceOperator} ? OR (price_value = ?

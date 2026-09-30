@@ -179,11 +179,20 @@ function compareText(left, right) {
   return 0;
 }
 
+function postedSortKey(row) {
+  const timestamp = Date.parse(String(row?.posted_at || ""));
+  return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : "";
+}
+
 export function comparePcListingRows(left, right, sort = "recent") {
   if (sort === "price_asc" || sort === "price_desc") {
     const leftPrice = Number(left?.price_value);
     const rightPrice = Number(right?.price_value);
     if (leftPrice !== rightPrice) return sort === "price_desc" ? rightPrice - leftPrice : leftPrice - rightPrice;
+  }
+  if (sort === "recent") {
+    const postedComparison = compareText(postedSortKey(right), postedSortKey(left));
+    if (postedComparison !== 0) return postedComparison;
   }
   const updatedComparison = compareText(
     right?.updated_at ?? right?.last_checked_at,

@@ -172,6 +172,15 @@ const comparatorFixture = [
 ];
 assert.deepEqual([...comparatorFixture].sort((left, right) => comparePcListingRows(left, right, "recent"))
   .map((row) => row.item_id), ["fixture:c", "fixture:a", "fixture:b"]);
+assert.deepEqual([{
+  item_id: "fixture:checked-new", posted_at: "2026-08-20T00:00:00Z", last_checked_at: "2026-08-31T03:00:00Z"
+}, {
+  item_id: "fixture:posted-new", posted_at: "2026-08-30T00:00:00Z", last_checked_at: "2026-08-31T01:00:00Z"
+}, {
+  item_id: "fixture:unknown", posted_at: "unparseable", last_checked_at: "2026-08-31T04:00:00Z"
+}].sort((left, right) => comparePcListingRows(left, right, "recent")).map((row) => row.item_id),
+  ["fixture:posted-new", "fixture:checked-new", "fixture:unknown"],
+  "recent listings use marketplace posting time and place unknown dates after known dates");
 assert.deepEqual([...comparatorFixture].sort((left, right) => comparePcListingRows(left, right, "price_asc"))
   .map((row) => row.item_id), ["fixture:a", "fixture:c", "fixture:b"]);
 assert.deepEqual([...comparatorFixture].sort((left, right) => comparePcListingRows(left, right, "price_desc"))
@@ -1502,6 +1511,11 @@ for (const fixture of [
 ]) {
   insertPaginationFixture.run(fixture[0], fixture[1], fixture[1], fixture[2], fixture[3], fixture[4]);
 }
+for (const [itemId, postedAt] of [
+  ["danawa:boundary-200", "2026-08-29T01:00:00Z"],
+  ["danawa:boundary-300", "2026-08-30T01:00:00Z"],
+  ["danawa:boundary-900", "2026-08-31T01:00:00Z"]
+]) paginationD1.prepare("UPDATE listings SET posted_at = ? WHERE item_id = ?").run(postedAt, itemId);
 const paginationEnv = {
   DB: d1Adapter(paginationD1),
   FREE_TIER_MODE: "true",
@@ -1543,6 +1557,11 @@ assert.deepEqual(publicItems.map((item) => item.item_id), [
   "danawa:boundary-200", "danawa:boundary-300", "danawa:boundary-400", "danawa:boundary-500",
   "danawa:boundary-600", "danawa:boundary-700", "danawa:998877", "danawa:boundary-900"
 ], "stable-only rows follow the requested keyset sort across every page boundary");
+const postedPagination = await readAllPaginationFixtures(publicBase.replace("sort=price_asc", "sort=recent"));
+assert.deepEqual(postedPagination.items.map((item) => item.item_id), [
+  "danawa:boundary-900", "danawa:boundary-300", "danawa:boundary-200", "danawa:boundary-400",
+  "danawa:boundary-500", "danawa:boundary-600", "danawa:boundary-700", "danawa:998877"
+], "recent keyset pages order known posting dates before recently checked older or undated listings");
 
 const auditBase = "https://used-pick.test/api/pc/listings?canonical_product_id=gpu%3Anvidia%3Artx-3080&market_pool=KR_C2C_USED&currency=KRW&sort=price_asc&limit=2&reconciliation_audit=audit-one";
 const auditPagination = await readAllPaginationFixtures(auditBase);
