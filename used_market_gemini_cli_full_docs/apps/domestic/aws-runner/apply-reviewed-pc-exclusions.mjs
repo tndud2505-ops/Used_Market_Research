@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -20,10 +20,13 @@ export function parseReviewedExclusionArguments(argv) {
       result.apply = true;
       continue;
     }
-    if (argument === "--confirm-checksum" || argument === "--expect-count") {
+    if (argument === "--confirm-checksum" || argument === "--expect-count"
+      || argument === "--item-id" || argument === "--canonical-product-id") {
       const value = text(argv[index + 1]);
       if (!value || value.startsWith("--")) throw new Error(argument + " requires a value");
       if (argument === "--confirm-checksum") result.confirmChecksum = value.toLowerCase();
+      else if (argument === "--item-id") result.itemId = value;
+      else if (argument === "--canonical-product-id") result.canonicalProductId = value;
       else {
         if (!/^\d+$/u.test(value)) throw new Error("--expect-count must be a non-negative integer");
         result.expectedCount = Number(value);
@@ -37,6 +40,15 @@ export function parseReviewedExclusionArguments(argv) {
   if (!result.apply && hasConfirmation) throw new Error("confirmation options require --apply");
   if (result.apply && (!/^[a-f0-9]{64}$/u.test(result.confirmChecksum) || result.expectedCount === null)) {
     throw new Error("--apply requires --confirm-checksum and --expect-count from a dry-run");
+  }
+  if (Boolean(result.itemId) !== Boolean(result.canonicalProductId)) {
+    throw new Error("--item-id and --canonical-product-id must be supplied together");
+  }
+  if (result.itemId && !/^[a-z][a-z0-9_-]*:[a-z0-9_-]+$/u.test(result.itemId)) {
+    throw new Error("--item-id must be a source-prefixed listing ID");
+  }
+  if (result.canonicalProductId && !/^[a-z][a-z0-9_-]*(?::[a-z0-9_-]+)+$/u.test(result.canonicalProductId)) {
+    throw new Error("--canonical-product-id must be a canonical product ID");
   }
   return result;
 }
@@ -86,12 +98,17 @@ function productionUrl(value, label) {
   return parsed;
 }
 
-function excludedProjection(item, exclusion, updatedAt) {
+export function excludedProjection(item, exclusion, updatedAt) {
   return {
     ...item,
     listing_kind: exclusion.reason === "FULL_SYSTEM" ? "FULL_SYSTEM" : item.listing_kind,
     price_eligible: false,
+    statistics_eligible: false,
     good_listing_eligible: false,
+    statistics_exclusion_reasons: [...new Set([
+      ...(Array.isArray(item.statistics_exclusion_reasons) ? item.statistics_exclusion_reasons : []),
+      "REVIEWED_" + exclusion.reason
+    ])],
     exclusion_reasons: [...new Set([
       ...(Array.isArray(item.exclusion_reasons) ? item.exclusion_reasons : []),
       "REVIEWED_" + exclusion.reason
@@ -133,11 +150,28 @@ async function importD1(importUrl, importToken, projections) {
 async function main(argv) {
   const options = parseReviewedExclusionArguments(argv);
   const apiBase = productionUrl(process.env.PC_PUBLIC_API_BASE || "https://used-pick.com", "PC_PUBLIC_API_BASE");
-  const publicItems = await fetchAllPublicPcListings(apiBase, "reviewed-" + Date.now().toString(36));
-  const candidates = reviewedPublicCandidates(publicItems);
+  const site = options.itemId?.split(":", 1)[0] || "";
+  const scope = options.itemId ? { canonicalProductId: options.canonicalProductId, site } : {};
+  const expectedExclusion = options.itemId ? reviewedPcListingExclusion(site, options.itemId) : null;
+  if (options.itemId && !expectedExclusion) {
+    throw new Error("TARGET_LISTING_IS_NOT_REVIEWED");
+  }
+  const publicItems = await fetchAllPublicPcListings(apiBase, "reviewed-" + Date.now().toString(36), scope);
+  const target = options.itemId
+    ? publicItems.filter((item) => text(item.item_id || item.id) === options.itemId)
+    : [];
+  if (target.length > 1) throw new Error("TARGET_LISTING_DUPLICATE_PUBLIC_ID");
+  if (target.length === 1 && (text(target[0].site).toLowerCase() !== site
+    || text(target[0].canonical_product_id) !== options.canonicalProductId
+    || reviewedPcListingExclusion(site, target[0].url)?.source_listing_token
+      !== expectedExclusion.source_listing_token)) {
+    throw new Error("TARGET_LISTING_IDENTITY_MISMATCH");
+  }
+  const candidates = reviewedPublicCandidates(options.itemId ? target : publicItems);
   const checksum = reviewedCandidateChecksum(candidates);
   const summary = {
     mode: options.apply ? "apply" : "dry-run",
+    ...(options.itemId ? { item_id: options.itemId, canonical_product_id: options.canonicalProductId } : {}),
     candidate_count: candidates.length,
     checksum,
     candidates: candidateManifest(candidates)
@@ -149,6 +183,7 @@ async function main(argv) {
   if (options.confirmChecksum !== checksum || options.expectedCount !== candidates.length) {
     throw new Error("REVIEWED_EXCLUSION_CONFIRMATION_MISMATCH");
   }
+  if (options.itemId && candidates.length !== 1) throw new Error("TARGET_LISTING_NOT_PUBLIC");
 
   const importToken = text(process.env.CLOUDFLARE_MANUAL_RUN_TOKEN || process.env.IMPORT_TOKEN);
   if (!importToken) throw new Error("CLOUDFLARE_MANUAL_RUN_TOKEN or IMPORT_TOKEN is required for --apply");
@@ -167,7 +202,10 @@ async function main(argv) {
     ? "/var/lib/used-market-runner"
     : path.join(os.tmpdir(), "used-market-runner"));
   const indexPath = process.env.RUNNER_INDEX_PATH || path.join(indexRoot, "search-index.sqlite");
-  const index = new SearchIndex({ filePath: indexPath, backupDir: path.join(indexRoot, "backups") });
+  const backupDir = options.itemId
+    ? path.join(indexRoot, "backups", "reviewed-" + options.itemId.replace(":", "-") + "-" + randomUUID())
+    : path.join(indexRoot, "backups");
+  const index = new SearchIndex({ filePath: indexPath, backupDir });
   let localUpdated = 0;
   let backup = null;
   try {
@@ -191,8 +229,9 @@ async function main(argv) {
 
   const remaining = reviewedPublicCandidates(await fetchAllPublicPcListings(
     apiBase,
-    "reviewed-verify-" + Date.now().toString(36)
-  ));
+    "reviewed-verify-" + Date.now().toString(36),
+    scope
+  )).filter((candidate) => !options.itemId || text(candidate.item.item_id || candidate.item.id) === options.itemId);
   if (remaining.length > 0) {
     throw new Error("REVIEWED_EXCLUSIONS_REMAIN_PUBLIC:" + candidateManifest(remaining)
       .map((item) => item.item_id).join(","));

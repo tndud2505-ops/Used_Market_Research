@@ -7,6 +7,7 @@ import { evaluatePipelineQualityReports } from "../aws-runner/pc-pipeline-govern
 import { PcShadowPipeline } from "../aws-runner/pc-shadow-pipeline.mjs";
 import { evaluatePcQualityDataset } from "../aws-runner/pc-quality-eval.mjs";
 import {
+  excludedProjection,
   parseReviewedExclusionArguments,
   reviewedCandidateChecksum,
   reviewedPublicCandidates
@@ -37,6 +38,12 @@ const reviewedCandidateFixture = reviewedPublicCandidates([
 ]);
 assert.equal(reviewedCandidateFixture.length, 1,
   "reviewed exclusion apply must select only exact source listing identities");
+const reviewedProjection = excludedProjection({
+  item_id: "bunjang:430668014", statistics_eligible: true, price_eligible: true
+}, reviewedPcListingExclusion("bunjang", "430668014"), "2026-09-30T00:00:00.000Z");
+assert.equal(reviewedProjection.listing_kind, "FULL_SYSTEM");
+assert.equal(reviewedProjection.price_eligible, false);
+assert.equal(reviewedProjection.statistics_eligible, false);
 assert.match(reviewedCandidateChecksum(reviewedCandidateFixture), /^[a-f0-9]{64}$/u);
 assert.throws(() => parseReviewedExclusionArguments(["--apply"]), /requires --confirm-checksum and --expect-count/u);
 assert.deepEqual(parseReviewedExclusionArguments([]), {
@@ -44,6 +51,37 @@ assert.deepEqual(parseReviewedExclusionArguments([]), {
   confirmChecksum: "",
   expectedCount: null
 });
+assert.deepEqual(parseReviewedExclusionArguments([
+  "--item-id", "bunjang:430668014", "--canonical-product-id", "cpu:intel:i3-7100"
+]), {
+  apply: false,
+  confirmChecksum: "",
+  expectedCount: null,
+  itemId: "bunjang:430668014",
+  canonicalProductId: "cpu:intel:i3-7100"
+});
+assert.throws(() => parseReviewedExclusionArguments(["--item-id", "bunjang:430668014"]),
+  /must be supplied together/u);
+assert.throws(() => parseReviewedExclusionArguments([
+  "--item-id", "../bunjang:430668014", "--canonical-product-id", "cpu:intel:i3-7100"
+]), /source-prefixed listing ID/u);
+const scopedFetchOriginal = globalThis.fetch;
+let reviewedFetchUrl;
+try {
+  globalThis.fetch = async (url) => {
+    reviewedFetchUrl = new URL(url);
+    return { ok: true, json: async () => ({ data: {
+      items: [], total: 0, pagination: { has_more: false, next_cursor: null }
+    } }) };
+  };
+  assert.deepEqual(await fetchAllPublicPcListings(new URL("https://used-pick.com"), "targeted-test", {
+    canonicalProductId: "cpu:intel:i3-7100", site: "bunjang"
+  }), []);
+  assert.equal(reviewedFetchUrl.searchParams.get("canonical_product_id"), "cpu:intel:i3-7100");
+  assert.equal(reviewedFetchUrl.searchParams.get("site"), "bunjang");
+} finally {
+  globalThis.fetch = scopedFetchOriginal;
+}
 assert.equal(enrichLedgerProjection({
   getCanonicalProduct: () => ({ category_code: "MOTHERBOARD", manufacturer: "ASRock", spec: {} })
 }, {

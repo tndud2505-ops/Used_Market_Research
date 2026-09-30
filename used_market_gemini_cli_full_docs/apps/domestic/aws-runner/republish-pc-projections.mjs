@@ -214,7 +214,7 @@ async function readJsonResponse(response, label) {
   return payload;
 }
 
-export async function fetchAllPublicPcListings(apiBase, auditKey = Date.now().toString(36)) {
+export async function fetchAllPublicPcListings(apiBase, auditKey = Date.now().toString(36), scope = {}) {
   const items = [];
   const seenCursors = new Set();
   let cursor = "";
@@ -223,6 +223,8 @@ export async function fetchAllPublicPcListings(apiBase, auditKey = Date.now().to
     const url = new URL("/api/pc/listings", apiBase);
     url.searchParams.set("limit", "100");
     url.searchParams.set("reconciliation_audit", auditKey);
+    if (scope.canonicalProductId) url.searchParams.set("canonical_product_id", scope.canonicalProductId);
+    if (scope.site) url.searchParams.set("site", scope.site);
     if (cursor) url.searchParams.set("cursor", cursor);
     const payload = await readJsonResponse(await fetch(url, {
       method: "GET",
