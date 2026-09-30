@@ -2,6 +2,13 @@ import { canonicalSourceListingToken } from "../../aws-runner/pc-source-listing-
 
 export const PC_REVIEWED_LISTING_EXCLUSIONS = Object.freeze([
   Object.freeze({
+    source_id: "bunjang",
+    source_listing_token: "430668014",
+    reason: "FULL_SYSTEM",
+    reviewed_at: "2026-09-30",
+    evidence: "PUBLIC_DETAIL_COMPLETE_DESKTOP"
+  }),
+  Object.freeze({
     source_id: "hellomarket",
     source_listing_token: "182653333",
     reason: "FULL_SYSTEM",

@@ -19,7 +19,7 @@ import {
   mergedPublicExclusionReasons,
   parseArguments as parsePublicReclassificationArguments
 } from "../aws-runner/reclassify-public-pc-listings.mjs";
-import { classifyPcPartListing } from "../market/logic/pc-parts-classifier.mjs";
+import { classifyPcPartListing, classifyPcPartListingPublic } from "../market/logic/pc-parts-classifier.mjs";
 import { explicitSoldText, isPartialSaleText, structuredSoldEvidenceFromHtml } from "../market/logic/listing-lifecycle.mjs";
 import { reviewedPcListingExclusion } from "../market/logic/pc-reviewed-listing-exclusions.mjs";
 
@@ -98,6 +98,19 @@ const helloMarketFullPc = classifyPcPartListing({
 assert.equal(helloMarketFullPc.listing_kind, "FULL_SYSTEM",
   "a model-only HelloMarket title must use public detail specifications to reject a complete PC");
 assert.equal(helloMarketFullPc.price_eligible, false);
+const bunjangDesktop = classifyPcPartListing({
+  title: "(중고)데스크탑 팝니다.(i3 7100)",
+  price: 160000,
+  currency: "KRW"
+});
+assert.equal(bunjangDesktop.listing_kind, "FULL_SYSTEM");
+assert.equal(bunjangDesktop.price_eligible, false);
+assert.equal(classifyPcPartListingPublic({
+  title: "(중고)데스크탑 팝니다.(i3 7100)", price: 160000, currency: "KRW"
+}).statistics_eligible, false);
+assert.equal(classifyPcPartListing({
+  title: "데스크탑용 CPU i3-7100 팝니다", price: 16000, currency: "KRW"
+}).listing_kind, "SINGLE_COMPONENT");
 const firstReadDeferral = schedulerReadDeferral({
   nowMs: 10_000,
   lastPublicReadAtMs: 9_000,
@@ -154,6 +167,7 @@ for (const [title, expected] of [
   for (const [key, value] of Object.entries(expected)) assert.equal(actual[key], value, `${title}: ${key}`);
 }
 assert.equal(reviewedPcListingExclusion("hellomarket", "https://www.hellomarket.com/item/182653333")?.reason, "FULL_SYSTEM");
+assert.equal(reviewedPcListingExclusion("bunjang", "https://m.bunjang.co.kr/products/430668014")?.reason, "FULL_SYSTEM");
 assert.equal(reviewedPcListingExclusion("hellomarket", "hellomarket:https://www.hellomarket.com/item/183908019")?.reason, "QUANTITY_UNKNOWN");
 assert.equal(reviewedPcListingExclusion("joonggonara", "https://web.joongna.com/product/231873683")?.reason, "FULL_SYSTEM");
 assert.equal(reviewedPcListingExclusion("ebay", "v1|327343241050|0")?.reason, "QUANTITY_UNNORMALIZED");
