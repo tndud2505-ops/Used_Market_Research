@@ -34,3 +34,5 @@ Configuration and deployment details:
 
 - [Portable setup](used_market_gemini_cli_full_docs/SETUP.md)
 - [Application](used_market_gemini_cli_full_docs/apps/domestic/README.md)
+- [운영 위키](used_market_gemini_cli_full_docs/apps/domestic/docs/wiki/README.md)
+- [가격 통계 게시·장애 대응](used_market_gemini_cli_full_docs/apps/domestic/docs/wiki/09-price-publication-operations.md)

@@ -112,6 +112,102 @@ export async function readActiveProductStatsScopes(db) {
     row_count: scopes.length, scopes, checked_at: new Date().toISOString() };
 }
 
+// Identity-only bootstrap is paged too: Free Workers must not serialize the
+// entire product directory in one invocation. Each page has one DB snapshot.
+export async function readActiveProductStatsScopePage(db, offset = 0, afterRowid = null) {
+  if (!Number.isSafeInteger(offset) || offset < 0) throw new Error('invalid scope offset');
+  if (afterRowid !== null && (!Number.isSafeInteger(afterRowid) || afterRowid < 0
+    || (offset === 0 && afterRowid !== 0) || (offset > 0 && afterRowid === 0)))
+    throw new Error('invalid scope cursor');
+  const results = await db.batch([
+    db.prepare('SELECT publication_id, checksum, expected_row_count FROM public_stats_publications WHERE active = 1'),
+    db.prepare(`SELECT s.rowid AS storage_rowid, s.canonical_product_id, s.market_pool, s.condition_code, s.currency, s.days
+      FROM public_product_stats s INDEXED BY idx_public_stats_publication_rows JOIN public_stats_publications p
+        ON p.publication_id = s.publication_id AND p.active = 1
+      ${afterRowid === null ? '' : 'WHERE s.rowid > ?'}
+      ORDER BY s.rowid LIMIT 100 ${afterRowid === null ? 'OFFSET ?' : ''}`).bind(afterRowid ?? offset)
+  ]);
+  const active = results[0]?.results || [];
+  if (active.length > 1) throw new Error('ambiguous active publication');
+  const scopes = results[1]?.results || [];
+  const count = Number(active[0]?.expected_row_count || 0);
+  if (offset > count || scopes.length !== Math.min(100, count - offset)) throw new Error('active scope page incomplete');
+  return { publication_id: active[0]?.publication_id ?? null, checksum: active[0]?.checksum ?? null,
+    row_count: count, scopes, offset, next_offset: offset + scopes.length < count ? offset + scopes.length : null,
+    next_rowid: offset + scopes.length < count ? scopes.at(-1)?.storage_rowid : null,
+    d1_usage: { rows_read: results.reduce((n, r) => n + Number(r.meta?.rows_read || 0), 0),
+      rows_written: results.reduce((n, r) => n + Number(r.meta?.rows_written || 0), 0) },
+    checked_at: new Date().toISOString() };
+}
+
+export async function readStagedProductStatsPage(db, publicationId, kind, offset = 0, rowIds = [], afterRowid = null) {
+  if (!publicationId || !['rows', 'chunks', 'identities'].includes(kind)
+    || !Number.isSafeInteger(offset) || offset < 0) throw new Error('invalid publication readback page');
+  const limit = kind === 'rows' ? 4 : kind === 'identities' ? 100 : 40;
+  if (afterRowid !== null && (kind !== 'identities' || !Number.isSafeInteger(afterRowid) || afterRowid < 0
+    || (offset === 0 && afterRowid !== 0) || (offset > 0 && afterRowid === 0)))
+    throw new Error('invalid publication readback cursor');
+  if (kind === 'rows' && (!Array.isArray(rowIds) || rowIds.length < 1 || rowIds.length > 4
+    || new Set(rowIds).size !== rowIds.length || rowIds.some(id => !Number.isSafeInteger(id) || id < 1)))
+    throw new Error('invalid publication row identities');
+  const sql = kind === 'rows'
+    ? `SELECT canonical_product_id, market_pool, condition_code, currency, days, stats_json, as_of
+        FROM public_product_stats WHERE publication_id = ? AND rowid IN (${rowIds.map(() => '?').join(',')}) ORDER BY rowid`
+    : kind === 'identities'
+    ? `SELECT rowid AS storage_rowid FROM public_product_stats INDEXED BY idx_public_stats_publication_rows
+        WHERE publication_id = ? ${afterRowid === null ? '' : 'AND rowid > ?'}
+        ORDER BY rowid LIMIT 100 ${afterRowid === null ? 'OFFSET ?' : ''}`
+    : `SELECT chunk_index, expected_chunk_count, chunk_checksum, row_count, non_empty_scope_count,
+        first_scope_key, last_scope_key FROM public_stats_publication_chunks
+        WHERE publication_id = ? AND chunk_index >= ? ORDER BY chunk_index LIMIT 40`;
+  const results = await db.batch([
+    db.prepare('SELECT * FROM public_stats_publications WHERE publication_id = ?').bind(publicationId),
+    db.prepare(sql).bind(publicationId, ...(kind === 'rows' ? rowIds : [afterRowid ?? offset]))
+  ]);
+  const publication = results[0]?.results?.[0];
+  if (!publication) throw new Error('publication readback was removed');
+  const items = results[1]?.results || [];
+  return { publication, kind, offset, limit, items,
+    next_rowid: kind === 'identities' && offset + items.length < Number(publication.expected_row_count)
+      ? items.at(-1)?.storage_rowid : null,
+    d1_usage: { rows_read: results.reduce((n, r) => n + Number(r.meta?.rows_read || 0), 0),
+      rows_written: results.reduce((n, r) => n + Number(r.meta?.rows_written || 0), 0) } };
+}
+
+// Runs on AWS, after reading back D1. Never trust hashes of chunk descriptors
+// alone: compare both every chunk and the canonical complete row byte stream.
+export async function verifyProductStatsReadback(input, inputRows, inputChunks) {
+  const metadata = assertPublicationMetadata(input, null);
+  const rows = canonicalRows(inputRows);
+  const keys = rows.map(statsPublicationKey);
+  if (rows.length !== metadata.expectedRowCount || new Set(keys).size !== keys.length)
+    throw new Error('staged publication scope count mismatch');
+  const sampled = validateChunkRowContract(rows, input, metadata);
+  if (sampled !== metadata.expectedNonEmptyScopeCount) throw new Error('staged publication sample count mismatch');
+  if (await statsChecksum(rows) !== metadata.checksum) throw new Error('staged publication full row checksum mismatch');
+  const chunks = canonicalChunkManifest(inputChunks);
+  if (chunks.length !== Number(input.expected_chunk_count)
+    || await statsChunkManifestChecksum(chunks) !== input.chunk_manifest_checksum)
+    throw new Error('staged publication chunk checksum mismatch');
+  let offset = 0;
+  for (const [index, chunk] of chunks.entries()) {
+    if (chunk.chunk_index !== index || chunk.expected_chunk_count !== chunks.length
+      || !Number.isSafeInteger(chunk.row_count) || chunk.row_count < 1 || chunk.row_count > 40)
+      throw new Error('staged publication chunk count mismatch');
+    const part = rows.slice(offset, offset + chunk.row_count);
+    if (part.length !== chunk.row_count || await statsChecksum(part) !== chunk.chunk_checksum
+      || nonEmptyScopeCount(part) !== chunk.non_empty_scope_count
+      || statsPublicationBoundaryKey(part[0]) !== chunk.first_scope_key
+      || statsPublicationBoundaryKey(part.at(-1)) !== chunk.last_scope_key)
+      throw new Error('staged publication chunk readback mismatch');
+    offset += part.length;
+  }
+  if (offset !== rows.length) throw new Error('staged publication incomplete chunks');
+  return { publication_id: metadata.publicationId, checksum: metadata.checksum, row_count: rows.length,
+    non_empty_scope_count: sampled, chunk_manifest_checksum: input.chunk_manifest_checksum,
+    expected_chunk_count: chunks.length, row_checksum_verified: true, verifier: 'aws-readback-v1' };
+}
+
 function nonEmptyScopeCount(rows) {
   return rows.filter((row) => {
     let stats;
@@ -270,6 +366,7 @@ async function verifyStagedContent(db, input, metadata) {
 }
 
 export async function stageProductStatsChunk(db, input) {
+  const mutationUsage = { rows_read: 0, rows_written: 0 };
   if (input.merge_with_active !== false) throw new Error("chunked publication must replace the complete active publication");
   const metadata = assertPublicationMetadata(input, null);
   const chunkIndex = Number(input.chunk_index);
@@ -283,7 +380,7 @@ export async function stageProductStatsChunk(db, input) {
   const keys = inputRows.map(statsPublicationKey);
   if (new Set(keys).size !== keys.length) throw new Error("publication chunk contains duplicate scope keys");
   const chunkChecksum = await statsChecksum(inputRows);
-  const chunkNonEmptyScopeCount = nonEmptyScopeCount(inputRows);
+  const chunkNonEmptyScopeCount = validateChunkRowContract(inputRows, input, metadata);
   if (chunkChecksum !== String(input.chunk_checksum || "")
     || inputRows.length !== Number(input.chunk_row_count)
     || chunkNonEmptyScopeCount !== Number(input.chunk_non_empty_scope_count)
@@ -291,13 +388,11 @@ export async function stageProductStatsChunk(db, input) {
     || statsPublicationBoundaryKey(inputRows.at(-1)) !== String(input.last_scope_key || "")) {
     throw new Error("publication chunk manifest mismatch");
   }
-  validateChunkRowContract(inputRows, input, metadata);
-
   let stored = await db.prepare(`SELECT publication_id, checksum, expected_row_count,
       expected_non_empty_scope_count, parser_version, rule_version, filter_version, created_at, active
     FROM public_stats_publications WHERE publication_id = ?`).bind(metadata.publicationId).first();
   if (!stored) {
-    await db.prepare(`INSERT INTO public_stats_publications (
+    const insertedPublication = await db.prepare(`INSERT INTO public_stats_publications (
         publication_id, checksum, expected_row_count, expected_non_empty_scope_count,
         parser_version, rule_version, filter_version, created_at, active
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)`).bind(
@@ -305,6 +400,8 @@ export async function stageProductStatsChunk(db, input) {
       metadata.expectedNonEmptyScopeCount, metadata.parserVersion, metadata.ruleVersion,
       metadata.filterVersion, metadata.createdAt
     ).run();
+    mutationUsage.rows_read += Number(insertedPublication.meta?.rows_read || 0);
+    mutationUsage.rows_written += Number(insertedPublication.meta?.rows_written || 0);
     stored = { ...input, active: 0 };
   }
   assertPublicationMetadata(input, stored);
@@ -341,11 +438,16 @@ export async function stageProductStatsChunk(db, input) {
       chunkNonEmptyScopeCount, statsPublicationBoundaryKey(inputRows[0]),
       statsPublicationBoundaryKey(inputRows.at(-1)), new Date().toISOString()
     ));
-  await db.batch(statements);
-  return { publication_id: metadata.publicationId, chunk_index: chunkIndex, already_staged: false };
+  const stagedResults = await db.batch(statements);
+  for (const result of stagedResults) {
+    mutationUsage.rows_read += Number(result.meta?.rows_read || 0);
+    mutationUsage.rows_written += Number(result.meta?.rows_written || 0);
+  }
+  return { publication_id: metadata.publicationId, chunk_index: chunkIndex, already_staged: false,
+    mutation_d1_usage: mutationUsage };
 }
 
-export async function activateStagedProductStats(db, input) {
+export async function activateStagedProductStats(db, input, { verifyContent = null } = {}) {
   if (input.merge_with_active !== false) throw new Error("chunked publication must replace the complete active publication");
   const stored = await db.prepare(`SELECT publication_id, checksum, expected_row_count,
       expected_non_empty_scope_count, parser_version, rule_version, filter_version, created_at, active
@@ -354,12 +456,23 @@ export async function activateStagedProductStats(db, input) {
   const metadata = assertPublicationMetadata(input, stored);
   if (Number(stored.active) !== 0) throw new Error("publication is already active");
 
+  const expectedChunkCount = Number(input.expected_chunk_count);
+  let verifiedContent;
+  if (verifyContent) {
+    verifiedContent = await verifyContent(input);
+    if (verifiedContent?.verifier !== 'aws-readback-v1' || verifiedContent.row_checksum_verified !== true
+      || verifiedContent.publication_id !== metadata.publicationId || verifiedContent.checksum !== metadata.checksum
+      || verifiedContent.row_count !== metadata.expectedRowCount
+      || verifiedContent.non_empty_scope_count !== metadata.expectedNonEmptyScopeCount
+      || verifiedContent.expected_chunk_count !== expectedChunkCount
+      || verifiedContent.chunk_manifest_checksum !== input.chunk_manifest_checksum)
+      throw new Error('AWS publication verification acknowledgement mismatch');
+  } else {
   const chunkResult = await db.prepare(`SELECT chunk_index, expected_chunk_count, chunk_checksum,
       row_count, non_empty_scope_count, first_scope_key, last_scope_key
     FROM public_stats_publication_chunks WHERE publication_id = ? ORDER BY chunk_index`)
     .bind(metadata.publicationId).all();
   const chunks = canonicalChunkManifest(Array.isArray(chunkResult?.results) ? chunkResult.results : chunkResult || []);
-  const expectedChunkCount = Number(input.expected_chunk_count);
   if (!Number.isInteger(expectedChunkCount) || expectedChunkCount < 1 || chunks.length !== expectedChunkCount
     || chunks.some((chunk, index) => chunk.chunk_index !== index || chunk.expected_chunk_count !== expectedChunkCount)) {
     throw new Error("staged publication chunk count mismatch");
@@ -382,7 +495,8 @@ export async function activateStagedProductStats(db, input) {
     FROM public_product_stats WHERE publication_id = ?`).bind(metadata.publicationId).first();
   if (Number(verified?.count) !== metadata.expectedRowCount) throw new Error("staged publication row count mismatch");
 
-  const verifiedContent = await verifyStagedContent(db, input, metadata);
+  verifiedContent = await verifyStagedContent(db, input, metadata);
+  }
 
   const active = await db.prepare(`SELECT publication_id, checksum, expected_row_count,
       expected_non_empty_scope_count FROM public_stats_publications WHERE active = 1`).first();
@@ -393,24 +507,25 @@ export async function activateStagedProductStats(db, input) {
       throw new Error('active publication predecessor changed; prepare a fresh complete publication');
     }
   }
-  const actualKeys = verifiedContent.keys;
-  let removedActiveScopeKeys = [];
+  let removedScopeCount = 0;
   if (active?.publication_id) {
-    const activeKeyResult = await db.prepare(`SELECT canonical_product_id, market_pool, condition_code, currency, days
-      FROM public_product_stats WHERE publication_id = ?`).bind(active.publication_id).all();
-    const actualKeySet = new Set(actualKeys);
-    removedActiveScopeKeys = (Array.isArray(activeKeyResult?.results) ? activeKeyResult.results : activeKeyResult || [])
-      .map(statsPublicationKey).filter((key) => !actualKeySet.has(key));
+    const missing = await db.prepare(`SELECT COUNT(*) AS count FROM public_product_stats old
+      WHERE old.publication_id = ? AND NOT EXISTS (SELECT 1 FROM public_product_stats next
+        WHERE next.publication_id = ? AND next.canonical_product_id = old.canonical_product_id
+        AND next.market_pool = old.market_pool AND next.condition_code = old.condition_code
+        AND next.currency = old.currency AND next.days = old.days)`)
+      .bind(active.publication_id, metadata.publicationId).first();
+    removedScopeCount = Number(missing?.count || 0);
   }
   let scopeSchemaMigrationApplied = false;
-  if (removedActiveScopeKeys.length > 0 || Number(active?.expected_row_count || 0) > metadata.expectedRowCount) {
+  if (removedScopeCount > 0 || Number(active?.expected_row_count || 0) > metadata.expectedRowCount) {
     const migration = input.scope_schema_migration;
     const reason = String(migration?.reason || "").trim();
     scopeSchemaMigrationApplied = Boolean(active?.publication_id)
       && migration && typeof migration === "object" && !Array.isArray(migration)
       && String(migration.previous_publication_id || "") === String(active.publication_id)
       && String(migration.previous_checksum || "") === String(active.checksum)
-      && Number(migration.expected_removed_scope_count) === removedActiveScopeKeys.length
+      && Number(migration.expected_removed_scope_count) === removedScopeCount
       && Number.isFinite(Date.parse(String(migration.reviewed_at || "")))
       && reason.length >= 20 && reason.length <= 500;
     if (!scopeSchemaMigrationApplied) throw new Error("publication scope shrink requires an explicit schema migration");
@@ -431,7 +546,21 @@ export async function activateStagedProductStats(db, input) {
     if (!sampleDropAcknowledged) throw new Error("publication sampled scope count dropped by more than 50 percent");
   }
 
-  await db.batch([
+  const activationResults = await db.batch([
+    // A failing SQLite expression rolls back the entire batch. Recheck the
+    // pointer and complete immutable candidate inside the transaction, not
+    // only before an asynchronous AWS verification request.
+    db.prepare(`SELECT CASE WHEN
+      EXISTS (SELECT 1 FROM public_stats_publications WHERE publication_id = ? AND checksum = ?
+        AND expected_row_count = ? AND active = 0)
+      AND (SELECT COUNT(*) FROM public_product_stats WHERE publication_id = ?) = ?
+      AND (SELECT COUNT(*) FROM public_stats_publication_chunks WHERE publication_id = ?) = ?
+      AND ((? IS NULL AND NOT EXISTS (SELECT 1 FROM public_stats_publications WHERE active = 1))
+        OR EXISTS (SELECT 1 FROM public_stats_publications WHERE active = 1 AND publication_id = ? AND checksum = ?))
+      THEN 1 ELSE json('publication activation conflict') END AS activation_guard`).bind(
+        metadata.publicationId, metadata.checksum, metadata.expectedRowCount,
+        metadata.publicationId, metadata.expectedRowCount, metadata.publicationId, expectedChunkCount,
+        active?.publication_id ?? null, active?.publication_id ?? null, active?.checksum ?? null),
     db.prepare("UPDATE public_stats_publications SET active = 0 WHERE active = 1"),
     db.prepare(`UPDATE public_stats_publications SET active = 1, activated_at = ?
       WHERE publication_id = ? AND checksum = ? AND expected_row_count = ?`).bind(
@@ -446,16 +575,22 @@ export async function activateStagedProductStats(db, input) {
     checksum: metadata.checksum,
     row_count: metadata.expectedRowCount,
     non_empty_scope_count: metadata.expectedNonEmptyScopeCount,
-    scope_key_count: actualKeys.length,
+    scope_key_count: metadata.expectedRowCount,
     input_row_count: metadata.expectedRowCount,
     preserved_row_count: 0,
     overwritten_row_count: 0,
     merged_with_active: false,
     sample_drop_acknowledged: sampleDropAcknowledged,
     scope_schema_migration_applied: scopeSchemaMigrationApplied,
-    removed_scope_count: removedActiveScopeKeys.length,
+    removed_scope_count: removedScopeCount,
     row_checksum_verified: true,
     verification_pages: verifiedContent.pages,
+    readback_d1_usage: verifiedContent.d1_usage,
+    activation_d1_usage: {
+      rows_read: activationResults.reduce((n, r) => n + Number(r.meta?.rows_read || 0), 0),
+      rows_written: activationResults.reduce((n, r) => n + Number(r.meta?.rows_written || 0), 0)
+    },
+    verifier: verifiedContent.verifier || 'local-readback',
     active: true
   };
 }

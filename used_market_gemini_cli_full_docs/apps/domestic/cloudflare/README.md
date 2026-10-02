@@ -9,13 +9,15 @@
 - `POST /api/runner/run`: 허용된 스케줄러 작업 하나 또는 묶음을 실행하는 인증된 Node 엔드포인트
 - `POST /api/search`: rollback용 legacy 범용 검색 경로. PC 디렉터리는 호출하지 않음
 
-공개 PC 화면은 검증된 하나의 publication manifest에 속한 projection만 조회한다. 좌측 부품·용량·제조사·모델·사이트 필터, 사이트별 매물 결과, 현재 ACTIVE·RESERVED 평균·중앙값, SOLD 직전 마지막 표시가격 평균·중앙값, 최근 30일 그래프는 모두 같은 `publication_version`/`as_of` 범위를 사용한다. RESERVED·SOLD 표시가격은 실제 체결가가 아니며, 확인된 체결금액은 별도 통계로 표시한다.
+2026-09-24부터 통계 전체 readback 검증은 AWS가 담당한다. Worker는 4행 staging·100개 활성 범위 페이지를 제공하고, 고정된 인증 AWS 검증 API의 판정을 대조한 뒤 D1 트랜잭션으로 게시를 전환한다. 기존 `RUNNER_TOKEN`·`MANUAL_RUN_TOKEN`을 사용하며 새 secret이나 유료 플랜을 요구하지 않는다. [현재 운영·복구](../docs/wiki/09-price-publication-operations.md)와 [변경·검증 기록](../docs/worklog/2026-09-24-aws-publication-verification.md)을 참고한다.
 
-다나와 장터·중고나라·번개장터·헬로마켓·리씽크몰·eBay·쿨엔조이는 registry의 운영 승인과 공개 경로 제약을 통과한 사전수집 projection에서만 노출한다. 국내 개인 중고, 업자 중고, 리퍼비시, 해외 중고는 `market_pool`로 분리하며 HTTP 403·captcha가 발생한 소스는 우회하지 않고 backoff·quarantine을 적용한다.
+공개 PC 화면은 저장된 projection을 조회한다. 제품·시장군·상태·통화 조건은 일관되게 유지하지만 주기 갱신 매물의 freshness와 일일 가격 통계의 publication/as_of는 별도다. 가격 통계 게시본 내부의 버전·기간·체크섬을 검증한다. RESERVED·SOLD 표시가격은 실제 체결가가 아니며, 확인된 체결금액은 별도 통계로 표시한다.
+
+중고나라·번개장터·다나와 중고·eBay는 registry의 운영 승인과 공개 경로 제약을 통과한 사전수집 projection에서만 노출한다. 국내 개인 중고, 업자 중고, 리퍼비시, 해외 중고는 원본 `market_pool`로 분리한다. 국내 통합 평균 `KR_DOMESTIC_USED`는 국내 개인·업체 중고 표본만 합산한다. HTTP 403·captcha가 발생한 소스는 우회하지 않고 backoff·quarantine을 적용한다.
 
 수동 실행도 작업 결과 저장 뒤 알림 dispatch와 reporter 후처리를 실행한다. 후처리 경고가 있으면 전체 응답은 `partial_success`가 되며 `postprocess.warnings`에서 원인을 확인할 수 있다.
 
-사전수집은 Cloudflare Browser Run이 아니라 AWS 러너에서 처리한다. 공개 PC 읽기 API는 요청 중 원 사이트를 호출하지 않는다. 매물과 가격 통계는 AWS SQLite를 먼저 읽고 Worker Cache API에 5분간 응답을 저장한다. D1 매물 fallback은 기본 비활성이며, 작은 일일 가격 통계만 AWS 읽기 실패 때 D1 fallback을 사용할 수 있다. Worker의 `RUNNER_URL`과 legacy `SEARCH_RUNNER_URL`은 Cloudflare Tunnel 공개 URL이어야 하며, 로컬 `localhost`는 사용할 수 없다.
+사전수집은 Cloudflare Browser Run이 아니라 AWS 러너에서 처리한다. 공개 PC 읽기 API는 요청 중 원 사이트를 호출하지 않는다. 매물과 가격 통계는 AWS SQLite를 먼저 읽고 Worker Cache API에 5분간 응답을 저장한다. D1 매물 fallback은 기본 비활성이며, 검증된 일일 가격 통계는 AWS 읽기 실패 때 D1 fallback을 사용할 수 있다. 전체 통계가 Worker 한 요청에서 처리할 만큼 작다고 가정하지 않는다. 명시적 과거 as_of 요청은 현재 D1 통계로 대체하지 않는다. Worker의 `RUNNER_URL`과 legacy `SEARCH_RUNNER_URL`은 Cloudflare Tunnel 공개 URL이어야 하며, 로컬 `localhost`는 사용할 수 없다.
 
 ## 로컬 검증
 
@@ -57,7 +59,7 @@ npm run cloudflare:deploy
 
 이 프로필은 `https://runner.used-pick.com`을 러너·검색·원본 주소로 사용한다. DNS가 아직 없으면 배포하지 말고 먼저 아래 CNAME을 추가한다.
 
-Cron 표현식은 Cloudflare 기준 UTC다. 수집은 AWS 러너에서 처리되며, 연속 D1 매물 mirror와 D1 매물 fallback은 기본적으로 끈다. D1 매물 fallback을 운영자가 명시적으로 켜도 완전한 collection manifest가 있고 2시간 이내일 때만 허용한다. 작은 일일 가격 통계 publication은 fallback용으로 계속 사용할 수 있다. `FREE_TIER_MODE=false`이고 Worker에는 Browser/Queue 바인딩을 배포하지 않는다.
+Cron 표현식은 Cloudflare 기준 UTC다. 수집은 AWS 러너에서 처리되며, 연속 D1 매물 mirror와 D1 매물 fallback은 기본적으로 끈다. D1 매물 fallback을 운영자가 명시적으로 켜도 완전한 collection manifest가 있고 2시간 이내일 때만 허용한다. 전체 검증을 통과한 일일 가격 통계 publication은 fallback용으로 계속 사용할 수 있다. `FREE_TIER_MODE=false`는 AWS 연결 모드이고 Worker에는 Browser/Queue 바인딩을 배포하지 않는다.
 
 ## 수동 실행
 
@@ -78,6 +80,7 @@ The active Worker/AWS profile:
 - `/api/pc/catalog` and `/api/pc/products` remain precollected/static directory reads.
 - `/api/search` remains a legacy rollback path through Cloudflare Tunnel; the PC directory does not call it.
 - Cron and manual jobs call the authenticated AWS `/api/runner/run` endpoint.
+- Full publication validation runs on AWS via authenticated readback; the Worker checks the matching verdict and atomically activates the candidate. `FREE_TIER_MODE=false` selects this routing profile, not a paid billing plan.
 - D1 listing mirror and listing fallback are disabled by default. An explicit listing fallback accepts only a fresh complete snapshot; compact daily price stats remain available for AWS failure fallback.
 - Browser Run and Queue are intentionally not deployed for this profile.
 - Public GET responses and search POST bodies are cached to avoid duplicate origin/browser work.

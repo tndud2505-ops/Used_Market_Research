@@ -15,7 +15,7 @@ import { pcPartsCatalogForApi } from '../../../market/logic/pc-parts-catalog.mjs
 // @ts-ignore shared runtime ESM module is loaded from the application root
 import { pcCatalogResponse, pcProductsResponse } from '../../../cloudflare/pc-directory-http.mjs';
 // @ts-ignore shared runtime ESM module is loaded from the application root
-import { parsePriceStatsRequest, priceStatsResponse } from '../../../aws-runner/pc-price-stats-http.mjs';
+import { parsePriceStatsRequest, priceStatsResponse, priceHistoryResponse } from '../../../aws-runner/pc-price-stats-http.mjs';
 // Public catalog APIs expose only the seven supported PC-part categories.
 // @ts-ignore shared runtime ESM module is loaded from the application root
 import { publicPcCatalogForApi, publicPcFacetsForApi, publicPcModelsForApi, publicPcProductById } from '../../../market/logic/pc-public-catalog.mjs';
@@ -561,7 +561,7 @@ export function createServer(
           });
         }
         const normalizePriceStats = (stats: Record<string, unknown>) => ({
-          ...priceStatsResponse(priceQuery, stats),
+          ...(urlObj.searchParams.get('view') === 'daily' ? priceHistoryResponse(priceQuery, stats) : priceStatsResponse(priceQuery, stats)),
           ...(stats.availability ? { availability: stats.availability } : {})
         });
         const statsMatchRequestedWindow = (stats: Record<string, any>) => {

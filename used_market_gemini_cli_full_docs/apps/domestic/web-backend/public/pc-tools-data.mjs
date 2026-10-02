@@ -1,4 +1,4 @@
-import { idOf, coherentStats } from './pc-tools-core.mjs?v=parts-ux-v9';
+import { idOf, coherentStats } from './pc-tools-core.mjs?v=danawa-display-v2';
 
 export async function readJson(url, signal, onStatus) {
   const request = new AbortController();
@@ -25,7 +25,7 @@ export async function readJson(url, signal, onStatus) {
 }
 
 export function createPriceStore(onChange, options = {}) {
-  const marketPool = String(options.marketPool || 'KR_C2C_USED');
+  const marketPool = String(options.marketPool || 'KR_DOMESTIC_USED');
   const condition = String(options.condition || 'USED_WORKING');
   const currency = String(options.currency || 'KRW').toUpperCase();
   const cache = new Map();
@@ -48,6 +48,7 @@ export function createPriceStore(onChange, options = {}) {
         const previous = cache.get(key);
         if (previous?.state === 'ready' && Date.now() - previous.loadedAt < 300000) continue;
         const params = new URLSearchParams({ days: String(days), market_pool: marketPool, condition, currency });
+        if (options.dailyOnly) params.set('view','daily');
         if (asOf) params.set('as_of', asOf);
         const diagnostics = { requestUrl: `/api/products/${encodeURIComponent(id)}/price-stats?${params}`, httpStatus: null };
         cache.set(key, { state: 'loading', ...diagnostics });
@@ -57,6 +58,7 @@ export function createPriceStore(onChange, options = {}) {
           if (signal.aborted) break;
           if (data.canonical_product_id !== id) throw new Error('모델이 일치하지 않는 가격 응답입니다.');
           const scope = data.methodology || {};
+          if (options.dailyOnly && data.view !== 'daily') throw new Error('일별 가격 기록 응답이 아닙니다.');
           if (scope.days != null && Number(scope.days) !== days) throw new Error('가격 집계 기간이 일치하지 않습니다.');
           if (asOf && data.window?.to !== asOf) throw new Error('요청한 날짜의 가격 기록이 아닙니다.');
           const latestCompletedDailyPublication = !asOf && String(data?.availability?.status || '').toUpperCase() === 'LAST_PUBLISHED';

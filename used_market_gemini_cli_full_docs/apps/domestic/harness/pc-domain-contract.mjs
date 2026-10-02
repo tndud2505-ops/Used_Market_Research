@@ -146,6 +146,45 @@ assert.equal(bunjangDesktop.price_eligible, false);
 assert.equal(classifyPcPartListingPublic({
   title: "(중고)데스크탑 팝니다.(i3 7100)", price: 160000, currency: "KRW"
 }).statistics_eligible, false);
+const descriptionBundle = classifyPcPartListingPublic({
+  title: "GTX 980", description: "GTX980 그래픽카드와 DDR4 16GB 램 함께 일괄 판매",
+  price: 300000, currency: "KRW"
+});
+assert.equal(descriptionBundle.price_eligible, true, "a statistics exclusion does not hide the listing");
+assert.equal(descriptionBundle.statistics_eligible, false, "mixed parts in the description cannot supply a GPU price");
+assert.ok(descriptionBundle.statistics_exclusion_reasons.includes("COMPONENT_BUNDLE"));
+assert.equal(classifyPcPartListingPublic({
+  title: "GTX 980 Ti PC", description: "i7-6700 CPU DDR4 16GB RAM SSD 256GB 전체 판매",
+  price: 300000, currency: "KRW"
+}).statistics_eligible, false, "a full PC described below a GPU title cannot supply a GPU price");
+const specificationsOnlySystem = classifyPcPartListingPublic({
+  title: "GTX 980 Ti PC", description: "i7-6700 CPU DDR4 16GB RAM SSD 256GB",
+  price: 300000, currency: "KRW"
+});
+assert.equal(specificationsOnlySystem.price_eligible, true, "a title system cue keeps the listing visible");
+assert.equal(specificationsOnlySystem.statistics_eligible, false,
+  "a full PC specification does not need to repeat a sale verb in the description");
+assert.equal(classifyPcPartListingPublic({
+  title: "GTX 980 Ti PC", description: "i7-6700 CPU DDR4 16GB RAM SSD 256GB PC에서 사용하던 그래픽카드 단품 판매",
+  price: 76000, currency: "KRW"
+}).statistics_eligible, true, "a described part removed from a previous PC remains comparable");
+assert.equal(classifyPcPartListingPublic({
+  title: "GTX 980", description: "i5 6500에서 사용하던 그래픽카드만 단품 판매",
+  price: 76000, currency: "KRW"
+}).statistics_eligible, true, "a previously used PC is not evidence that the card is sold as a bundle");
+assert.equal(classifyPcPartListingPublic({
+  title: "GTX 980", description: "그래픽카드 단품 판매. DDR4 16GB 램과 함께 사용 가능",
+  price: 76000, currency: "KRW"
+}).statistics_eligible, true, "using parts together is not evidence of selling them together");
+assert.equal(classifyPcPartListingPublic({
+  title: "GTX 980 PC 호환 그래픽카드",
+  description: "i5-6500, DDR4 16GB RAM, SSD 256GB PC에서 사용하던 그래픽카드 단품 판매",
+  price: 76000, currency: "KRW"
+}).statistics_eligible, true, "PC compatibility and prior system specs do not turn a card sale into a system sale");
+assert.equal(classifyPcPartListingPublic({
+  title: "GTX 980", description: "i7-6700 CPU DDR4 16GB RAM SSD 256GB 컴퓨터 판매",
+  price: 300000, currency: "KRW"
+}).statistics_eligible, false, "an explicit computer sale in the description cannot supply a GPU price");
 assert.equal(classifyPcPartListing({
   title: "데스크탑용 CPU i3-7100 팝니다", price: 16000, currency: "KRW"
 }).listing_kind, "SINGLE_COMPONENT");
@@ -206,6 +245,7 @@ for (const [title, expected] of [
 }
 assert.equal(reviewedPcListingExclusion("hellomarket", "https://www.hellomarket.com/item/182653333")?.reason, "FULL_SYSTEM");
 assert.equal(reviewedPcListingExclusion("bunjang", "https://m.bunjang.co.kr/products/430668014")?.reason, "FULL_SYSTEM");
+assert.equal(reviewedPcListingExclusion("joonggonara", "https://web.joongna.com/product/230040424")?.reason, "FULL_SYSTEM");
 assert.equal(reviewedPcListingExclusion("hellomarket", "hellomarket:https://www.hellomarket.com/item/183908019")?.reason, "QUANTITY_UNKNOWN");
 assert.equal(reviewedPcListingExclusion("joonggonara", "https://web.joongna.com/product/231873683")?.reason, "FULL_SYSTEM");
 assert.equal(reviewedPcListingExclusion("ebay", "v1|327343241050|0")?.reason, "QUANTITY_UNNORMALIZED");
@@ -223,6 +263,20 @@ for (const [title, quantity] of [
   assert.equal(lot.quantity, quantity, "English lot count must be preserved: " + title);
   assert.equal(lot.price_scope, "TOTAL", "English lot display price must be treated as the total: " + title);
 }
+const matrixLot = classifyPcPartListing({
+  title: "ASUS MATRIX GTX980TI 풀박스 2장 그래픽카드", price: 335_000, currency: "KRW"
+});
+assert.equal(matrixLot.quantity, 2);
+assert.equal(matrixLot.price_scope, "AMBIGUOUS", "a count alone cannot prove whether the price is per card or total");
+assert.equal(matrixLot.price_eligible, false);
+const verifiedMatrixLot = classifyPcPartListing({
+  title: "ASUS MATRIX GTX980TI 풀박스 2장 그래픽카드",
+  description: "2장 일괄판매 합니다", price: 335_000, currency: "KRW"
+});
+assert.equal(verifiedMatrixLot.quantity, 2);
+assert.equal(verifiedMatrixLot.price_scope, "TOTAL");
+assert.equal(verifiedMatrixLot.price_eligible, true);
+assert.equal(classifyPcPartListing({ title: "GTX980TI 그래픽카드 사진 2장 첨부", price: 100_000 }).quantity, 1);
 const qualityProbe = evaluatePcQualityDataset([{ id: "quality-probe", input: { title: "RTX 3080" }, truth: {
   category_code: "GPU", canonical_model: "RTX 3080", quantity: 1, price_scope: "TOTAL",
   listing_kind: "SINGLE_COMPONENT", lifecycle_status: "ACTIVE", market_pool: "KR_C2C_USED", duplicate: false
@@ -313,6 +367,8 @@ const observedSystemAndBundleRegressions = [
   ["9950X3D2/a620/RX9070XT/1TB", "FULL_SYSTEM"],
   ["34)울트라7 270K Plus /RX9070XT 화이트 컴퓨터", "FULL_SYSTEM"],
   ["285K/b760/RX9070XT/1TB", "FULL_SYSTEM"],
+  ["인텔 코어 울트라7 시리즈2 270K Plus, 삼성 데스크탑 램 DDR5 16G 5600 44800 16GB", "COMPONENT_BUNDLE"],
+  ["라이젠5-7600 PC팝니다", "FULL_SYSTEM"],
   ["(27일까지)7800x3D RX9070XT 32G CL28 하닉A다이 6000 2T", "FULL_SYSTEM"]
 ];
 for (const [title, listingKind] of observedSystemAndBundleRegressions) {
@@ -1098,6 +1154,88 @@ assert.equal(movedOldBucketStats.daily.find((row) => row.date === movedDate)?.so
 
 const pipeline = new PcShadowPipeline({ ledger });
 await pipeline.initialize();
+const comparisonDb = new DatabaseSync(":memory:");
+try {
+  const comparisonLedger = new PcPartsLedger({ db: comparisonDb, now: () => now });
+  comparisonLedger.migrate();
+  const comparisonPipeline = new PcShadowPipeline({ ledger: comparisonLedger });
+  await comparisonPipeline.initialize();
+  for (const [title, productId] of [
+    ["인텔 i5-7600 CPU 3.5GHz SR334", "cpu:intel:i5-7600"],
+    ["중고 인텔 코어 i5 7세대 7600 카비레이크 CPU", "cpu:intel:i5-7600"],
+    ["라이젠5 7600", "cpu:amd:ryzen-5-7600"],
+    ["인텔 i7-7700", "cpu:intel:i7-7700"],
+    ["AMD 라이젠7 7700", "cpu:amd:ryzen-7-7700"],
+    ["인텔 i3-7400", null]
+  ]) {
+    assert.equal(comparisonPipeline.normalizeItem({site: "bunjang", title, price: 100000, currency: "KRW"},
+      new Date(now).toISOString(), null, {reclassification: true}).normalized.canonicalProductId, productId,
+    "CPU identity requires the vendor, family and exact model: " + title);
+  }
+  const detailLot = { item_id: "joonggonara:detail-lot", source_listing_id: "detail-lot", site: "joonggonara",
+    title: "ASUS MATRIX GTX980TI 풀박스 2장 그래픽카드", description: "2장 일괄판매 합니다",
+    price: 335000, currency: "KRW", status: "ACTIVE" };
+  comparisonPipeline.recordItem(detailLot, new Date(now).toISOString());
+  const { description: verifiedDescription, ...searchLot } = detailLot;
+  comparisonPipeline.recordItem(searchLot, new Date(now + 1).toISOString());
+  const retainedLot = comparisonLedger.getPublicProjection("joonggonara", "detail-lot");
+  assert.equal(retainedLot.description, verifiedDescription, "a search result without a body retains verified Joong detail");
+  assert.equal(retainedLot.quantity, 2);
+  assert.equal(retainedLot.price_scope, "TOTAL");
+  const retainedSnapshot = comparisonLedger.latestSnapshot("joonggonara", "detail-lot");
+  assert.equal(comparisonDb.prepare(`SELECT li.unit_price FROM listing_items li JOIN normalized_listings n
+    ON n.id=li.normalized_listing_id WHERE n.snapshot_id=?`).get(retainedSnapshot.id).unit_price, 167500);
+  const comparisonItems = [
+    { item_id: "bunjang:980-card", site: "bunjang", title: "GTX 980 그래픽카드",
+      description: "정상 작동 단품 판매", price: 76000, currency: "KRW" },
+    { item_id: "bunjang:980-mixed", site: "bunjang", title: "GTX 980",
+      description: "GTX980 그래픽카드와 DDR4 16GB 램 함께 일괄 판매", price: 300000, currency: "KRW" },
+    { item_id: "bunjang:980-system", site: "bunjang", title: "GTX 980 PC",
+      description: "i7-6700 CPU DDR4 16GB RAM SSD 256GB", price: 400000, currency: "KRW" }
+  ];
+  const comparisonScope = {
+    canonicalProductId: "gpu:nvidia:gtx-980", days: 30, marketPool: "KR_C2C_USED",
+    condition: "USED_WORKING", currency: "KRW", ...comparisonPipeline.pipelineVersions()
+  };
+  for (const item of comparisonItems) comparisonPipeline.recordItem({ ...item, status: "ACTIVE" }, new Date(now).toISOString());
+  const mixedProjection = comparisonLedger.getPublicProjection("bunjang", "980-mixed");
+  assert.equal(mixedProjection.price_eligible, true, "the mixed listing stays displayable");
+  assert.equal(mixedProjection.statistics_eligible, false, "rechecks preserve the independent statistics gate");
+  assert.ok(mixedProjection.statistics_exclusion_reasons.includes("COMPONENT_BUNDLE"));
+  assert.equal(comparisonLedger.getPublicProjection("bunjang", "980-card").statistics_eligible, true,
+    "normal lifecycle projections retain their valid statistics inclusion");
+  const restoredCard = comparisonLedger.getPublicProjection("bunjang", "980-card");
+  assert.equal(restoredCard.market_segment, "CONSUMER_DESKTOP");
+  assert.equal(restoredCard.listing_type, "SINGLE");
+  assert.equal(restoredCard.condition_group, "USED_WORKING");
+  assert.ok(restoredCard.classification_confidence > 0);
+  comparisonPipeline.recordItem({ site: "danawa", item_id: "danawa:search_0132874431c6774c3e58bcce",
+    title: "GTX 980 중고", description: "정상 단품 문의 010-1234-5678",
+    price: 76000, currency: "KRW", status: "ACTIVE", seller_type: "DEALER",
+    url: "https://prod.danawa.com/info/?pcode=01012345678&contact=010-1234-5678" }, new Date(now).toISOString());
+  const restoredDanawa = comparisonLedger.getPublicProjection("danawa", "search_0132874431c6774c3e58bcce");
+  assert.equal(restoredDanawa.item_id, "danawa:search_0132874431c6774c3e58bcce");
+  assert.equal(restoredDanawa.url, "https://prod.danawa.com/info/?pcode=01012345678");
+  assert.ok(!restoredDanawa.description.includes("010-1234-5678"));
+  comparisonDb.exec("CREATE TABLE listings(item_id TEXT,site TEXT,url TEXT)");
+  comparisonDb.prepare("INSERT INTO listings VALUES (?,?,?)").run(restoredDanawa.item_id,"danawa",restoredDanawa.url);
+  comparisonPipeline.recordItem({site:"danawa",source_listing_id:"search_0132874431c6774c3e58bcce",
+    item_id:"danawa:search_[PHONE]c6774c3e58bcce",title:"GTX 980 중고",description:"정상 단품",
+    price:76001,currency:"KRW",status:"ACTIVE",seller_type:"DEALER",
+    url:"https://prod.danawa.com/info/?pcode=[PHONE]"},new Date(now+1000).toISOString());
+  const recoveredDanawa = comparisonLedger.getPublicProjection("danawa", "search_0132874431c6774c3e58bcce");
+  assert.equal(recoveredDanawa.item_id, restoredDanawa.item_id);
+  assert.equal(recoveredDanawa.url, restoredDanawa.url, "restore legacy masked URLs from the same authoritative indexed ID");
+  const activeComparison = comparisonLedger.rebuildAndGetPriceStats({ ...comparisonScope, asOf: new Date(now + 1000).toISOString() });
+  assert.equal(activeComparison.active.sample_count, 1);
+  assert.equal(activeComparison.active.min, 76000, "the 300k bundle must not enter active GPU statistics");
+  for (const item of comparisonItems) comparisonPipeline.recordItem({ ...item, status: "SOLD" }, new Date(now + 2000).toISOString());
+  const soldComparison = comparisonLedger.rebuildAndGetPriceStats({ ...comparisonScope, asOf: new Date(now + 3000).toISOString() });
+  assert.equal(soldComparison.sold.sample_count, 1);
+  assert.equal(soldComparison.sold.min, 76000, "the 300k bundle must not enter sold GPU statistics");
+} finally {
+  comparisonDb.close();
+}
 assert.equal(ledger.matchAlias("CPU", "1200")?.forbidden, true,
   "bare 1200 is a forbidden CPU alias because socket numbers are not Ryzen model evidence");
 assert.equal(ledger.matchAliasInText("CPU", "LGA 1200 소켓 Z490")?.forbidden, true,
@@ -1318,6 +1456,18 @@ const storageFacetProjection = ledger.getPublicProjection("joonggonara", "ssd-fa
 assert.equal(storageFacetProjection.product_kind, "M2_NVME");
 assert.equal(storageFacetProjection.placement, "INTERNAL");
 assert.equal(storageFacetProjection.form_factor, "M.2");
+for (const [token, title, capacityBucket] of [
+  ['ssd-comparison', '삼성870 EVO SSD 1TB 과 동급인 이메인션 SSD 1TB', '513-gb-1-tb'],
+  ['ssd-liteon', '삼성 M.2 SATA SSD 128GB (LITE-ON)', 'le-256-gb']
+]) {
+  const result = pipeline.normalizeItem({
+    item_id: `bunjang:${token}`, source_listing_id: token, site: 'bunjang', title,
+    description: 'NVMe PCIe 슬롯 호환 여부를 확인하세요', price: 100_000, currency: 'KRW',
+    url: `https://m.bunjang.co.kr/products/${token}`, status: 'ACTIVE'
+  }, new Date(now).toISOString(), null, { reclassification: true }).normalized;
+  assert.equal(result.canonicalProductId, `ssd:other-unclassified:capacity-bucket:${capacityBucket}`);
+  if (token === 'ssd-liteon') assert.equal(result.productKind, 'M2_SATA');
+}
 pipeline.recordItem({
   item_id: "joonggonara:232154630", source_listing_id: "232154630", site: "joonggonara",
   title: "RTX 3080 정상 작동", description: "개인 사용", price: 480_000, currency: "KRW",
@@ -1332,6 +1482,9 @@ assert.equal(reviewedLegacyProjection.price_eligible, false,
   "reviewed exclusions must override a stale eligible normalization during projection reconciliation");
 assert.equal(reviewedLegacyProjection.listing_kind, "FULL_SYSTEM");
 assert.ok(reviewedLegacyProjection.exclusion_reasons.includes("REVIEWED_FULL_SYSTEM"));
+assert.equal(reviewedLegacyProjection.statistics_eligible, false,
+  "reviewed exclusions override stale statistics eligibility during a lifecycle recheck");
+assert.ok(reviewedLegacyProjection.statistics_exclusion_reasons.includes("REVIEWED_FULL_SYSTEM"));
 const unchangedProjected = pipeline.recordItem({
   item_id: stableProjectionId, source_listing_id: "stable-id", site: "joonggonara",
   title: "RTX 3080 정상 작동", description: "개인 사용", price: 480_000, currency: "KRW",
@@ -1469,6 +1622,14 @@ assert.equal(reclassifyPcSnapshots({
 const fullReclassification = reclassifyPcSnapshots({
   ledger, pipeline, versions: reclassificationVersions, apply: true
 });
+const reclassifiedAnomaly = db.prepare(`SELECT n.price_eligible,n.statistics_eligible,n.exclusion_reasons_json
+  FROM normalized_listings n JOIN listing_snapshots s ON s.id=n.snapshot_id
+  WHERE s.source_listing_id='rtx5090-anomalous' AND n.normalization_version=2`).get();
+assert.ok(reclassifiedAnomaly, 'Previously rejected price must remain represented');
+assert.equal(reclassifiedAnomaly.price_eligible, 0);
+assert.equal(reclassifiedAnomaly.statistics_eligible, 0);
+assert.ok(JSON.parse(reclassifiedAnomaly.exclusion_reasons_json).includes('ANOMALOUS_LOW_PRICE'),
+  'Skipping historical price references must not promote an unchanged anomalous price');
 assert.equal(fullReclassification.inserted + fullReclassification.skipped,
   db.prepare("SELECT COUNT(*) AS count FROM listing_snapshots").get().count,
   "candidate activation requires complete snapshot coverage");

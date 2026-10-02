@@ -411,7 +411,7 @@ body.ui-a.has-category-tabs .workspace-heading { grid-template-columns:minmax(20
    application page compositions. No price or data state is implemented in CSS. */
 body.ui-a { --canvas:#fff; --bg:#fff; --up-width:1536px; --radius-sm:4px; --radius-md:4px; background:#fff; }
 .ui-a [hidden] { display:none !important; }
-.ui-a :is(.site-header,.tools-header) { height:64px; min-height:64px; gap:42px; padding:0 max(24px,calc((100vw - 1488px)/2)); background:#fff; }
+.ui-a :is(.site-header,.tools-header) { height:64px; min-height:64px; gap:42px; padding:0 max(24px,calc((100% - var(--up-width))/2 + 24px)); background:#fff; }
 .ui-a :is(.site-header,.tools-header) nav a { font-size:15px; }
 .ui-a .brand { font-size:24px; }
 .ui-a .up-header-help { font-size:13px; }
@@ -434,6 +434,8 @@ body.ui-a .workspace-heading, body.ui-a.has-selected-product .workspace-heading,
 .ui-a .source-choice input:checked + span { color:white; background:var(--accent); border-color:var(--accent); box-shadow:none; }
 .ui-a .source-choice input:focus-visible + span { outline:3px solid var(--focus); outline-offset:2px; }
 .ui-a .model-selector select, .ui-a .category-selector select { min-height:42px; padding:9px 10px; font-size:14px; border-radius:4px; }
+.ui-a .model-selector option { color:var(--ink); background-color:#fff; }
+.ui-a .model-selector option.model-no-listings, #model-select.model-no-listings { color:#737b87; background-color:#f3f4f6; }
 .ui-a .up-search-row { display:grid; grid-area:auto; order:1; grid-template-columns:minmax(0,1fr) auto; gap:0 8px; margin:0; align-items:end; }
 .sf-query-label { grid-column:1 / -1; }
 .ui-a .up-catalog-search { width:100%; border-radius:4px; }

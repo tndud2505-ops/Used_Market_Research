@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
+import { writeFile } from 'node:fs/promises';
 
 import { compactStatsForPublication, statsChecksum, statsPublicationKey } from "../cloudflare/public-product-stats.mjs";
 import { PC_DIRECTORY_PUBLICATION_SOURCE_KEYS } from "../collector/logic/pc-source-registry.mjs";
@@ -56,6 +57,8 @@ if (importUrl.protocol !== "https:" || importUrl.username || importUrl.password
 const indexPath = path.resolve(indexValue);
 const index = new SearchIndex({ filePath: indexPath, backupDir: path.join(path.dirname(indexPath), "backups") });
 const ledger = new PcPartsLedger({ db: index.db });
+const publicationStarted = performance.now();
+const publicationCpuStarted = process.cpuUsage();
 
 try {
   ledger.migrate();
@@ -148,13 +151,20 @@ try {
     expectedKeys: rows.map(storedPricePublicationKey), allowedSourceIds: PC_DIRECTORY_PUBLICATION_SOURCE_KEYS,
     validateOnly: true
   });
+  // Operator recovery artifact: seal the fresh AWS calculation before the
+  // first D1 write. Never overwrite or substitute an older prepared result.
+  if (process.env.PC_STATS_PUBLICATION_OUTPUT?.trim()) {
+    await writeFile(path.resolve(process.env.PC_STATS_PUBLICATION_OUTPUT.trim()),
+      `${publicationBody}\n`, { encoding: 'utf8', flag: 'wx', mode: 0o600 });
+  }
   console.error(JSON.stringify({
     phase: "prepared",
     publication_id: publication.publication_id,
     row_count: rows.length,
     non_empty_scope_count: nonEmptyScopeCount,
     product_ids: statsProductIds,
-    body_bytes: Buffer.byteLength(publicationBody)
+    body_bytes: Buffer.byteLength(publicationBody),
+    scope_d1_usage: externalActive.d1_usage
   }));
   const activated = await publishStatsInChunks({
     importUrl,
@@ -180,6 +190,13 @@ try {
   });
   console.log(JSON.stringify({
     published: true,
+    elapsed_ms: Math.round(performance.now() - publicationStarted),
+    cpu_time_ms: (() => { const usage = process.cpuUsage(publicationCpuStarted); return Math.round((usage.user + usage.system) / 1000); })(),
+    verifier: activated.verifier,
+    readback_d1_usage: activated.readback_d1_usage,
+    scope_d1_usage: externalActive.d1_usage,
+    staging_mutation_d1_usage: activated.staging_mutation_d1_usage,
+    activation_d1_usage: activated.activation_d1_usage,
     local_publication: localPublication,
     row_count: Number(activated.row_count),
     input_row_count: rows.length,

@@ -15,7 +15,7 @@ try {
     'previous', 'cpu:previous-with-no-current-observation', 'KR_C2C_USED', 'USED_WORKING', 'KRW', 30,
     '2026-09-16', JSON.stringify({ active: { mean: 999_999 } }));
   const rows = fullPublicationScopes(db, [scope('ram:new'), scope('ram:new'), scope('ram:new', 'USD', 'OVERSEAS_USED')]);
-  assert.equal(rows.length, 3, 'old scope identities survive; duplicate observations do not duplicate publication rows');
+  assert.equal(rows.length, 5, 'old scope identities survive; domestic scopes combine pools without duplicate publication rows');
   assert.equal(rows.some(r => r.canonical_product_id === 'cpu:previous-with-no-current-observation'), true);
   assert.equal(rows.some(r => r.currency === 'USD'), true, 'currencies and pools stay separate');
   assert.equal(JSON.stringify(rows).includes('999999'), false, 'previous prices must NEVER be copied');

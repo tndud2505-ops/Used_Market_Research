@@ -14,7 +14,8 @@ try {
   const externalActive = { publication_id: 'd1-before', checksum: 'a'.repeat(64), checked_at: new Date(now).toISOString(), row_count: 2,
     scopes: [{ ...scope('cpu:old'), stats_json: { active: { mean: 999999 } } }, scope('ram:old', 'USD', 'OVERSEAS_USED')] };
   const result = fullPublicationScopes(db, [scope('ram:new'), scope('ram:new')], { externalActive, now });
-  assert.equal(result.length, 3);
+  assert.equal(result.length, 5);
+  assert.equal(result.filter(row => row.market_pool === 'KR_DOMESTIC_USED').length, 2);
   assert.ok(result.some(row => row.canonical_product_id === 'cpu:old'));
   assert.equal(JSON.stringify(result).includes('999999'), false, 'only identities cross the bootstrap boundary');
   assert.equal(result.filter(row => row.currency === 'USD').length, 1);
@@ -25,7 +26,8 @@ try {
     { scopes: [scope('cpu:old'), { ...scope('ram:old'), publication_id: 'another' }] }
   ]) assert.throws(() => fullPublicationScopes(db, [], { externalActive: { ...externalActive, ...changed }, now }));
   const firstInstall = { publication_id: null, checksum: null, row_count: 0, scopes: [], checked_at: new Date(now).toISOString() };
-  assert.deepEqual(fullPublicationScopes(db, [scope('ram:first')], { externalActive: firstInstall, now }), [scope('ram:first')]);
+  assert.deepEqual(fullPublicationScopes(db, [scope('ram:first')], { externalActive: firstInstall, now }),
+    [scope('ram:first'), scope('ram:first', 'KRW', 'KR_DOMESTIC_USED')]);
   console.log(JSON.stringify({ status: 'passed', contract: 'agent3-publication-bootstrap', synthetic_only: true,
     external_scopes_retained: 2, copied_price_values: 0, malformed_and_stale_manifests_rejected: true }));
 } finally { db.close(); }

@@ -23,7 +23,27 @@ export function parseBunjangDetailLifecycle(payload, expectedId) {
   return {
     status,
     price: Number.isFinite(Number(product.price)) && Number(product.price) > 0 ? Number(product.price) : null,
+    description: typeof product.description === 'string' ? product.description.trim().slice(0, 20_000) : null,
     evidence: { type: "STRUCTURED_STATUS", value: status },
     sourceStatus: String(product.saleStatus ?? "")
+  };
+}
+
+export function bunjangDetailObservationItem(listing, raw, detail, canonicalUrl) {
+  const description = detail.description ?? listing.description ?? null;
+  return {
+    ...raw,
+    site: 'bunjang',
+    item_id: raw.item_id || raw.id || `bunjang:${listing.source_listing_id}`,
+    source_listing_id: listing.source_listing_id,
+    title: listing.title,
+    description,
+    url: canonicalUrl,
+    price: detail.price ?? listing.price_value,
+    currency: listing.currency,
+    status: detail.status,
+    lifecycle_status: detail.status,
+    availability: ['ACTIVE', 'RESERVED'].includes(detail.status) ? 'AVAILABLE' : 'UNAVAILABLE',
+    raw_payload: { ...raw, url: canonicalUrl, description, status: detail.status, bunjang_sale_status: detail.sourceStatus }
   };
 }

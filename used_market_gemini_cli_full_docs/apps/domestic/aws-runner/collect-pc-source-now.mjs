@@ -7,17 +7,19 @@ import { pcCollectionTargetSetV2 } from "../cloudflare/pc-directory-http.mjs";
 import {
   PC_SOURCE_REGISTRY,
   getPcSource,
-  operatorAttestedSourceGovernance
+  operatorAttestedSourceGovernance,
+  sourceRuntimeForScheduler,
+  sourceRuntimeAfterFailure
 } from "../collector/logic/pc-source-registry.mjs";
 import {
-  SPECIALIST_FIXTURE_PARSERS,
-  collectDanawaCategoryListings
+  SPECIALIST_FIXTURE_PARSERS
 } from "../collector/logic/pc-source-adapters.mjs";
 import { SearchIndex } from "./search-index.mjs";
 import { PcPartsLedger } from "./pc-parts-ledger.mjs";
 import { PcShadowPipeline } from "./pc-shadow-pipeline.mjs";
 import { filterCollectionTargets } from "./pc-source-coverage-core.mjs";
 import { ebayTargetForCategory } from "../collector/logic/pc-specialist-targets.mjs";
+import { collectDanawaSearchListings, collectDanawaSearchTargetBatch, createDanawaPacedFetch } from '../collector/logic/danawa-search.mjs';
 
 const sourceKey = String(process.env.PC_COLLECT_SOURCE || "").trim().toLowerCase();
 const operationalSourceKeys = PC_SOURCE_REGISTRY
@@ -53,15 +55,7 @@ const collectTargetLimit = process.env.PC_COLLECT_TARGET_LIMIT
 const helloMarketDetailLimit = Math.min(120, Math.max(0,
   Number.parseInt(process.env.PC_HELLOMARKET_DETAIL_LIMIT || "40", 10) || 0));
 
-const DANAWA_REQUEST_MIN_INTERVAL_MS = 650;
-let lastDanawaRequestAt = 0;
-
-async function fetchDanawaPublicWithPacing(input, init) {
-  const remaining = DANAWA_REQUEST_MIN_INTERVAL_MS - (Date.now() - lastDanawaRequestAt);
-  if (remaining > 0) await new Promise((resolve) => setTimeout(resolve, remaining));
-  lastDanawaRequestAt = Date.now();
-  return fetch(input, init);
-}
+const fetchDanawaPublicWithPacing = createDanawaPacedFetch();
 
 function jsonEnvironment(name) {
   const raw = String(process.env[name] || "").trim();
@@ -100,7 +94,8 @@ function specialistSearchUrl(source, target) {
 
 async function collectTargetItems(target) {
   if (sourceKey === "danawa") {
-    return (await collectDanawaCategoryListings({
+    return (await collectDanawaSearchListings({
+      query: target.query_text,
       categoryCode: target.category_code,
       fetchImpl: fetchDanawaPublicWithPacing
     })).items.slice(0, collectLimit);
@@ -216,6 +211,10 @@ const index = new SearchIndex({ filePath: indexPath, backupDir: path.join(indexR
 const ledger = new PcPartsLedger({ db: index.db });
 const startedAt = new Date().toISOString();
 let crawlRunId = null;
+let runtimeBeforeRun = null;
+let collectionMetrics = null;
+let danawaFailureRuntime = null;
+let uncommittedTargets = [];
 try {
   ledger.migrate();
   const registeredSource = getPcSource(sourceKey);
@@ -243,20 +242,47 @@ try {
     limit: collectTargetLimit
   });
   if (targets.length === 0) throw new Error(`NO_COLLECTION_TARGETS:${sourceKey}:${collectCadenceClass}`);
+  runtimeBeforeRun = sourceRuntimeForScheduler(sourceKey, {persisted:ledger.getSource(sourceKey)});
   crawlRunId = ledger.startCrawlRun({ sourceId: sourceKey, startedAt, adapterVersion: "operator-source-refresh-v1" });
   const collectTarget = async (target) => ({ target, items: await collectTargetItems(target) });
   const settled = [];
-  for (const target of targets) {
-    try { settled.push({ status: "fulfilled", value: await collectTarget(target) }); }
-    catch (reason) { settled.push({ status: "rejected", reason }); }
-    await new Promise((resolve) => setTimeout(resolve, sourceTargetPacingMs[sourceKey] || 200));
+  if (sourceKey === "danawa") {
+    settled.push(...await collectDanawaSearchTargetBatch({ targets, collectTarget }));
+  } else {
+    for (const target of targets) {
+      try { settled.push({ status: "fulfilled", value: await collectTarget(target) }); }
+      catch (reason) { settled.push({ status: "rejected", reason }); }
+      await new Promise((resolve) => setTimeout(resolve, sourceTargetPacingMs[sourceKey] || 200));
+    }
   }
   const successful = settled.filter((result) => result.status === "fulfilled");
+  uncommittedTargets = successful.map(result => result.value.target);
   const failed = settled.filter((result) => result.status === "rejected");
   const failureMessages = failed
     .map((result) => result.reason instanceof Error ? result.reason.message : String(result.reason));
+  const blockedFailure = failureMessages.some((message) => /(?:HTTP[_ ]?(?:403|429)|\b403\b|\b429\b|blocked|captcha)/iu.test(message));
+  collectionMetrics = {request_count:settled.length,request_failure_count:failed.length,
+    http_blocked_count:failureMessages.filter(message => /HTTP_(?:403|429)|BLOCKED/iu.test(message)).length};
+  if (sourceKey === "danawa" && blockedFailure) {
+    danawaFailureRuntime = sourceRuntimeAfterFailure(sourceKey, runtimeBeforeRun,
+      new Error(failureMessages.join("; ")), new Date(startedAt));
+  }
+  settled.forEach((result, index) => result.status === "rejected" && ledger.updateSourceTargetRuntime({
+    sourceId: sourceKey,
+    targetId: targets[index].target_id,
+    startedAt,
+    succeededAt: result.status === "fulfilled" ? startedAt : null,
+    cursor: result.status === "fulfilled"
+      ? (result.value.target.incremental_cursor || null)
+      : (targets[index].incremental_cursor || null),
+    error: result.status === "rejected"
+      ? (result.reason instanceof Error ? result.reason.message : String(result.reason))
+      : null
+  }));
   if (successful.length === 0) {
-    throw new Error(`ALL_SOURCE_TARGETS_FAILED:${sourceKey}:0/${targets.length}:${failureMessages.join(";")}`);
+    const error = new Error(`ALL_SOURCE_TARGETS_FAILED:${sourceKey}:0/${settled.length}:${failureMessages.join(";")}`);
+    error.collection_metrics = collectionMetrics;
+    throw error;
   }
   console.info(JSON.stringify({ phase: "collected", source: sourceKey, targets: successful.length,
     items: successful.reduce((count, result) => count + (result.value.items || []).length, 0), limit: collectLimit }));
@@ -277,18 +303,6 @@ try {
   if (sourceKey === "hellomarket" && helloMarketDetailLimit > 0) {
     await enrichHelloMarketDetails([...deduped.values()], { maxItems: helloMarketDetailLimit });
   }
-  settled.forEach((result, index) => ledger.updateSourceTargetRuntime({
-    sourceId: sourceKey,
-    targetId: targets[index].target_id,
-    startedAt,
-    succeededAt: result.status === "fulfilled" ? startedAt : null,
-    cursor: result.status === "fulfilled"
-      ? (result.value.target.incremental_cursor || null)
-      : (targets[index].incremental_cursor || null),
-    error: result.status === "rejected"
-      ? (result.reason instanceof Error ? result.reason.message : String(result.reason))
-      : null
-  }));
   const projections = pipeline.recordItems([...deduped.values()], { observedAt: startedAt });
   console.info(JSON.stringify({ phase: "classified", source: sourceKey, projections: projections.length }));
   index.upsertPublicProjections(projections, { observedAt: startedAt });
@@ -318,15 +332,23 @@ try {
     };
   }
   const finishedAt = new Date().toISOString();
-  const blockedFailure = failureMessages.some((message) => /(?:HTTP[_ ]?(?:403|429)|\b403\b|\b429\b|blocked|captcha)/iu.test(message));
+  for (const result of successful) ledger.updateSourceTargetRuntime({
+    sourceId: sourceKey, targetId: result.value.target.target_id, startedAt,
+    succeededAt: finishedAt, cursor: result.value.target.incremental_cursor || null, error: null
+  });
+  uncommittedTargets = [];
   ledger.finishCrawlRun({
-    crawlRunId, status: failed.length > 0 ? (blockedFailure ? "QUARANTINED" : "FAILED") : "SUCCEEDED", finishedAt,
+    crawlRunId, status: failed.length > 0
+      ? (danawaFailureRuntime ? (danawaFailureRuntime.runtime_status === "QUARANTINED" ? "QUARANTINED" : "FAILED")
+        : (blockedFailure ? "QUARANTINED" : "FAILED")) : "SUCCEEDED", finishedAt,
     collectedCount: projections.length, changedCount: projections.filter((item) => item._pc_snapshot_created === true).length,
-    requestCount: targets.length, requestFailureCount: failed.length, parsedCount: projections.length,
-    httpBlockedCount: blockedFailure ? failed.length : 0,
+    requestCount: settled.length, requestFailureCount: failed.length, parsedCount: projections.length,
+    httpBlockedCount: collectionMetrics.http_blocked_count,
     error: failed.length > 0 ? failureMessages.join("; ") : null,
     adapterVersion: "operator-source-refresh-v1"
   });
+  crawlRunId = null;
+  if (danawaFailureRuntime) ledger.updateSourceRuntime(sourceKey, danawaFailureRuntime);
   if (failed.length === 0) ledger.updateSourceRuntime(sourceKey, {
       runtime_status: "ENABLED",
       consecutive_failures: 0,
@@ -337,12 +359,24 @@ try {
       last_succeeded_at: finishedAt,
       last_error: null
     });
-  console.log(JSON.stringify({ source: sourceKey, targets: targets.length, successful_targets: successful.length,
+  console.log(JSON.stringify({ source: sourceKey, targets: settled.length, successful_targets: successful.length,
     failed_targets: failed.length, collected: projections.length, imported, sql_export: sqlExport }));
   if (failed.length > 0) process.exitCode = 1;
 } catch (error) {
+  for (const target of uncommittedTargets) ledger.updateSourceTargetRuntime({
+    sourceId: sourceKey, targetId: target.target_id, startedAt,
+    cursor: target.incremental_cursor || null, error: `PERSISTENCE_FAILED:${error.message}`
+  });
   if (crawlRunId) {
-    try { ledger.finishCrawlRun({ crawlRunId, status: "FAILED", finishedAt: new Date().toISOString(), error: error.message }); }
+    const failureMetrics = error.collection_metrics || collectionMetrics;
+    try { ledger.finishCrawlRun({ crawlRunId,
+      status: danawaFailureRuntime?.runtime_status === "QUARANTINED" ? "QUARANTINED" : "FAILED",
+      finishedAt: new Date().toISOString(), error: error.message,
+      requestCount: failureMetrics?.request_count || 0,
+      requestFailureCount: failureMetrics?.request_failure_count || 0,
+      httpBlockedCount: failureMetrics?.http_blocked_count || 0 });
+      if (danawaFailureRuntime) ledger.updateSourceRuntime(sourceKey, danawaFailureRuntime);
+    }
     catch {}
   }
   throw error;

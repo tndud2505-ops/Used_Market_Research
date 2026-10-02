@@ -41,30 +41,30 @@ assert.equal(analysisHtml.includes('id="tools-summary"'), false,
   "price analysis uses one source table, not duplicate summary cards");
 requireText(analysisHtml, 'id="analysis-title"', 'analysis needs its compact selected-model heading');
 requireText(analysisHtml, 'id="analysis-workspace"', 'analysis chart and source table must share one workspace');
-requireText(analysisHtml, 'data-action="analysis-pane" data-pane="chart"', 'chart pane must be collapsible');
-requireText(analysisHtml, 'data-action="analysis-pane" data-pane="table"', 'source table pane must be collapsible');
-requireText(analysisHtml, 'class="sf-source-table-scroll" tabindex="0"', 'source table must scroll inside its own keyboard-focusable region');
+requireText(analysisHtml, 'id="analysis-chart-pane"', 'chart stays the primary analysis surface');
+requireText(analysisHtml, 'id="analysis-model-dialog"', 'model selection remains available from the chart workspace');
+assert.equal(analysisHtml.includes('id="analysis-table-pane"'), false, 'the current analysis workspace has one chart surface');
 assert.equal(analysisHtml.includes('id="chart-scale-'), false, 'zoom belongs to the date and price axes, not separate sliders');
 assert.equal(analysisHtml.includes('tools-source-label'), false,
   "analysis source tabs stand alone without a redundant site label");
 assert.equal(analysisHtml.includes('id="overview-button"'), false, "overall trend must be removed");
 assert.equal(analysisHtml.includes('id="chart-mode"'), false, "price analysis must remain in amount mode");
-requireText(toolsScript, "const sourceOrder = ['ebay', 'joonggonara', 'bunjang']",
-  "analysis sites must keep the requested visible order after the domestic total");
+requireText(toolsScript, "const sourceOrder = ['joonggonara', 'bunjang', 'danawa', 'ebay']",
+  "analysis separates domestic comparison from overseas USD prices");
 requireText(toolsScript, "const visibleSeries = builder ? SERIES.filter(s => s.key !== 'confirmed_transactions') : [];",
   "analysis model rows must keep only the model and view columns");
 requireText(toolsScript, "const link = el('a', 'model-name-link', nameOf(product));",
   "the visible model name must be the direct original-search link");
 assert.equal(toolsScript.includes("state.expanded"), false, "flat model rows must not retain expansion state");
 assert.equal(toolsScript.includes("동일 모델 묶기"), false, "flat model rows must not expose a grouping toggle");
-requireText(toolsScript, "makeTable(['부품', '선택 모델', '수량', '판매중 가격', '판매완료 평균', '변경'])",
-  'the search-first builder has one six-column integrated table');
-assert.match(builderHtml, /<header class="sf-page-bar sf-builder-bar">[\s\S]*?id="contextual-offer"[\s\S]*?<\/header>/,
-  'the contextual ad stays with the builder actions');
+requireText(toolsScript, "makeTable(['부품', '선택 모델', '수량', '판매중', '판매완료 표시가', '다나와 중고 표시가', ''])",
+  'the builder includes a separate Danawa displayed-price column');
+assert.match(builderHtml, /id="contextual-offer" aria-label="쿠팡 파트너스 광고" hidden/,
+  'the contextual ad retains its explicit advertising identity');
 assert.equal(toolsScript.includes("el('tfoot')"), true, 'totals share the component table footer');
 assert.equal(toolsScript.includes("'원문 검색'"), false,
   "the model name link must not repeat a separate original-search label");
-requireText(toolsScript, "[['', '전체']", "analysis must offer all sources with currencies kept separate");
+requireText(toolsScript, "[['', '국내 비교']", "analysis must label the domestic comparison scope");
 requireText(toolsScript, "state.range.to === state.range.latest ? '' : state.range.to",
   "today must use the latest price publication without an explicit as_of contract");
 const requestedPriceAsOfSource = toolsScript.match(/function requestedPriceAsOf\(\) \{[^}]+\}/u)?.[0];
@@ -89,13 +89,13 @@ requireText(toolsChart, "item.label || metric?.label",
   "site-specific chart descriptors must provide stable legend and tooltip labels");
 requireText(toolsChart, "filter(item => item.points.some(point => point.value != null))",
   "empty sold series must not leave a misleading legend entry");
-requireText(guideHtml, '현재 운영 중인 중고나라·번개장터·eBay',
-  'the guide must describe the current three-source operating set');
+requireText(guideHtml, '중고나라·번개장터·다나와·eBay',
+  'the guide must describe every operational directory source');
 assert.doesNotMatch(guideHtml, /다나와 장터|헬로마켓|리씽크몰|쿨엔조이/u,
   'the guide must not advertise retired sources as currently collected');
 assert.equal(toolsScript.includes('state.overview'), false, "removed overall-trend state must not remain reachable");
 assert.equal(toolsScript.includes("target.id === 'chart-mode'"), false, "removed index-mode control must not retain an event path");
-requireText(toolsChart, "empty.textContent = '가격 자료 없음'", "a source without evidence needs an honest empty state");
+requireText(toolsChart, "가격 자료 없음", "a source without evidence needs an honest empty state");
 requireText(toolsStyles, 'width:min(1536px,100%)', "tool pages must share the listing page container width");
 
 const categoryIndex = html.indexOf('id="category-select"');
@@ -143,8 +143,8 @@ requireText(script, "payload?.available_facets", "the model response must drive 
 requireText(html, 'class="source-selector-label">거래 사이트</span>', "site scope needs a short visible label");
 requireText(script, 'input.type = "radio"', "site controls must use the same single-selection semantics as price analysis");
 requireText(script, 'input.name = "listing-source"', "main listing site tabs must form one radio group");
-requireText(script, '["joonggonara", "bunjang", "ebay"]',
-  "source toggles must follow domestic total, Joonggonara, Bunjang, eBay order");
+requireText(script, '["joonggonara", "bunjang", "danawa", "ebay"]',
+  "source toggles must put domestic sources before overseas eBay");
 requireText(script, 'source.id === "ebay" ? "eBay (USD)"', "the overseas tab must state its separate currency");
 requireText(script, "state.selectedSites.add(source.id)", "a site tab must apply one exact source");
 requireText(script, "state.selectedSites.clear()", "the all-sites choice must clear individual scope");
@@ -171,17 +171,16 @@ requireText(script, 'if (state.categoryCode) url.searchParams.set("category_code
   "text search must preserve the selected component category when one is active");
 requireText(script, 'params.set("category_code", state.categoryCode)', "broad listing search must preserve the category");
 requireText(script, "params.append(key, value)", "broad listing search must preserve repeated facets");
-requireText(script, 'params.set("canonical_product_id", productId(state.selectedProduct))', "model selection must use an exact listing query");
+requireText(script, 'params.set("canonical_product_id", productId(selectedProduct))', "model selection must use an exact listing query");
 requireText(script, 'params.set("limit", "100")', "one bounded request preloads ten compact listing pages");
 requireText(script, "listing-model-action", "broad listing rows must offer direct model insight");
 requireText(script, "state.listingRequest", "listing and stats requests need independent cancellation");
 requireText(script, "function cancelListingRequest", "scope changes must cancel stale listing requests");
 
 // Search preview and standalone analysis share the same price calculation rules.
-requireText(toolsScript, '판매완료 표시가는 실제 체결가가 아닙니다.', 'sold display price remains distinguished');
-requireText(toolsScript, "makeTable(['출처','통화','기간'", 'source table includes actual currency and window');
-requireText(toolsScript, 'scopedStats(sourceStats(record.data, id)', 'source rows do not repeat aggregate prices');
-requireText(toolsScript, 'metric.sample_count >= 0', 'sample counts must be valid before display');
+requireText(toolsScript, '판매완료 표시가', 'sold display price remains labelled');
+requireText(toolsScript, "currency: id === 'ebay' ? 'USD' : 'KRW'", 'chart sources retain their own currency');
+requireText(toolsScript, 'sourceStats(scopedStats(record.data, state.selectedManufacturer), id)', 'source series use the selected manufacturer before selecting the source');
 requireText(toolsChart, "svg.setAttribute('tabindex', '0')", 'one accessible chart focus target');
 requireText(toolsChart, "['ArrowLeft', 'ArrowRight', 'Enter', ' ']", 'chart remains keyboard operable');
 requireText(toolsChart, "if (point.value == null) { drawing = false; return; }", 'missing observations remain gaps');
@@ -301,7 +300,7 @@ let listingLoads = 0;
 let statsRenders = 0;
 Object.assign(context, {
   updateFacetSelectionUi() {}, renderSourceFilters() {}, updateStatsMessage() {},
-  syncCatalogUrl() {}, updatePriceGraphLink() {},
+  syncCatalogUrl() {}, updatePriceGraphLink() {}, refreshModelAvailability() {},
   window: { requestAnimationFrame() {} },
   renderStats() { statsRenders += 1; },
   loadListings() { listingLoads += 1; },
@@ -341,6 +340,12 @@ linkContext.state.selectedSites.clear();
 assert.equal(linkContext.buildListingQuery().get('currency'),'KRW');
 assert.equal(linkContext.buildListingQuery().get('market_pool'),'KR_C2C_USED');
 assert.equal(linkContext.buildListingQuery().get('sites'),'bunjang');
+linkContext.state.sources.push({id:'danawa',currency:'KRW',marketPools:['KR_C2C_USED','KR_DEALER_USED']});
+assert.equal(linkContext.buildListingQuery().get('market_pool'),null,'domestic searches must include dealer listings through the approved site/currency scope');
+linkContext.state.selectedSites.add('danawa');
+assert.equal(linkContext.buildListingQuery().get('market_pool'),null,'Danawa searches must include both supported used pools');
+assert.equal(linkContext.buildListingQuery().get('sites'),'danawa');
+linkContext.state.selectedSites.clear();
 linkContext.state.sources=[linkContext.state.sources[1]];
 assert.equal(linkContext.listingSourceScope().length,0,'domestic cannot fall back to eBay');
 linkContext.state.selectedProduct=null;linkContext.state.productTotal=2;

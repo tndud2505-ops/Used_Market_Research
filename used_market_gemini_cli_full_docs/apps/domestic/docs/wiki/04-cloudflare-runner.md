@@ -1,7 +1,31 @@
 # Cloudflare Runner 아키텍처
 
-마지막 갱신: 2026-08-20
-상태: Named Tunnel·AWS Runner·Worker 운영 배포 및 live 검증 완료
+마지막 갱신: 2026-09-24
+상태: Worker + Named Tunnel + AWS Runner 운영, AWS 전체 통계 검증 배포·새 게시 검증 완료
+
+## 현재 역할과 운영 문서
+
+```text
+승인 사이트 → AWS 주기 수집 → AWS 규칙 분류 → SQLite 매물/관측
+Worker 매일 03:00 KST 호출 → AWS 전체 통계 계산 → D1 분할 staging
+Worker 활성화 요청 → 인증된 AWS 전체 readback 검증
+  → Worker 이전 게시/행 수 재확인 + D1 원자적 활성화 → AWS 저장본 기록
+사용자 → Worker 화면/API·캐시 → AWS 저장 자료 조회 (현재 가격은 D1 대체 가능)
+```
+
+Workers Free를 유지한다. Worker는 전체 통계를 한 요청에서 다시 파싱·검증하지 않고, 고정된 인증 AWS 검증 API의 일치하는 판정을 확인한다. 업로드 4행, 활성 범위 조회 100개씩으로 나눈다. `FREE_TIER_MODE=false`는 AWS 연결 설정이며 유료 구독 표시가 아니다.
+
+현재 PC 운영 소스와 KST cadence는 중고나라 매시 04·34분, 번개장터 11분, 다나와 중고 19·49분, eBay 44분이다. AWS가 0~120초 jitter와 배치 제한을 적용한다. Worker cron은 UTC `0 0`, `0 6`, `0 12`, `0 18`, `30 18`의 매일 5개 트리거다. `0 18 * * *`에서 통계 작업을 호출하고 나머지는 AWS scheduler watchdog이다. 실제 완료 시각은 계산 시간만큼 늦어진다.
+
+현재 Node 작업 실행 코드는 `aws-runner/runner.mjs`다. 실행 잠금과 idempotency 결과는 프로세스 메모리이므로 재시작·다중 인스턴스 사이의 중복 방지를 보장한다고 해석하지 않는다. 공개 PC API는 원 사이트를 호출하지 않으며 매물 freshness와 일일 통계 게시 시각은 따로 판단한다.
+
+- [게시 운영·인증·장애 대응·배포 순서](09-price-publication-operations.md)
+- [2026-09-24 원인·결정·배포 및 게시 증거](../worklog/2026-09-24-aws-publication-verification.md)
+- [현재 AWS 설치 절차](../../aws-runner/README.md), [Worker 배포](../../cloudflare/README.md)
+
+## 이전 범용 검색 운영 기록 (2026-08)
+
+아래는 8월의 legacy `/api/search` 설계와 배포 기록을 보존한 것이다. 당시 소스·cron·공유 파일 lock·버전·DB 크기 설명을 현재 PC 운영 설정으로 적용하지 않는다. 현재 운영 및 복구에는 위의 2026-09-24 문서를 우선한다.
 
 ## 역할
 
@@ -77,7 +101,7 @@ PC 전용 source cadence는 AWS에서 KST로 계산하며 0~120초 jitter를 적
 | --- | --- |
 | 중고나라 | 04, 34 |
 | 번개장터 | 11, 41 |
-| 다나와 | 19, 49 |
+| 다나와 | 19 |
 | 헬로마켓 | 27 |
 | 리씽크몰 | 36 |
 | eBay | 44 |
@@ -92,7 +116,7 @@ Free 플랜의 5개 Cron 제한 때문에 `daily-price-refresh`는 `0 */2 * * *`
 - https://developers.cloudflare.com/workers/runtime-apis/handlers/scheduled/
 - https://developers.cloudflare.com/workers/configuration/cron-triggers/
 
-## 현재 배포 전제
+## 당시 배포 전제 (2026-08)
 
 - Worker: `used-market-runner`
 - 배포 Worker 버전: `61544219-71da-488f-b150-403d7abc45b4`

@@ -3,18 +3,19 @@ import { DatabaseSync } from 'node:sqlite';
 import { readFileSync } from 'node:fs';
 import {
   stageProductStatsChunk, activateStagedProductStats, readActiveProductStatsScopes, statsChecksum,
-  statsChunkManifestChecksum, statsPublicationBoundaryKey, statsPublicationKey
+  statsChunkManifestChecksum, statsPublicationBoundaryKey, statsPublicationKey, readActiveProductStatsScopePage, readStagedProductStatsPage
 } from '../cloudflare/public-product-stats.mjs';
 import worker from '../cloudflare/worker.mjs';
 import { readActiveStatsScopes, publishStatsInChunks } from '../aws-runner/pc-stats-publication-client.mjs';
 import { fullPublicationScopes } from '../aws-runner/pc-publication-scopes.mjs';
+import { verifyStoredStatsOnAws } from '../aws-runner/pc-stats-readback.mjs';
 
 // Actual SQLite tables and constraints, but only an isolated in-memory DB.
 class LocalD1 {
   constructor() {
     this.sqlite = new DatabaseSync(':memory:');
     this.sqlite.exec('PRAGMA foreign_keys=ON');
-    for (const name of ['0002_pc_public_stats.sql', '0015_pc_stats_chunk_staging.sql']) {
+    for (const name of ['0002_pc_public_stats.sql', '0015_pc_stats_chunk_staging.sql', '0016_pc_stats_publication_cursor.sql']) {
       this.sqlite.exec(readFileSync(new URL(`../cloudflare/migrations/${name}`, import.meta.url), 'utf8'));
     }
     this.failPointer = false;
@@ -105,6 +106,21 @@ await check('large multi-page statistics keep the same exact checksum', async db
   assert.equal(activated.checksum,largeChecksum);
   assert.equal(activated.row_count,largeRows.length);
   assert.ok(activated.verification_pages>=4,'verification remains bounded across several payload-sized pages');
+  await stage(db, 'unrelated-staging');
+  const scopes = [];
+  let cursor = 0;
+  for (let offset = 0; offset < largeRows.length; offset += 100) {
+    const page = await readActiveProductStatsScopePage(db, offset, cursor);
+    scopes.push(...page.scopes);
+    cursor = page.next_rowid;
+  }
+  assert.deepEqual(scopes.map(statsPublicationKey).sort(), largeRows.map(statsPublicationKey).sort(),
+    'cursor pages retain every active scope while excluding unrelated staged rows');
+  const plan = db.sqlite.prepare('EXPLAIN QUERY PLAN SELECT rowid FROM public_product_stats INDEXED BY idx_public_stats_publication_rows WHERE publication_id=? AND rowid>? ORDER BY rowid LIMIT 100').all('large-pages', 0);
+  assert.ok(plan.every(row => !/TEMP B-TREE|SCAN /u.test(row.detail)), 'cursor must seek indexed rows');
+  await assert.rejects(() => readActiveProductStatsScopePage(db, 100, 0), /cursor/u);
+  const identities = await readStagedProductStatsPage(db, 'unrelated-staging', 'identities', 0, [], 0);
+  assert.equal(identities.items.length, rows.length);
 });
 await check('wrong claimed overall checksum is rejected', async db => {
   const manifest = await stage(db, 'wrong-checksum', { checksum: 'b'.repeat(64) });
@@ -179,7 +195,7 @@ await check('fresh D1 identities bootstrap an empty local publication table', as
     canonical_product_id: 'ram:fixture:new-observation', market_pool: 'KR_C2C_USED',
     condition_code: 'USED_WORKING', currency: 'KRW', days: 30
   }], { externalActive: proof });
-  assert.equal(combined.length, 42);
+  assert.equal(combined.length, 84);
   assert.ok(rows.every(row => combined.some(scope => statsPublicationKey(scope) === statsPublicationKey(row))));
 });
 await check('stale predecessor rejects activation and preserves current prices', async db => {
@@ -199,13 +215,26 @@ await check('Worker scope endpoint is authenticated and returns no-store identit
   assert.equal(response.headers.get('cache-control'), 'no-store');
   assert.equal((await response.json()).external_active.row_count, 0);
 });
-await check('client-to-Worker complete publication and bootstrap use one matching manifest', async db => {
+await check('client-to-Worker publication survives a lost chunk acknowledgement and verifies on AWS', async db => {
   const originalFetch = globalThis.fetch;
   const seen = [];
+  let lostChunkResponse = false;
   try {
     globalThis.fetch = async (url, options) => {
       seen.push({ path: new URL(url).pathname, method: options.method });
-      return worker.fetch(new Request(url, options), { DB: db, MANUAL_RUN_TOKEN: 'fixture-secret' });
+      if (new URL(url).hostname === 'runner.test') {
+        assert.equal(options.headers.authorization, 'Bearer runner-secret');
+        const verification = await verifyStoredStatsOnAws({ importUrl: 'https://publication.test/admin/import-product-stats',
+          token: 'fixture-secret', publication: JSON.parse(options.body) });
+        return Response.json({ ok: true, verification });
+      }
+      const response = await worker.fetch(new Request(url, options), { DB: db, MANUAL_RUN_TOKEN: 'fixture-secret',
+        RUNNER_URL: 'https://runner.test/api/runner/run', RUNNER_TOKEN: 'runner-secret' });
+      if (new URL(url).pathname === '/admin/stage-product-stats' && !lostChunkResponse) {
+        lostChunkResponse = true;
+        return new Response('temporary gateway failure after commit', { status: 503 });
+      }
+      return response;
     };
     const importUrl = 'https://publication.test/admin/import-product-stats';
     const proof = await readActiveStatsScopes({ importUrl, token: 'fixture-secret' });
@@ -215,9 +244,48 @@ await check('client-to-Worker complete publication and bootstrap use one matchin
     assert.equal(result.row_checksum_verified, true);
     assert.equal(result.checksum, checksum);
     assert.equal(db.active(), 'roundtrip');
-    assert.deepEqual(seen.map(item => item.method), ['GET', 'POST', 'POST', 'POST']);
-    assert.equal(seen.at(-1).path, '/admin/activate-product-stats');
+    assert.equal(result.verifier, 'aws-readback-v1');
+    assert.equal(seen.filter(item => item.path === '/admin/stage-product-stats').length, 12);
+    assert.equal(seen.filter(item => item.path === '/api/runner/verify-stats-publication').length, 1);
+    assert.ok(seen.some(item => item.path === '/admin/product-stats-readback'));
   } finally { globalThis.fetch = originalFetch; }
+});
+await check('public readback and caller-supplied verification bypasses are rejected', async db => {
+  const env = { DB: db, MANUAL_RUN_TOKEN: 'fixture-secret' };
+  assert.equal((await worker.fetch(new Request('https://publication.test/admin/product-stats-readback?publication_id=x&kind=rows'), env)).status, 401);
+  const manifest = await stage(db, 'skip-attempt');
+  const response = await worker.fetch(new Request('https://publication.test/admin/activate-product-stats', {
+    method: 'POST', headers: { authorization: 'Bearer fixture-secret', 'content-type': 'application/json' },
+    body: JSON.stringify({ ...manifest, expected_previous_publication: { publication_id: null, checksum: null },
+      verified: true, row_checksum_verified: true, verifier: 'aws-readback-v1' })
+  }), env);
+  assert.equal(response.status, 400);
+  assert.equal(db.active(), undefined);
+});
+await check('AWS readback rejects a stored price changed after staging', async db => {
+  const manifest = await stage(db, 'aws-tamper');
+  db.sqlite.prepare("UPDATE public_product_stats SET stats_json=json_set(stats_json,'$.active.median',900000) WHERE canonical_product_id=?")
+    .run(rows[0].canonical_product_id);
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async (url, options) => worker.fetch(new Request(url, options), { DB: db, MANUAL_RUN_TOKEN: 'fixture-secret' });
+    await assert.rejects(() => verifyStoredStatsOnAws({ importUrl: 'https://publication.test/admin/import-product-stats',
+      token: 'fixture-secret', publication: manifest }), /checksum/u);
+    assert.equal(db.active(), undefined);
+  } finally { globalThis.fetch = originalFetch; }
+});
+await check('predecessor race inside pointer transaction cannot overwrite a winner', async db => {
+  await activateStagedProductStats(db, await stage(db, 'old'));
+  const manifest = await stage(db, 'racing');
+  const batch = db.batch.bind(db);
+  db.batch = async statements => {
+    if (statements.some(statement => statement.sql.includes('activation_guard'))) {
+      db.sqlite.prepare('UPDATE public_stats_publications SET checksum=? WHERE publication_id=?').run('c'.repeat(64), 'old');
+    }
+    return batch(statements);
+  };
+  await assert.rejects(() => activateStagedProductStats(db, manifest), /malformed JSON/u);
+  assert.equal(db.active(), 'old');
 });
 console.log(JSON.stringify({ status: failures.length ? 'failed' : 'passed', contract: 'pc-agent1-chunk-integrity',
   passed, failed: failures.length, failures, production_writes: 0, real_requests: 0 }));

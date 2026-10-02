@@ -24,12 +24,13 @@ import { decodeSearchCursor, encodeSearchCursor } from "./search-cursor.mjs";
 import { collectionIdentity, SearchIndex } from "./search-index.mjs";
 import { PcPartsLedger } from "./pc-parts-ledger.mjs";
 import { stabilizeIncrementalPcProjections } from "./pc-projection-republish-policy.mjs";
-import { parsePriceStatsRequest, priceStatsResponse } from "./pc-price-stats-http.mjs";
+import { parsePriceStatsRequest, priceStatsResponse, priceHistoryResponse } from "./pc-price-stats-http.mjs";
 import { pcPriceReadinessProblem } from '../market/logic/pc-price-readiness.mjs';
 import { schedulerReadDeferral } from "./pc-scheduler-admission.mjs";
+import { verifyStoredStatsOnAws } from './pc-stats-readback.mjs';
 import { PcShadowPipeline } from "./pc-shadow-pipeline.mjs";
 import { explicitSoldText, structuredSoldEvidenceFromHtml } from "../market/logic/listing-lifecycle.mjs";
-import { bunjangProductIdFromListing, parseBunjangDetailLifecycle } from "../market/logic/bunjang-lifecycle.mjs";
+import { bunjangProductIdFromListing, parseBunjangDetailLifecycle, bunjangDetailObservationItem } from "../market/logic/bunjang-lifecycle.mjs";
 import {
   pcCatalogResponse,
   pcCollectionCapacityPlan,
@@ -55,11 +56,11 @@ import {
 } from "../collector/logic/pc-source-registry.mjs";
 import {
   SPECIALIST_FIXTURE_PARSERS,
-  collectDanawaCategoryListings,
   createSourceAdapter,
   filterIncrementalListings
 } from "../collector/logic/pc-source-adapters.mjs";
 import { ebayTargetForCategory } from "../collector/logic/pc-specialist-targets.mjs";
+import { collectDanawaSearchListings, collectDanawaSearchTargetBatch, createDanawaPacedFetch } from '../collector/logic/danawa-search.mjs';
 
 const PORT = Number.parseInt(process.env.RUNNER_PORT || "8787", 10);
 const RUNNER_TOKEN = process.env.CLOUDFLARE_RUNNER_TOKEN || process.env.RUNNER_TOKEN || "";
@@ -214,15 +215,9 @@ const PC_SOURCE_TARGET_PACING_MS = Object.freeze({
   // between requests so a partial batch can still be committed.
   rethinkmall: 1_500
 });
-const DANAWA_REQUEST_MIN_INTERVAL_MS = 650;
-let lastDanawaRequestAt = 0;
-
-async function fetchDanawaPublicWithPacing(input, init = {}) {
-  const remaining = DANAWA_REQUEST_MIN_INTERVAL_MS - (Date.now() - lastDanawaRequestAt);
-  if (remaining > 0) await new Promise((resolve) => setTimeout(resolve, remaining));
-  lastDanawaRequestAt = Date.now();
-  return fetch(input, { ...init, signal: boundedFetchSignal(init.signal, 20_000) });
-}
+const fetchDanawaPublicWithPacing = createDanawaPacedFetch({
+  fetchImpl: (input, init) => fetch(input, { ...init, signal: boundedFetchSignal(init.signal, 20_000) })
+});
 const SEARCH_ONLY_CATEGORY_IDS = Object.freeze([
   "all", "fashion", "fashion_women", "fashion_men", "fashion_women_outer", "fashion_women_tops",
   "fashion_women_bottoms", "fashion_women_skirts", "fashion_men_outer", "fashion_men_tops",
@@ -256,6 +251,7 @@ let searchIndex = null;
 let searchIndexError = "";
 let pcLedger = null;
 let pcPipeline = null;
+let pcStatsVerificationActive = false;
 let pcPipelineError = "";
 let pcSchedulerAfter = new Date(Date.now() - PC_SCHEDULER_CATCHUP_MS).toISOString();
 let pcSchedulerRuntime = Object.fromEntries(PC_SOURCE_REGISTRY.map((source) => [source.key, getSourceRuntimeDefaults(source.key)]));
@@ -1374,7 +1370,8 @@ function dedupeCollectedItems(items) {
 
 async function collectSpecialistSource(sourceKey, target, parentSignal) {
   if (sourceKey === "danawa") {
-    return collectDanawaCategoryListings({
+    return collectDanawaSearchListings({
+      query: target.query_text,
       categoryCode: target.category_code,
       fetchImpl: (input, init = {}) => fetchDanawaPublicWithPacing(input, {
         ...init,
@@ -1416,7 +1413,7 @@ function listingIdentityIsPresent(html, listing) {
 }
 
 async function recheckKnownListings(sourceKey, checkedAt, parentSignal) {
-  if (sourceKey === "ebay") return [];
+  if (sourceKey === "ebay" || sourceKey === "danawa") return [];
   const changedProjections = [];
   const captureProjection = (sourceListingId, result) => {
     if (result?.snapshotCreated !== true) return;
@@ -1483,15 +1480,10 @@ async function recheckKnownListings(sourceKey, checkedAt, parentSignal) {
         break;
       }
       if (detail.status === "UNAVAILABLE_UNKNOWN") continue;
-      const result = pcLedger.recordObservation({
-        sourceId: sourceKey, sourceListingId: listing.source_listing_id, observedAt: checkedAt,
-        title: listing.title, description: listing.description,
-        rawPayload: { ...raw, url: canonicalUrl, status: detail.status, bunjang_sale_status: detail.sourceStatus },
-        price: detail.price ?? listing.price_value, currency: listing.currency,
-        status: detail.status, statusEvidence: detail.evidence,
-        availability: ["ACTIVE", "RESERVED"].includes(detail.status) ? "AVAILABLE" : "UNAVAILABLE"
-      });
-      captureProjection(listing.source_listing_id, result);
+      const projection = pcPipeline.recordItem(
+        bunjangDetailObservationItem(listing, raw, detail, canonicalUrl), checkedAt
+      );
+      captureProjection(listing.source_listing_id, { snapshotCreated: projection._pc_snapshot_created });
       continue;
     }
     let response;
@@ -1578,7 +1570,9 @@ function pcSourceAdapter(sourceKey) {
         return { target, items, diagnostics, request_count: Math.max(1, diagnostics.length) };
       };
       const settled = [];
-      if (SPECIALIST_FIXTURE_PARSERS[sourceKey] || Object.hasOwn(PC_SOURCE_TARGET_PACING_MS, sourceKey)) {
+      if (sourceKey === "danawa") {
+        settled.push(...await collectDanawaSearchTargetBatch({ targets: dueTargets, collectTarget, signal: input.signal }));
+      } else if (SPECIALIST_FIXTURE_PARSERS[sourceKey] || Object.hasOwn(PC_SOURCE_TARGET_PACING_MS, sourceKey)) {
         for (const target of dueTargets) {
           throwIfAborted(input.signal);
           try {
@@ -1617,7 +1611,7 @@ function pcSourceAdapter(sourceKey) {
         const error = new Error(`ALL_PC_QUERIES_FAILED:${sourceKey}`);
         error.collection_metrics = {
           ...collectionMetrics,
-          target_results: dueTargets.map((target, index) => ({
+          target_results: dueTargets.slice(0, settled.length).map((target, index) => ({
             target_id: target.target_id,
             status: "FAILED",
             cursor: target.incremental_cursor || null,
@@ -2332,6 +2326,7 @@ const server = http.createServer(async (req, res) => {
           items: result.items,
           total: result.total,
           source_counts: result.sourceTotals || {},
+          model_counts: result.modelCounts || {},
           pagination: { has_more: Boolean(nextCursor), next_cursor: nextCursor },
           as_of: asOf,
           freshness: pcListingsFreshness(asOf, result.latestObservedAt),
@@ -2390,6 +2385,7 @@ const server = http.createServer(async (req, res) => {
         ruleVersion: activePipelineVersion.rule_version,
         filterVersion: activePipelineVersion.filter_version
       } : {};
+      const dailyOnly = url.searchParams.get('view') === 'daily';
       const stats = pcLedger.getStoredDailyPriceStats({
         canonicalProductId: query.canonicalProductId,
         days: query.days,
@@ -2397,9 +2393,11 @@ const server = http.createServer(async (req, res) => {
         condition: query.condition,
         currency: query.currency,
         asOf,
-        requireAsOfCoverage: query.isHistorical,
+        requireAsOfCoverage: !dailyOnly && query.isHistorical,
+        dailyOnly,
         ...priceVersionOptions
       });
+      if (dailyOnly) return json(res, 200, { status:'success', data:priceHistoryResponse(query,stats) });
       const problem = pcPriceReadinessProblem(query, stats);
       if (problem) {
         res.setHeader('cache-control', 'no-store');
@@ -2506,6 +2504,21 @@ const server = http.createServer(async (req, res) => {
         note: "메인 검색에 통합되어 있으며, 공식 카테고리 ID 대신 명시 검색어와 결과 분류 필터를 사용합니다."
       }
     });
+  }
+  if (req.method === 'POST' && url.pathname === '/api/runner/verify-stats-publication') {
+    if (!tokenMatches((req.headers.authorization || '').replace(/^Bearer\s+/i, ''), RUNNER_TOKEN))
+      return json(res, 401, { ok: false, error: 'Unauthorized' });
+    if (pcStatsVerificationActive) return json(res, 409, { ok: false, error: 'Publication verification busy' });
+    pcStatsVerificationActive = true;
+    try {
+      const publication = await readJson(req);
+      const verification = await verifyStoredStatsOnAws({ importUrl: STATS_IMPORT_URL, token: IMPORT_TOKEN, publication });
+      console.log(JSON.stringify({ event: 'pc_stats_readback_verified', ...verification }));
+      return json(res, 200, { ok: true, verification });
+    } catch (error) {
+      console.error('[aws-runner] stats readback verification failed', error.message);
+      return json(res, 422, { ok: false, error: 'Publication readback verification failed' });
+    } finally { pcStatsVerificationActive = false; }
   }
   if (req.method === "GET" && url.pathname === "/api/runner/status") {
     if (!tokenMatches((req.headers.authorization || "").replace(/^Bearer\s+/i, ""), RUNNER_TOKEN)) {

@@ -47,13 +47,14 @@ function addEvidence(evidence, field, matchedText, value) {
 }
 
 function detectCondition(text, evidence) {
-  const defectScanText = text.replace(/(?:고장\s*(?:아님|아닙니다|없음|없습니다)|부품용\s*(?:아님|아닙니다)|불량\s*(?:아님|아닙니다|없음|없습니다)|작동\s*안\s*되는\s*것\s*아님)/giu, ' ');
+  const defectScanText = text.replace(/(?:파손\s*면책|고장\s*(?:아님|아닙니다|없음|없습니다)|부품용\s*(?:아님|아닙니다)|불량\s*(?:아님|아닙니다|없음|없습니다)|작동\s*안\s*되는\s*것\s*아님)/giu, ' ');
   const broken = firstMatch(defectScanText, /고장품?|부품용|화면\s*깨짐|파손|불량|작동\s*안[\s됨돼]|for\s+parts|not\s+working/i);
   if (broken) {
     addEvidence(evidence, 'condition', broken.matchedText, 'BROKEN');
     return 'BROKEN';
   }
-  const mined = firstMatch(text, /채굴(?:품|용|\s*사용)?|마이닝/i);
+  const miningScanText = text.replace(/채굴\s*(?:이력|경험|한\s*적)?\s*(?:은|는|이|가)?\s*(?:없(?:어요|습니다|음|다)|아님|아닙니다|안\s*(?:함|했(?:어요|습니다|음)))/giu, ' ');
+  const mined = firstMatch(miningScanText, /채굴(?:품|용|\s*사용)?|마이닝/i);
   if (mined) {
     addEvidence(evidence, 'condition', mined.matchedText, 'MINED');
     return 'MINED';
@@ -218,6 +219,7 @@ function detectSpecialKind(text, evidence, title = text) {
   }
   if (LEGACY_DISCRETE_GPU_PATTERN.test(title)) componentGroups.add('GPU');
   if (CORE_ULTRA_PATTERN.test(title)) componentGroups.add('CPU');
+  if (/\b2\d{2}K(?:F|S)?\b/iu.test(title)) componentGroups.add('CPU');
   const explicitSystem = firstMatch(title, /게이밍\s*(?:(?<!반)본체|PC|컴퓨터|데스크탑)|조립(?:식|\s*)\s*(?:PC|컴퓨터)|조립컴퓨터|컴퓨터\s*(?<!반)본체|(?:^|\s)PC\s*본체|본체\s*PC|(?:게임용|사무용|업무용)\s*(?<!반)본체|완본체|완제품\s*(?:PC|컴퓨터)|(?:슬림|미니)\s*데스크탑(?!\s*용)|PC\s*케이스.{0,40}(?:RTX|GTX|RX)|(?:삼성|LG)\s*컴퓨터\s+[A-Z]{2,}\d{3,}|\bSFF\b.{0,40}(?:I[3579]|RYZEN)|(?:HP|DELL|LENOVO).{0,50}(?:DESKTOP|SFF|WORKSTATION)|(?:RTX|GTX|RX\s*\d{3,4}|\d{4,5}X(?:3D)?|I[3579][ -]?\d{4,5}[A-Z]*).{0,40}(?<!반)본체|(?:^|\s|\d)(?<!반)본체\s*(?:팝니다|판매|급처)/i);
   const systemNoun = /(?:중고\s*)?(?:컴퓨터|컵퓨터)|(?<!용)데스크탑(?!\s*용)|(?:게임용|게이밍)\s*본체|(?<!반)본체|(?:미니|슬림)\s*PC|(?:^|[^A-Z])PC(?:$|[^A-Z])/i.test(title);
   const cpuGpuPair = componentGroups.has('CPU') && componentGroups.has('GPU');
@@ -237,7 +239,7 @@ function detectSpecialKind(text, evidence, title = text) {
   const componentRemovalWording = componentGroups.size === 1
     && /(?:분리|탈거|적출|장착\s*테스트|테스트\s*후|컴퓨터\s*부품|데스크탑\s*부품)/iu.test(title);
   const clearDesktopSystem = !cpuComponentWording && !componentRemovalWording
-    && /(?:데스크탑|데스크톱)\s*(?:본체\s*)?(?:팝니다|판매(?:합니다)?|팔아요|급처)|(?:중고|게임용|사무용|업무용|브랜드)\s*컴퓨터|(?:게임용|사무용|업무용)\s*(?:PC|데스크탑)|미니\s*컴퓨터|HP\s*(?:PRODESK|프로\s*데스크|ELITEDESK|엘리트\s*데스크|PAVILION|파빌리온|일체형)|컴퓨터.{0,30}(?:RYZEN|라이젠|\d{4,5}X(?:3D)?|울트라\s*[3579]?[- ]?\d{3}[A-Z]*|I[3579][ -]?\d{4,5}[A-Z]*)|(?:RYZEN|라이젠|\d{4,5}X(?:3D)?|울트라\s*[3579]?[- ]?\d{3}[A-Z]*|I[3579][ -]?\d{4,5}[A-Z]*).{0,30}(?:데스크탑(?:\s*PC)?|컴퓨터\s*(?:팝니다|판매|급처)?)/iu.test(title);
+    && /(?:^|[^A-Z])PC\s*(?:팝니다|판매(?:합니다)?|팔아요|급처)|(?:데스크탑|데스크톱)\s*(?:본체\s*)?(?:팝니다|판매(?:합니다)?|팔아요|급처)|(?:중고|게임용|사무용|업무용|브랜드)\s*컴퓨터|(?:게임용|사무용|업무용)\s*(?:PC|데스크탑)|미니\s*컴퓨터|HP\s*(?:PRODESK|프로\s*데스크|ELITEDESK|엘리트\s*데스크|PAVILION|파빌리온|일체형)|컴퓨터.{0,30}(?:RYZEN|라이젠|\d{4,5}X(?:3D)?|울트라\s*[3579]?[- ]?\d{3}[A-Z]*|I[3579][ -]?\d{4,5}[A-Z]*)|(?:RYZEN|라이젠|\d{4,5}X(?:3D)?|울트라\s*[3579]?[- ]?\d{3}[A-Z]*|I[3579][ -]?\d{4,5}[A-Z]*).{0,30}(?:데스크탑(?:\s*PC)?|컴퓨터\s*(?:팝니다|판매|급처)?)/iu.test(title);
   const fullSystem = explicitSystem || describedSystem || describedPortableSystem || namedPortableSystem
     || workstationSystem || describedCompactSystem || componentRichSystem || clearDesktopSystem;
   if (fullSystem) {
@@ -368,6 +370,10 @@ function capacity(text) {
 }
 
 const CATEGORY_MANUFACTURER_PATTERNS = Object.freeze({
+  CPU: [
+    ["Intel", /(?:\bIntel\b|인텔|\bI[3579](?=\s*[-~]?\s*\d)|\bCORE\s*ULTRA|코어\s*울트라)/iu],
+    ["AMD", /(?:\bAMD\b|\bRYZEN|라이젠)/iu]
+  ],
   RAM: [
     ["Samsung", /(?:\bSamsung\b|삼성전자|삼성램|삼성\s*메모리|삼성)/iu], ["SK hynix", /(?:\bSK\s*hynix\b|하이닉스)/iu],
     ["Micron", /(?:\bMicron\b|마이크론)/iu], ["Crucial", /(?:\bCrucial\b|크루셜)/iu],
@@ -422,12 +428,29 @@ const CATEGORY_MANUFACTURER_PATTERNS = Object.freeze({
   ]
 });
 
+const SSD_EXPLICIT_BRAND = String.raw`(?:Samsung|삼성(?:전자)?|SK\s*hynix|하이닉스|Solidigm|솔리다임|Crucial|크루셜|Western\s*Digital|\bWD\b|SanDisk|샌디스크|Kingston|킹스톤|Seagate|씨게이트|Kioxia|키옥시아|Imation|이메[이인]션|LITE[\s-]?ON|라이트온)`;
+const SSD_COMPARISON_REFERENCE = new RegExp(
+  `${SSD_EXPLICIT_BRAND}(?:(?!${SSD_EXPLICIT_BRAND})[^,;!?\\n]){0,64}?(?:와|과|대비)?\\s*(?:동급(?:인|의)?|비슷한|유사한|급의)(?=\\s*${SSD_EXPLICIT_BRAND})`, 'giu'
+);
+const SSD_COMPARISON_PREDICATE = new RegExp(
+  `${SSD_EXPLICIT_BRAND}(?:(?!${SSD_EXPLICIT_BRAND})[^,;!?\\n]){0,64}?(?:와|과)\\s*동급(?:입니다|이다|이에요|임)(?=$|[\\s.!?,])`, 'giu'
+);
+
+function ssdManufacturerEvidence(text) {
+  const mentions = text.match(new RegExp(SSD_EXPLICIT_BRAND, 'giu')) || [];
+  // A vague comparison alone is not evidence that the named maker is wrong.
+  return mentions.length < 2 ? text : text.replace(SSD_COMPARISON_REFERENCE, ' ').replace(SSD_COMPARISON_PREDICATE, ' ');
+}
+
 function detectProductManufacturer(text, category, evidence) {
   // Memory-chip makers (e.g. Samsung B-die) are not the assembled module brand.
   // Remove only explicitly chip-scoped mentions; conflicting module brands stay ambiguous.
   const manufacturerText = category === 'RAM' ? text.replace(
     /(?:\bSamsung\b|삼성(?:전자)?|\b(?:SK\s*)?hynix\b|하이닉스|\bMicron\b|마이크론)\s*(?:[ABM]\s*[- ]?\s*)?(?:다이|DIE\b|칩|CHIPS?\b|IC\b)/giu, ' '
-  ) : text;
+  ) : category === 'SSD' ? ssdManufacturerEvidence(text) : text;
+  // Recognized comparison brands must not label an unsupported actual maker.
+  // Keep those products in the existing unclassified capacity bucket.
+  if (category === 'SSD' && /\bImation\b|이메[이인]션|\bLITE[\s-]?ON\b|라이트온/iu.test(manufacturerText)) return null;
   const matches = (CATEGORY_MANUFACTURER_PATTERNS[category] || [])
     .filter(([, pattern]) => pattern.test(manufacturerText))
     .map(([manufacturer]) => manufacturer);
@@ -712,7 +735,9 @@ function detectQuantity(text, category, evidence) {
     const englishUnits = text.match(/(?:^|[\s(])(\d+)\s*[x×]\s*(?:UNITS?|PCS?)\b/iu);
     const multiplied = text.match(/(?:RTX\s*\d{4}(?:\s*TI)?(?:\s*SUPER)?|GTX\s*\d{3,4}|RX\s*\d{4}(?:\s*XT[X]?)?|SSD\s*\d+\s*TB)\s*[x×*]\s*(\d+)\b/i);
     const koreanCount = text.match(/(두|세|네)\s*(?:개|장)(?=\s*(?:일괄|개당|장당|각각|보유|판매|중|모두|전부|$))/i);
-    const numericCount = text.match(/(?:^|[\s,(/[\]])(\d+)\s*(?:개|장|EA)(?=\s*(?:일괄|세트|셋트|개당|장당|각각|보유|판매|중|모두|전부|$|[\]]))/i)
+    const gpuCount = category === 'GPU'
+      ? text.match(/(?:^|[\s,(])(\d+)\s*(?:개|장)(?=\s*그래픽\s*카드)/iu) : null;
+    const numericCount = gpuCount || text.match(/(?:^|[\s,(/[\]])(\d+)\s*(?:개|장|EA)(?=\s*(?:일괄|세트|셋트|개당|장당|각각|보유|판매|중|모두|전부|$|[\]]))/i)
       || text.match(/총\s*(\d+)\s*(?:개|장|EA)/iu);
     if (englishLot || englishUnits) {
       const englishQuantity = englishLot || englishUnits;
@@ -962,10 +987,16 @@ function storagePlacement(text) {
     ? 'INTERNAL' : 'UNKNOWN';
 }
 
+function ssdInterfaceEvidence(text) {
+  return text.replace(/\b(?:NON[- ]?|NOT\s+)NVMe\b|NVMe\s*(?:방식(?:이|은)?\s*)?(?:아님|아닌|아니(?:며|고|라|에요|다)?|미지원|불가)/giu, ' ');
+}
+
 function ssdProductKind(text, placement) {
+  text = ssdInterfaceEvidence(text);
   if (placement === 'EXTERNAL') return 'EXTERNAL';
   if (/M\.2/iu.test(text) && /SATA/iu.test(text) && !/NVMe/iu.test(text)) return 'M2_SATA';
   if (/NVMe|PCIe|\b(?:PM9A1|PM981A?|SM981|SN5[78]0|SN7[57]0|SN8[57]0X?|9[6789]0\s*(?:EVO|PRO)?|P[235]1|P41|FIRECUDA\s*5[123]0|KC3000|NV2)\b/iu.test(text)) return 'M2_NVME';
+  if (/M\.2/iu.test(text) && /\b8[567]0\s*(?:EVO|QVO|PRO)\b/iu.test(text)) return 'M2_SATA';
   if (/2[.,]5\s*(?:INCH|인치|["″])|\bSATA\b|\b(?:8[567]0|870)\s*(?:EVO|QVO|PRO)\b|\b(?:MX500|BX500|SA510|A400)\b/iu.test(text)) return 'SATA_2_5';
   return 'OTHER_UNKNOWN';
 }
@@ -1011,7 +1042,7 @@ function publicSpecGroupId(category, model, text, marketSegment, base = {}, fiel
   return id ? `${category}:SPEC:${id}:${marketSegment}` : null;
 }
 
-function publicSpecificFields(category, model, text, base, motherboardProduct = null) {
+function publicSpecificFields(category, model, text, base, motherboardProduct = null, title = '') {
   const fields = {};
   if (category === 'GPU') {
     fields.chip_vendor = publicChipVendor(category, model, text);
@@ -1059,8 +1090,17 @@ function publicSpecificFields(category, model, text, base, motherboardProduct = 
     fields.interface = /SAS/iu.test(text) ? 'SAS' : /IDE/iu.test(text) ? 'IDE' : /SATA/iu.test(text) ? 'SATA' : /PCIe|NVMe/iu.test(text) ? 'PCIe' : null;
     fields.placement = storagePlacement(text);
     if (category === 'SSD') {
-      fields.protocol = /SATA/iu.test(text) && !/NVMe/iu.test(text) ? 'SATA' : /NVMe/iu.test(text) ? 'NVMe' : null;
+      const interfaceText = ssdInterfaceEvidence(text);
+      fields.protocol = /SATA/iu.test(interfaceText) && !/NVMe/iu.test(interfaceText) ? 'SATA' : /NVMe/iu.test(interfaceText) ? 'NVMe' : null;
       fields.product_kind = ssdProductKind(text, fields.placement);
+      // An explicit title interface wins over generic compatibility in the body.
+      const titleKind = ssdProductKind(title, storagePlacement(title));
+      if (titleKind === 'M2_SATA' || titleKind === 'SATA_2_5') {
+        fields.product_kind = fields.placement === 'EXTERNAL' ? 'EXTERNAL' : titleKind;
+        fields.protocol = 'SATA';
+        fields.interface = 'SATA';
+        if (fields.placement !== 'EXTERNAL') fields.form_factor = titleKind === 'M2_SATA' ? 'M.2' : '2.5-inch';
+      }
     }
     if (category === 'HDD') fields.purpose = /NAS/iu.test(text) ? 'NAS' : /CCTV|감시/iu.test(text) ? 'CCTV_SURVEILLANCE' : /서버|ENTERPRISE|기업용/iu.test(text) ? 'ENTERPRISE' : /노트북|LAPTOP/iu.test(text) ? 'LAPTOP' : null;
   }
@@ -1073,6 +1113,21 @@ function publicSpecificFields(category, model, text, base, motherboardProduct = 
     fields.atx_or_sfx_version = text.match(/ATX\s*3\.[01]/iu)?.[0]?.replace(/\s+/gu, ' ') || null;
   }
   return fields;
+}
+
+function statisticsSaleScopeExclusion(input) {
+  const text = normalizedText(input);
+  const title = normalizedTitle(input);
+  const description = normalizedTitle({ title: input?.description });
+  const groupedSale = /(?:일괄|묶음|세트|셋트|함께(?!\s*(?:사용|호환|장착|테스트))|모두|통째로|전체)[^.!?]{0,30}(?:판매|팝니다|팔아요|드립니다|가격|금액)|(?:판매|팝니다|팔아요|가격|금액)[^.!?]{0,30}(?:일괄|묶음|세트|셋트|함께(?!\s*(?:사용|호환|장착|테스트))|모두|통째로|전체)/iu.test(description);
+  const systemSale = /(?:\bPC\b|본체|완제품|컴퓨터|데스크탑)\s*(?:(?:전체|일괄|통째로)\s*)?(?:판매|팝니다|팔아요)/iu.test(description);
+  const titleSystemConfiguration = /(?:\bPC\b|본체|완제품|컴퓨터|데스크탑)/iu.test(title)
+    && !/호환|지원|(?:PC|컴퓨터|데스크탑)\s*(?:용|부품|케이스|그래픽\s*카드)|(?:에서|으로)\s*(?:테스트|사용)|사용하던|탈거|분리|단품/iu.test(title)
+    && !/단품|단독|(?:카드|부품)만|(?:에서|으로)\s*(?:테스트|사용)|사용하던|탈거|분리/iu.test(description);
+  if (!description || (!groupedSale && !systemSale && !titleSystemConfiguration)) return null;
+  // Listing visibility is independent; only a component's comparable price is rejected.
+  const kind = detectSpecialKind(text, [], text);
+  return ['FULL_SYSTEM', 'COMPONENT_BUNDLE', 'OPTION_AD'].includes(kind) ? kind : null;
 }
 
 export function classifyPcPartListingPublic(input, options = {}) {
@@ -1089,10 +1144,12 @@ export function classifyPcPartListingPublic(input, options = {}) {
     ? resolveMotherboardDirectoryNode(text) : null;
   const exactMotherboardProduct = motherboardResolution?.product?.spec?.directory_node_type === 'PRODUCT'
     ? motherboardResolution.product : null;
-  const fields = publicSpecificFields(category, model, text, base, exactMotherboardProduct);
+  const fields = publicSpecificFields(category, model, text, base, exactMotherboardProduct, normalizedTitle(input));
   const canonicalProductId = publicCanonicalProductId(category, model, text, marketSegment, base, fields, motherboardResolution);
+  const saleScopeExclusion = statisticsSaleScopeExclusion(input);
   const exclusionReasons = unique([
     ...(base.exclusion_reasons || []),
+    ...(saleScopeExclusion ? [saleScopeExclusion] : []),
     ...(category === 'UNSUPPORTED_CATEGORY' ? ['UNSUPPORTED_CATEGORY'] : []),
     ...(marketSegment !== 'CONSUMER_DESKTOP' ? ['MARKET_SEGMENT_OUT_OF_SCOPE'] : []),
     ...(!model && category !== 'UNSUPPORTED_CATEGORY' ? ['MODEL_AMBIGUOUS'] : []),

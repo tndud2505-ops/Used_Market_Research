@@ -1,8 +1,8 @@
-import { SERIES, idOf, nameOf, naturalCompare, money, metricValue, soldMeanValue, metricPresentation, statsUnavailable, priceRecordIssue, analysisSelectionUrl, groupProducts, scopedStats, sourceStats, priceDateRange, modelPageItems, buildTotals, compactBuild, compatibility, validateBuild, dailySeries, percentChange, buildAnalysisSeries } from './pc-tools-core.mjs?v=parts-ux-v10';
-import { readJson, createPriceStore } from './pc-tools-data.mjs?v=parts-data-v6';
-import { drawChart } from './pc-tools-chart.mjs?v=price-workspace-v5';
+import { SERIES, idOf, nameOf, naturalCompare, money, metricValue, soldMeanValue, metricPresentation, listedPriceRange, statsUnavailable, priceRecordIssue, analysisSelectionUrl, groupProducts, scopedStats, sourceStats, priceDateRange, modelPageItems, buildTotals, compactBuild, compatibility, validateBuild, dailySeries, percentChange, buildAnalysisSeries } from './pc-tools-core.mjs?v=danawa-display-v2';
+import { readJson, createPriceStore } from './pc-tools-data.mjs?v=danawa-display-v2';
+import { drawMarketChart as drawChart } from './pc-market-chart.mjs?v=danawa-display-v2';
 import { createDatePicker } from './pc-tools-calendar.mjs?v=coverage-v4';
-import { createAdfitSlot } from './adfit.js?v=adfit-v2';
+import { createAdfitSlot } from './adfit.js?v=adfit-rail-v1';
 import { createContextualAffiliate } from './affiliate.js?v=compact-ad-v2';
 import { toolBrand, toolFilterSchema, toolFacetValues, toolFacetLabel, filterToolProducts, visibleSelection, toolScopeNote } from './pc-tools-catalog.mjs?v=parts-ux-v4';
 
@@ -17,10 +17,7 @@ const state = {
   manufacturer: '', generation: '', capacity: '', query: '', sort: 'name', page: 1,
   entries: [], selectedId: '', selectedManufacturer: '',
   days: 30, range: priceDateRange(), chartDate: '', source: '', ready: false,
-  analysisPanes: { chart: true, table: !window.matchMedia('(max-width: 760px)').matches },
-  chartZoomX: 1, chartZoomY: 1,
 };
-let analysisWasNarrow = window.matchMedia('(max-width: 760px)').matches;
 let repaintTimer, statusTimer;
 const displayPrice = (value, currency = 'KRW') => value == null ? '—' : money(value, currency);
 function quotePrice(value, currency = 'KRW') {
@@ -50,9 +47,9 @@ const scheduleRepaint = () => {
   clearTimeout(repaintTimer);
   repaintTimer = setTimeout(() => { renderSummary(); renderModelTable(); if (builder) renderBuild(); else renderAnalysis(); }, 50);
 };
-const prices = createPriceStore(scheduleRepaint);
+const prices = createPriceStore(scheduleRepaint, { dailyOnly: !builder });
 const overseasPrices = builder ? null : createPriceStore(scheduleRepaint, {
-  marketPool: 'OVERSEAS_USED', condition: 'USED_WORKING', currency: 'USD'
+  marketPool: 'OVERSEAS_USED', condition: 'USED_WORKING', currency: 'USD', dailyOnly: true
 });
 const SOURCE_LABELS = { joonggonara: '중고나라', bunjang: '번개장터', hellomarket: '헬로마켓', danawa: '다나와', coolenjoy: '쿨엔조이', ebay: 'eBay', rethinkmall: '리씽크몰' };
 const el = (tag, className = '', text = '') => {
@@ -117,8 +114,11 @@ function currentProducts() {
 function groups() {
   const rows = groupProducts(currentProducts(), false);
   const sortData = builder ? payload : analysisData;
-  if (state.sort === 'price') rows.sort((a, b) => (metricValue(sortData(idOf(a.products[0]))?.active) ?? Infinity)
-    - (metricValue(sortData(idOf(b.products[0]))?.active) ?? Infinity) || naturalCompare(a.label, b.label));
+  const sortPrice = product => {
+    const data=sortData(idOf(product));
+    return (builder ? metricValue(data?.active) : dailySeries(data,'active',state.days).filter(point=>point.value!=null).at(-1)?.value) ?? Infinity;
+  };
+  if (state.sort === 'price') rows.sort((a, b) => sortPrice(a.products[0])-sortPrice(b.products[0]) || naturalCompare(a.label,b.label));
   return rows;
 }
 function pageGroups() { return groups().slice((state.page - 1) * PAGE_SIZE, state.page * PAGE_SIZE); }
@@ -189,6 +189,30 @@ function priceCell(data, key, record, { showChange = false } = {}) {
   }
   return td;
 }
+function renderDanawaPrice(node, data, record, id, manufacturer = '') {
+  node.replaceChildren(); node.dataset.label = '다나와 중고 표시가';
+  const metric = sourceStats(data, 'danawa')?.active;
+  const range = record?.state === 'ready' && !statsUnavailable(record.data) && !statsUnavailable(data)
+    ? listedPriceRange(metric) : null;
+  if (!range) {
+    const pending = !record || record.state !== 'ready' || statsUnavailable(record.data) || statsUnavailable(data);
+    const presentation = pricePresentation(null, 'active', 'KRW', statsUnavailable(data) ? { ...record, data } : record);
+    node.textContent = pending ? presentation.text : Number(metric?.sample_count) > 0 ? '표시가 확인 필요'
+      : manufacturer ? '제조사별 자료 없음' : '자료 없음';
+    node.dataset.priceState = pending ? presentation.state : Number(metric?.sample_count) > 0 ? 'invalid' : 'missing';
+    node.title = pending ? presentation.label : '선택 모델의 다나와 중고 표시가';
+    return;
+  }
+  const text = range.minimum === range.maximum ? money(range.minimum) : `${money(range.minimum)}~${money(range.maximum)}`;
+  const link = el('a', 'danawa-price-link', text);
+  const url = new URL(analysisSelectionUrl(new URL('/price-analysis.html', location.href).href, id, manufacturer));
+  url.searchParams.set('source', 'danawa');
+  link.href = url.pathname + url.search;
+  link.setAttribute('aria-label', `다나와 중고 표시가 ${text} · 가격 분석 보기`);
+  node.append(link, el('small', 'danawa-price-detail', `가격 표본 ${range.count}건 · 개당`));
+  node.dataset.priceState = 'listed';
+  node.title = `최근 30일 다나와 중고 등록가 · ${range.count}건 · 국내 통합 시세 합계와 별도 비교`;
+}
 function chosen(id, manufacturer = '') { return state.entries.some(e => e.id === id && e.manufacturer === manufacturer); }
 function renderModelTable() {
   const container = $('#model-table');
@@ -209,7 +233,7 @@ function renderModelTable() {
   const focus = document.activeElement;
   const focusKey = container.contains(focus) ? { ...focus.dataset } : null;
   const visibleSeries = builder ? SERIES.filter(s => s.key !== 'confirmed_transactions') : [];
-  const { table, body } = makeTable(['모델', ...visibleSeries.map(s => s.label), builder ? '조합' : '보기']);
+  const { table, body } = makeTable(['모델', ...visibleSeries.map(s => s.label), ...(builder ? ['다나와 중고 표시가'] : []), builder ? '조합' : '보기']);
   for (const group of pageGroups()) {
     const product = group.products[0], id = idOf(product), record = chartRecord(id), data = record?.data;
     const row = el('tr', state.selectedId === id ? 'is-selected' : '');
@@ -225,6 +249,9 @@ function renderModelTable() {
     if (['FACET', 'BROWSE_FACET'].includes(specOf(product).directory_node_type)) name.title = '제조사·규격별 그룹';
     row.append(name);
     visibleSeries.forEach(s => { const cell = priceCell(data, s.key, record, { showChange: !builder }); cell.dataset.label = s.label; row.append(cell); });
+    if (builder) {
+      const cell = el('td', 'price danawa-price'); renderDanawaPrice(cell, data, record, id); row.append(cell);
+    }
     const control = el('td');
     const currentAnalysisModel = !builder && state.selectedId === id;
     const button = action(builder ? chosen(id) ? '선택됨' : '선택' : currentAnalysisModel ? '현재 모델' : '보기', builder ? 'choose' : 'analyze', { id });
@@ -232,7 +259,7 @@ function renderModelTable() {
     if (currentAnalysisModel) { button.disabled = true; button.setAttribute('aria-current', 'true'); }
     control.append(button); row.append(control); body.append(row);
   }
-  if (!body.children.length) { const tr = el('tr'), td = el('td', 'tools-empty', '해당 조건의 모델이 없습니다.'); td.colSpan = visibleSeries.length + 2; tr.append(td); body.append(tr); }
+  if (!body.children.length) { const tr = el('tr'), td = el('td', 'tools-empty', '해당 조건의 모델이 없습니다.'); td.colSpan = visibleSeries.length + (builder ? 3 : 2); tr.append(td); body.append(tr); }
   container.replaceChildren(table);
   if (focusKey) {
     const replacement = [...container.querySelectorAll('button')].find(b => Object.entries(focusKey).every(([k, v]) => b.dataset[k] === v));
@@ -267,10 +294,11 @@ function persistBuild() {
   let urlSaved = true;
   try { history.replaceState(null, '', url); } catch { urlSaved = false; }
   const feedback = $('#build-save-status');
-  if (feedback) feedback.textContent = saved ? '이 브라우저에 저장되었습니다. 선택을 바꾸면 자동 저장됩니다.'
+  if (feedback) feedback.textContent = saved ? ''
     : urlSaved ? '브라우저 저장을 사용할 수 없습니다. 현재 주소의 구성 정보는 유지됩니다.'
       : '브라우저 저장과 주소 갱신을 사용할 수 없습니다. 현재 구성을 다시 확인해 주세요.';
-  if (feedback && saved && !urlSaved) feedback.textContent += ' 현재 주소 갱신은 실패했습니다.';
+  if (feedback && saved && !urlSaved) feedback.textContent = '구성은 저장됐지만 현재 주소 갱신에 실패했습니다.';
+  if (feedback) feedback.hidden = !feedback.textContent;
   return saved;
 }
 
@@ -293,32 +321,39 @@ function renderSummary() {
   summary.replaceChildren();
   const totals = buildTotals(state.entries, buildEntryData);
   const row = el('tr', 'build-total-row'); row.id = 'build-summary';
-  const heading = el('th', 'build-total-heading', '합계'); heading.scope = 'row';
-  const selection = el('td', 'build-total-selection', `선택 ${state.entries.length}종`);
-  const quantity = el('td', 'build-total-quantity', `${state.entries.reduce((n,e) => n + e.quantity, 0)}개`);
+  const partial = state.entries.length > 0 && (!totals.active.complete || !totals.sold.complete);
+  const heading = el('th', 'build-total-heading', partial ? '부분 합계' : '합계'); heading.scope = 'row';
+  const selection = el('td', 'build-total-selection');
+  const quantity = el('td', 'build-total-quantity');
   row.append(heading, selection, quantity);
   [['active', '판매중 합계'], ['sold', '판매완료 합계']].forEach(([key, label]) => {
     const total = totals[key];
     const title = total.total > 0 && !total.complete ? label.replace('합계', '부분 합계') : label;
     const item = summaryItem(title, displayPrice(total.amount), '', `series-${key}`);
     item.title = title;
-    if (key === 'sold') item.title += ' · 판매완료 매물의 마지막 표시가격 합계이며 실제 체결가격이 아닙니다.';
     item.children[0].className = 'sr-only';
+    if (total.total > 0 && !total.complete) item.append(el('small', 'build-total-partial', `${total.covered}/${total.total}개 가격만 반영`));
     const cell = el('td', 'build-total-price'); cell.dataset.label = label;
     cell.append(item); row.append(cell);
   });
-  row.append(el('td', 'build-total-spacer'));
+  row.append(el('td', 'build-total-spacer'), el('td', 'build-total-spacer'));
   summary.append(row);
   const issues = [...new Set(state.entries.map(entry => priceRecordIssue(chartRecord(entry.id), buildEntryData(entry))).filter(Boolean))];
   if (buildScopeConflict()) issues.unshift('서로 다른 게시 기준의 가격은 합산하지 않습니다.');
   if (issues.length) {
     const note = el('p', 'tools-quote-status', issues.join(' '));
     if (buildScopeConflict() || state.entries.some(e => chartRecord(e.id)?.state === 'error')) note.append(action('가격 다시 조회', 'retry'));
-    const issueRow = el('tr', 'build-total-issues'), cell = el('td'); cell.colSpan = 6;
+    const issueRow = el('tr', 'build-total-issues'), cell = el('td'); cell.colSpan = 7;
     cell.append(note); issueRow.append(cell); summary.append(issueRow);
   }
 }
 function refreshBuildPriceDetails() {
+  for (const node of $('#build-table').querySelectorAll('[data-danawa-price]')) {
+    const entry = state.entries.find(item => item.id === node.dataset.danawaPrice);
+    if (!entry) continue;
+    if (buildScopeConflict()) { node.textContent = '기준 확인 필요'; node.dataset.priceState = 'scope-conflict'; continue; }
+    renderDanawaPrice(node, buildEntryData(entry), chartRecord(entry.id), entry.id, entry.manufacturer);
+  }
   for (const node of $('#build-table').querySelectorAll('[data-build-price]')) {
     const entry = state.entries.find(item => item.id === node.dataset.buildPrice);
     if (!entry) continue;
@@ -329,18 +364,14 @@ function refreshBuildPriceDetails() {
     node.replaceChildren();
     node.dataset.priceState = buildScopeConflict() ? 'scope-conflict' : presentation.state;
     if (value == null || record?.state !== 'ready' || statsUnavailable(record.data)) {
-      node.append(el('strong', '', '—'));
+      const missing = buildScopeConflict() ? '기준 확인 필요' : presentation.state === 'insufficient' ? '표본 부족'
+        : presentation.state === 'missing' ? '자료 없음' : presentation.empty ? presentation.text : '자료 없음';
+      node.append(el('span', 'build-price-unavailable', missing));
       node.title = buildScopeConflict() ? '게시 기준 불일치' : presentation.label;
     } else {
       const relation = Number(value.toFixed(2)) === value ? '=' : '≈';
-      node.append(el('strong', '', quotePrice(value * entry.quantity, currency)));
-      if (key === 'sold') {
-        const minimum = data.sold.min, maximum = data.sold.max;
-        if (typeof minimum === 'number' && typeof maximum === 'number' && minimum > 0 && maximum >= minimum) {
-          node.append(el('small', 'build-price-range', `${quotePrice(minimum * entry.quantity, currency)}~${quotePrice(maximum * entry.quantity, currency)}`));
-        }
-        node.dataset.priceState = 'ready';
-      }
+      node.append(el('strong', '', money(value * entry.quantity, currency)));
+      if (key === 'sold') node.dataset.priceState = 'ready';
       node.title = `단가 ${quotePrice(value, currency)} × ${entry.quantity} ${relation} ${quotePrice(value * entry.quantity, currency)} · ${key === 'sold' ? '판매완료 표시가 평균' : presentation.label} · 표본 ${data[key].sample_count}건 · ${data.window?.from || '—'} ~ ${data.window?.to || '—'}`;
     }
   }
@@ -359,10 +390,12 @@ function renderBuild() {
   if (container.contains(focus) && focus.dataset.quantity) { refreshBuildPriceDetails(); return; }
   const focusKey = container.contains(focus) ? { ...focus.dataset } : null;
   const focusedCategory = focus?.closest?.('tr[data-category]')?.dataset.category;
-  const { table, body } = makeTable(['부품', '선택 모델', '수량', '판매중 가격', '판매완료 평균', '변경']);
+  const result = compatibility(state.entries, state.byId);
+  const warnings = result.checks.filter(check => check.kind === 'socket' || check.status !== 'match');
+  const { table, body } = makeTable(['부품', '선택 모델', '수량', '판매중', '판매완료 표시가', '다나와 중고 표시가', '']);
   table.className = 'sf-build-table'; table.setAttribute('aria-label', 'PC 부품 구성 및 수량 반영 가격');
   const columns = el('colgroup');
-  ['part','model','quantity','active','sold','action'].forEach(name => columns.append(el('col', `build-col-${name}`)));
+  ['part','model','quantity','active','sold','danawa','action'].forEach(name => columns.append(el('col', `build-col-${name}`)));
   table.prepend(columns);
   state.categories.forEach(category => {
     const entry = state.entries.find(e => e.category === category.code), product = state.byId.get(entry?.id);
@@ -372,31 +405,38 @@ function renderBuild() {
     if (entry) {
       name.append(el('span', '', product ? nameOf(product) : '—'));
       if (entry.manufacturer) name.append(el('small', '', `${entry.manufacturer} · 제조사 기준`));
-      if (product?.category_code === 'RAM') { const memory = el('small', 'tools-memory-total'); memory.dataset.memoryTotal = entry.id; name.append(memory); }
     } else {
       const choose = action('+ 부품 선택', 'category', { category: category.code });
       choose.setAttribute('aria-label', `${category.label} 부품 선택`); name.append(choose);
     }
     const quantity = el('td', 'build-quantity'); quantity.dataset.label = '수량';
     if (entry) {
-      const control = el('div', 'sf-quantity');
-      const minus = action('−', 'quantity-step', { id:entry.id, quantityStep:-1 }); minus.setAttribute('aria-label', `${category.label} 수량 줄이기`);
-      const plus = action('+', 'quantity-step', { id:entry.id, quantityStep:1 }); plus.setAttribute('aria-label', `${category.label} 수량 늘리기`);
       const input = el('input'); input.type = 'number'; input.min = '1'; input.max = '16'; input.step = '1'; input.value = entry.quantity;
       input.dataset.quantity = entry.id; input.setAttribute('aria-label', `${category.label} 수량`);
-      control.append(minus,input,plus); quantity.append(control);
+      quantity.append(input);
     } else quantity.append(el('span', '', '—'));
     row.append(part, name, quantity);
     for (const {key,label} of SERIES.slice(0,2)) {
-      const cell = el('td', `build-price series-${key}`); cell.dataset.label = key === 'sold' ? '판매완료 평균' : label; cell.dataset.series = key;
+      const cell = el('td', `build-price series-${key}`); cell.dataset.label = key === 'sold' ? '판매완료 표시가' : label; cell.dataset.series = key;
       if (entry) cell.dataset.buildPrice = entry.id; else cell.textContent = '—';
       row.append(cell);
     }
+    const danawa = el('td', 'build-danawa-price danawa-price'); danawa.dataset.label = '다나와 중고 표시가';
+    if (entry) danawa.dataset.danawaPrice = entry.id; else danawa.textContent = '—';
+    row.append(danawa);
     const control = el('td', 'build-actions');
     if (entry) {
-      const change = action('변경', 'category', {category: category.code}); change.setAttribute('aria-label', `${category.label} 모델 변경`);
+      const check = warnings.find(check => check.category === category.code);
+      const rowActions = el('div', 'build-row-actions');
+      if (check) {
+        if (check.status !== 'match') row.classList.add('has-compatibility-warning');
+        const warning = action(check.status === 'conflict' ? '호환 안 됨' : check.status === 'match' ? 'CPU 지원 확인' : '규격 확인', 'compatibility-help', { kind: check.kind, status: check.status });
+        warning.className = 'build-warning-trigger'; warning.setAttribute('aria-label', `${category.label} ${warning.textContent} · 도움말`);
+        warning.setAttribute('aria-haspopup', 'dialog'); warning.setAttribute('aria-controls', 'compatibility-dialog');
+        rowActions.append(warning);
+      }
       const remove = action('×', 'remove', {id:entry.id}); remove.setAttribute('aria-label', `${category.label} 제거`);
-      control.append(change,remove);
+      rowActions.append(remove); control.append(rowActions);
     }
     row.append(control); body.append(row);
   });
@@ -405,48 +445,41 @@ function renderBuild() {
   container.replaceChildren(table);
   renderSummary();
   refreshBuildPriceDetails();
-  const result = compatibility(state.entries, state.byId), box = $('#build-compatibility'); box.replaceChildren();
-  box.hidden = !result.checks.length;
-  result.checks.forEach(c => box.append(el('span', c.status, `${c.label} ${c.status === 'match' ? '일치' : c.status === 'conflict' ? '충돌' : '미확인'} · ${c.detail}`)));
-  if (result.checks.length) box.append(el('span','compatibility-note',result.note));
   if (focusKey && Object.keys(focusKey).length) {
     const replacement=[...container.querySelectorAll('button')].find(b => Object.entries(focusKey).every(([k,v]) => b.dataset[k] === v))
       || [...container.querySelectorAll('button[data-action="category"]')].find(b => b.dataset.category === focusedCategory);
     replacement?.focus({preventScroll:true});
   }
 }
-function renderAnalysisPaneState() {
-  const workspace = $('#analysis-workspace');
-  if (!workspace) return;
-  const chartOpen = Boolean(state.analysisPanes.chart), tableOpen = Boolean(state.analysisPanes.table);
-  workspace.dataset.layout = chartOpen && tableOpen ? 'split' : chartOpen ? 'chart' : 'table';
-  $('#analysis-chart-pane').hidden = !chartOpen;
-  $('#analysis-table-pane').hidden = !tableOpen;
-  for (const button of workspace.querySelectorAll('[data-action="analysis-pane"]')) {
-    const open = Boolean(state.analysisPanes[button.dataset.pane]);
-    button.setAttribute('aria-pressed', String(open));
-    button.setAttribute('aria-expanded', String(open));
-    button.title = `${button.textContent} ${open ? '접기' : '펼치기'}`;
+function openCompatibilityHelp(kind) {
+  const check = compatibility(state.entries, state.byId).checks.find(check => check.kind === kind && check.explanation);
+  if (!check) return;
+  $('#compatibility-title').textContent = check.title;
+  $('#compatibility-explanation').textContent = check.explanation;
+  $('#compatibility-recommendation').textContent = check.recommendation;
+  const controls = $('#compatibility-actions'); controls.replaceChildren();
+  for (const category of check.changeCategories) {
+    const label = state.categories.find(item => item.code === category)?.label || category;
+    controls.append(action(`${label} 변경`, 'compatibility-change', { category }));
   }
+  const dialog = $('#compatibility-dialog'); dialog.dataset.kind = kind; if (!dialog.open) dialog.showModal();
+  $('#compatibility-title').focus();
 }
 function resetChartView() {
-  state.chartZoomX = 1;
-  state.chartZoomY = 1;
-  $('#price-chart .tools-chart-viewport')?.scrollTo(0, 0);
+  $('#price-chart')?.dispatchEvent(new CustomEvent('chart-reset'));
 }
 function analysisSources() {
   const allowedSources = new Set(state.sources.map(source => String(source.source_id || source.id || source.key || '')));
-  return (state.source ? [state.source] : ['ebay', 'joonggonara', 'bunjang']).filter(id => allowedSources.has(id)).map(id => {
+  return (state.source ? [state.source] : [...allowedSources].filter(id => id !== 'ebay')).filter(id => allowedSources.has(id)).map(id => {
     const record = id === 'ebay' ? overseasPrices?.get(state.selectedId, state.days, requestedPriceAsOf()) : chartRecord(state.selectedId);
     const data = record?.state === 'ready' && !statsUnavailable(record.data)
-      ? scopedStats(sourceStats(record.data, id), state.selectedManufacturer) : null;
+      ? sourceStats(scopedStats(record.data, state.selectedManufacturer), id) : null;
     return { id, record, data, currency: id === 'ebay' ? 'USD' : 'KRW' };
   });
 }
 function renderAnalysis() {
-  renderAnalysisPaneState();
   const record = analysisRecord(state.selectedId), base = record?.data;
-  const data = scopedStats(sourceStats(base, state.source), state.selectedManufacturer);
+  const data = sourceStats(scopedStats(base, state.selectedManufacturer), state.source);
   const currency = base?.methodology?.currency || (state.source === 'ebay' ? 'USD' : 'KRW');
   const window = state.range;
   const controls = $('#chart-navigation');
@@ -460,38 +493,37 @@ function renderAnalysis() {
     const apply = action('적용', 'range-apply'); apply.setAttribute('aria-label', '선택 기간 적용'); controls.append(apply);
   }
   controls.title = `${window.from} ~ ${window.to} · ${window.days}일`;
-  const sourceControls = $('#chart-sources'), sourceFocus = sourceControls.contains(document.activeElement) ? document.activeElement.dataset.source : null; sourceControls.replaceChildren();
-  const sourceOrder = ['ebay', 'joonggonara', 'bunjang'];
+  const sourceControls = $('#chart-sources'); sourceControls.replaceChildren();
+  const sourceOrder = ['joonggonara', 'bunjang', 'danawa', 'ebay'];
   const availableSources = new Set(state.sources.map(source => String(source.source_id || source.id || source.key || '')));
   const sourceIds = [...sourceOrder.filter(id => availableSources.has(id)),
     ...[...availableSources].filter(id => id && !sourceOrder.includes(id)).sort(naturalCompare)];
-  [['', '전체'], ...sourceIds.map(id => [id, id === 'ebay' ? 'eBay (USD)' : SOURCE_LABELS[id] || id])].forEach(([id, label]) => {
-    const button = action(label, 'chart-source', { source: id }); button.setAttribute('aria-pressed', String(state.source === id)); sourceControls.append(button);
+  [['', '국내 비교'], ...sourceIds.map(id => [id, id === 'ebay' ? 'eBay (USD)' : SOURCE_LABELS[id] || id])].forEach(([id, label]) => {
+    const option = el('option', '', label); option.value = id; option.selected = state.source === id; sourceControls.append(option);
   });
-  if (sourceFocus != null) [...sourceControls.children].find(b => b.dataset.source === sourceFocus)?.focus({ preventScroll: true });
+  for (const button of document.querySelectorAll('[data-action="chart-period"]')) button.setAttribute('aria-pressed', String(Number(button.dataset.days) === state.days));
   const coverage = $('#chart-coverage'); coverage.replaceChildren(); coverage.hidden = true;
   const sources = analysisSources();
   const series = sources.flatMap(item => buildAnalysisSeries(statsUnavailable(item.data) ? null : item.data, {
     source: item.id, allowedSourceIds: [item.id], days: state.days, sourceLabels: SOURCE_LABELS,
-  }).map(line => ({ ...line, currency: item.currency })));
-  // Put KRW on the left and USD on the right; never combine the currencies.
-  series.sort((a, b) => Number(a.currency === 'USD') - Number(b.currency === 'USD'));
+  }).filter(line => ['active', 'sold'].includes(line.metricKey)).map(line => ({ ...line,
+    label: `${SOURCE_LABELS[item.id] || item.id} · ${line.priceBasis === 'listed-minimum' ? '중고 최저 표시가' : line.metricKey === 'sold' ? '판매완료 표시가' : '판매중'}`, currency: item.currency })));
   const dates = [...new Set(series.flatMap(item => item.points.map(point => point.date)))].sort();
   const totalDates = dates.length;
   const workspace = $('#analysis-workspace');
   if (workspace) workspace.dataset.chartPointCount = String(totalDates);
   const windowStatus = $('#chart-window-status');
-  if (windowStatus) windowStatus.textContent = totalDates ? `${totalDates}일 · 가로 ${state.chartZoomX.toFixed(1)}× · 세로 ${state.chartZoomY.toFixed(1)}×` : '';
+  if (windowStatus) windowStatus.textContent = `${window.from.slice(5).replace('-', '/')}–${window.to.slice(5).replace('-', '/')} · ${currency === 'USD' ? '달러' : '원'}`;
   const product = state.byId.get(state.selectedId), modelName = product ? nameOf(product) : '선택 모델 없음';
-  $('#analysis-title').textContent = product ? `가격 분석 · ${modelName}` : '가격 분석';
+  $('#analysis-title').textContent = '가격 분석';
   $('#analysis-model-select').textContent = `${modelName} ▾`;
-  $('#chart-title').textContent = '가격 추이';
   const pending = sources.some(item => !item.record || item.record.state === 'loading');
   const failedSource = sources.find(item => item.record?.state === 'error');
+  const sparsePrices = sources.some(item => item.data?.daily?.some(day => metricPresentation(day.active).state === 'insufficient'));
   $('#price-chart').setAttribute('aria-busy', String(Boolean(state.selectedId) && pending));
   $('#price-chart').dataset.modelId = state.selectedId;
   $('#price-chart').dataset.priceState = !state.selectedId ? 'empty' : pending ? 'loading'
-    : series.length ? 'ready' : failedSource ? 'error' : 'unavailable';
+    : series.length ? 'ready' : failedSource ? 'error' : sparsePrices ? 'insufficient' : 'unavailable';
   const issue = !state.selectedId ? '선택 조건에 맞는 모델이 없습니다.'
     : failedSource ? `${SOURCE_LABELS[failedSource.id] || failedSource.id} · ${priceRecordIssue(failedSource.record, failedSource.data)}`
     : priceRecordIssue(record, data);
@@ -502,26 +534,16 @@ function renderAnalysis() {
   } else {
     const excluded = Number(base?.integrity_filtered_source_count || base?.integrity_repaired_source_ids?.length || 0);
     if (excluded) { coverage.textContent = `집계값이 불일치하는 출처 ${excluded}곳 제외`; coverage.hidden = false; }
+    else if (base?.coverage?.status === 'PARTIAL') {
+      coverage.textContent = `보존 기록 ${base.coverage.from} ~ ${base.coverage.to}`; coverage.hidden = false;
+    }
+    else if (base?.coverage?.status === 'EMPTY') { coverage.textContent = '선택 기간의 보존 기록이 없습니다.'; coverage.hidden = false; }
+    else if (!series.length && sparsePrices) {
+      coverage.textContent = '등록 가격은 있지만 표본이 부족해 대표가격을 표시하지 않습니다.'; coverage.hidden = false;
+    }
   }
   renderAnalysisContext(record, data, currency);
-  drawChart($('#price-chart'), series, { label: `${modelName} 가격 추이`, selectedDate: state.chartDate || dates.at(-1) || window.to, currency, scrollable: true, zoomX: state.chartZoomX, zoomY: state.chartZoomY,
-    onZoom(axis, factor, anchor) {
-      const viewport = $('#price-chart .tools-chart-viewport');
-      const key = axis === 'x' ? 'chartZoomX' : 'chartZoomY', previous = state[key];
-      const offset = axis === 'x' ? viewport.scrollLeft : viewport.scrollTop;
-      const origin = axis === 'x' ? 68 : 28;
-      const size = axis === 'x' ? viewport.clientWidth : viewport.clientHeight;
-      const point = anchor ?? size / 2;
-      state[key] = factor === 0 ? 1 : Math.max(1, Math.min(axis === 'x' ? 6 : 4, previous * factor));
-      if (state[key] === previous) return;
-      const oldExtent = (axis === 'x' ? viewport.scrollWidth - 68 - (new Set(series.map(s => s.currency)).size > 1 ? 70 : 24) : viewport.scrollHeight - 28 - 42);
-      renderAnalysis();
-      const next = $('#price-chart .tools-chart-viewport');
-      const newExtent = axis === 'x' ? next.scrollWidth - 68 - (new Set(series.map(s => s.currency)).size > 1 ? 70 : 24) : next.scrollHeight - 28 - 42;
-      const position = factor === 0 ? 0 : (offset + point - origin) * newExtent / oldExtent + origin - point;
-      next.scrollTo(axis === 'x' ? { left: position } : { top: position });
-    }
-  });
+  drawChart($('#price-chart'), series, { label: `${modelName} 가격 추이`, currency, identity: `${state.selectedId}:${state.selectedManufacturer}:${state.source}:${window.from}:${window.to}` });
 }
 
 function searchReturnPath(product) {
@@ -547,45 +569,8 @@ function renderAnalysisContext(record, data, currency) {
     link.hidden = !publicModel;
     link.href = publicModel ? searchReturnPath(product) : '/';
   }
-  const comparison = $('#analysis-source-comparison');
-  if (!comparison) return;
-  const type = product?.key_specs?.directory_node_type;
-  const unit = !product ? '선택 모델 없음' : type === 'PRODUCT' ? '등록 모델'
-    : ['FACET','BROWSE_FACET'].includes(type) ? '제조사·규격 구간 참고' : '카탈로그 비교 단위';
-  const rows = state.selectedId ? analysisSources() : [];
-  const showConfirmed = rows.some(row => Number(row.data?.confirmed_transactions?.sample_count) > 0);
-  const keys = showConfirmed ? SERIES : SERIES.slice(0,2);
-  const {table,body} = makeTable(['출처','통화','기간',...keys.flatMap(s => [s.label + ' 평균','표본'])]);
-  table.className = 'sf-price-table'; table.setAttribute('aria-label','출처별 가격 비교');
-  const caption = el('caption','sf-source-caption',`${product ? nameOf(product) + ' · ' : ''}비교 단위: ${unit}${state.selectedManufacturer ? ' · ' + state.selectedManufacturer : ''}`);
-  caption.append(el('span','sf-price-method',' · 판매완료 표시가는 실제 체결가가 아닙니다.'));
-  table.prepend(caption);
-  for (const item of rows) {
-    const { id, data: scoped, record: sourceRecord, currency: rowCurrency } = item;
-    const row = el('tr'); row.dataset.source = id;
-    const sourceName = el('th','source-name',SOURCE_LABELS[id] || id); sourceName.scope = 'row'; row.append(sourceName);
-    const code = el('td','source-currency',rowCurrency || '—'); code.dataset.label = '통화'; row.append(code);
-    const period = scoped?.window || sourceRecord?.data?.window;
-    const date = el('td','source-period',period?.from && period?.to ? `${period.from} ~ ${period.to}` : '—'); date.dataset.label = '기간'; row.append(date);
-    for (const {key,label} of keys) {
-      const metric = scoped?.[key], presentation = pricePresentation(metric,key,rowCurrency,sourceRecord);
-      const cell = el('td','source-price series-' + key); cell.dataset.label = label; cell.dataset.series = key;
-      const usable = Boolean(scoped) && !statsUnavailable(scoped);
-      const average = usable ? soldMeanValue(metric) : null;
-      const unavailable = sourceRecord?.state === 'error' ? '조회 실패'
-        : !sourceRecord || sourceRecord.state === 'loading' ? '확인 중'
-        : !usable ? '선택 범위 미제공' : Number(metric?.sample_count) === 0 ? '자료 없음' : '평균 미제공';
-      cell.append(el('strong','',average != null ? money(average, rowCurrency) : unavailable));
-      cell.title = average != null ? `평균 · 표본 ${metric.sample_count}건` : presentation.label; row.append(cell);
-      const count = usable && metric?.aggregate_incomplete !== true && Number.isInteger(metric?.sample_count) && metric.sample_count >= 0
-        ? metric.sample_count.toLocaleString('ko-KR') : '—';
-      const sample = el('td','source-sample',count); sample.dataset.label = label + ' 표본'; sample.dataset.series = key; row.append(sample);
-    }
-    body.append(row);
-  }
-  if (!rows.length) { const row=el('tr'), cell=el('td','tools-empty',state.selectedId ? '출처별 가격 자료 없음' : '선택 조건에 맞는 모델이 없습니다.'); cell.colSpan=3+keys.length*2; row.append(cell); body.append(row); }
-  comparison.replaceChildren(table);
 }
+
 function render() { renderControls(); renderSummary(); renderModelTable(); if (builder) renderBuild(); else renderAnalysis(); }
 function refreshPrices() {
   const targets = state.sort === 'price' ? currentProducts() : builder && $('#builder-model-dialog')?.open ? pageGroups().flatMap(g => g.products) : [];
@@ -598,7 +583,7 @@ function refreshPrices() {
   const overseas = !builder && state.source === 'ebay';
   const asOf = requestedPriceAsOf();
   void prices.load(overseas ? [] : targets, builder ? 30 : state.days, asOf);
-  if (!builder) void overseasPrices.load(overseas ? targets : !state.source && selected ? [selected] : [], state.days, asOf);
+  if (!builder) void overseasPrices.load(overseas ? targets : [], state.days, asOf);
 }
 function selectCategory(category) {
   state.category = category; state.manufacturer = ''; state.generation = ''; state.capacity = ''; state.query = ''; state.page = 1; state.selectedManufacturer = ''; state.chartDate = ''; resetChartView();
@@ -623,21 +608,23 @@ document.addEventListener('click', event => {
   if (type === 'open-analysis-picker') { $('#analysis-model-dialog').showModal(); $('#analysis-picker-title').focus({ preventScroll: true }); refreshPrices(); return; }
   if (type === 'close-analysis-picker') { $('#analysis-model-dialog').close(); return; }
   if (type === 'close-picker') { closeModelPicker(); return; }
-  if (type === 'save-build') { persistBuild(); return; }
-  if (type === 'print-build') { window.print(); return; }
-  if (type === 'analysis-pane') {
-    const pane = button.dataset.pane;
-    if (!['chart','table'].includes(pane)) return;
-    if (window.matchMedia('(max-width: 760px)').matches) {
-      state.analysisPanes = { chart: pane === 'chart', table: pane === 'table' };
-    } else {
-      const other = pane === 'chart' ? 'table' : 'chart';
-      state.analysisPanes[pane] = !state.analysisPanes[pane];
-      if (!state.analysisPanes[pane] && !state.analysisPanes[other]) state.analysisPanes[other] = true;
-    }
-    renderAnalysisPaneState();
-    if (state.analysisPanes.chart) requestAnimationFrame(renderAnalysis);
+  if (type === 'save-build') {
+    if (persistBuild()) { button.textContent = '저장됨'; setTimeout(() => { button.textContent = '구성 저장'; }, 1800); }
     return;
+  }
+  if (type === 'compatibility-help') { openCompatibilityHelp(button.dataset.kind); return; }
+  if (type === 'close-compatibility') { $('#compatibility-dialog').close(); return; }
+  if (type === 'compatibility-change') {
+    $('#compatibility-dialog').close(); selectCategory(button.dataset.category); return;
+  }
+  if (type === 'print-build') { window.print(); return; }
+  if (type === 'chart-period') {
+    const days = Number(button.dataset.days);
+    if (![30,60,100,300].includes(days)) return;
+    const to = state.range.latest, from = new Date(Date.parse(to) - (days - 1) * 86400000).toISOString().slice(0,10);
+    state.range = priceDateRange(from, to); state.days = state.range.days; resetChartView();
+    $('#chart-from').value = from; $('#chart-to').value = to;
+    syncAnalysisUrl(); renderAnalysis(); refreshPrices(); return;
   }
   if (type === 'quantity-step') {
     const entry = state.entries.find(e => e.id === id), delta = Number(button.dataset.quantityStep);
@@ -655,11 +642,11 @@ document.addEventListener('click', event => {
       if (!from || !to) throw new Error('시작일과 종료일을 선택하세요.');
       const range = priceDateRange(from, to);
       state.range = range; state.days = range.days; state.chartDate = ''; resetChartView(); syncAnalysisUrl();
+      $('#chart-custom-range').open = false;
       status(''); renderSummary(); renderModelTable(); renderAnalysis(); refreshPrices();
     } catch (error) { status(error.message, true); }
     return;
   }
-  if (type === 'chart-source') { state.source = button.dataset.source; state.page = 1; syncAnalysisUrl(); renderControls(); renderSummary(); renderModelTable(); renderAnalysis(); refreshPrices(); return; }
   if (type === 'retry') {
     prices.clear(); overseasPrices?.clear(); status(''); refreshPrices();
     renderSummary(); renderModelTable(); if (builder) renderBuild(); else renderAnalysis();
@@ -690,6 +677,7 @@ document.addEventListener('click', event => {
 });
 document.addEventListener('change', event => {
   const target = event.target;
+  if (target.id === 'chart-sources') { state.source = target.value; state.page = 1; resetChartView(); syncAnalysisUrl(); renderControls(); renderModelTable(); renderAnalysis(); refreshPrices(); return; }
   if (target.dataset.quantity) {
     const entry = state.entries.find(e => e.id === target.dataset.quantity); const n = Number(target.value);
     if (!entry) return;
@@ -740,8 +728,9 @@ async function start() {
   try {
     const catalog = await readJson('/api/pc/catalog');
     const pageCatalog = builder ? catalog.tools_catalog : catalog.public_catalog;
-    state.products = pageCatalog?.products || catalog.products || [];
-    state.categories = (pageCatalog?.categories || catalog.categories || []).map(c => ({ code: c.code || c.category_code, label: c.label || c.display_name || c.code }));
+    const excludedBuildIds = new Set((pageCatalog?.products || catalog.products || []).filter(p => builder && ['CASE', 'COOLING'].includes(p.category_code)).map(idOf));
+    state.products = (pageCatalog?.products || catalog.products || []).filter(p => !excludedBuildIds.has(idOf(p)));
+    state.categories = (pageCatalog?.categories || catalog.categories || []).map(c => ({ code: c.code || c.category_code, label: c.label || c.display_name || c.code })).filter(c => !builder || !['CASE', 'COOLING'].includes(c.code));
     state.sources = (catalog.sources || []).filter(source => source.public_enabled === true);
     state.byId = new Map(state.products.map(p => [idOf(p), p]));
     if (!state.products.length || !state.categories.length) throw new Error('공개 카탈로그가 비어 있습니다.');
@@ -753,7 +742,8 @@ async function start() {
         const raw = fragment.has('build') ? fragment.get('build') : localStorage.getItem(STORAGE_KEY);
         if (raw) {
           if (raw.length > 20000) throw new Error('조합 주소가 너무 깁니다.');
-          state.entries = validateBuild(JSON.parse(raw), state.byId, new Set(state.categories.map(c => c.code)));
+          const saved = JSON.parse(raw);
+          state.entries = validateBuild(Array.isArray(saved) ? saved.filter(entry => !excludedBuildIds.has(entry?.id)) : saved, state.byId, new Set(state.categories.map(c => c.code)));
         }
         status('');
       } catch (error) { status(`조합을 불러오지 못했습니다. ${error.message}`, true); }
@@ -781,6 +771,9 @@ async function start() {
   }
 }
 if (builder) {
+  $('#compatibility-dialog')?.addEventListener('close', () => requestAnimationFrame(() => {
+    if (!$('#builder-model-dialog')?.open) document.querySelector(`.build-warning-trigger[data-kind="${$('#compatibility-dialog').dataset.kind}"]`)?.focus({ preventScroll: true });
+  }));
   $('#builder-model-dialog')?.addEventListener('close', () => {
     const target = [...document.querySelectorAll('#build-table button[data-action="category"]')]
       .find(button => button.dataset.category === pickerReturnCategory)
@@ -804,10 +797,5 @@ document.addEventListener('visibilitychange', () => {
 let resizeFrame;
 window.addEventListener('resize', () => {
   if (builder || !state.ready) return;
-  const analysisIsNarrow = window.matchMedia('(max-width: 760px)').matches;
-  if (analysisIsNarrow && !analysisWasNarrow && state.analysisPanes.chart && state.analysisPanes.table) {
-    state.analysisPanes.table = false;
-  }
-  analysisWasNarrow = analysisIsNarrow;
   cancelAnimationFrame(resizeFrame); resizeFrame = requestAnimationFrame(renderAnalysis);
 });

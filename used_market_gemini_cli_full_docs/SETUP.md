@@ -49,6 +49,12 @@ npm test
 
 Live harnesses and deployment commands are intentionally separate because they access external marketplaces or production infrastructure.
 
+Production uses Cloudflare Worker + AWS Runner through Named Tunnel. See the
+[deployment entry point](apps/domestic/DEPLOYMENT.md) and
+[price publication runbook](apps/domestic/docs/wiki/09-price-publication-operations.md)
+before changing either side. `FREE_TIER_MODE=false` selects the AWS routing
+profile; it does not mean a paid Workers subscription.
+
 ## Local web servers
 
 Build first, then start the app from its directory:

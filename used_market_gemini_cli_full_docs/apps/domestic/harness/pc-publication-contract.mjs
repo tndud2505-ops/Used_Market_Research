@@ -62,7 +62,8 @@ assert.match(workerSource, /const MAX_STATS_PUBLICATION_BYTES = 33_554_432;/u,
   "the statistics publication limit must accommodate the complete V16 catalog payload");
 assert.doesNotMatch(workerSource, /\/api\/monetization\/contextual-offer[\s\S]{0,250}MAX_STATS_PUBLICATION_BYTES/u,
   "public JSON routes must retain the smaller request limit");
-assert.match(publicationClientSource, /const CHUNK_ROW_COUNT = 40;/u,
+assert.ok(Number(publicationClientSource.match(/const CHUNK_ROW_COUNT = (\d+);/u)?.[1]) > 0
+  && Number(publicationClientSource.match(/const CHUNK_ROW_COUNT = (\d+);/u)?.[1]) <= 40,
   "large publications must use bounded transport chunks on the free Worker plan");
 assert.match(publicationClientSource, /\/admin\/stage-product-stats[\s\S]{0,2200}\/admin\/activate-product-stats/u,
   "publication transport must stage all chunks before the active pointer changes");

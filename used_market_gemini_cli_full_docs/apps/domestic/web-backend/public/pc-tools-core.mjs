@@ -50,6 +50,14 @@ export function metricPresentation(metric, seriesKey = 'active', currency = 'KRW
   }
   return { text: '—', label: count > 0 ? '표본 부족 · 대표가격 없음' : '가격 자료 없음', empty: true, state: count > 0 ? 'insufficient' : 'missing' };
 }
+export function listedPriceRange(metric) {
+  const count = metric?.sample_count, minimum = metric?.min, maximum = metric?.max;
+  if (!Number.isInteger(count) || count < 1 || metric.aggregate_incomplete === true || !metricIsConsistent(metric)
+    || typeof minimum !== 'number' || !Number.isFinite(minimum) || minimum <= 0
+    || typeof maximum !== 'number' || !Number.isFinite(maximum) || maximum < minimum
+    || (count === 1 && minimum !== maximum)) return null;
+  return { minimum, maximum, count };
+}
 // Builder sold prices are arithmetic means, including small exact samples.
 // Older publications with exactly one/two values can be recovered from their
 // extrema; for three or more values the midpoint is NOT an arithmetic mean.
@@ -70,7 +78,12 @@ export function statsUnavailable(data) {
   return status === 'UNAVAILABLE' || status === 'NO_EXACT_PUBLICATION' || data?.aggregate_incomplete === true;
 }
 export function priceRecordIssue(record, data = record?.data) {
-  if (record?.state === 'error') return `가격 조회 실패 · ${record.error || '다시 시도해 주세요.'}`;
+  if (record?.state === 'error') {
+    const code = record.errorCode || '';
+    if (['HISTORICAL_PRICE_STATS_UNAVAILABLE', 'HISTORICAL_EXACT_STATS_UNAVAILABLE'].includes(code)) return '선택한 기간의 가격 자료가 없습니다. 다른 기간을 선택해 주세요.';
+    if (/PUBLICATION|STATS_NOT_READY/.test(code)) return '가격 통계를 준비 중입니다. 잠시 후 다시 조회해 주세요.';
+    return '가격 조회 실패 · 잠시 후 다시 시도해 주세요.';
+  }
   if (record?.state === 'loading' || !record) return '가격 자료 확인 중';
   if (statsUnavailable(record?.data) || statsUnavailable(data)) {
     const code = data?.availability?.code || record?.data?.availability?.code || '';
@@ -146,7 +159,7 @@ export function scopedStats(data, manufacturer = '') {
   return row ? inheritStatsScope(data, row) : null;
 }
 function inheritStatsScope(data, row) {
-  const inherited = Object.fromEntries(['as_of', 'window', 'published_window', 'methodology', 'publication_id', 'versions', 'availability']
+  const inherited = Object.fromEntries(['as_of', 'window', 'published_window', 'methodology', 'publication_id', 'versions', 'availability', 'coverage', 'view']
     .filter(key => data[key] !== undefined).map(key => [key, data[key]]));
   // Member traceability belongs to the selected row, never to the whole market.
   return { ...inherited, ...row, as_of: data.as_of, window: data.window };
@@ -173,13 +186,15 @@ export function buildAnalysisSeries(data, {
   const output = [];
   const appendPair = (scope, scopeId, scopeLabel, colors) => {
     for (const metric of SERIES.slice(0, 2)) {
-      const points = dailySeries(scope, metric.key, days);
+      const listedMinimum = scopeId === 'danawa' && metric.key === 'active';
+      const points = dailySeries(scope, metric.key, days, { listedMinimum });
       if (!points.some(point => point.value != null)) continue;
       output.push({
         id: `${scopeId}:${metric.key}`,
         key: metric.key,
         metricKey: metric.key,
-        label: `${scopeLabel} · ${metric.key === 'active' ? '판매중 대표가격' : metric.label}`,
+        label: `${scopeLabel} · ${listedMinimum ? '중고 최저 표시가' : metric.key === 'active' ? '판매중 대표가격' : metric.label}`,
+        priceBasis: listedMinimum ? 'listed-minimum' : 'representative',
         color: colors[metric.key],
         dash: metric.key === 'sold' ? '6 3' : 'none',
         points,
@@ -279,20 +294,45 @@ export function buildTotals(entries, getStats) {
 }
 export function compatibility(entries, products) {
   const byCategory = new Map(entries.map(e => [products.get(e.id)?.category_code || e.category, products.get(e.id)]));
-  const cpu = byCategory.get('CPU')?.key_specs;
-  const board = byCategory.get('MOTHERBOARD')?.key_specs;
-  const ram = byCategory.get('RAM')?.key_specs;
+  const cpuProduct = byCategory.get('CPU'), boardProduct = byCategory.get('MOTHERBOARD'), ramProduct = byCategory.get('RAM');
+  const cpu = cpuProduct?.key_specs || {}, board = boardProduct?.key_specs || {}, ram = ramProduct?.key_specs || {};
   const checks = [];
-  if (cpu && board) {
+  if (cpuProduct && boardProduct) {
     checks.push(cpu.socket && board.socket
       ? { label: 'CPU·메인보드 소켓', status: normalizedName(cpu.socket) === normalizedName(board.socket) ? 'match' : 'conflict', detail: `${cpu.socket} / ${board.socket}` }
       : { label: 'CPU·메인보드 소켓', status: 'unknown', detail: '세부 사양 필요' });
   }
-  if (board && ram) {
+  if (boardProduct && ramProduct) {
     const a = board.memory_generation, b = ram.memory_generation || ram.generation;
     checks.push(a && b
       ? { label: '메모리 규격', status: normalizedName(a) === normalizedName(b) ? 'match' : 'conflict', detail: `${a} / ${b}` }
       : { label: '메모리 규격', status: 'unknown', detail: '세부 사양 필요' });
+  }
+  for (const check of checks) {
+    const socket = check.label === 'CPU·메인보드 소켓';
+    check.kind = socket ? 'socket' : 'memory';
+    check.category = socket ? 'MOTHERBOARD' : 'RAM';
+    check.changeCategories = socket ? ['MOTHERBOARD', 'CPU'] : ['RAM', 'MOTHERBOARD'];
+    const boardName = nameOf(boardProduct), otherName = nameOf(socket ? cpuProduct : ramProduct);
+    const boardSpec = socket ? board.socket : board.memory_generation;
+    const otherSpec = socket ? cpu.socket : ram.memory_generation || ram.generation;
+    const support = boardSpec ? `${boardName} 메인보드는 ${boardSpec}${socket ? ' 소켓을 사용합니다.' : ' 메모리를 지원합니다.'}`
+      : `${boardName} 메인보드의 ${socket ? 'CPU 소켓' : '메모리 규격'} 정보가 아직 등록되어 있지 않습니다.`;
+    if (check.status === 'conflict') {
+      check.title = socket ? 'CPU를 이 메인보드에 장착할 수 없어요' : '이 RAM은 메인보드에서 지원하지 않아요';
+      check.explanation = `${support} 선택한 ${otherName}${socket ? ` CPU는 ${otherSpec} 소켓용이라 장착할 수 없습니다.` : `은 ${otherSpec} 규격이라 함께 사용할 수 없습니다.`}`;
+      check.recommendation = socket ? `${otherSpec} 소켓의 메인보드로 바꾸거나, 현재 메인보드에서 지원하는 CPU를 선택해 주세요. 새 조합의 CPU 지원 목록과 BIOS 버전도 확인해 주세요.`
+        : `${boardSpec} RAM으로 바꾸거나, ${otherSpec} 메모리를 지원하는 메인보드를 선택해 주세요.`;
+    } else if (check.status === 'match' && socket) {
+      check.title = '소켓은 같지만 CPU 지원 확인이 필요해요';
+      check.explanation = `${support} 선택한 ${otherName} CPU도 ${otherSpec} 소켓용입니다. 다만 소켓이 같아도 CPU 세대나 메인보드 BIOS 버전에 따라 지원하지 않을 수 있습니다.`;
+      check.recommendation = '메인보드 제조사의 CPU 지원 목록에 이 CPU가 있는지 확인해 주세요. 목록에 필요한 BIOS 버전이 적혀 있다면, 메인보드의 현재 버전도 함께 확인해 주세요.';
+    } else if (check.status === 'unknown') {
+      check.title = socket ? 'CPU 지원 여부를 확인해 주세요' : 'RAM 지원 규격을 확인해 주세요';
+      check.explanation = `${support} ${otherSpec ? `선택한 ${otherName}의 규격은 ${otherSpec}입니다.` : `${otherName}의 ${socket ? '소켓' : '메모리 규격'} 정보가 아직 등록되어 있지 않습니다.`} 현재 정보만으로는 함께 사용할 수 있는지 판단하기 어렵습니다.`;
+      check.recommendation = socket ? '메인보드 제조사 홈페이지의 CPU 지원 목록에서 CPU 모델명과 필요한 BIOS 버전을 확인해 주세요.'
+        : '메인보드 제품 사양과 RAM 라벨의 DDR 규격을 확인해 주세요. DDR3·DDR4·DDR5는 서로 바꿔 끼울 수 없습니다.';
+    }
   }
   return { checks, conflict: checks.some(c => c.status === 'conflict'), note: 'BIOS·크기·전원 커넥터는 별도 확인이 필요합니다.' };
 }
@@ -322,18 +362,20 @@ export function compactBuild(input, products, categories) {
     return entry;
   });
 }
-export function dailySeries(data, key, days = 30) {
+export function dailySeries(data, key, days = 30, { listedMinimum = false } = {}) {
   const rows = Array.isArray(data?.daily) ? data.daily : [];
   const latestPublished = String(data?.availability?.status || '').toUpperCase() === 'LAST_PUBLISHED';
   const date = String((latestPublished ? data?.published_window?.to : '') || data?.window?.to || data?.as_of || rows.at(-1)?.date || rows.at(-1)?.stat_date || '').slice(0, 10);
   const end = Date.parse(`${date}T00:00:00Z`);
   if (!Number.isFinite(end)) return [];
   const start = end - (days - 1) * 86400000;
-  const map = new Map(rows.map(row => [String(row.date || row.stat_date).slice(0, 10),
-    key === 'sold' ? soldMeanValue(row[key]) ?? metricValue(row[key]) : metricValue(row[key])]));
+  const map = new Map(rows.map(row => [String(row.date || row.stat_date).slice(0, 10), row[key]]));
   return Array.from({ length: days }, (_, i) => {
     const day = new Date(start + i * 86400000).toISOString().slice(0, 10);
-    return { date: day, value: map.get(day) ?? null };
+    const metric = map.get(day);
+    return { date: day, value: listedMinimum ? listedPriceRange(metric)?.minimum ?? null
+      : key === 'sold' ? soldMeanValue(metric) ?? metricValue(metric) : metricValue(metric),
+      sampleCount: Number.isInteger(metric?.sample_count) && metric.sample_count >= 0 && metric.aggregate_incomplete !== true ? metric.sample_count : null };
   });
 }
 export function percentChange(points) {

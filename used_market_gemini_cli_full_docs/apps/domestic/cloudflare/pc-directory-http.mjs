@@ -188,8 +188,8 @@ export function pcCollectionTargetSetV2() {
       && source.policy_status === "APPROVED"
       && source.runtime_status === "ENABLED")
     .map((source) => source.key));
-  const categoryEndpointSources = ["danawa", "ebay"].filter((source) => operationalDirectorySources.has(source));
-  const searchMarketplaceSources = ["joonggonara", "hellomarket", "bunjang", "rethinkmall", "coolenjoy"]
+  const categoryEndpointSources = ["ebay"].filter((source) => operationalDirectorySources.has(source));
+  const searchMarketplaceSources = ["joonggonara", "hellomarket", "bunjang", "danawa", "rethinkmall", "coolenjoy"]
     .filter((source) => operationalDirectorySources.has(source));
   const overseasExactSources = operationalDirectorySources.has("ebay") ? ["ebay"] : [];
   const generalQueries = [
@@ -214,7 +214,7 @@ export function pcCollectionTargetSetV2() {
     ["ODD", "블루레이 ODD"]
   ];
   const categoryTargets = PC_PART_CATEGORY_SEEDS_V2.map((category, index) => ({
-    targetId: `pc-target:${PC_PRODUCT_MASTER_V2_VERSION}:category-v13:${category.code}`,
+    targetId: `pc-target:${PC_PRODUCT_MASTER_V2_VERSION}:category-v15:${category.code}`,
     canonicalProductId: null,
     categoryCode: category.code,
     queryText: category.label,
@@ -225,7 +225,7 @@ export function pcCollectionTargetSetV2() {
     enabled: true
   }));
   const generalTargets = generalQueries.map(([categoryCode, queryText], index) => ({
-    targetId: `pc-target:${PC_PRODUCT_MASTER_V2_VERSION}:market-v13:${categoryCode}:${index}`,
+    targetId: `pc-target:${PC_PRODUCT_MASTER_V2_VERSION}:market-v15:${categoryCode}:${index}`,
     canonicalProductId: null,
     categoryCode,
     queryText,
@@ -296,7 +296,7 @@ export function pcCollectionTargetSetV2() {
     for (let queryIndex = 0; queryIndex < uniquePlans.length; queryIndex += 1) {
       const plan = uniquePlans[queryIndex];
       exactTargets.push({
-        targetId: `pc-target:${PC_PRODUCT_MASTER_V2_VERSION}:master-v13:${product.id}:${plan.scope}:${queryIndex}`,
+        targetId: `pc-target:${PC_PRODUCT_MASTER_V2_VERSION}:master-v15:${product.id}:${plan.scope}:${queryIndex}`,
         canonicalProductId: product.id,
         categoryCode: product.category,
         queryText: plan.queryText,
@@ -310,12 +310,12 @@ export function pcCollectionTargetSetV2() {
     }
   }
   return {
-    targetSetVersion: `pc-targets:${PC_PRODUCT_MASTER_V2_VERSION}:full-master-v13`,
+    targetSetVersion: `pc-targets:${PC_PRODUCT_MASTER_V2_VERSION}:full-master-v15`,
     directoryVersion: PC_PRODUCT_MASTER_V2_VERSION,
     targets: [...categoryTargets, ...generalTargets, ...exactTargets,
       ...collectionProducts.filter(product => product.category === 'RAM' && product.manufacturer === 'G.Skill')
         .map((product, index) => ({
-          targetId: `pc-target:${PC_PRODUCT_MASTER_V2_VERSION}:master-v13:${product.id}:domestic:ko`,
+          targetId: `pc-target:${PC_PRODUCT_MASTER_V2_VERSION}:master-v15:${product.id}:domestic:ko`,
           canonicalProductId: product.id,
           categoryCode: 'RAM',
           queryText: `지스킬 ${product.spec.memory_generation} ${product.spec.module_capacity_gb}GB`,

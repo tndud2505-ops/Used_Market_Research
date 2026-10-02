@@ -1,4 +1,5 @@
 import { statsPublicationKey } from '../cloudflare/public-product-stats.mjs';
+import { withDomesticStatsScopes } from '../market/logic/pc-market-pools.mjs';
 
 // Reuse scope identities only, never prices from a previous publication. Every
 // scope returned here must be rebuilt with the caller's one version and as_of.
@@ -31,7 +32,7 @@ export function fullPublicationScopes(db, observedScopes, options = {}) {
     externalScopes = external.scopes;
   }
   const scopes = new Map();
-  for (const input of [...previous, ...externalScopes, ...observedScopes]) {
+  for (const input of withDomesticStatsScopes([...previous, ...externalScopes, ...observedScopes])) {
     const scope = { canonical_product_id: input.canonical_product_id, market_pool: input.market_pool,
       condition_code: input.condition_code, currency: input.currency, days: 30 };
     if (['canonical_product_id', 'market_pool', 'condition_code', 'currency'].some(key =>

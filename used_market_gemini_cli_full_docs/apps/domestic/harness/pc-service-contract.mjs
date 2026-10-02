@@ -15,6 +15,7 @@ import {
   statsPublicationBoundaryKey,
   statsPublicationKey
 } from "../cloudflare/public-product-stats.mjs";
+import { verifyStoredStatsOnAws } from '../aws-runner/pc-stats-readback.mjs';
 import {
   comparePcListingRows,
   dedupePcListingRows,
@@ -228,9 +229,9 @@ const authoritativeProjectionSet = collectAuthoritativePcProjections(
   (sourceId, sourceListingId) => republishProjectionBySourcePair.get(`${sourceId}\u0000${sourceListingId}`)
 );
 assert.deepEqual(authoritativeProjectionSet.items.map((item) => item.item_id).sort(), [
-  "bunjang:1001"
+  "bunjang:1001", "danawa:1002"
 ], "only enabled directory sources in the active pipeline may drive republication");
-assert.equal(authoritativeProjectionSet.ineligible_count, 6,
+assert.equal(authoritativeProjectionSet.ineligible_count, 5,
   "otherwise eligible rows from retired sources must remain outside republication authority");
 const activeV9Fixture = {
   normalization_version: 9, parser_version: "pc-parser-v5", rule_version: "pc-rules-v9", filter_version: "pc-filter-v5"
@@ -365,13 +366,13 @@ const reconciliationFixture = buildPcProjectionReconciliation({
   pipelineVersion: activeV9Fixture,
   authorityCoverage: authoritativeProjectionSet
 });
-assert.equal(reconciliationFixture.authoritative_count, 1);
-assert.deepEqual(reconciliationFixture.d1_stale.map((item) => item.item_id), ["bunjang:stale-v8-system"]);
-assert.deepEqual(reconciliationFixture.local_stale.map((item) => item.item_id), [],
-  "retired source rows stay outside the active reconciliation scope");
+assert.equal(reconciliationFixture.authoritative_count, 2);
+assert.deepEqual(reconciliationFixture.d1_stale.map((item) => item.item_id), ["bunjang:stale-v8-system", legacyLotIdentity.item_id]);
+assert.deepEqual(reconciliationFixture.local_stale.map((item) => item.item_id), [staleLocalFixture.item_id],
+  "enabled source rows participate in the active reconciliation scope");
 assert.equal(reconciliationFixture.d1_upserts.find((item) => item.item_id === "bunjang:1001").canonical_product_id,
   "gpu:nvidia:rtx-3080", "the authoritative canonical target replaces the stale public target in place");
-assert.equal(reconciliationFixture.d1_missing_count, 0);
+assert.equal(reconciliationFixture.d1_missing_count, 1);
 const canonicalIdMigrationFixture = buildPcProjectionReconciliation({
   authoritative: [eligibleBunjangLotProjection],
   d1Public: [legacyBunjangLotIdentity],
@@ -398,6 +399,13 @@ assert.equal(canonicalWithAliasFixture.d1_missing_count, 0);
 assert.deepEqual(canonicalWithAliasFixture.d1_stale.map((item) => item.item_id), [legacyBunjangLotIdentity.item_id]);
 assert.deepEqual(canonicalWithAliasFixture.d1_upserts.map((item) => item.item_id), [eligibleBunjangLotProjection.item_id],
   "an exact canonical row survives while only its legacy alias is tombstoned");
+const danawaSearchProjection = { ...eligibleRepublishProjection, site: 'danawa', url: 'https://prod.danawa.com/info/?pcode=01012345678&keyword=ignored' };
+assert.equal(repairAuthoritativePcProjection('danawa', 'search_2a6854c096ff0c51842869b0', danawaSearchProjection).url, 'https://prod.danawa.com/info/?pcode=01012345678');
+assert.equal(repairAuthoritativePcProjection('danawa', 'search_ff7d26430968574c6eb7f141', { ...danawaSearchProjection, url: 'https://prod.danawa.com/bridge/go_link_goods.php?cmpny_c=TEST&link_prod_c=123' }).url, 'https://prod.danawa.com/bridge/go_link_goods.php?cmpny_c=TEST&link_prod_c=123');
+for (const url of ['https://prod.danawa.com.attacker.test/info/?pcode=123', 'https://prod.danawa.com/info/?pcode=[PHONE]', 'https://user:pass@prod.danawa.com/info/?pcode=123']) {
+  assert.throws(() => repairAuthoritativePcProjection('danawa', 'search_2a6854c096ff0c51842869b0', { ...danawaSearchProjection, url }), /AUTHORITATIVE_URL_UNRECOVERABLE/);
+}
+assert.equal(repairAuthoritativePcProjection('danawa', '998877', danawaSearchProjection).url, 'https://dmall.danawa.com/v3/?controller=sale&methods=blog&seq=998877');
 const ebayCanonicalProjection = repairAuthoritativePcProjection("ebay", "v1|116454586914|0", {
   ...eligibleRepublishProjection,
   id: "ebay:legacy-input",
@@ -455,8 +463,8 @@ assert.ok(staleTombstone.exclusion_reasons.includes("NOT_IN_ACTIVE_PIPELINE_ELIG
 assert.throws(() => parsePcProjectionRepublishArguments(["--apply"]), /requires checksum and all exact expected counts/u);
 const confirmedReconciliation = parsePcProjectionRepublishArguments([
   "--apply", `--confirm-checksum=${reconciliationFixture.checksum}`,
-  "--expect-authoritative-count=1", "--expect-d1-stale-count=1", "--expect-d1-missing-count=0",
-  "--expect-local-stale-count=0", "--expect-local-missing-count=0",
+  "--expect-authoritative-count=2", "--expect-d1-stale-count=2", "--expect-d1-missing-count=1",
+  "--expect-local-stale-count=1", "--expect-local-missing-count=0",
   "--expect-source-pair-count=7", "--expect-projection-count=7", "--expect-version-covered-count=7"
 ]);
 assert.equal(assertPcProjectionApplyConfirmation(confirmedReconciliation, reconciliationFixture), true);
@@ -718,6 +726,12 @@ const indexedNvmeOnly = index.browsePcListings({
   asOf: "2026-08-29T00:00:01.000Z", currency: "KRW"
 });
 assert.deepEqual(indexedNvmeOnly.items.map((item) => item.item_id), ["danawa:ssd-nvme"]);
+const availabilityProjection = index.browsePcListings({
+  sites: ["danawa"], limit: 1, asOf: "2026-08-29T00:00:01.000Z"
+});
+assert.ok(availabilityProjection.total > availabilityProjection.items.length);
+assert.equal(Object.values(availabilityProjection.modelCounts).reduce((sum, count) => sum + count, 0),
+  availabilityProjection.total, "AWS model availability must include rows beyond the first page");
 const browsedProjection = index.browsePcListings({
   canonicalProductId: "gpu:nvidia:rtx-3080", sites: ["danawa"], sort: "price_asc", limit: 2,
   asOf: "2026-08-29T00:00:01.000Z"
@@ -1041,7 +1055,10 @@ function d1Adapter(database, { maxBindings = Number.POSITIVE_INFINITY, bindingOb
           return { results };
         },
         async first() { observeBindings(values); return statement.get(...values) || null; },
-        async run() { observeBindings(values); return statement.run(...values); }
+        async run() {
+          observeBindings(values);
+          return /^\s*SELECT\b/iu.test(sql) ? { success: true, results: statement.all(...values) } : statement.run(...values);
+        }
       });
       return {
         ...bound([]),
@@ -1077,6 +1094,7 @@ d1.prepare(`INSERT INTO listings(item_id, site, category_id, title, search_text,
   "gpu:nvidia:rtx-3080", "NVIDIA GeForce RTX 3080", null, "ASUS", "SINGLE_COMPONENT", "GPU", 1, "TOTAL",
   "USED_WORKING", "ACTIVE", "KR_C2C_USED"
 );
+d1.prepare("UPDATE listings SET statistics_eligible = 1 WHERE item_id = ?").run('joonggonara:d1-pc');
 d1.prepare(`INSERT INTO listings(item_id, site, category_id, title, search_text, price_value, currency, url, image_url, updated_at, active,
   canonical_product_id, canonical_display_name, canonical_manufacturer, board_manufacturer, listing_kind, pc_category_code, quantity, price_scope, condition_code,
   lifecycle_status, market_pool, price_eligible, exclusion_reasons_json)
@@ -1097,9 +1115,12 @@ assert.equal(nextTokenImportResponse.status, 200, "a secondary operator token su
 const publicationRouteD1 = new DatabaseSync(":memory:");
 publicationRouteD1.exec(await readFile(new URL("../cloudflare/migrations/0002_pc_public_stats.sql", import.meta.url), "utf8"));
 publicationRouteD1.exec(await readFile(new URL("../cloudflare/migrations/0015_pc_stats_chunk_staging.sql", import.meta.url), "utf8"));
+publicationRouteD1.exec(await readFile(new URL("../cloudflare/migrations/0016_pc_stats_publication_cursor.sql", import.meta.url), "utf8"));
 const publicationRouteEnv = {
   DB: d1Adapter(publicationRouteD1),
-  MANUAL_RUN_TOKEN: "publication-route-token"
+  MANUAL_RUN_TOKEN: "publication-route-token",
+  RUNNER_URL: 'https://runner-verifier.test/api/runner/run',
+  RUNNER_TOKEN: 'fixture-runner-token'
 };
 const publicationRouteStats = (sampleCount) => ({
   active: { sample_count: sampleCount },
@@ -1189,15 +1210,31 @@ for (const [chunkIndex, row] of stagedRows.entries()) {
   }), publicationRouteEnv);
   assert.equal(response.status, 200, JSON.stringify(await response.clone().json()));
 }
-const stagedActivationResponse = await worker.fetch(new Request("https://used-pick.test/admin/activate-product-stats", {
+const beforeVerificationFetch = globalThis.fetch;
+globalThis.fetch = async (url, options) => {
+  if (new URL(url).hostname === 'runner-verifier.test') {
+    assert.equal(options.headers.authorization, 'Bearer fixture-runner-token');
+    return Response.json({ ok: true, verification: await verifyStoredStatsOnAws({
+      importUrl: 'https://used-pick.test/admin/import-product-stats', token: 'publication-route-token',
+      publication: JSON.parse(options.body)
+    }) });
+  }
+  assert.equal(new URL(url).hostname, 'used-pick.test');
+  return worker.fetch(new Request(url, options), publicationRouteEnv);
+};
+let stagedActivationResponse;
+try {
+stagedActivationResponse = await worker.fetch(new Request("https://used-pick.test/admin/activate-product-stats", {
   method: "POST",
   headers: { authorization: "Bearer publication-route-token", "content-type": "application/json" },
   body: JSON.stringify({
     ...stagedCommon,
+    expected_previous_publication: { publication_id: 'route-base', checksum: await statsChecksum(publicationBaseRows) },
     expected_chunk_count: stagedDescriptors.length,
     chunk_manifest_checksum: await statsChunkManifestChecksum(stagedDescriptors)
   })
 }), publicationRouteEnv);
+} finally { globalThis.fetch = beforeVerificationFetch; }
 const storedStagedDescriptors = publicationRouteD1.prepare(`SELECT chunk_index, expected_chunk_count, chunk_checksum,
   row_count, non_empty_scope_count, first_scope_key, last_scope_key
   FROM public_stats_publication_chunks WHERE publication_id = ? ORDER BY chunk_index`).all("route-staged");
@@ -1317,6 +1354,7 @@ d1.prepare(`INSERT INTO listings(item_id, site, category_id, title, search_text,
     50000, 'KRW', 'https://web.joongna.com/product/3200', ?, 1, ?,
     'AMD Ryzen 3 3200G', 'AMD', 'SINGLE_COMPONENT', 'CPU', 1, 'TOTAL', 'USED_WORKING', 'ACTIVE',
     'KR_C2C_USED', 1, '[]')`).run(currentPublicationAsOf, inconsistentCpuId);
+d1.prepare("UPDATE listings SET statistics_eligible = 1 WHERE item_id = ?").run('joonggonara:3200g-current');
 for (const [index, price] of [90_000, 100_000, 110_000].entries()) {
   d1.prepare(`INSERT INTO listings(item_id, site, category_id, title, search_text, price_value, currency, url, updated_at, active,
     canonical_product_id, canonical_display_name, canonical_manufacturer, listing_kind, pc_category_code, quantity, price_scope,
@@ -1327,6 +1365,7 @@ for (const [index, price] of [90_000, 100_000, 110_000].entries()) {
     `https://web.joongna.com/product/ssd-bucket-${index}`,
     currentPublicationAsOf, ssdBucketId
   );
+  d1.prepare("UPDATE listings SET statistics_eligible = 1 WHERE item_id = ?").run(`joonggonara:ssd-bucket-${index}`);
 }
 d1.prepare("UPDATE listings SET listing_facets_json = ? WHERE item_id IN (?, ?)")
   .run(JSON.stringify({ product_kind: "M2_NVME", placement: "INTERNAL", form_factor: "M.2" }), "joonggonara:ssd-bucket-0", "joonggonara:ssd-bucket-1");
@@ -1342,6 +1381,7 @@ for (const [index, price] of [280_000, 300_000, 320_000].entries()) {
     `https://web.joongna.com/product/3060${index}`,
     currentPublicationAsOf
   );
+  d1.prepare("UPDATE listings SET statistics_eligible = 1 WHERE item_id = ?").run(`joonggonara:rtx-3060-${index}`);
 }
 for (const [index, price] of [290_000, 310_000, 330_000].entries()) {
   d1.prepare(`INSERT INTO listings(item_id, site, category_id, title, search_text, price_value, currency, url, updated_at, active,
@@ -1353,6 +1393,7 @@ for (const [index, price] of [290_000, 310_000, 330_000].entries()) {
     `https://m.bunjang.co.kr/products/3061${index}`,
     currentPublicationAsOf
   );
+  d1.prepare("UPDATE listings SET statistics_eligible = 1 WHERE item_id = ?").run(`bunjang:rtx-3060-${index}`);
 }
 const workerCatalog = await worker.fetch(new Request("https://used-pick.test/api/pc/catalog"), importEnv);
 assert.equal(workerCatalog.status, 200);
@@ -1370,8 +1411,10 @@ const workerProducts = await worker.fetch(new Request("https://used-pick.test/ap
 assert.equal(workerProducts.status, 200);
 const workerProductsPayload = await workerProducts.json();
 assert.equal(workerProductsPayload.data.products.items[0].id, "gpu:nvidia:rtx-3080");
-assert.equal(workerProductsPayload.data.products.items[0].price_stats.active.median, 490000);
-assert.equal(workerProductsPayload.data.products.items[0].price_stats_market_pool, "KR_C2C_USED");
+assert.equal(workerProductsPayload.data.products.items[0].price_stats.active.median, null,
+  "a current domestic projection below three listings must preserve minimum-sample price suppression");
+assert.equal(workerProductsPayload.data.products.items[0].price_stats.active.sample_count, 1);
+assert.equal(workerProductsPayload.data.products.items[0].price_stats_market_pool, "KR_DOMESTIC_USED");
 const publishedStatsResponse = await worker.fetch(new Request(
   `https://used-pick.test/api/products/gpu%3Anvidia%3Artx-3080/price-stats?days=30&as_of=${currentPublicationDate}&market_pool=KR_C2C_USED&condition=USED_WORKING&currency=KRW`
 ), importEnv);
@@ -1420,6 +1463,21 @@ assert.equal(currentOnlyStats.daily.at(-1).active.sample_count, 6);
 assert.deepEqual(currentOnlyStats.by_source.map((source) => source.source_id), ["bunjang", "joonggonara"]);
 assert.equal(currentOnlyStats.by_source.find((source) => source.source_id === "bunjang").active.median, 310_000);
 assert.equal(currentOnlyStats.by_source.find((source) => source.source_id === "joonggonara").active.median, 300_000);
+d1.prepare(`INSERT INTO listings (item_id, site, category_id, title, search_text, price_value, currency, url,
+  updated_at, active, canonical_product_id, listing_kind, pc_category_code, quantity, price_scope,
+  condition_code, lifecycle_status, market_pool, price_eligible, statistics_eligible)
+  SELECT 'bunjang:statistics-excluded-system', site, category_id, 'RTX 3060 PC', search_text, 900000,
+    currency, url, updated_at, active, canonical_product_id, listing_kind, pc_category_code, quantity,
+    price_scope, condition_code, lifecycle_status, market_pool, 1, 0
+  FROM listings WHERE item_id = 'bunjang:rtx-3060-0'`).run();
+const filteredCurrentStatsResponse = await worker.fetch(new Request(
+  "https://used-pick.test/api/products/gpu%3Anvidia%3Artx-3060/price-stats?days=30&market_pool=KR_DOMESTIC_USED&condition=USED_WORKING&currency=KRW"
+), importEnv);
+assert.equal(filteredCurrentStatsResponse.status, 200);
+const filteredCurrentStats = (await filteredCurrentStatsResponse.json()).data;
+assert.equal(filteredCurrentStats.active.sample_count, 6, "displayable statistics-excluded rows cannot enter the domestic fallback");
+assert.equal(filteredCurrentStats.active.mean, 305_000, "the fallback must apply the ledger's statistics eligibility gate");
+d1.prepare("DELETE FROM listings WHERE item_id = 'bunjang:statistics-excluded-system'").run();
 const repairedStatsResponse = await worker.fetch(new Request(
   `https://used-pick.test/api/products/${encodeURIComponent(inconsistentCpuId)}/price-stats?days=30&market_pool=KR_C2C_USED&condition=USED_WORKING&currency=KRW`
 ), importEnv);
@@ -1550,6 +1608,8 @@ assert.equal(publicPagination.pages.every((page) => page.payload.data.total === 
   "ordinary browse total is the reconciled stable-row count");
 assert.equal(publicPagination.pages[0].payload.data.source_counts?.danawa, 8,
   "the first listing page must carry whole-query source counts so empty sites can stay hidden");
+assert.equal(publicPagination.pages[0].payload.data.model_counts?.['gpu:nvidia:rtx-3080'], 8,
+  "model availability must count the entire filtered result, not the two-row first page");
 const publicItems = publicPagination.items;
 assert.equal(new Set(publicItems.map((item) => item.item_id)).size, publicItems.length,
   "authoritatively reconciled stable item IDs must not repeat across page boundaries");
@@ -1609,7 +1669,10 @@ try {
   assert.equal(firstCachedListing.headers.get("x-pc-read-cache"), "MISS");
   assert.equal(secondCachedListing.headers.get("x-pc-read-cache"), "HIT");
   assert.equal(secondCachedListing.headers.get("x-search-data-source"), "aws-runner");
-  assert.equal(secondCachedListing.headers.get("cache-control"), "public, max-age=60");
+  assert.equal(firstCachedListing.headers.get("cache-control"), "no-cache, max-age=0, must-revalidate");
+  assert.equal(secondCachedListing.headers.get("cache-control"), "no-cache, max-age=0, must-revalidate");
+  assert.ok([...listingCacheEntries.values()].every(entry => entry.headers.get("cache-control") === "public, max-age=60"),
+    "browser revalidation must retain the Worker cache TTL");
   assert.equal(listingReads, 1, "identical public listing reads must share a Worker cache entry");
   await fetchThroughPcReadCache(new Request(`${cachedListingRequest.url}&reconciliation_audit=fixture`), {}, originRead);
   assert.equal(listingReads, 2, "reconciliation audit reads must remain uncached");
@@ -1630,7 +1693,7 @@ try {
   ), {}, statsOriginRead);
   assert.equal(firstCachedStats.headers.get("x-pc-read-cache"), "MISS");
   assert.equal(secondCachedStats.headers.get("x-pc-read-cache"), "HIT");
-  assert.ok([...listingCacheEntries.keys()].every(key => key.startsWith('https://used-market-pc-read-cache-v3.invalid/')),
+  assert.ok([...listingCacheEntries.keys()].every(key => key.startsWith('https://used-market-pc-read-cache-v4.invalid/')),
     'the repaired price cohort must never reuse pre-release v1 edge cache entries');
   assert.equal(statsReads, 1, "normalized price-stat reads must share a Worker cache entry");
 
@@ -1997,7 +2060,7 @@ assert.equal(workerListingsPayload.data.items[0].price_eligible, true);
 assert.deepEqual(workerListingsPayload.data.items[0].exclusion_reasons, []);
 assert.equal(Object.hasOwn(workerListingsPayload.data.pagination, "next_cursor"), true);
 assert.equal(workerListings.headers.get("x-free-tier-data-source"), "d1");
-assert.equal(workerListings.headers.get("cache-control"), "public, max-age=60");
+assert.equal(workerListings.headers.get("cache-control"), "no-cache, max-age=0, must-revalidate");
 assert.equal(isCacheableRequest(new Request("https://used-pick.test/api/pc/listings"),
   new URL("https://used-pick.test/api/pc/listings")), false,
 "a FRESH listing response must never enter the 24-hour static cache");
@@ -2011,9 +2074,9 @@ const d1ListingItemsBeforeFreshnessMirror = structuredClone(workerListingsPayloa
 const sourceRuntimeCollectedAt = new Date(Date.now() - 30_000).toISOString();
 const unrelatedSourceRuntimeCollectedAt = new Date(Date.now() - 5_000).toISOString();
 const freshnessTargetIds = Object.freeze({
-  bunjangGpu: "pc-target:5:market-v13:GPU:0",
-  joonggonaraGpu: "pc-target:5:market-v13:GPU:0",
-  joonggonaraCpu: "pc-target:5:market-v13:CPU:1"
+  bunjangGpu: "pc-target:5:market-v15:GPU:0",
+  joonggonaraGpu: "pc-target:5:market-v15:GPU:0",
+  joonggonaraCpu: "pc-target:5:market-v15:CPU:1"
 });
 const mirrorCollectionManifest = async (sourceId, asOf, successfulTargetIds) => {
   const response = await worker.fetch(new Request("https://used-pick.test/admin/import-listings", {
@@ -2361,6 +2424,19 @@ assert.equal(firstUnchangedPayload.unchanged, 0);
 const usageBeforeUnchangedReplay = d1.prepare(
   "SELECT d1_rows_written FROM free_tier_usage ORDER BY date_key DESC LIMIT 1"
 ).get().d1_rows_written;
+const identityBeforeConflict = d1.prepare('SELECT * FROM listings WHERE item_id=?').get(unchangedProjection.item_id);
+for (const items of [
+  [{ ...unchangedProjection, site: 'joonggonara', url: 'https://web.joongna.com/product/1234' }],
+  [unchangedProjection, { ...unchangedProjection, site: 'joonggonara', url: 'https://web.joongna.com/product/1234' }]
+]) {
+  const conflict = await worker.fetch(new Request('https://used-pick.test/admin/import-listings', {
+    method: 'POST', headers: { authorization: 'Bearer import-fixture-token', 'content-type': 'application/json' },
+    body: JSON.stringify({ items })
+  }), importEnv);
+  assert.equal(conflict.status, 500, 'cross-source item identity collisions fail closed');
+  assert.deepEqual(d1.prepare('SELECT * FROM listings WHERE item_id=?').get(unchangedProjection.item_id), identityBeforeConflict,
+    'a rejected source collision leaves the original row untouched');
+}
 const changesBeforeUnchangedReplay = d1.prepare("SELECT total_changes() AS value").get().value;
 const unchangedReplay = await worker.fetch(new Request("https://used-pick.test/admin/import-listings", {
   method: "POST",
@@ -2483,6 +2559,29 @@ try {
     DB: d1Adapter(d1), SEARCH_RUNNER_URL: "https://runner.example.test/api/search", RUNNER_TOKEN: "fixture-token"
   });
   assert.equal((await wrongManufacturer.json()).data.items.length, 0);
+const danawaImportUrls = [
+  ['https://prod.danawa.com/info/?pcode=123456',true],
+  ['https://prod.danawa.com/bridge/go_link_goods.php?cmpny_c=TEST&link_prod_c=123456',true],
+  ['https://prod.danawa.com/list/?cate=112752',false],
+  ['https://prod.danawa.com/info/?pcode=oops',false],
+  ['https://prod.danawa.com/bridge/go_link_goods.php?cmpny_c=TEST',false],
+  ['https://prod.danawa.com.attacker.test/info/?pcode=123456',false]
+];
+for(const [url,allowed] of danawaImportUrls){
+  const response=await worker.fetch(new Request('https://used-pick.test/admin/import-listings',{
+    method:'POST',headers:{authorization:'Bearer import-fixture-token','content-type':'application/json'},
+    body:JSON.stringify({items:[{item_id:'danawa:url-contract-'+danawaImportUrls.findIndex(r=>r[0]===url),site:'danawa',category_id:'pc',
+      title:'삼성 DDR5 16GB 중고',price:50000,currency:'KRW',url,lifecycle_status:'ACTIVE',market_pool:'KR_DEALER_USED',
+      canonical_product_id:'ram:samsung:ddr5:16gb',canonical_display_name:'Samsung DDR5 16GB',canonical_manufacturer:'Samsung',
+      listing_kind:'SINGLE_COMPONENT',pc_category_code:'RAM',quantity:1,price_scope:'TOTAL',condition_code:'USED_WORKING',
+      price_eligible:true,statistics_eligible:true,exclusion_reasons:[]}]})
+  }),importEnv);
+  assert.equal(response.status,200);
+  const payload=await response.json();
+  const receipt=payload.data || payload;
+  assert.equal(receipt.inserted,allowed?1:0,url);
+  assert.equal(receipt.rejected,allowed?0:1,url);
+}
 } finally {
   globalThis.fetch = previousFetch;
   d1.close();
@@ -2589,12 +2688,12 @@ try {
   const localCatalog = await fetch(`${baseUrl}/api/pc/catalog`);
   assert.equal(localCatalog.status, 200);
   const localCatalogData = (await localCatalog.json()).data;
-  assert.deepEqual(localCatalogData.sources.map((source) => source.source_id).sort(), ["bunjang", "ebay", "joonggonara"],
-    "the local PC catalog must expose exactly the three current operational sources");
+  assert.deepEqual(localCatalogData.sources.map((source) => source.source_id).sort(), ["bunjang", "danawa", "ebay", "joonggonara"],
+    "the local PC catalog must expose the current operational sources");
   const localCategories = await fetch(`${baseUrl}/api/categories`);
   assert.equal(localCategories.status, 200);
   const localCategoryData = (await localCategories.json()).data;
-  assert.deepEqual(Object.keys(localCategoryData.site_plans).sort(), ["bunjang", "ebay", "joonggonara"],
+  assert.deepEqual(Object.keys(localCategoryData.site_plans).sort(), ["bunjang", "danawa", "ebay", "joonggonara"],
     "the local category catalog must not retain disabled source plans");
   const localProducts = await fetch(`${baseUrl}/api/pc/products?category_code=GPU&query=RTX%203080`);
   assert.equal((await localProducts.json()).data.products.items[0].id, "gpu:nvidia:rtx-3080");

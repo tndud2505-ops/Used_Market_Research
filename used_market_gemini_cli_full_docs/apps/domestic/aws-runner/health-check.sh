@@ -87,7 +87,7 @@ check_health() {
       (.pc_parts.collection_targets.enabled_target_count <= .pc_parts.collection_targets.declared_target_count) and
       .pc_parts.collection_targets.monitor_target_count == 0 and
       .pc_parts.collection_capacity.all_sources_sufficient == true and
-      (.pc_parts.required_source_keys | sort) == ["bunjang", "ebay", "joonggonara"] and
+      (.pc_parts.required_source_keys | sort) == ["bunjang", "danawa", "ebay", "joonggonara"] and
       (.pc_parts.source_readiness | type == "array") and
       (.pc_parts.review_required_active_sources | length) == 0 and
       ($require_pc_continuous == false or (

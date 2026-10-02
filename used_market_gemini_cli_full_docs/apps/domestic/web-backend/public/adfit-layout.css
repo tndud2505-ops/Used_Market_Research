@@ -1,0 +1,16 @@
+body.ui-a .adfit-layout { display:grid; grid-template-columns:minmax(0,1fr); width:100%; max-width:var(--up-width); margin:0 auto; padding:0 24px; align-items:start; }
+body.ui-a .adfit-layout > main#main { grid-column:1; width:100%; min-width:0; max-width:none; margin:0; padding:0 0 32px; }
+body.ui-a .adfit-layout > .adfit-banner { grid-column:1; grid-row:1; justify-self:center; width:320px; max-width:100%; min-height:100px; margin:16px 0; padding:0; border:0; overflow:hidden; }
+body.ui-a .adfit-layout > .adfit-banner .kakao_ad_area { flex:0 0 auto; }
+body.ui-a .adfit-layout > .adfit-banner[data-format=desktop] { display:none; }
+@media (min-width:1360px) {
+  body.ui-a .adfit-layout:has(> .adfit-banner[data-format=desktop]:not([hidden])) { grid-template-columns:minmax(0,1fr) 160px; column-gap:24px; }
+  body.ui-a .adfit-layout > .adfit-banner[data-format=desktop]:not([hidden]) { display:flex; grid-column:2; grid-row:1; align-self:start; position:sticky; top:20px; width:160px; min-height:600px; margin:24px 0 0; }
+}
+@media (max-width:700px) {
+  body.ui-a .adfit-layout { padding:0 14px; }
+}
+@media print {
+  body.ui-a .adfit-layout { display:block; padding:0; }
+  body.ui-a .adfit-layout > .adfit-banner { display:none !important; }
+}

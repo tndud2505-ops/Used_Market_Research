@@ -1,5 +1,7 @@
 # 컴퓨터 부품 가격 이력과 그래프
 
+2026-09-24 게시 경로 갱신: 통계 계산과 D1 전체 저장 내용 검증은 AWS에서 수행한다. Worker는 인증된 AWS 판정과 트랜잭션 조건을 확인해 게시를 전환한다. 현재 매물 freshness와 일일 가격 통계의 `publication_id`·`as_of`를 따로 판단한다. [게시·장애 대응](09-price-publication-operations.md)과 [변경 기록](../worklog/2026-09-24-aws-publication-verification.md)을 참고한다.
+
 ## 데이터 흐름
 
 다음 흐름은 rollback용 legacy 범용 검색 그래프다. 공개 PC 디렉터리 화면은 이 경로에서 원 사이트를 호출하지 않고, 아래의 사전수집 publication만 사용한다.
@@ -42,6 +44,8 @@
 AWS raw_listings / listing_snapshots
   -> normalized_listings / listing_items / product_master
   -> daily_price_stats + daily_price_stat_members
+  -> 일일 전체 통계 계산 → D1 4행 staging → AWS 전체 readback 검증
+  -> Worker 트랜잭션 활성화 → AWS 게시본 저장
   -> AWS SQLite 공개 listing / price stats 읽기
   -> Cloudflare Worker 응답 cache
   -> AWS 장애 때 compact D1 public_product_stats fallback

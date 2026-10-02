@@ -28,6 +28,19 @@ function currentItemIdCanRepresentAuthority(item) {
 }
 
 function canonicalSourceUrl(site, token, fallback) {
+  if (site === "danawa" && !/^\d+$/u.test(token)) {
+    try {
+      const url = new URL(text(fallback));
+      if (url.protocol !== "https:" || url.hostname !== "prod.danawa.com" || url.username || url.password || url.port) throw new Error("invalid target");
+      const pcode = url.searchParams.get("pcode");
+      if (url.pathname === "/info/" && /^\d+$/u.test(pcode || "")) return `https://prod.danawa.com/info/?pcode=${pcode}`;
+      const shop = url.searchParams.get("cmpny_c"), product = url.searchParams.get("link_prod_c");
+      if (url.pathname === "/bridge/go_link_goods.php" && /^[a-z0-9_-]+$/iu.test(shop || "") && /^[a-z0-9_-]+$/iu.test(product || "")) {
+        return `https://prod.danawa.com/bridge/go_link_goods.php?cmpny_c=${shop}&link_prod_c=${product}`;
+      }
+    } catch {}
+    throw new Error(`AUTHORITATIVE_URL_UNRECOVERABLE:${site}:${token}`);
+  }
   const builders = {
     bunjang: (id) => `https://m.bunjang.co.kr/products/${id}`,
     hellomarket: (id) => `https://www.hellomarket.com/item/${id}`,

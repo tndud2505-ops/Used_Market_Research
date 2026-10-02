@@ -102,7 +102,7 @@ try {
       assert.equal(result.canonical_product_id, id, `${category}: classification → catalog identity`);
       assert.equal(result.statistics_eligible, true, `${category}: valid comparison sample`);
     }
-    const data = ledger.rebuildAndGetPriceStats({ canonicalProductId: id, days: 30, marketPool: 'KR_C2C_USED', condition: 'USED_WORKING', currency: 'KRW', asOf: observedAt });
+    const data = ledger.rebuildAndGetPriceStats({ canonicalProductId: id, days: 30, marketPool: 'KR_DOMESTIC_USED', condition: 'USED_WORKING', currency: 'KRW', asOf: observedAt });
     assert.equal(data.active.sample_count, 5, `${category}: 5 sellers count as 5 samples`);
     assert.equal(data.active.mean, 70_000, `${category}: exact per-component mean`);
     published.set(id, { ...data, canonical_product_id: id, window: { from: '2026-08-18', to: '2026-09-16' } });
@@ -112,7 +112,7 @@ try {
     globalThis.fetch = async input => {
       const url = new URL(input, 'https://example.test');
       const id = decodeURIComponent(url.pathname.match(/^\/api\/products\/(.*)\/price-stats$/u)[1]);
-      assert.equal(url.searchParams.get('market_pool'), 'KR_C2C_USED');
+      assert.equal(url.searchParams.get('market_pool'), 'KR_DOMESTIC_USED');
       return new Response(JSON.stringify({ status: 'success', data: published.get(id) }), { status: 200 });
     };
     const store = createPriceStore(() => {}), selections = fixtures.map(([category, , id]) => ({ category, id, quantity: category === 'RAM' ? 2 : 1 }));

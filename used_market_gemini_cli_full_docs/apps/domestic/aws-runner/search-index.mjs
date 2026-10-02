@@ -1166,12 +1166,20 @@ export class SearchIndex {
     for (const row of dedupedSourceRows) {
       sourceTotals[row.site] = Number(sourceTotals[row.site] || 0) + 1;
     }
+    const modelCounts = {};
+    if (!after?.item_id) {
+      for (const row of rows) {
+        const id = row.pc_canonical_product_id;
+        if (id) modelCounts[id] = (modelCounts[id] || 0) + 1;
+      }
+    }
     return {
       items: page.map(publicItem),
       total: rows.length,
       asOf,
       latestObservedAt: latestObservedAt || null,
       sourceTotals,
+      modelCounts,
       cursorFound,
       nextAfter: hasMore && last ? { item_id: last.item_id } : null
     };

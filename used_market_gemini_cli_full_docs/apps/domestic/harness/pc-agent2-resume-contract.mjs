@@ -16,7 +16,7 @@ const ram = { canonical_product_id: 'ram:g-skill:ddr4:16gb', canonical_display_n
   category_code: 'RAM', brand: 'G.Skill', key_specs: { memory_generation: 'DDR4', module_capacity_gb: 16 } };
 const metric = value => ({ sample_count: 5, mean: value, median: value, min: value, max: value });
 const raw = () => ({ canonical_product_id: ram.canonical_product_id, active: metric(129500), sold: metric(126237.5),
-  methodology: { days: 30, market_pool: 'KR_C2C_USED', condition: 'USED_WORKING', currency: 'KRW' },
+  methodology: { days: 30, market_pool: 'KR_DOMESTIC_USED', condition: 'USED_WORKING', currency: 'KRW' },
   window: { from: '2026-08-19', to: '2026-09-17' }, published_window: { from: '2026-08-19', to: '2026-09-17', days: 30 },
   publication_id: 'synthetic-test', by_source: [], daily: [] });
 function node(text = '') {
@@ -53,11 +53,11 @@ test('RAM displayed sold unit × 2 preserves fractional-won arithmetic', () => {
   assert.match(allText(priceNode), /252,475원/);
   assert.match(allText(memoryNode), /16GB × 2개 = 총 32GB/);
 });
-test('higher precision statistical means use an approximation sign, not a false equality', () => {
+test('whole-won display retains precise statistical arithmetic in its title', () => {
   const { sandbox, priceNode } = setup({ data: { ...raw(), sold: metric(100.335) } });
   sandbox.refreshBuildPriceDetails();
   assert.match(priceNode.title, /단가 100\.34원 × 2 ≈ 200\.67원/);
-  assert.match(allText(priceNode), /200\.67원/);
+  assert.equal(allText(priceNode), '201원');
 });
 test('reset clears maker/spec/query/sort but preserves saved build and site', () => {
   const { sandbox, state } = setup();

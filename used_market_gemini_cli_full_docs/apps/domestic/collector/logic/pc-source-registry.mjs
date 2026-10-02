@@ -85,13 +85,13 @@ export const PC_SOURCE_REGISTRY = Object.freeze([
   }),
   source({
     key: "danawa",
-    name: "다나와 장터",
-    market_pool: "KR_C2C_USED",
+    name: "다나와 중고 가격비교",
+    market_pool: "KR_DEALER_USED",
     market_pools: ["KR_C2C_USED", "KR_DEALER_USED"],
     policy_status: "APPROVED",
-    runtime_status: "DISABLED",
+    runtime_status: "ENABLED",
     public_search: false,
-    directory_source: false,
+    directory_source: true,
     directory_order: 1,
     policy_reviewed_at: "2026-08-31",
     policy_basis_url: "https://www.danawa.com/info/provision.html",
@@ -100,8 +100,8 @@ export const PC_SOURCE_REGISTRY = Object.freeze([
     approval_attested_at: "2026-08-31",
     approval_scope: "PC_PARTS_COLLECTION_AND_PUBLICATION",
     access_constraints: "PUBLIC_ROUTES_ONLY_NO_AUTH_OR_BLOCK_BYPASS",
-    cadence: { timezone: "Asia/Seoul", kst_minutes: [19, 49], jitter_max_seconds: MAX_JITTER_SECONDS },
-    access: { strategy: "site_category_json", adapter_kind: "specialist_site_script", api_only_required: false }
+    cadence: { timezone: "Asia/Seoul", kst_minutes: [19], jitter_max_seconds: MAX_JITTER_SECONDS },
+    access: { strategy: "public_used_search_html", adapter_kind: "specialist_site_script", api_only_required: false }
   }),
   source({
     key: "hellomarket",
@@ -502,10 +502,12 @@ export async function runSourceCollection({ sourceKey, adapter, runtime, governa
       && Number(result.metrics?.parse_failure_count || 0) === 0
       && Number(result.metrics?.http_blocked_count || 0) === 0
       && Number(result.metrics?.captcha_count || 0) === 0;
-    if (requestCount > 0 && successRate < 0.95 && !singleTargetTolerance) {
-      const partialError = new Error(`SOURCE_SUCCESS_RATE_BELOW_THRESHOLD:${sourceKey}:${successRate.toFixed(4)}`);
-      const accessFailure = Number(result.metrics?.http_blocked_count || 0) > 0
-        || Number(result.metrics?.captcha_count || 0) > 0;
+    const accessFailure = Number(result.metrics?.http_blocked_count || 0) > 0
+      || Number(result.metrics?.captcha_count || 0) > 0;
+    const danawaAccessBlocked = sourceKey === "danawa" && accessFailure;
+    if (danawaAccessBlocked || (requestCount > 0 && successRate < 0.95 && !singleTargetTolerance)) {
+      const partialReason = danawaAccessBlocked ? "SOURCE_ACCESS_BLOCKED" : "SOURCE_SUCCESS_RATE_BELOW_THRESHOLD";
+      const partialError = new Error(`${partialReason}:${sourceKey}:${successRate.toFixed(4)}`);
       const partialRuntime = accessFailure ? failureRuntime(currentRuntime, runAt, partialError) : {
         ...currentRuntime,
         runtime_status: "ENABLED",
@@ -518,7 +520,7 @@ export async function runSourceCollection({ sourceKey, adapter, runtime, governa
       return {
         source_key: sourceKey,
         status: "partial_success",
-        reason: "SOURCE_SUCCESS_RATE_BELOW_THRESHOLD",
+        reason: partialReason,
         error: partialError.message,
         result,
         next_runtime: partialRuntime

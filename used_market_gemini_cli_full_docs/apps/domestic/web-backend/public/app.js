@@ -1,6 +1,6 @@
 import { createContextualAffiliate } from "./affiliate.js?v=compact-ad-v2";
-import { createAdfitSlot } from "./adfit.js?v=adfit-v2";
-import { createListingPricePreview } from "./listing-price-preview.mjs?v=search-modal-v4";
+import { createAdfitSlot } from "./adfit.js?v=adfit-rail-v1";
+import { createListingPricePreview } from "./listing-price-preview.mjs?v=domestic-danawa-v1";
 
 const PRODUCT_QUERY_KEYS = new Set([
   "manufacturer", "model", "gpu_model", "board_brand", "usage", "configuration", "socket", "chipset", "form_interface", "capacity", "purpose", "rated_wattage",
@@ -90,6 +90,9 @@ const state = {
   listingTotal: null,
   listingSort: "recent",
   productRequest: null,
+  modelAvailabilityRequest: null,
+  modelAvailabilityScope: "",
+  modelCounts: null,
   listingRequest: null,
   modelFiltersCollapsed: false,
   returnFocusProductId: "",
@@ -234,6 +237,7 @@ async function fetchJson(url, options = {}) {
     method: "GET",
     headers: { Accept: "application/json" },
     credentials: "same-origin",
+    cache: "no-cache",
     signal: options.signal
       ? AbortSignal.any([options.signal, AbortSignal.timeout(20000)])
       : AbortSignal.timeout(20000),
@@ -337,7 +341,7 @@ function sourceLabel(sourceId) {
     bunjang: "번개장터",
     hellomarket: "헬로마켓",
     rethinkmall: "리씽크몰",
-    danawa: "다나와 장터",
+    danawa: "다나와",
     ebay: "eBay",
     coolenjoy: "쿨엔조이",
     daangn: "당근",
@@ -1056,7 +1060,7 @@ function syncListingSortTabs() {
 function syncSourceFilterSummary() {
   if (!dom.sourceFilterSummary) return;
   if (state.selectedSites.size === 0) {
-    dom.sourceFilterSummary.textContent = "국내 개인 중고";
+    dom.sourceFilterSummary.textContent = "국내 중고";
     return;
   }
   const sourceId = [...state.selectedSites][0];
@@ -1064,6 +1068,7 @@ function syncSourceFilterSummary() {
 }
 
 function reloadListingsForControls(focusSourceValue) {
+  refreshModelAvailability();
   syncCatalogUrl();
   updatePriceGraphLink();
   updateFacetSelectionUi();
@@ -1087,13 +1092,13 @@ function renderSourceFilters() {
   dom.sourceFacetRow.hidden = state.sources.length === 0;
   syncSourceFilterSummary();
   if (!state.sources.length) return;
-  const priority = ["joonggonara", "bunjang", "ebay"];
+  const priority = ["joonggonara", "bunjang", "danawa", "ebay"];
   const compactLabels = {
     joonggonara: "중고나라",
     bunjang: "번개장터",
     hellomarket: "헬로마켓",
     coolenjoy: "쿨엔조이",
-    danawa: "다나와 장터",
+    danawa: "다나와",
   };
   const orderedSources = [...state.sources].sort((left, right) => {
     const leftIndex = priority.indexOf(left.id);
@@ -1113,7 +1118,7 @@ function renderSourceFilters() {
     choice.append(input, createElement("span", "", label));
     dom.sourceFilters.append(choice);
   };
-  appendChoice("국내 개인 중고", "", state.selectedSites.size === 0, () => {
+  appendChoice("국내 중고", "", state.selectedSites.size === 0, () => {
     state.selectedSites.clear();
     reloadListingsForControls("");
   });
@@ -1256,13 +1261,18 @@ function renderProducts() {
   placeholder.value = "";
   dom.modelSelect.append(placeholder);
   selectableProducts.forEach((product) => {
-    const option = createElement("option", "", `${productName(product)} · ${productSpecText(product)}`);
+    const count = state.modelCounts === null ? null : Number(state.modelCounts[productId(product)] || 0);
+    const unavailable = count === 0;
+    const option = createElement("option", unavailable ? "model-no-listings" : "",
+      `${productName(product)} · ${productSpecText(product)}${unavailable ? " · 매물 없음" : ""}`);
     option.value = productId(product);
     option.selected = option.value === selectedId;
     dom.modelSelect.append(option);
   });
   dom.modelSelect.disabled = selectableProducts.length === 0;
   if (!selectedId) dom.modelSelect.value = "";
+  dom.modelSelect.classList.toggle("model-no-listings", Boolean(selectedId && state.modelCounts !== null
+    && Number(state.modelCounts[selectedId] || 0) === 0));
   // Model count is not listing count. Keep the results region for every state.
   dom.listingSection.hidden = false;
   updatePriceGraphLink();
@@ -1333,6 +1343,7 @@ async function loadProducts() {
     renderFacets();
     renderProducts();
     showCatalogMessage("");
+    refreshModelAvailability();
     openSingleSearchResult();
   } catch (error) {
     if (error.name === "AbortError" || controller.signal.aborted || state.productRequest !== controller) return;
@@ -1345,6 +1356,7 @@ async function loadProducts() {
       renderFacets();
       renderProducts();
       showCatalogMessage("제품 목록 API가 응답하지 않아 카탈로그에 포함된 제품을 표시합니다.");
+      refreshModelAvailability();
       openSingleSearchResult();
     } else {
       state.products = [];
@@ -1417,6 +1429,9 @@ function showScopedListings(listingDelayMs = 0) {
 
 async function refreshBrowseScope(listingDelayMs = 0) {
   const generation = ++browseGeneration;
+  state.modelAvailabilityRequest?.abort();
+  state.modelAvailabilityScope = "";
+  state.modelCounts = null;
   state.products = [];
   state.productTotal = 0;
   resetDetail();
@@ -1468,7 +1483,10 @@ function listingMarketPoolScope() {
   const sourceScope = listingSourceScope();
   if (!sourceScope.length) return "";
   if (sourceScope.every((source) => source.currency === "USD")) return "OVERSEAS_USED";
-  if (sourceScope.every((source) => source.currency === "KRW")) return "KR_C2C_USED";
+  if (sourceScope.every((source) => source.currency === "KRW")) {
+    return sourceScope.some((source) => source.marketPools.includes("KR_DEALER_USED"))
+      ? "" : "KR_C2C_USED";
+  }
   return "";
 }
 
@@ -1496,12 +1514,13 @@ function selectProduct(product) {
   // or scroll away while a user is typing or operating the model selector.
 }
 
-function buildListingQuery(cursor = "") {
+function buildListingQuery(cursor = "", includeSelectedProduct = true) {
   const params = new URLSearchParams();
+  const selectedProduct = includeSelectedProduct ? state.selectedProduct : null;
   // One bounded read prepares ten 10-item UI pages in the server's global order.
   params.set("limit", "100");
-  if (state.selectedProduct) {
-    params.set("canonical_product_id", productId(state.selectedProduct));
+  if (selectedProduct) {
+    params.set("canonical_product_id", productId(selectedProduct));
   } else {
     if (state.categoryCode) params.set("category_code", state.categoryCode);
     if (state.query) params.set("q", state.query);
@@ -1510,7 +1529,7 @@ function buildListingQuery(cursor = "") {
     : state.categoryCode === "HDD" ? ["placement"]
       : state.categoryCode === "PSU" ? ["form_factor"] : []);
   Object.keys(state.facets).sort().forEach((key) => {
-    if (!PRODUCT_QUERY_KEYS.has(key) || (state.selectedProduct && !listingFacetKeys.has(key))) return;
+    if (!PRODUCT_QUERY_KEYS.has(key) || (selectedProduct && !listingFacetKeys.has(key))) return;
     selectedFacetValues(key).sort().forEach((value) => params.append(key, value));
   });
   if (state.listingSort) params.set("sort", state.listingSort);
@@ -1523,6 +1542,35 @@ function buildListingQuery(cursor = "") {
   if (marketPoolScope) params.set("market_pool", marketPoolScope);
   if (cursor) params.set("cursor", cursor);
   return params;
+}
+
+async function refreshModelAvailability() {
+  const params = buildListingQuery("", false);
+  params.set("limit", "1");
+  params.delete("sort");
+  const scope = params.toString();
+  if (scope === state.modelAvailabilityScope) return;
+  state.modelAvailabilityRequest?.abort();
+  state.modelAvailabilityScope = scope;
+  state.modelCounts = null;
+  renderProducts();
+  if (!state.products.length) return;
+  const controller = new AbortController();
+  state.modelAvailabilityRequest = controller;
+  try {
+    const payload = await fetchJson(`/api/pc/listings?${scope}`, { signal: controller.signal });
+    if (controller.signal.aborted || state.modelAvailabilityRequest !== controller) return;
+    const counts = payload?.model_counts;
+    // Missing metadata or a failed read is unknown, never proof of zero listings.
+    state.modelCounts = counts && typeof counts === "object" && !Array.isArray(counts) ? counts : null;
+    renderProducts();
+  } catch (error) {
+    if (!controller.signal.aborted && state.modelAvailabilityRequest === controller) {
+      state.modelAvailabilityScope = "";
+    }
+  } finally {
+    if (state.modelAvailabilityRequest === controller) state.modelAvailabilityRequest = null;
+  }
 }
 
 function applyListingPayload(payload, pageNumber = 1) {

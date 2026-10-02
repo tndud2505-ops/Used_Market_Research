@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { SERIES, money, metricValue, soldMeanValue, metricIsConsistent, buildTotals, compactBuild, compatibility, groupProducts, validateBuild, dailySeries, percentChange, overviewIndex, priceDateRange, shiftDate, sourceStats, coherentStats, modelPageItems, buildAnalysisSeries } from '../web-backend/public/pc-tools-core.mjs';
+import { SERIES, money, metricValue, soldMeanValue, metricIsConsistent, listedPriceRange, buildTotals, compactBuild, compatibility, groupProducts, validateBuild, dailySeries, percentChange, overviewIndex, priceDateRange, shiftDate, sourceStats, coherentStats, modelPageItems, buildAnalysisSeries } from '../web-backend/public/pc-tools-core.mjs';
+import { movingAverage, marketLinePath } from '../web-backend/public/pc-market-chart.mjs';
 import { createPriceStore } from '../web-backend/public/pc-tools-data.mjs';
 import { pcCatalogResponse } from '../cloudflare/pc-directory-http.mjs';
 const p = (id, category, name, specs = {}) => ({ canonical_product_id: id, category_code: category, canonical_display_name: name, key_specs: specs });
@@ -39,6 +40,17 @@ assert.equal(buildTotals([{id:'cpu',quantity:2}],()=>({sold:{sample_count:2,min:
 assert.deepEqual(compactBuild([{ id: 'cpu', quantity: 1, manufacturer: '', category: 'CPU' }, { id: 'board', quantity: 2, manufacturer: ' ASUS ', category: 'MOTHERBOARD' }], products, categories), [{ id: 'cpu' }, { id: 'board', quantity: 2, manufacturer: 'ASUS' }],
   'persisted builds must retain only validated fields needed to restore the selection');
 assert.equal(compatibility([...entries, { id: 'ram' }], products).checks.filter(c => c.status === 'conflict').length, 2);
+const helpChecks = compatibility([...entries, { id: 'ram' }], products).checks;
+assert.match(helpChecks.find(c => c.kind === 'memory').explanation, /DDR5.*DDR4.*함께 사용할 수 없습니다/);
+assert.match(helpChecks.find(c => c.kind === 'socket').explanation, /AM5.*AM4.*장착할 수 없습니다/);
+const absentSpecs = new Map(products); absentSpecs.set('board', { ...board, key_specs: undefined });
+const unknownChecks = compatibility([...entries, { id: 'ram' }], absentSpecs).checks;
+assert.equal(unknownChecks.filter(c => c.status === 'unknown').length, 2, 'selected components with missing specs must not silently pass');
+assert.ok(unknownChecks.every(c => !/undefined|null/.test(c.explanation)));
+const sameSocket = new Map(products); sameSocket.set('board', { ...board, key_specs: { ...board.key_specs, socket: 'AM4' } });
+const socketHelp = compatibility(entries, sameSocket).checks.find(c => c.kind === 'socket');
+assert.equal(socketHelp.status, 'match');
+assert.match(socketHelp.explanation, /소켓이 같아도.*BIOS/);
 assert.throws(() => validateBuild([{ id: 'unknown' }], products, categories));
 assert.throws(() => validateBuild([{ id: 'cpu', quantity: 0 }], products, categories));
 assert.throws(() => validateBuild([{ id: 'cpu' }, { id: 'cpu' }], products, categories));
@@ -47,6 +59,10 @@ assert.equal(groups.length, 2);
 assert.equal(groups[0].products.length, 2);
 const data = { as_of: '2026-09-08', daily: [{ date: '2026-09-06', active: { sample_count: 5, mean: 100 } }, { date: '2026-09-08', active: { sample_count: 5, mean: 110 } }] };
 const points = dailySeries(data, 'active', 3);
+assert.equal(points[0].sampleCount,5);
+assert.equal(points[1].sampleCount,null,'missing daily samples are not zero');
+assert.equal(movingAverage(points,3)[2].value,105,'calendar average excludes missing price days');
+assert.equal(movingAverage(points,3)[1].value,null,'average does not invent a missing daily observation');
 assert.equal(points[1].value, null, 'missing dates must be gaps, never zero or interpolated');
 assert.ok(Math.abs(percentChange(points) - 10) < 0.00001);
 assert.equal(overviewIndex([data], 'active', 3).points[1].value, null);
@@ -92,6 +108,22 @@ assert.equal(new Set(['overall:active', 'joonggonara:active', 'bunjang:active']
   .map(id => analysisSeries.find(series => series.id === id).color)).size, 3,
   'aggregate and marketplace lines must use distinct colors');
 assert.equal(analysisSeries.some(series => series.id.startsWith('hellomarket:')), false);
+const listed = { sample_count: 1, min: 394000, max: 394000, mean: null, median: null };
+const listedFixture = { as_of: '2026-10-02', daily: [{ date: '2026-10-01', active: listed }] };
+const danawaSeries = buildAnalysisSeries(listedFixture, { source: 'danawa', allowedSourceIds: ['danawa'], days: 2, sourceLabels: { danawa: '다나와' } });
+assert.equal(danawaSeries[0].points[0].value, 394000, 'a verified single Danawa listing is visible as a displayed price');
+assert.equal(danawaSeries[0].points[1].value, null, 'missing displayed-price dates remain gaps');
+const gapPoints = [{ date: '2026-10-01', value: 100 }, { date: '2026-10-02', value: null },
+  { date: '2026-10-03', value: 110 }, { date: '2026-10-04', value: 120 }];
+const gapPath = points => marketLinePath(points, date => Number(date.slice(-2)), value => value);
+assert.equal(gapPath(gapPoints), 'M1,100 M3,110 L4,120', 'SVG paths break across missing days');
+assert.equal(gapPath(gapPoints.filter(point => point.value != null)), 'M1,100 M3,110 L4,120', 'omitted days also break the path');
+assert.match(danawaSeries[0].label, /중고 최저 표시가/);
+assert.equal(metricValue(listed), null, 'displaying a listing must not relax the representative-price threshold');
+assert.deepEqual(buildAnalysisSeries(listedFixture, { source: 'bunjang', allowedSourceIds: ['bunjang'], days: 2 }), []);
+assert.equal(listedPriceRange({ ...listed, aggregate_incomplete: true }), null);
+assert.equal(listedPriceRange({ ...listed, min: 500000 }), null, 'contradictory listed prices remain excluded');
+assert.equal(listedPriceRange({ sample_count: 0, min: 394000, max: 394000 }), null);
 assert.deepEqual(buildAnalysisSeries(sourceStats(analysisFixture, 'bunjang'), {
   source: 'bunjang', allowedSourceIds: ['joonggonara', 'bunjang'], days: 30,
   sourceLabels: { bunjang: '번개장터' },
@@ -175,7 +207,7 @@ try {
       status: 'success',
       data: {
         canonical_product_id: 'cpu',
-        methodology: { days: 30, market_pool: 'KR_C2C_USED', condition: 'USED_WORKING', currency: 'KRW' },
+        methodology: { days: 30, market_pool: 'KR_DOMESTIC_USED', condition: 'USED_WORKING', currency: 'KRW' },
         window: { from: '2026-08-10', to: '2026-09-08' },
         as_of: '2026-09-08',
         active: { sample_count: 5, min: 90, max: 110, mean: 100, median: 100 },
@@ -193,7 +225,7 @@ try {
   await store.load([cpu], 30);
   const loaded = store.get('cpu', 30);
   assert.equal(loaded.state, 'ready');
-  assert.match(requestedStatsUrl, /\/api\/products\/cpu\/price-stats\?days=30&market_pool=KR_C2C_USED&condition=USED_WORKING&currency=KRW/u);
+  assert.match(requestedStatsUrl, /\/api\/products\/cpu\/price-stats\?days=30&market_pool=KR_DOMESTIC_USED&condition=USED_WORKING&currency=KRW/u);
   assert.equal(buildTotals([{ id: 'cpu', quantity: 2 }], entry => store.get(entry.id, 30).data).active.amount, 200,
     'the builder total must consume the same published price-stat response used by the UI');
   assert.equal(dailySeries(loaded.data, 'active', 30).at(-1).value, 105,

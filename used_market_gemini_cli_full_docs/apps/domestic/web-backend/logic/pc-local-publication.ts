@@ -204,6 +204,11 @@ export function createLocalPcPublicationReader() {
     else if (query.sort === 'price_desc') items.sort((left, right) => Number(right.price_value) - Number(left.price_value));
     else items.sort((left, right) => String(right.updated_at || right.posted_at || '').localeCompare(String(left.updated_at || left.posted_at || '')));
     const total = items.length;
+    const modelCounts: Record<string, number> = {};
+    for (const item of items) {
+      const id = normalize(item.canonical_product_id);
+      if (id) modelCounts[id] = (modelCounts[id] || 0) + 1;
+    }
     const offset = cursorOffset(query.cursor);
     const page = items.slice(offset, offset + query.limit);
     const nextOffset = offset + page.length;
@@ -211,6 +216,7 @@ export function createLocalPcPublicationReader() {
     return {
       items: page,
       total,
+      model_counts: modelCounts,
       pagination: { has_more: nextOffset < total, next_cursor: nextOffset < total ? `offset:${nextOffset}` : null },
       next_cursor: nextOffset < total ? `offset:${nextOffset}` : null,
       as_of: asOf,

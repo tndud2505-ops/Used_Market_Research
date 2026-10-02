@@ -88,7 +88,7 @@ test('reopening on eBay uses a separate USD store, never old KRW observations',(
 test('error and retry are explicit and failed data cannot produce a chart',()=>{
   const t=setup();t.preview.open(product);t.stores[0].respond({state:'error',error:'자료 요청 실패 (503)'});t.flush();
   assert.equal(t.nodes.get('chart').dataset.priceState,'error');assert.equal(t.nodes.get('retry').hidden,false);
-  assert.equal(t.nodes.get('chart').children.length,0);assert.match(t.nodes.get('status').textContent,/503/);
+  assert.equal(t.nodes.get('chart').children.length,0);assert.match(t.nodes.get('status').textContent,/조회 실패/);
   t.nodes.get('retry').dispatch('click');t.flush();assert.equal(t.stores[0].loads.length,2);
   t.stores[0].respond({state:'ready',data:priceData()});t.flush();assert.equal(t.nodes.get('chart').dataset.priceState,'ready');
 });

@@ -90,7 +90,7 @@ test('yesterday fallback exposes its actual dates and is accepted by the shared 
   assert.equal(payload.data.window.from, shift(query.asOfDate, -30));
   assert.equal(payload.data.requested_window.to, query.asOfDate);
   globalThis.fetch = async () => result.clone();
-  const store = createPriceStore(() => {});
+  const store = createPriceStore(() => {}, { marketPool: query.marketPool });
   await store.load([{ canonical_product_id: id }]);
   assert.equal(store.get(id).state, 'ready');
   assert.equal(store.get(id).data.active.mean, 120000.5);

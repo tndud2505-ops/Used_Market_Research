@@ -125,7 +125,9 @@ try {
     JOIN normalized_listings n ON n.id = i.normalized_listing_id
     WHERE d.normalization_version = ? AND d.parser_version = ? AND d.rule_version = ? AND d.filter_version = ?
       AND d.stat_date BETWEEN date(?, '-29 days') AND date(?)
-      AND (d.canonical_product_id <> n.canonical_product_id OR d.market_pool <> n.market_pool
+      AND (d.canonical_product_id <> n.canonical_product_id
+        OR NOT (d.market_pool = n.market_pool OR (d.market_pool = 'KR_DOMESTIC_USED'
+          AND n.market_pool IN ('KR_C2C_USED', 'KR_DEALER_USED') AND d.currency = 'KRW'))
         OR d.condition_code <> n.condition_code OR d.currency <> s.currency)`)
     .get(versions.normalization, versions.parser, versions.rule, versions.filter,
       payload.created_at, payload.created_at)?.count || 0);

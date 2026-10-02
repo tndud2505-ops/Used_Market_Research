@@ -126,6 +126,7 @@ export function priceStatsResponse(request, stats) {
     availability,
     exclusions: stats?.exclusions || { total: 0, reasons: {} },
     methodology: {
+      ...(stats?.methodology || {}),
       days: request.days,
       market_pool: request.marketPool,
       condition: request.condition,
@@ -144,6 +145,34 @@ export function priceStatsResponse(request, stats) {
       ? { integrity_repaired_source_ids: stats.integrity_repaired_source_ids }
       : {}),
     as_of: stats?.as_of || new Date().toISOString()
+  };
+}
+
+// Chart history uses daily observations, never reconstructed distinct-period totals.
+export function priceHistoryResponse(request, stats) {
+  const slice = rows => (Array.isArray(rows) ? rows : []).filter(row => {
+    const date = String(row.date || row.stat_date || '').slice(0,10);
+    return DATE_ONLY.test(date) && date >= request.window.from && date <= request.window.to;
+  }).map(row => ({ date:String(row.date || row.stat_date).slice(0,10),
+    ...Object.fromEntries(['active','sold'].filter(key => row[key]).map(key=>[key,row[key]])) }));
+  const scopes = (stats?.by_source || []).map(row=>({source_id:row.source_id,daily:slice(row.daily)}));
+  const daily = slice(stats?.daily);
+  const stored = stats?.daily_coverage || stats?.published_window;
+  const allDates = [...daily, ...scopes.flatMap(row=>row.daily)].map(row=>row.date).sort();
+  const from = allDates[0] || null, to = allDates.at(-1) || null;
+  const complete = Boolean(stored?.from && stored?.to && from && to
+    && stored.from<=request.window.from && stored.to>=request.window.to
+    && from<=request.window.from && to>=request.window.to);
+  return {
+    view:'daily', canonical_product_id:request.canonicalProductId, window:request.window,
+    daily, by_source:scopes,
+    by_manufacturer:(stats?.by_manufacturer || []).map(row=>({manufacturer:row.manufacturer,daily:slice(row.daily),
+      by_source:(row.by_source || []).map(source=>({source_id:source.source_id,daily:slice(source.daily)}))})),
+    coverage:{status:complete?'COMPLETE':allDates.length?'PARTIAL':'EMPTY',from,to},
+    methodology:{...(stats?.methodology || {}),days:request.days,market_pool:request.marketPool,condition:request.condition,currency:request.currency,
+      sample_counting:'DAILY_OBSERVATIONS',period_totals_available:false},
+    versions:stats?.versions || {}, as_of:stats?.as_of || null,
+    ...(stats?.publication_id ? {publication_id:stats.publication_id} : {})
   };
 }
 

@@ -341,6 +341,33 @@ assert.equal(nvmeSsd.placement, "INTERNAL");
 const sataSsdIdentityCase = classifyPcPartListingPublic({ title: "삼성 870 EVO 2.5인치 SATA SSD 1TB", price: 100_000, currency: "KRW" });
 assert.equal(sataSsdIdentityCase.product_kind, "SATA_2_5");
 assert.equal(sataSsdIdentityCase.canonical_product_id, nvmeSsd.canonical_product_id, "SSD detail filters must not split the statistics identity");
+for (const title of [
+  "삼성870 EVO SSD 1TB 과 동급인 이메인션 SSD 1TB",
+  "삼성 870 EVO와 동급인 이메이션 SSD 1TB",
+  "삼성 M.2 SATA SSD 128GB (LITE-ON)"
+]) {
+  const result = classifyPcPartListingPublic({ title, price: 100_000, currency: "KRW" });
+  assert.ok(result.canonical_product_id.startsWith('ssd:other-unclassified:'), `${title} actual maker is not Samsung`);
+}
+const reverseComparison = classifyPcPartListingPublic({ title: "이메이션 SSD 1TB과 동급인 삼성 870 EVO SSD 1TB", price: 100_000, currency: "KRW" });
+assert.equal(reverseComparison.canonical_product_id, sataSsdIdentityCase.canonical_product_id);
+for (const listing of [
+  { title: 'Samsung 870 EVO SSD 1TB 비슷한 성능의 제품', description: '' },
+  { title: '삼성 870 EVO SSD 1TB', description: '이메이션 SSD 1TB과 동급입니다.' },
+  { title: '삼성 870 EVO SSD 1TB', description: '다른 제품과 동급인 성능입니다.' }
+]) {
+  assert.equal(classifyPcPartListingPublic({ ...listing, price: 100_000, currency: 'KRW' }).canonical_product_id, sataSsdIdentityCase.canonical_product_id);
+}
+const modelBasedM2Sata = classifyPcPartListingPublic({ title: '삼성 860 EVO M.2 SSD 1TB', price: 100_000, currency: 'KRW' });
+assert.equal(modelBasedM2Sata.product_kind, 'M2_SATA');
+assert.equal(modelBasedM2Sata.form_factor, 'M.2');
+for (const title of ["삼성 M.2 SATA SSD 128GB (LITE-ON)", "삼성전자 860 EVO SSD 1TB SATA M.2", "Samsung 850 EVO 1TB M.2 SATA (Not NVME)", "삼성 PM871 M.2 SATA SSD 256GB (NVMe 아님)"]) {
+  const result = classifyPcPartListingPublic({ title, description: "NVMe PCIe 슬롯 호환 여부를 확인하세요", price: 100_000, currency: "KRW" });
+  assert.equal(result.product_kind, 'M2_SATA');
+  assert.equal(result.protocol, 'SATA');
+  assert.equal(result.interface, 'SATA');
+  assert.equal(result.form_factor, 'M.2');
+}
 const internalHdd = classifyPcPartListingPublic({ title: "WD Blue 3.5인치 SATA HDD 4TB", price: 100_000, currency: "KRW" });
 assert.equal(internalHdd.canonical_product_id, externalHdd.canonical_product_id, "HDD placement must not split the statistics identity");
 const atxPsu = classifyPcPartListingPublic({ title: "Corsair 750W ATX 파워", price: 100_000, currency: "KRW" });

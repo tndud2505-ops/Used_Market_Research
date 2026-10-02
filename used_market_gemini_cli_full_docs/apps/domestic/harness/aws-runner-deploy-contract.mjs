@@ -75,6 +75,10 @@ assert.match(runnerScript, /enrichHelloMarketDetails\(items/u,
   "the scheduled HelloMarket collector must classify public detail text, not search-card titles alone");
 assert.match(installScript, /pc-reviewed-listing-exclusions\.mjs/u,
   "the AWS installer must copy and syntax-check the reviewed listing exclusions module");
+for (const module of ['collector/logic/danawa-search.mjs', 'market/logic/pc-market-pools.mjs']) {
+  assert.ok(installScript.includes(`install -m 0644 "$SOURCE_ROOT/${module}" "$APP_ROOT/${module}"`), `${module}: deploy required runtime import`);
+  assert.ok(installScript.includes(`node --check "$APP_ROOT/${module}"`), `${module}: validate installed module`);
+}
 assert.match(installScript,
   /install -m 0644 "\$SOURCE_ROOT\/market\/logic\/pc-search-query-variants\.mjs" "\$APP_ROOT\/market\/logic\/pc-search-query-variants\.mjs"/u,
   "the AWS installer must deploy the query variant module imported by the target set");
@@ -191,7 +195,7 @@ assert.match(runnerScript, /const PC_SCHEDULER_CATCHUP_MS = 0;/u,
   "runner startup must not synchronously replay a multi-hour scheduler backlog");
 assert.match(runnerScript, /process\.env\.PC_SOURCE_TARGETS_PER_RUN \|\| "85"/u,
   "the runtime default must cover the largest hourly plus daily source target budget");
-assert.match(runnerScript, /requireAsOfCoverage:\s*query\.isHistorical/u,
+assert.match(runnerScript, /requireAsOfCoverage:\s*(?:!dailyOnly\s*&&\s*)?query\.isHistorical/u,
   "the runner must reject uncovered historical windows without rejecting ordinary current-stat reads");
 assert.match(runnerScript, /process\.env\.PC_SOURCE_TARGET_CONCURRENCY \|\| "6"/u,
   "the runtime default must process the expanded target budget within the scheduler window");
@@ -231,7 +235,8 @@ assert.match(statsRunnerScript, /const publicationTimeoutMs = Math\.min\(15 \* 6
   "large product-stat publications must have a dedicated bounded timeout");
 assert.match(publicationClientScript, /signal: AbortSignal\.timeout\(timeoutMs\)/u,
   "every bounded product-stat chunk request must retain an explicit timeout");
-assert.match(publicationClientScript, /const CHUNK_ROW_COUNT = 40;/u,
+const publicationChunkRows = Number(publicationClientScript.match(/const CHUNK_ROW_COUNT = (\d+);/u)?.[1]);
+assert.ok(publicationChunkRows > 0 && publicationChunkRows <= 40,
   "large product-stat imports must stay below the free Worker CPU and request budgets");
 assert.match(installScript, /node --check "\$APP_ROOT\/aws-runner\/publish-pc-stats-runner\.mjs"/u,
   "AWS deployment must syntax-check the isolated statistics publisher before restarting services");

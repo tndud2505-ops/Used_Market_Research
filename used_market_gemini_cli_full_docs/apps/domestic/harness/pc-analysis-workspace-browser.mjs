@@ -5,6 +5,7 @@ import { existsSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { chromium } from 'playwright';
+import {parsePriceStatsRequest,priceHistoryResponse} from '../aws-runner/pc-price-stats-http.mjs';
 
 const argument = name => {
   const index = process.argv.indexOf(name);
@@ -77,7 +78,7 @@ if (fixture) {
       data.daily = daily.map((row, index) => ({ date: row.date, active: usdMetric(45 + index / 10), sold: usdMetric(36 + index / 10) }));
       data.by_source = [{ source_id: 'ebay', active: data.active, sold: data.sold, daily: data.daily }];
     }
-    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ status: 'success', data }) });
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ status: 'success', data:url.searchParams.get('view')==='daily' ? priceHistoryResponse(parsePriceStatsRequest(url),data) : data }) });
   });
 }
 page.on('pageerror', error => pageErrors.push(error.message));
@@ -99,8 +100,8 @@ try {
   await page.goto(`${origin}/price-analysis.html?model=${encodeURIComponent(modelId)}`, { waitUntil: 'domcontentloaded' });
   await ready();
 
-  const tabs = await page.locator('#chart-sources [data-action="chart-source"]').allTextContents();
-  assert.ok(tabs.includes('전체'));
+  const tabs = await page.locator('#chart-sources option').allTextContents();
+  assert.ok(tabs.includes('국내 비교'));
   assert.ok(tabs.includes('중고나라'));
   assert.ok(tabs.includes('번개장터'));
   assert.ok(tabs.includes('eBay (USD)'));
@@ -138,78 +139,68 @@ try {
   await page.goto(`${origin}/price-analysis.html?model=${encodeURIComponent(modelId)}`, { waitUntil: 'domcontentloaded' });
   await ready();
 
-  const overallLegend = await page.locator('#price-chart .tools-chart-legend').innerText();
-  assert.match(overallLegend, /(중고나라|번개장터) · 판매중 대표가격/);
+  const overallLegend = await page.locator('#price-chart .market-chart-summary').innerText();
+  assert.match(overallLegend, /중고나라|번개장터/);
   assert.doesNotMatch(overallLegend, /헬로마켓/i);
-  if (fixture) assert.match(overallLegend, /eBay · 판매중 대표가격 \(USD\)/);
-  assert.deepEqual(await page.locator('#analysis-source-comparison tbody tr').evaluateAll(rows => rows.map(row => row.dataset.source)), ['ebay', 'joonggonara', 'bunjang']);
-  const legendColors = await page.locator('#price-chart .tools-chart-legend > button').evaluateAll(items => items.map(item => ({
+  assert.doesNotMatch(overallLegend, /eBay|USD/);
+  const legendColors = await page.locator('#price-chart .market-series').evaluateAll(items => items.map(item => ({
     label: item.textContent,
-    color: getComputedStyle(item).color,
+    color: item.style.getPropertyValue('--series-color'),
   })));
-  const activeColors = legendColors.filter(item => item.label.includes('판매중 대표가격')).map(item => item.color);
+  const activeColors = legendColors.map(item => item.color);
   assert.equal(new Set(activeColors).size, activeColors.length, 'aggregate and marketplace active lines must have distinct colors');
 
-  await page.locator('[data-action="chart-source"][data-source="bunjang"]').click();
+  await page.locator('#chart-sources').selectOption('bunjang');
   await ready();
-  const bunjangLegend = await page.locator('#price-chart .tools-chart-legend').innerText();
-  assert.match(bunjangLegend, /번개장터 · 판매중 대표가격/);
+  const bunjangLegend = await page.locator('#price-chart .market-chart-summary').innerText();
+  assert.match(bunjangLegend, /번개장터/);
   assert.doesNotMatch(bunjangLegend, /전체|중고나라|eBay|헬로마켓/i);
 
-  await page.locator('[data-action="chart-source"][data-source=""]').click();
+  await page.locator('#chart-sources').selectOption('');
   await ready();
-  const workspace = page.locator('#analysis-workspace');
-  assert.equal(await workspace.getAttribute('data-layout'), 'split');
-  await page.locator('[data-action="analysis-pane"][data-pane="table"]').click();
-  assert.equal(await workspace.getAttribute('data-layout'), 'chart');
-  assert.equal(await page.locator('#analysis-table-pane').isHidden(), true);
-  await page.locator('[data-action="analysis-pane"][data-pane="table"]').click();
-  await page.locator('[data-action="analysis-pane"][data-pane="chart"]').click();
-  assert.equal(await workspace.getAttribute('data-layout'), 'table');
-  assert.equal(await page.locator('#analysis-chart-pane').isHidden(), true);
-  await page.locator('[data-action="analysis-pane"][data-pane="chart"]').click();
+  assert.equal(await page.locator('#analysis-table-pane').count(),0);
+  assert.equal(await page.locator('#chart-indicators,.market-average-line,.market-sample-bar').count(),0);
 
-  const beforeZoom = await page.locator('#chart-window-status').innerText();
-  const zoomX = page.locator('[data-zoom-axis="x"]');
-  if (await zoomX.count()) {
-    for (let i = 0; i < 6; i++) { await zoomX.hover(); await page.mouse.wheel(0, -120); }
-    const zoomY = page.locator('[data-zoom-axis="y"]').first();
-    for (let i = 0; i < 4; i++) { await zoomY.hover(); await page.mouse.wheel(0, -120); }
-    assert.notEqual(await page.locator('#chart-window-status').innerText(), beforeZoom);
-    const viewport = page.locator('#price-chart .tools-chart-viewport');
-    await viewport.hover(); await page.mouse.wheel(200, 160);
-    await page.waitForFunction(() => {
-      const node = document.querySelector('#price-chart .tools-chart-viewport');
-      return node.scrollLeft > 0 && node.scrollTop > 0;
-    });
-    const axes = page.locator('.tools-chart-fixed-axes');
-    const axisBox = await axes.boundingBox();
-    await viewport.hover(); await page.mouse.wheel(100, 100);
-    assert.deepEqual(await axes.boundingBox(), axisBox, 'date and price axes stay fixed while the plot pans');
-    const toggle = page.locator('.tools-chart-legend button').first();
-    const seriesId = await toggle.getAttribute('data-series');
-    await toggle.click();
-    assert.equal(await toggle.getAttribute('aria-pressed'), 'false');
-    assert.equal(await page.locator(`g[data-series="${seriesId}"]`).isVisible(), false);
-    await toggle.click();
-    assert.equal(await toggle.getAttribute('aria-pressed'), 'true');
-    await zoomX.dblclick(); await zoomY.dblclick();
-  }
-  const tableScroll = page.locator('#analysis-source-comparison');
-  assert.equal(await tableScroll.evaluate(node => getComputedStyle(node).overflowX), 'auto');
-  assert.ok(await tableScroll.evaluate(node => node.scrollWidth >= node.clientWidth));
+  const chart = page.locator('#price-chart .market-chart-stage > svg');
+  const fullCount = Number(await chart.getAttribute('data-visible-count'));
+  await chart.hover(); await page.mouse.wheel(0, -120);
+  await page.waitForFunction(count => Number(document.querySelector('.market-chart-stage > svg').dataset.visibleCount) < count, fullCount);
+  const bounds = await chart.boundingBox();
+  await page.mouse.move(bounds.x + bounds.width * .5, bounds.y + bounds.height * .5);
+  await page.mouse.down();
+  await page.mouse.move(bounds.x + bounds.width * .3, bounds.y + bounds.height * .5, { steps: 5 });
+  await page.mouse.up();
+  assert.ok(Number(await chart.getAttribute('data-offset')) > 0);
+  await chart.focus(); await page.keyboard.press('Home');
+  assert.equal(Number(await chart.getAttribute('data-visible-count')), fullCount);
+  const toggle = page.locator('.market-series').first();
+  const seriesId = await toggle.getAttribute('data-series');
+  await toggle.click();
+  assert.equal(await toggle.getAttribute('aria-pressed'), 'false');
+  assert.equal(await chart.locator(`g[data-series="${seriesId}"]`).count(), 0);
+  await toggle.click();
+  assert.equal(await toggle.getAttribute('aria-pressed'), 'true');
+  assert.equal(await page.locator('.market-series strong, .market-series small').count(), 0, 'legend has labels only');
+  assert.equal(await chart.evaluate(node => getComputedStyle(node).cursor), 'default');
+  const point = chart.locator('circle[data-date]').last();
+  await point.hover();
+  assert.equal(await page.locator('.market-chart-readout').isVisible(), false, 'hover does not show a price card');
+  const selectedDate = await point.getAttribute('data-date');
+  await point.click();
+  assert.equal(await page.locator('.market-chart-readout time').getAttribute('datetime'), selectedDate);
+  assert.equal(await page.locator('.market-tooltip-value').count(), await page.locator('.market-series[aria-pressed="true"]').count());
+  await toggle.click();
+  assert.equal(await page.locator(`.market-tooltip-value[data-series="${seriesId}"]`).count(), 0, 'disabled series is removed from the open tooltip');
+  await toggle.click();
+  await page.getByRole('button', { name: '가격 도움말 닫기' }).click();
+  assert.equal(await page.locator('.market-chart-readout').isVisible(), false);
+  assert.ok(await page.locator('.market-chart-stage').evaluate(node => node.scrollWidth <= node.clientWidth + 1 && node.scrollHeight <= node.clientHeight + 1));
   await page.screenshot({ path: path.join(out, 'analysis-desktop.png'), fullPage: true });
 
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.locator('[data-action="analysis-pane"][data-pane="table"]').click();
-  assert.equal(await workspace.getAttribute('data-layout'), 'table');
-  assert.equal(await page.locator('#analysis-chart-pane').isHidden(), true);
-  await page.locator('[data-action="analysis-pane"][data-pane="chart"]').click();
-  assert.equal(await workspace.getAttribute('data-layout'), 'chart');
-  assert.equal(await page.locator('#analysis-table-pane').isHidden(), true);
+  await page.waitForFunction(() => document.querySelector('.market-chart-stage > svg').getAttribute('viewBox').split(' ')[2] < 400);
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
   await page.screenshot({ path: path.join(out, 'analysis-mobile.png'), fullPage: true });
-
   assert.deepEqual(pageErrors, []);
   assert.deepEqual(responseErrors, []);
   if (fixture) assert.ok(priceRequests.length && priceRequests.every(query => !('as_of' in query)), 'the current default range must not send as_of');

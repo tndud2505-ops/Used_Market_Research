@@ -6,7 +6,7 @@ import {
 } from "../cloudflare/public-product-stats.mjs";
 
 const MAX_RESPONSE_BYTES = 1_048_576;
-const CHUNK_ROW_COUNT = 40;
+const CHUNK_ROW_COUNT = 4;
 
 function redactDiagnostic(value, token = "", maximum = 1200) {
   let text = String(value ?? "");
@@ -116,19 +116,70 @@ export function postStatsJson(url, token, payload, timeoutMs) {
   return requestStatsJson(url, token, payload, timeoutMs);
 }
 
+function ambiguousTransportFailure(error) {
+  return error.code === 'D1_STATS_IMPORT_TRANSPORT_FAILED'
+    || error.code === 'D1_STATS_IMPORT_RESPONSE_READ_FAILED'
+    || [502, 503, 504, 530].includes(error.diagnostics?.status);
+}
+
+async function postImmutableStatsChunk(url, token, payload, timeoutMs) {
+  try { return await postStatsJson(url, token, payload, timeoutMs); }
+  catch (error) {
+    if (!ambiguousTransportFailure(error)) throw error;
+    // Same immutable publication ID/index/checksum: a lost success response
+    // can be replayed without inserting duplicate rows. Never retry denials.
+    await new Promise(resolve => setTimeout(resolve, 500));
+    return postStatsJson(url, token, payload, timeoutMs);
+  }
+}
+
+export async function getStatsJson(url, token, timeoutMs = 30_000) {
+  for (let attempt = 0; ; attempt += 1) {
+    try { return await requestStatsJson(url, token, null, timeoutMs, 'GET'); }
+    catch (error) {
+      if (attempt >= 1 || !ambiguousTransportFailure(error)) throw error;
+      await new Promise(resolve => setTimeout(resolve, 250));
+    }
+  }
+}
+
 export async function readActiveStatsScopes({ importUrl, token, timeoutMs = 30_000 }) {
   const url = new URL(importUrl);
   url.pathname = "/admin/product-stats-scopes";
   url.search = "";
   url.hash = "";
-  const result = await requestStatsJson(url, token, null, timeoutMs, "GET");
-  const proof = result.external_active;
-  if (!proof || !Array.isArray(proof.scopes) || !Number.isSafeInteger(proof.row_count)
-    || proof.row_count !== proof.scopes.length
-    || !Number.isFinite(Date.parse(proof.checked_at))) {
-    throw new Error("D1_STATS_ACTIVE_SCOPE_PROOF_INVALID");
+  let proof;
+  const scopes = [];
+  let afterRowid = 0;
+  const usage = { rows_read: 0, rows_written: 0 };
+  for (let offset = 0; ; ) {
+    url.searchParams.set('offset', String(offset));
+    if (afterRowid !== null) url.searchParams.set('after_rowid', String(afterRowid));
+    else url.searchParams.delete('after_rowid');
+    const page = (await getStatsJson(url, token, timeoutMs)).external_active;
+    if (!page || !Array.isArray(page.scopes) || !Number.isSafeInteger(page.row_count)
+      || page.row_count < 0 || page.row_count > 100_000 || page.offset !== offset
+      || page.scopes.length !== Math.min(100, page.row_count - offset)
+      || !Number.isFinite(Date.parse(page.checked_at))) throw new Error('D1_STATS_ACTIVE_SCOPE_PROOF_INVALID');
+    if (proof && (page.publication_id !== proof.publication_id || page.checksum !== proof.checksum
+      || page.row_count !== proof.row_count)) throw new Error('D1_STATS_ACTIVE_SCOPE_CHANGED');
+    proof ||= page;
+    usage.rows_read += Number(page.d1_usage?.rows_read || 0);
+    usage.rows_written += Number(page.d1_usage?.rows_written || 0);
+    scopes.push(...page.scopes);
+    if (page.next_offset === null) break;
+    if (page.next_offset !== scopes.length || !page.scopes.length) throw new Error('D1_STATS_SCOPE_CURSOR_INVALID');
+    if (Object.hasOwn(page, 'next_rowid')) {
+      if (!Number.isSafeInteger(page.next_rowid) || page.next_rowid <= (afterRowid ?? 0))
+        throw new Error('D1_STATS_SCOPE_CURSOR_INVALID');
+      afterRowid = page.next_rowid;
+    } else afterRowid = null; // Rolling upgrade: older Workers retain the offset protocol.
+    offset = page.next_offset;
   }
-  return proof;
+  if (scopes.length !== proof.row_count || new Set(scopes.map(statsPublicationKey)).size !== scopes.length)
+    throw new Error('D1_STATS_ACTIVE_SCOPE_PROOF_INVALID');
+  return { publication_id: proof.publication_id, checksum: proof.checksum, row_count: scopes.length,
+    scopes, checked_at: proof.checked_at, d1_usage: usage };
 }
 
 export async function publishStatsInChunks({ importUrl, token, publication, timeoutMs, onProgress = null }) {
@@ -151,6 +202,7 @@ export async function publishStatsInChunks({ importUrl, token, publication, time
     merge_with_active: false
   };
   const descriptors = [];
+  const stagingUsage = { rows_read: 0, rows_written: 0 };
   const stageUrl = new URL(importUrl);
   stageUrl.pathname = "/admin/stage-product-stats";
   for (let offset = 0; offset < rows.length; offset += CHUNK_ROW_COUNT) {
@@ -166,7 +218,7 @@ export async function publishStatsInChunks({ importUrl, token, publication, time
       last_scope_key: statsPublicationBoundaryKey(chunkRows.at(-1))
     };
     descriptors.push(descriptor);
-    const result = await postStatsJson(stageUrl, token, {
+    const result = await postImmutableStatsChunk(stageUrl, token, {
       ...common,
       ...descriptor,
       chunk_row_count: descriptor.row_count,
@@ -178,6 +230,8 @@ export async function publishStatsInChunks({ importUrl, token, publication, time
       throw new Error("D1_STATS_CHUNK_ACKNOWLEDGEMENT_MISMATCH");
     }
     if (typeof onProgress === "function") onProgress({ staged: chunkIndex + 1, total: expectedChunkCount });
+    stagingUsage.rows_read += Number(result.chunk.mutation_d1_usage?.rows_read || 0);
+    stagingUsage.rows_written += Number(result.chunk.mutation_d1_usage?.rows_written || 0);
   }
   const activateUrl = new URL(importUrl);
   activateUrl.pathname = "/admin/activate-product-stats";
@@ -190,5 +244,5 @@ export async function publishStatsInChunks({ importUrl, token, publication, time
     ...(publication.scope_schema_migration
       ? { scope_schema_migration: publication.scope_schema_migration } : {})
   }, timeoutMs);
-  return result.publication;
+  return { ...result.publication, staging_mutation_d1_usage: stagingUsage };
 }

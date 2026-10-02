@@ -1,5 +1,29 @@
 # AWS Ubuntu 러너 운영
 
+## Price publication verification (2026-09-24)
+
+Collection, classification, and daily price calculations remain on AWS. The
+Worker retains public API routing, authentication, caching, the daily trigger,
+and D1 fallback. Publication uploads use four-row chunks; identity bootstrap
+uses 100-scope pages. These are search/statistics scopes, not unique listings.
+
+Before activation, the Worker calls the configured Runner's authenticated
+`/api/runner/verify-stats-publication` endpoint. AWS reads the staged D1 rows
+back through the authenticated `/admin/product-stats-readback` endpoint in
+four-row pages, then checks versions, traceability, per-chunk manifests and the
+complete canonical row checksum. The caller cannot submit a skip-verification
+flag. The Worker only accepts the matching AWS verdict and performs the
+predecessor/count guard and pointer swap in one D1 transaction. A failed check
+preserves the current publication. No new secret or paid Workers plan is needed.
+
+Deploy the Worker readback routes and then the Runner through the normal
+installer, before starting a publication. Do not run publication during this
+brief mixed-version window. `pc_stats_readback_verified` logs the AWS verifier
+receipt; publisher output records elapsed and process CPU milliseconds. The
+verifier's process CPU measure can include concurrent Runner work.
+
+운영 결정·수집 주기·실패 단계별 대응은 [게시 운영 위키](../docs/wiki/09-price-publication-operations.md), 당시 배포 ID·CPU 실측·남은 문제는 [2026-09-24 기록](../docs/worklog/2026-09-24-aws-publication-verification.md)에 보존한다.
+
 ## Bunjang lifecycle tracking (2026-09-14)
 
 The scheduled Bunjang collection rechecks stored listing URLs through the same
@@ -23,15 +47,16 @@ lifecycle rechecks. Statistics become public through the normal stats publicatio
 
 이 디렉터리는 현재 `runner.mjs`를 AWS Ubuntu 24.04에서 실행하기 위한 설치·환경·systemd·Cloudflare Tunnel·헬스체크 파일만 담는다.
 
-검색과 PC 디렉터리의 승인된 운영 대상은 다음 3곳이다.
+PC 디렉터리의 승인된 운영 대상은 다음 4곳이다. 범용 검색은 다나와를 제외한 3곳을 사용한다.
 
 - 번개장터: `bunjang`
 - 중고나라: `joonggonara`
+- 다나와 중고 가격비교: `danawa` (공개 통합검색 HTML, 중고 상품만)
 - eBay: `ebay` (공식 Browse API)
 
 중고나라와 번개장터는 매시간 11개 부품군 검색과 하루 단위 전체 제품 master 순회를 수행한다. eBay는 공식 Browse API로 부품군 검색과 정확 모델 순회를 수행하며 해외 중고 시장군으로 분리한다. 분류와 `market_pool` 분리가 끝난 projection만 공개한다. 비활성 소스는 스케줄 이벤트·수집 대상·공개 사이트 목록에서 제외된다. 개별 운영 소스가 HTTP 차단이나 응답 변경으로 실패하면 우회하지 않고 해당 source만 격리하며 다른 source와 이전 publication은 유지한다.
 
-공개 PC 화면은 사전수집으로 완성된 catalog·listing·stats projection만 조회하며 페이지 요청 중 원 사이트를 호출하지 않는다. 좌측 필터와 사이트별 매물 결과, 현재 ACTIVE·RESERVED 평균·중앙값, SOLD 직전 마지막 표시가격 평균·중앙값, 최근 30일 그래프는 동일 publication 범위에서 응답한다. RESERVED·SOLD 표시가격은 실제 체결가가 아니며, 출처가 구조적으로 제공한 확인 체결금액만 별도 통계로 표시한다.
+공개 PC 화면은 저장된 catalog·listing·stats를 조회하며 페이지 요청 중 원 사이트를 호출하지 않는다. 동일 제품·시장군·상태·통화 조건으로 조회하되 매물 freshness와 일일 통계 publication/as_of는 따로 확인한다. RESERVED·SOLD 표시가격은 실제 체결가가 아니며, 출처가 구조적으로 제공한 확인 체결금액만 별도 통계로 표시한다.
 
 `runner.mjs`는 위 사이트를 사이트별 동시성 제한 안에서 병렬 수집한다. 서로 다른 검색은 최대 4개가 동시에 실행되고 16개까지 대기하며, 한 검색의 소스 작업은 최대 16개다. AWS 로컬 SQLite가 주 검색 색인이고 D1에는 변경된 최근 핵심 매물만 백업한다.
 
@@ -104,7 +129,7 @@ sudo bash /opt/used-market-runner/aws-runner/configure-ubuntu24.sh
 - `D1_IMPORT_URL`: 선택. 운영자 seed/recovery 또는 명시적으로 켠 background mirror가 `{ "items": [...] }`를 보내는 HTTPS import API
 - `D1_BACKGROUND_MIRROR_ENABLED`: 기본 `false`. `true`일 때만 수집·상태 확인 결과를 D1에 연속 복제
 - `D1_STATS_IMPORT_URL`: PC 전환 시 필수. checksum·row count가 포함된 완성 통계 publication을 받는 `/admin/import-product-stats`
-- `PC_STATS_PRODUCT_IDS`: 선택 사항. 쉼표로 구분한 canonical product ID만 다시 계산하고 같은 버전의 기존 활성 통계와 병합
+- `PC_STATS_PRODUCT_IDS`: 현재 운영 게시기는 값이 있으면 `PC_STATS_PARTIAL_PUBLICATION_DISABLED`로 중단한다. 일부 제품만 기존 활성 통계에 병합하는 설정으로 사용하지 않는다.
 - `PC_SOURCE_TARGETS_PER_RUN`: 사이트별 한 번의 수집 배치 크기. 기본 `85`, 현재 최소 `83`; 전체 일일 모델 순회에 부족하면 설정·health가 실패한다.
 - `PC_SOURCE_TARGET_CONCURRENCY`: 사이트 내부 동시 요청 수. 기본 `6`, 허용 범위 `1~8`
 - `CLOUDFLARE_MANUAL_RUN_TOKEN`: 선택한 import API의 Bearer 토큰
@@ -161,9 +186,9 @@ RUNNER_TOKEN=<CLOUDFLARE_RUNNER_TOKEN과 동일한 값>
 
 PC 원장 shadow dual-write는 `PC_PARTS_SHADOW_WRITE_ENABLED=true`로 켠다. 고주기 cadence는 운영자가 병행 수집 시작을 승인한 뒤 `PC_PARTS_SCHEDULER_ENABLED=true`로 켠다. 동시에 Worker의 `AWS_PC_SCHEDULER_AUTHORITY=true`를 적용해야 Cloudflare cron이 중복 수집을 멈추고 watchdog만 수행한다. 단, 하루 한 번의 `daily-price-refresh`는 완성된 통계 publication을 위해 계속 AWS Runner로 전달된다.
 
-공개 매물·가격 통계의 주 저장소는 AWS SQLite다. `D1_BACKGROUND_MIRROR_ENABLED=false`와 Worker의 `D1_LISTING_FALLBACK_ENABLED=false`가 기본이다. 이 상태에서는 `D1_IMPORT_URL`과 token이 남아 있어도 scheduler와 lifecycle 확인이 D1 매물을 자동 갱신하거나 Worker가 오래된 D1 매물을 fallback으로 공개하지 않는다. D1 매물 fallback을 명시적으로 켜더라도 완전한 collection manifest가 있고 2시간 이내인 snapshot만 허용한다. 단순 `export-pc-listings-now.mjs` 결과 upsert는 누락된 판매완료·삭제 행을 퇴역시키지 않으므로 authoritative snapshot 교체로 취급하지 않는다. 가격 통계 publication용 `D1_STATS_IMPORT_URL`은 훨씬 작은 일일 fallback 데이터 경로이므로 매물 mirror와 별도로 계속 사용할 수 있다.
+공개 매물·가격 통계의 주 저장소는 AWS SQLite다. `D1_BACKGROUND_MIRROR_ENABLED=false`와 Worker의 `D1_LISTING_FALLBACK_ENABLED=false`가 기본이다. 이 상태에서는 `D1_IMPORT_URL`과 token이 남아 있어도 scheduler와 lifecycle 확인이 D1 매물을 자동 갱신하거나 Worker가 오래된 D1 매물을 fallback으로 공개하지 않는다. D1 매물 fallback을 명시적으로 켜더라도 완전한 collection manifest가 있고 2시간 이내인 snapshot만 허용한다. 단순 `export-pc-listings-now.mjs` 결과 upsert는 누락된 판매완료·삭제 행을 퇴역시키지 않으므로 authoritative snapshot 교체로 취급하지 않는다. `D1_STATS_IMPORT_URL`은 매물 mirror와 별개인 일일 통계 사본 경로다. 수십 MB 통계도 있으므로 분할 전송·AWS 전체 검증을 사용한다.
 
-`daily-price-refresh`가 성공하면 당일 관측과 매물별 최신 snapshot, 분류 교정·중복 판정·모델 후보 증거는 남기고 완료된 날짜의 원본 상세는 자동 압축한다. 평균·중앙값·최솟값·최댓값·표본 수와 소스별 일일 통계는 유지한다. 대규모 최초 정리는 `compact-pc-storage.mjs`의 dry-run checksum을 확인한 뒤 서비스 중지 상태에서 `--apply --confirm-observation-prune --confirm-plan-checksum <checksum> --vacuum`으로 실행한다.
+`daily-price-refresh`는 게시 성공 후 백업을 만들고 `observationRetentionDays: 30`으로 압축한다. 현재 30일 통계 구성원 검증에 필요한 관측 상세와 매물별 최신 snapshot, 분류 교정·중복 판정·모델 후보 증거를 보존한다. 평균·중앙값·최솟값·최댓값·표본 수와 소스별 일일 통계도 유지한다. 대규모 최초 정리는 `compact-pc-storage.mjs`의 dry-run checksum을 확인한 뒤 서비스 중지 상태에서 `--apply --confirm-observation-prune --confirm-plan-checksum <checksum> --vacuum`으로 실행하는 별도 운영 조치다.
 
 기존 비활성 검색행은 자동으로 SOLD/DELETED로 추정하지 않는다. 서비스 중지 후 아래 명시 명령을 한 번 실행하면 먼저 SQLite 복구 백업을 만들고 `UNAVAILABLE_UNKNOWN`으로 이행한다.
 
@@ -173,15 +198,15 @@ sudo -u usedrunner node --env-file=/etc/used-market-runner/runner.env /opt/used-
 sudo systemctl start used-market-runner.service
 ```
 
-PC 사전수집·공개 전환에 포함할 source는 registry의 운영자 승인 기록, `directory_source:true`, `runtime_status:"ENABLED"`를 모두 갖춰야 한다. 현재 비활성 소스의 과거 adapter나 설정값이 남아 있어도 스케줄 이벤트와 공개 projection에는 포함되지 않는다. source 실패 시 이전 데이터 보존, backoff, 격리 기록을 남긴다.
+신규 PC 사전수집 대상 source는 registry의 운영자 승인 기록, `directory_source:true`, `runtime_status:"ENABLED"`를 모두 갖춰야 한다. 비활성 소스는 새 스케줄 대상에서 제외하지만 과거 공개 projection의 잔존 행까지 자동 제거됐다고 가정하지 않는다. 2026-09-24에 확인한 과거 소스·분류 품질 과제는 변경 기록에서 계속 추적한다. source 실패 시 이전 데이터 보존, backoff, 격리 기록을 남긴다.
 
-collection target은 `HOURLY_CATEGORY`와 `DAILY_MASTER`로 나뉜다. 전자는 모든 11개 부품군을 매시간 확인하고, 후자는 GPU·CPU 정확 모델과 RAM 세대·용량·제조사, 저장장치 용량·제조사 등 versioned master 전체를 24시간 간격으로 순회한다. `PC_SOURCE_TARGETS_PER_RUN`은 한 사이트를 한 번에 과도하게 호출하지 않도록 배치를 제한한다. `/health`의 `pc_parts.collection_capacity`는 현재 target set과 사이트별 실행 횟수로 전체 순회 가능 여부를 계산하며, 기본값 `85`는 현재 운영 소스 전체와 한 회차 실패 여유를 충족한다.
+collection target은 `HOURLY_CATEGORY`와 `DAILY_MASTER`로 나뉜다. 전자는 모든 11개 부품군을 매시간 확인하고, 후자는 GPU·CPU 정확 모델과 RAM 세대·용량·제조사, 저장장치 용량·제조사 등 versioned master 전체를 24시간 간격으로 순회한다. `PC_SOURCE_TARGETS_PER_RUN`은 한 사이트를 한 번에 과도하게 호출하지 않도록 배치를 제한한다. `/health`의 `pc_parts.collection_capacity`는 현재 target set과 사이트별 실행 횟수로 전체 순회 가능 여부를 계산하며, 기본값 `85`는 현재 운영 소스의 정상 회차 기준 일일 순회량을 충족한다. 다나와는 매시 19분에 최대 85개를 순차 요청하고 요청 사이를 최소 5초 띄운다. 403·429·접근 차단이 나오면 해당 회차를 중단하며, 이미 수집한 자료는 보존한다. 수동 수집도 같은 간격과 중단 정책을 사용한다.
 
 실패한 개별 target은 다음 소스 실행부터 지수 백오프로 재시도한다. `/health`의 `source_readiness[].target_coverage`는 성공 target 수, 실패 target 수, 2회 주기 이상 성공하지 못한 stale target 수를 공개하며, `--require-pc-continuous`는 stale target이 남아 있으면 통과하지 않는다.
 
-가격 통계 publication은 D1에 여러 batch로 staging한 뒤 활성 포인터를 교체한다. 데이터가 커져도 일반 마켓 요청의 30초 제한에 끊기지 않도록 `PC_STATS_PUBLICATION_TIMEOUT_MS`를 별도 사용하며 기본값은 15분이다.
+가격 통계 publication은 D1에 4행씩 staging하고 AWS의 전체 readback 검증을 통과한 뒤 Worker가 활성 포인터를 교체한다. `PC_STATS_PUBLICATION_TIMEOUT_MS`는 개별 게시 HTTP 요청에 쓰는 별도 제한이며 기본 15분이다. 전체 계산·후처리가 15분 안에 끝난다는 보장은 아니다. readback의 별도 제한과 오류 판정은 위 운영 위키를 따른다.
 
-현재 비활성인 다나와 adapter의 실제 목록 수집 진단은 다음 명령으로만 실행한다. 운영 스케줄이나 결정적 테스트에는 포함하지 않는다.
+기존 다나와 장터 adapter의 실제 목록 수집 진단은 다음 명령으로만 실행한다. 이 legacy 진단은 현재 운영하는 `danawa-search.mjs` 중고 통합검색 수집과 다르며, 운영 스케줄이나 결정적 테스트에는 포함하지 않는다.
 
 ```bash
 npm run test:pc:live-specialist

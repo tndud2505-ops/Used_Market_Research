@@ -65,8 +65,10 @@ done
 for required_file in \
   collector/logic/pc-source-registry.mjs \
   collector/logic/pc-source-adapters.mjs \
+  collector/logic/danawa-search.mjs \
   collector/logic/pc-specialist-targets.mjs \
   market/logic/pc-parts-classifier.mjs \
+  market/logic/pc-market-pools.mjs \
   market/logic/pc-search-query-variants.mjs \
   market/logic/pc-public-catalog.mjs \
   market/logic/pc-price-readiness.mjs \
@@ -183,8 +185,10 @@ if [[ "$SOURCE_ROOT" != "$APP_ROOT" ]]; then
   done
   install -m 0644 "$SOURCE_ROOT/collector/logic/pc-source-registry.mjs" "$APP_ROOT/collector/logic/pc-source-registry.mjs"
   install -m 0644 "$SOURCE_ROOT/collector/logic/pc-source-adapters.mjs" "$APP_ROOT/collector/logic/pc-source-adapters.mjs"
+  install -m 0644 "$SOURCE_ROOT/collector/logic/danawa-search.mjs" "$APP_ROOT/collector/logic/danawa-search.mjs"
   install -m 0644 "$SOURCE_ROOT/collector/logic/pc-specialist-targets.mjs" "$APP_ROOT/collector/logic/pc-specialist-targets.mjs"
   install -m 0644 "$SOURCE_ROOT/market/logic/pc-parts-classifier.mjs" "$APP_ROOT/market/logic/pc-parts-classifier.mjs"
+  install -m 0644 "$SOURCE_ROOT/market/logic/pc-market-pools.mjs" "$APP_ROOT/market/logic/pc-market-pools.mjs"
   install -m 0644 "$SOURCE_ROOT/market/logic/pc-search-query-variants.mjs" "$APP_ROOT/market/logic/pc-search-query-variants.mjs"
   install -m 0644 "$SOURCE_ROOT/market/logic/pc-public-catalog.mjs" "$APP_ROOT/market/logic/pc-public-catalog.mjs"
   install -m 0644 "$SOURCE_ROOT/market/logic/pc-price-readiness.mjs" "$APP_ROOT/market/logic/pc-price-readiness.mjs"
@@ -328,6 +332,8 @@ node --check "$APP_ROOT/aws-runner/compact-pc-storage.mjs"
 node --check "$APP_ROOT/aws-runner/backfill-legacy-inactive.mjs"
 node --check "$APP_ROOT/collector/logic/pc-source-registry.mjs"
 node --check "$APP_ROOT/collector/logic/pc-source-adapters.mjs"
+node --check "$APP_ROOT/collector/logic/danawa-search.mjs"
+node --check "$APP_ROOT/market/logic/pc-market-pools.mjs"
 node --check "$APP_ROOT/collector/logic/pc-specialist-targets.mjs"
 node --check "$APP_ROOT/market/logic/pc-parts-classifier.mjs"
 node --check "$APP_ROOT/market/logic/pc-search-query-variants.mjs"

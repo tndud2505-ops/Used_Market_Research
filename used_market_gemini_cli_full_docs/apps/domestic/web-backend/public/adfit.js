@@ -24,12 +24,23 @@ export function createAdfitSlot(root) {
   if (!root) return { setEligible() {} };
 
   let eligible = false;
+  let started = false;
+  let failed = false;
   let collapseTimer;
+  const desktop = window.matchMedia('(min-width: 1360px)');
+  const format = desktop.matches ? 'desktop' : 'mobile';
+  const template = root.querySelector(`template[data-format="${format}"]`);
+  if (template) root.append(template.content.cloneNode(true));
+  root.dataset.format = format;
+  const fits = () => format !== 'desktop' || desktop.matches;
   const hasCreative = () => Boolean(root.querySelector("iframe, .kakao_ad_area > *"));
   const sync = () => {
-    if (!eligible) root.hidden = true;
+    if (!eligible || failed || !fits()) root.hidden = true;
     else if (hasCreative()) root.hidden = false;
   };
+  window.usedPickAdfitNoAd = () => { failed = true; root.hidden = true; };
+  root.querySelector('ins')?.setAttribute('data-ad-onfail', 'usedPickAdfitNoAd');
+  desktop.addEventListener('change', sync);
   const observer = new MutationObserver(sync);
   observer.observe(root, { childList: true, subtree: true });
   root.hidden = true;
@@ -37,13 +48,14 @@ export function createAdfitSlot(root) {
   return {
     setEligible(value) {
       eligible = Boolean(value);
-      clearTimeout(collapseTimer);
-      if (!eligible) {
+      if (!eligible || failed || !fits()) {
         root.hidden = true;
         return;
       }
+      if (started) { sync(); return; }
+      started = true;
       root.hidden = false;
-      void loadSdk().catch(() => { root.hidden = true; });
+      void loadSdk().catch(() => { failed = true; root.hidden = true; });
       collapseTimer = setTimeout(() => {
         if (eligible && !hasCreative()) root.hidden = true;
       }, 5_000);

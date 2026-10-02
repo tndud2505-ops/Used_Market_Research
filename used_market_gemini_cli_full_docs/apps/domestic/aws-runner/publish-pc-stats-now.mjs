@@ -3,6 +3,7 @@ import { stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { compactStatsForPublication, statsChecksum, statsPublicationKey } from "../cloudflare/public-product-stats.mjs";
 import { PC_DIRECTORY_PUBLICATION_SOURCE_KEYS } from "../collector/logic/pc-source-registry.mjs";
+import { withDomesticStatsScopes } from '../market/logic/pc-market-pools.mjs';
 import { PcPartsLedger } from "./pc-parts-ledger.mjs";
 import { pcStatsTraceability } from "./pc-stats-traceability.mjs";
 import { SearchIndex } from "./search-index.mjs";
@@ -52,9 +53,10 @@ try {
       versionOptions.filterVersion,
       ...PC_DIRECTORY_PUBLICATION_SOURCE_KEYS
     );
+  const allScopes = withDomesticStatsScopes(availableScopes);
   const scopes = statsProductIds.length > 0
-    ? availableScopes.filter((scope) => statsProductIds.includes(String(scope.canonical_product_id || "")))
-    : availableScopes;
+    ? allScopes.filter((scope) => statsProductIds.includes(String(scope.canonical_product_id || "")))
+    : allScopes;
   if (statsProductIds.length > 0) {
     const foundProductIds = new Set(scopes.map((scope) => String(scope.canonical_product_id || "")));
     const missingProductIds = statsProductIds.filter((productId) => !foundProductIds.has(productId));

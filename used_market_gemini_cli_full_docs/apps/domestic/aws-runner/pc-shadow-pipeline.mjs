@@ -68,7 +68,18 @@ function cpuModelToken(value) {
 }
 
 function cpuProductMatchesClassification(classified, product) {
-  if (classified?.category_code !== "CPU" || !classified?.canonical_model || !product?.spec?.cpu_model) return true;
+  if (classified?.category_code !== "CPU" || !product) return true;
+  const classifiedVendor = /^I[3579](?:[-\s]|\d)|^CORE\s*ULTRA/iu.test(classified.canonical_model || '')
+    ? 'Intel' : classified.manufacturer;
+  const productVendor = product.spec?.platform_vendor || product.manufacturer;
+  if (classifiedVendor && productVendor && classifiedVendor.toLowerCase() !== productVendor.toLowerCase()) return false;
+  if (!classified.canonical_model || !product.spec?.cpu_model) return true;
+  const classifiedUltraTier = classified.canonical_model.match(/^(?:CORE\s*)?ULTRA\s*([3579])/iu)?.[1];
+  const productUltraTier = product.spec.cpu_model.match(/^(?:CORE\s*)?ULTRA\s*([3579])/iu)?.[1];
+  if ((classifiedUltraTier || productUltraTier) && classifiedUltraTier !== productUltraTier) return false;
+  const classifiedIntelFamily = classified.canonical_model.match(/^I([3579])/iu)?.[1];
+  const productIntelFamily = product.spec.cpu_model.match(/^I([3579])/iu)?.[1];
+  if (classifiedIntelFamily && productIntelFamily && classifiedIntelFamily !== productIntelFamily) return false;
   const classifiedModel = cpuModelToken(classified.canonical_model);
   const productModel = cpuModelToken(product.spec.cpu_model);
   return !classifiedModel || !productModel || classifiedModel === productModel;
@@ -304,7 +315,9 @@ export class PcShadowPipeline {
     const publicClassified = classifyPcPartListingPublic({
       ...item,
       description: item.description
-    }, { preclassified: classified });
+    }, { preclassified: classified.seller_type === 'DEALER' && source.market_pools.includes('KR_DEALER_USED')
+      ? { ...classified, exclusion_reasons: classified.exclusion_reasons.filter(reason => reason !== 'DEALER_LISTING') }
+      : classified });
     const publicSupportedCategory = ["CPU", "GPU", "RAM", "MOTHERBOARD", "SSD", "HDD", "PSU"].includes(publicClassified.category_code);
     const toolComparisonCategory = ['CASE', 'COOLING'].includes(classified.category_code);
     const marketSegment = toolComparisonCategory ? pcPartMarketSegment(item, classified.category_code) : publicClassified.market_segment;
@@ -316,13 +329,25 @@ export class PcShadowPipeline {
       classified.category_code,
       `${item.title || ""} ${item.description || ""}`
     );
-    const alias = exactAlias?.matched
+    let alias = exactAlias?.matched
       ? exactAlias
       : textAlias?.matched
         ? textAlias
         : exactAlias?.forbidden
           ? exactAlias
           : textAlias;
+    if (classified.category_code === 'CPU' && classified.canonical_model) {
+      const compatible = candidate => candidate?.matched && cpuProductMatchesClassification(classified,
+        this.ledger.getCanonicalProduct(candidate.canonical_product_id, candidate.master_version));
+      alias = compatible(exactAlias) ? exactAlias : compatible(textAlias) ? textAlias : null;
+      if (!alias && classified.manufacturer && !exactAlias?.forbidden && !textAlias?.forbidden) {
+        const cpuCandidates = PC_PRODUCT_MASTER_V2.filter(candidate => candidate.category === 'CPU'
+          && cpuModelToken(candidate.spec?.cpu_model) === cpuModelToken(classified.canonical_model)
+          && cpuProductMatchesClassification(classified, candidate));
+        if (cpuCandidates.length === 1) alias = { matched: true, forbidden: false,
+          canonical_product_id: cpuCandidates[0].id, master_version: PC_PRODUCT_MASTER_V2_VERSION };
+      }
+    }
     const aliasMatched = Boolean(alias?.matched && !alias?.forbidden);
     const facetClassification = ["SSD", "HDD", "PSU"].includes(classified.category_code) ? publicClassified : classified;
     // RAM aliases may contain a kit's total capacity. Its statistics identity must
@@ -499,7 +524,15 @@ export class PcShadowPipeline {
     };
   }
 
-  recordItem(item, observedAt) {
+  recordItem(item, observedAt, options = {}) {
+    // Search responses omit the body; retain the last verified detail text.
+    if (['bunjang', 'joonggonara'].includes(item.site) && item.description == null) {
+      const previous = this.ledger.latestSnapshot(item.site, sourceListingId(item));
+      const description = previous && this.ledger.db.prepare('SELECT description FROM raw_listings WHERE id = ?')
+        .get(previous.raw_listing_id)?.description;
+      if (description) item = { ...item, description,
+        ...(item.raw_payload ? { raw_payload: { ...item.raw_payload, description } } : {}) };
+    }
     const {
       source,
       classified,
@@ -514,7 +547,7 @@ export class PcShadowPipeline {
       exclusionReasons,
       priceEligible,
       duplicate
-    } = this.normalizeItem(item, observedAt);
+    } = this.normalizeItem(item, observedAt, null, options);
     const observation = this.ledger.recordObservation({
       sourceId: source.key,
       sourceListingId: sourceListingId(item),
@@ -570,7 +603,7 @@ export class PcShadowPipeline {
           filterVersion: rollbackVersion.filter_version,
           modelVersion: rollbackVersion.model_version
         };
-        const rollbackNormalized = this.normalizeItem(item, observedAt, rollbackVersions).normalized;
+        const rollbackNormalized = this.normalizeItem(item, observedAt, rollbackVersions, options).normalized;
         this.ledger.insertNormalization(
           observation.snapshotId,
           rollbackNormalized,

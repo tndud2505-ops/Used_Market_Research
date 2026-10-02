@@ -30,9 +30,12 @@ import {
   activateStagedProductStats,
   publishProductStats,
   readActiveProductStatsScopes,
+  readActiveProductStatsScopePage,
+  readStagedProductStatsPage,
   readPublishedProductStats,
   stageProductStatsChunk
 } from "./public-product-stats.mjs";
+import { verifyStatsWithRunner } from './pc-stats-runner-verification.mjs';
 import { getPcSource } from "../collector/logic/pc-source-registry.mjs";
 import { resolvePcCanonicalIdV3 } from "../market/data/pc-product-master-v2.mjs";
 import {
@@ -76,7 +79,7 @@ const IMPORT_ALLOWED_HOSTS_BY_SITE = Object.freeze({
   bunjang: Object.freeze(["m.bunjang.co.kr", "bunjang.co.kr", "www.bunjang.co.kr"]),
   hellomarket: Object.freeze(["hellomarket.com", "www.hellomarket.com"]),
   rethinkmall: Object.freeze(["web.rethinkmall.com"]),
-  danawa: Object.freeze(["dmall.danawa.com"]),
+  danawa: Object.freeze(["dmall.danawa.com", "prod.danawa.com"]),
   ebay: Object.freeze(["ebay.com", "www.ebay.com"]),
   coolenjoy: Object.freeze(["coolenjoy.net", "www.coolenjoy.net"])
 });
@@ -216,19 +219,21 @@ async function currentProjectionRows(db, query, productIds = null) {
   if (!ids.length) return [];
   const placeholders = ids.map(() => "?").join(", ");
   const bound = db.prepare(`SELECT canonical_product_id, site, price_value, currency, quantity, price_scope,
-      market_pool, condition_code, updated_at, listing_kind, price_eligible, exclusion_reasons_json
+      market_pool, condition_code, updated_at, listing_kind, price_eligible, statistics_eligible, exclusion_reasons_json
     FROM listings
     WHERE active = 1 AND lifecycle_status = 'ACTIVE'
+      AND statistics_eligible = 1
       AND price_value > 0 AND canonical_product_id IN (${placeholders})
       AND currency = ? AND condition_code = ?
-      AND market_pool IN (${productIds ? "'KR_C2C_USED', 'KR_DEALER_USED'" : "?"})`)
-    .bind(...ids, query.currency || "KRW", query.condition || "USED_WORKING", ...(productIds ? [] : [query.marketPool]));
+      AND market_pool IN (${productIds || query.marketPool === 'KR_DOMESTIC_USED' ? "'KR_C2C_USED', 'KR_DEALER_USED'" : "?"})`)
+    .bind(...ids, query.currency || "KRW", query.condition || "USED_WORKING", ...(productIds || query.marketPool === 'KR_DOMESTIC_USED' ? [] : [query.marketPool]));
   if (typeof bound?.all !== "function") return [];
   const result = await bound.all();
   const rows = Array.isArray(result?.results) ? result.results : [];
   return rows.filter((row) => {
     return OPERATIONAL_PC_DIRECTORY_SITES.includes(String(row.site || ""))
       && Number(row.price_eligible) === 1
+      && Number(row.statistics_eligible) === 1
       && Number.isInteger(Number(row.quantity))
       && Number(row.quantity) > 0
       && ["TOTAL", "UNIT"].includes(String(row.price_scope || ""))
@@ -411,24 +416,24 @@ async function servePcProducts(url, env) {
       JOIN public_stats_publications p ON p.publication_id = s.publication_id AND p.active = 1
       WHERE s.canonical_product_id IN (${placeholders})
         AND s.condition_code = 'USED_WORKING' AND s.currency = 'KRW'
-        AND s.market_pool IN ('KR_C2C_USED', 'KR_DEALER_USED')`).bind(...ids).all();
+        AND s.market_pool IN ('KR_DOMESTIC_USED', 'KR_C2C_USED', 'KR_DEALER_USED')`).bind(...ids).all();
     const preferred = new Map();
     for (const row of rows.results || []) {
       const previous = preferred.get(row.canonical_product_id);
-      const rank = row.market_pool === "KR_C2C_USED" ? 2 : 1;
+      const rank = row.market_pool === 'KR_DOMESTIC_USED' ? 3 : row.market_pool === "KR_C2C_USED" ? 2 : 1;
       const hasSamples = Number(row.active_sample_count || 0) + Number(row.sold_sample_count || 0) > 0;
       if (!hasSamples || (previous && previous.rank >= rank)) continue;
       preferred.set(row.canonical_product_id, { ...row, rank });
     }
     const currentRows = await currentProjectionRows(env.DB, { currency: "KRW", condition: "USED_WORKING" }, ids);
     for (const productId of ids) {
-      for (const marketPool of ["KR_C2C_USED", "KR_DEALER_USED"]) {
-        const scoped = currentRows.filter((row) => row.canonical_product_id === productId && row.market_pool === marketPool);
+      for (const marketPool of ['KR_DOMESTIC_USED']) {
+        const scoped = currentRows.filter((row) => row.canonical_product_id === productId);
         if (!scoped.length) continue;
         const active = currentProjectionSummary(scoped);
-        const rank = marketPool === "KR_C2C_USED" ? 2 : 1;
+        const rank = 3;
         const previous = preferred.get(productId);
-        if (!previous || Number(previous.active_sample_count || 0) === 0) {
+        if (!previous || previous.rank < rank || Number(previous.active_sample_count || 0) === 0) {
           preferred.set(productId, {
             canonical_product_id: productId,
             market_pool: marketPool,
@@ -437,9 +442,9 @@ async function servePcProducts(url, env) {
             active_sample_count: active.sample_count,
             active_mean: active.mean,
             active_median: active.median,
-            sold_sample_count: previous?.sold_sample_count || 0,
-            sold_mean: previous?.sold_mean || null,
-            sold_median: previous?.sold_median || null,
+            sold_sample_count: previous?.market_pool === marketPool ? previous.sold_sample_count : 0,
+            sold_mean: previous?.market_pool === marketPool ? previous.sold_mean : null,
+            sold_median: previous?.market_pool === marketPool ? previous.sold_median : null,
             rank
           });
         }
@@ -682,6 +687,40 @@ async function readPriceStatsFromPreferredStore(request, env, runnerPath) {
   return serveProductPriceStats(request, env);
 }
 
+async function readPriceHistory(request, env, runnerPath) {
+  let query;
+  try { query=parsePriceStatsRequest(new URL(request.url)); }
+  catch (error) { return noStoreJson(400,{status:'error',error:error.message}); }
+  // Daily history lives in the retained ledger. A 30-day publication or current
+  // listing projection cannot replace older observations.
+  const response=await proxyToSearchRunner(request,env,runnerPath);
+  if (!response.ok) return response;
+  let payload;
+  try { payload=await response.json(); } catch { return noStoreJson(502,{status:'error',error:'INVALID_DAILY_HISTORY'}); }
+  const data=payload?.data, resolution=resolvePcCanonicalIdV3(query.canonicalProductId);
+  const canonicalId=resolution.status==='alias' ? resolution.canonicalProductIds[0] : query.canonicalProductId;
+  const validMetric = metric => !metric || (Number.isInteger(metric.sample_count) && metric.sample_count>=0
+    && ['min','max','mean','median','arithmetic_mean','average'].every(key=>metric[key]==null || (Number.isFinite(metric[key]) && metric[key]>0 && metric.sample_count>0))
+    && (metric.min==null || metric.max==null || metric.min<=metric.max)
+    && ['mean','median','arithmetic_mean','average'].every(key=>metric[key]==null || ((metric.min==null || metric[key]>=metric.min) && (metric.max==null || metric[key]<=metric.max))));
+  const scopes=[data,...(data?.by_source || []),...(data?.by_manufacturer || []),...(data?.by_manufacturer || []).flatMap(row=>row.by_source || [])];
+  const valid=data?.view==='daily' && data.canonical_product_id===canonicalId
+    && data.window?.from===query.window.from && data.window?.to===query.window.to
+    && data.methodology?.days===query.days && data.methodology?.currency===query.currency
+    && data.methodology?.market_pool===query.marketPool && data.methodology?.condition===query.condition
+    && ['COMPLETE','PARTIAL','EMPTY'].includes(data.coverage?.status)
+    && (data.coverage.status==='EMPTY' ? data.coverage.from===null && data.coverage.to===null
+      : /^\d{4}-\d{2}-\d{2}$/.test(data.coverage.from) && /^\d{4}-\d{2}-\d{2}$/.test(data.coverage.to)
+        && data.coverage.from>=query.window.from && data.coverage.to<=query.window.to && data.coverage.from<=data.coverage.to)
+    && (data.coverage.status!=='COMPLETE' || (data.coverage.from<=query.window.from && data.coverage.to>=query.window.to))
+    && scopes.every(scope=>!scope.active && !scope.sold && !scope.reference_price && Array.isArray(scope.daily)
+      && scope.daily.every(row=>/^\d{4}-\d{2}-\d{2}$/.test(row.date) && row.date>=query.window.from && row.date<=query.window.to && validMetric(row.active) && validMetric(row.sold)));
+  if (!valid) return noStoreJson(502,{status:'error',error:'INVALID_DAILY_HISTORY'});
+  const result=noStoreJson(200,{status:'success',data:{...data,canonical_product_id:query.canonicalProductId}});
+  result.headers.set('x-search-data-source','aws-runner');
+  return result;
+}
+
 async function proxyToRunnerStatus(request, env) {
   if (!nodeRunnerIsConfigured(env)) {
     return json(503, { ok: false, error: "AWS runner is not configured" });
@@ -868,6 +907,13 @@ function importedUrl(value, site) {
     if (site === "danawa" && parsed.protocol === "http:" && hostname === "dmall.danawa.com") parsed.protocol = "https:";
     const allowedHosts = IMPORT_ALLOWED_HOSTS_BY_SITE[site] || [];
     if (parsed.protocol !== "https:" || !allowedHosts.includes(hostname)) return null;
+    if (site === "danawa" && hostname === "prod.danawa.com") {
+      const product = parsed.pathname === "/info/" && /^\d+$/.test(parsed.searchParams.get("pcode") || "");
+      const offer = parsed.pathname === "/bridge/go_link_goods.php"
+        && /^[a-z0-9_-]+$/iu.test(parsed.searchParams.get("cmpny_c") || "")
+        && /^[a-z0-9_-]+$/iu.test(parsed.searchParams.get("link_prod_c") || "");
+      if ((!product && !offer) || parsed.username || parsed.password || parsed.port) return null;
+    }
     return parsed.toString();
   } catch {
     return null;
@@ -1072,6 +1118,12 @@ async function importListings(env, values, collectionManifestValue = null) {
     else rejected += 1;
   }
   rejected += Math.max(0, values.length - MAX_IMPORTED_LISTINGS);
+  const incomingSites = new Map();
+  for (const item of normalized) {
+    if (incomingSites.has(item.item_id) && incomingSites.get(item.item_id) !== item.site)
+      throw new Error('LISTING_SOURCE_IDENTITY_CONFLICT');
+    incomingSites.set(item.item_id, item.site);
+  }
   if (normalized.length === 0 && !collectionManifest) {
     return { inserted: 0, changed: 0, unchanged: 0, rejected, retired_purged: retiredPurged };
   }
@@ -1105,7 +1157,8 @@ async function importListings(env, values, collectionManifestValue = null) {
               ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
               ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(item_id) DO UPDATE SET
-        site = excluded.site,
+        site = CASE WHEN listings.site = excluded.site THEN excluded.site
+          ELSE json('listing source identity conflict') END,
         category_id = excluded.category_id,
         title = excluded.title,
         search_text = excluded.search_text,
@@ -1281,6 +1334,8 @@ async function importListings(env, values, collectionManifestValue = null) {
     inserted: normalized.length,
     changed,
     unchanged: normalized.length - changed,
+    d1_usage: { rows_read: statementResults.reduce((n, result) => n + Number(result.meta?.rows_read || 0), 0),
+      rows_written: rowsWritten },
     rejected,
     retired_purged: retiredPurged,
     retention_policy: "NON_DESTRUCTIVE",
@@ -1436,6 +1491,7 @@ export default {
 
     const isPriceStatsPath = /^\/api\/products\/[^/]+\/price-stats$/u.test(url.pathname);
     if (request.method === "GET" && isPriceStatsPath) {
+      if (url.searchParams.get('view') === 'daily') return readPriceHistory(request,env,url.pathname);
       const requestedProductId = decodeURIComponent(url.pathname.split("/")[3] || "");
       const requestedProduct = publicPcProductById(requestedProductId);
       if (requestedProduct?.category === "MOTHERBOARD" && requestedProduct.spec?.directory_node_type !== "PRODUCT") {
@@ -1611,9 +1667,28 @@ export default {
       if (!await manualTokenIsValid(request, env)) return noStoreJson(401, { ok: false, error: "Unauthorized" });
       if (!hasD1(env)) return noStoreJson(503, { ok: false, error: "D1 is not configured" });
       try {
-        return noStoreJson(200, { ok: true, external_active: await readActiveProductStatsScopes(env.DB) });
-      } catch {
+        const externalActive = url.searchParams.has('offset')
+          ? await readActiveProductStatsScopePage(env.DB, Number(url.searchParams.get('offset')),
+            url.searchParams.has('after_rowid') ? Number(url.searchParams.get('after_rowid')) : null)
+          : await readActiveProductStatsScopes(env.DB);
+        return noStoreJson(200, { ok: true, external_active: externalActive });
+      } catch (error) {
+        console.error('PC_ACTIVE_SCOPE_READ_FAILED', error instanceof Error ? error.message : String(error));
         return noStoreJson(503, { ok: false, error: "Active publication scope manifest is unavailable" });
+      }
+    }
+
+    if (request.method === 'GET' && url.pathname === '/admin/product-stats-readback') {
+      if (!await manualTokenIsValid(request, env)) return noStoreJson(401, { ok: false, error: 'Unauthorized' });
+      if (!hasD1(env)) return noStoreJson(503, { ok: false, error: 'D1 is not configured' });
+      try {
+        const page = await readStagedProductStatsPage(env.DB, url.searchParams.get('publication_id'),
+          url.searchParams.get('kind'), Number(url.searchParams.get('offset') || 0),
+          (url.searchParams.get('row_ids') || '').split(',').filter(Boolean).map(Number),
+          url.searchParams.has('after_rowid') ? Number(url.searchParams.get('after_rowid')) : null);
+        return noStoreJson(200, { ok: true, page });
+      } catch {
+        return noStoreJson(400, { ok: false, error: 'Publication readback page unavailable' });
       }
     }
 
@@ -1676,8 +1751,11 @@ export default {
         });
       }
       try {
-        const publication = await activateStagedProductStats(env.DB, body || {});
-        return json(200, { ok: true, publication });
+        if (!Object.hasOwn(body || {}, 'expected_previous_publication')) throw new Error('publication predecessor is required');
+        const publication = await activateStagedProductStats(env.DB, body || {}, {
+          verifyContent: input => verifyStatsWithRunner(env, input)
+        });
+        return noStoreJson(200, { ok: true, publication });
       } catch (error) {
         return json(400, { ok: false, error: error instanceof Error ? error.message : String(error) });
       }

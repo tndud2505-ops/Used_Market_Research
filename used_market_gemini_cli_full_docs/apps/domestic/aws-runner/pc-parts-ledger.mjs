@@ -4,6 +4,7 @@ import { mkdirSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { canonicalSourceListingIdentity } from "./pc-source-listing-identity.mjs";
 import { reviewedPcListingExclusion } from "../market/logic/pc-reviewed-listing-exclusions.mjs";
+import { underlyingMarketPools } from '../market/logic/pc-market-pools.mjs';
 import { migrateStoredPricePublications, readCompletedPricePublication, pruneCompletedPricePublications } from './pc-stored-price-publication.mjs';
 
 const HOUR_MS = 60 * 60 * 1000;
@@ -257,7 +258,7 @@ function migrateDailyPriceStatsReservedScope(db) {
 
 function priceStatsScopeMatches(row, scope) {
   return cleanText(row?.canonical_product_id, 300) === scope.canonicalProductId
-    && cleanText(row?.market_pool, 80) === scope.marketPool
+    && underlyingMarketPools(scope.marketPool).includes(cleanText(row?.market_pool, 80))
     && cleanText(row?.condition_code, 80) === scope.condition
     && cleanText(row?.currency, 20).toUpperCase() === scope.currency;
 }
@@ -289,7 +290,30 @@ function redactString(value) {
     .replace(/(?<!\d)0\d{1,2}[-. ]?\d{3,4}[-. ]?\d{4}(?!\d)/gu, "[PHONE]");
 }
 
+function publicDanawaUrl(value) {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:" || url.hostname !== "prod.danawa.com" || url.username || url.password || url.port) return null;
+    const pcode = url.searchParams.get("pcode");
+    if (url.pathname === "/info/" && /^\d+$/.test(pcode || "")) return `https://prod.danawa.com/info/?pcode=${pcode}`;
+    const shop = url.searchParams.get("cmpny_c");
+    const product = url.searchParams.get("link_prod_c");
+    if (url.pathname === "/bridge/go_link_goods.php" && /^[a-z0-9_-]+$/iu.test(shop || "") && /^[a-z0-9_-]+$/iu.test(product || "")) {
+      return `https://prod.danawa.com/bridge/go_link_goods.php?cmpny_c=${shop}&link_prod_c=${product}`;
+    }
+  } catch {}
+  return null;
+}
+
 function redactPayload(value, key = "") {
+  if (typeof value === "string" && ["id", "item_id", "source_listing_id"].includes(key.toLowerCase())
+    && /^(?:danawa:)?search_[a-f0-9]{24}$/iu.test(value)) return value;
+  if (typeof value === "string" && ["url", "item_url"].includes(key.toLowerCase())) {
+    try {
+      const url = new URL(value);
+      if (url.hostname === "prod.danawa.com") return publicDanawaUrl(value) || "[REDACTED:url]";
+    } catch {}
+  }
   if (Array.isArray(value)) return value.map((entry) => redactPayload(entry));
   if (value && typeof value === "object") {
     const result = {};
@@ -1815,7 +1839,7 @@ export class PcPartsLedger {
       cleanText(normalized.conditionCode || "UNKNOWN", 80), cleanText(normalized.marketPool || "UNKNOWN", 80),
       normalized.exactProduct === true ? 1 : 0,
       normalized.priceEligible === true && exclusionReasons.every((reason) => reason === "ANOMALOUS_LOW_PRICE") ? 1 : 0,
-      stableJson(exclusionReasons), stableJson(normalized.confidence || {}), stableJson(normalized.evidence || {}), normalizedAt
+      stableJson(exclusionReasons), stableJson(normalized.confidence || {}), stableJson(redactPayload(normalized.evidence || {})), normalizedAt
     );
     const normalizedId = Number(result.lastInsertRowid);
     const items = Array.isArray(normalized.items) && normalized.items.length > 0 ? normalized.items : [{
@@ -1957,7 +1981,11 @@ export class PcPartsLedger {
       }
       if (previous?.lifecycle_status === "SOLD" && status === "SOLD") {
         const lateTransaction = transactionPrice != null && previous.transaction_price !== transactionPrice;
-        if (!lateTransaction) {
+        const previousText = input.normalized && this.db.prepare('SELECT title, description FROM raw_listings WHERE id = ?')
+          .get(previous.raw_listing_id);
+        const changedClassificationText = previousText
+          && (previousText.title !== safeTitle || (previousText.description || '') !== (safeDescription || ''));
+        if (!lateTransaction && !changedClassificationText) {
           ensureRequestedNormalization(previous.id);
           return { rawListingId: raw.id, snapshotId: previous.id, snapshotCreated: false, status: "SOLD", soldLastAskPrice: previous.sold_last_ask_price };
         }
@@ -2133,7 +2161,10 @@ export class PcPartsLedger {
     const row = this.db.prepare(`
       SELECT s.*, r.raw_json, r.title, r.description,
              n.canonical_product_id, n.canonical_display_name, n.category_code, n.listing_kind,
+             n.market_segment, n.listing_type, n.condition_group, n.spec_group_id,
+             n.classification_confidence, n.model_confidence, n.quantity_confidence, n.price_scope_confidence,
              n.quantity, n.price_scope, n.condition_code, n.market_pool, n.price_eligible,
+             n.statistics_eligible, n.statistics_exclusion_reasons_json,
              n.normalization_version, n.parser_version, n.rule_version, n.filter_version,
              n.exclusion_reasons_json, n.confidence_json, n.evidence_json,
              li.unit_price, li.total_price, li.spec_json AS listing_spec_json
@@ -2160,7 +2191,8 @@ export class PcPartsLedger {
     const raw = parseJson(row.raw_json, {});
     const listingSpec = parseJson(row.listing_spec_json, {});
     const projection = {
-      item_id: cleanText(raw.item_id || raw.id || (raw.url || raw.item_url
+      item_id: row.source_id === "danawa" && /^search_[a-f0-9]{24}$/iu.test(row.source_listing_id)
+        ? `danawa:${row.source_listing_id}` : cleanText(raw.item_id || raw.id || (raw.url || raw.item_url
         ? `${row.source_id}:${raw.url || raw.item_url}`
         : `${row.source_id}:${row.source_listing_id}`), 700),
       source_listing_id: row.source_listing_id,
@@ -2178,6 +2210,14 @@ export class PcPartsLedger {
       canonical_product_id: row.canonical_product_id,
       canonical_display_name: row.canonical_display_name,
       listing_kind: row.listing_kind || "UNKNOWN",
+      market_segment: row.market_segment || "UNKNOWN",
+      listing_type: row.listing_type || "UNKNOWN",
+      condition_group: row.condition_group || "UNKNOWN",
+      spec_group_id: row.spec_group_id || null,
+      classification_confidence: row.classification_confidence ?? 0,
+      model_confidence: row.model_confidence ?? 0,
+      quantity_confidence: row.quantity_confidence ?? 0,
+      price_scope_confidence: row.price_scope_confidence ?? 0,
       category_code: row.category_code,
       product_kind: typeof listingSpec.listing_product_kind === "string" ? listingSpec.listing_product_kind : null,
       placement: typeof listingSpec.listing_placement === "string" ? listingSpec.listing_placement : null,
@@ -2190,6 +2230,8 @@ export class PcPartsLedger {
       confidence: parseJson(row.confidence_json, {}),
       evidence: parseJson(row.evidence_json, []),
       price_eligible: row.price_eligible === 1,
+      statistics_eligible: row.statistics_eligible === 1,
+      statistics_exclusion_reasons: parseJson(row.statistics_exclusion_reasons_json, []),
       exclusion_reasons: parseJson(row.exclusion_reasons_json, []),
       good_listing_eligible: false,
       reference_price: null,
@@ -2198,12 +2240,25 @@ export class PcPartsLedger {
       rule_version: row.rule_version || null,
       filter_version: row.filter_version || null
     };
+    if (row.source_id === "danawa" && /^search_[a-f0-9]{24}$/iu.test(row.source_listing_id)) {
+      let safeUrl = publicDanawaUrl(projection.url);
+      if (!safeUrl && this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='listings'").get()) {
+        const indexed = this.db.prepare("SELECT url FROM listings WHERE site='danawa' AND item_id=?").get(projection.item_id);
+        safeUrl = publicDanawaUrl(indexed?.url);
+      }
+      projection.url = safeUrl || "";
+    }
     const reviewedExclusion = reviewedPcListingExclusion(row.source_id, row.source_listing_id);
     if (!reviewedExclusion) return projection;
     return {
       ...projection,
       listing_kind: reviewedExclusion.reason === "FULL_SYSTEM" ? "FULL_SYSTEM" : projection.listing_kind,
       price_eligible: false,
+      statistics_eligible: false,
+      statistics_exclusion_reasons: [...new Set([
+        ...projection.statistics_exclusion_reasons,
+        "REVIEWED_" + reviewedExclusion.reason
+      ])],
       exclusion_reasons: [...new Set([
         ...projection.exclusion_reasons,
         "REVIEWED_" + reviewedExclusion.reason
@@ -2266,6 +2321,7 @@ export class PcPartsLedger {
   }
 
   eligibleRows({ canonicalProductId, marketPool, condition, currency, from, asOf, normalizationVersion, parserVersion, ruleVersion, filterVersion, sourceIds = [] }) {
+    const pools = underlyingMarketPools(marketPool);
     const allowedSourceIds = [...new Set((Array.isArray(sourceIds) ? sourceIds : [])
       .map((sourceId) => cleanText(sourceId, 100)).filter(Boolean))].sort();
     const sourceFilter = allowedSourceIds.length > 0
@@ -2286,7 +2342,7 @@ export class PcPartsLedger {
         JOIN raw_listings r ON r.id = s.raw_listing_id
         LEFT JOIN duplicate_cluster_members dcm ON dcm.snapshot_id = s.id
         LEFT JOIN duplicate_clusters dc ON dc.id = dcm.cluster_id
-       WHERE n.canonical_product_id = ? AND n.market_pool = ? AND n.condition_code = ?
+       WHERE n.canonical_product_id = ? AND n.market_pool IN (${pools.map(() => '?').join(',')}) AND n.condition_code = ?
          AND s.currency = ?
          AND n.normalization_version = ?
          AND n.parser_version = ? AND n.rule_version = ? AND n.filter_version = ?
@@ -2294,7 +2350,7 @@ export class PcPartsLedger {
          AND s.observed_at <= ?
          ${sourceFilter}
        ORDER BY s.observed_at, s.id
-    `).all(canonicalProductId, marketPool, condition, currency, normalizationVersion, parserVersion, ruleVersion, filterVersion,
+    `).all(canonicalProductId, ...pools, condition, currency, normalizationVersion, parserVersion, ruleVersion, filterVersion,
       from, from, asOf, ...allowedSourceIds);
     return rows.filter((row) => !reviewedPcListingExclusion(row.source_id, row.source_listing_id));
   }
@@ -2334,7 +2390,7 @@ export class PcPartsLedger {
       const stateRows = this.db.prepare(`
         SELECT s.id, s.source_id, s.source_listing_id, s.observed_at, s.lifecycle_status, s.currency,
                n.canonical_product_id, n.market_pool, n.condition_code, n.exact_product, n.price_eligible,
-               n.statistics_eligible,
+               n.statistics_eligible, n.statistics_exclusion_reasons_json,
                CASE WHEN dc.cluster_status = 'CONFIRMED' THEN ${clusterIdentitySql} ELSE NULL END AS cluster_identity
           FROM listing_snapshots s
           LEFT JOIN normalized_listings n ON n.snapshot_id = s.id
@@ -2400,7 +2456,10 @@ export class PcPartsLedger {
       groups.get(key).push({ row, price: Number(price) });
     };
     for (const [key, row] of latestByListingDay) {
-      if ((row.lifecycle_status === "ACTIVE" || row.lifecycle_status === "RESERVED") && priceStatsRowEligible(row)) {
+      const identity = priceStatsListingIdentity(row);
+      const latestReasons = parseJson(latestByListing.get(identity)?.statistics_exclusion_reasons_json, []);
+      const saleScopeExcluded = latestReasons.some((reason) => ["FULL_SYSTEM", "COMPONENT_BUNDLE", "OPTION_AD"].includes(reason));
+      if ((row.lifecycle_status === "ACTIVE" || row.lifecycle_status === "RESERVED") && priceStatsRowEligible(row) && !saleScopeExcluded) {
         add(key.split("\u0000").at(-1), row.lifecycle_status, row, row.comparable_price ?? row.price_value);
       }
     }
@@ -2649,7 +2708,7 @@ export class PcPartsLedger {
       ...options, canonicalProductId, marketPool, condition, currency, asOf, days,
       normalizationVersion, parserVersion, ruleVersion, filterVersion
     });
-    if (published) return published;
+    if (published && options.dailyOnly !== true) return published;
     const windowRow = this.db.prepare(`SELECT * FROM daily_price_stat_windows
       WHERE canonical_product_id = ? AND market_pool = ? AND condition_code = ? AND currency = ?
         AND normalization_version = ?
@@ -2729,6 +2788,7 @@ export class PcPartsLedger {
     const versionRow = dailyRows.at(-1);
     return {
       canonical_product_id: canonicalProductId,
+      daily_coverage: { from: availableFrom, to: availableThrough },
       active: this.storedSummaryFromDailyRows(rowsByScope.get("ACTIVE") || []),
       reserved,
       sold,
@@ -2959,12 +3019,12 @@ export class PcPartsLedger {
     const excludedRows = this.db.prepare(`SELECT n.exclusion_reasons_json
       FROM normalized_listings n
       JOIN listing_snapshots s ON s.id = n.snapshot_id
-      WHERE n.canonical_product_id = ? AND n.market_pool = ? AND n.condition_code = ?
+      WHERE n.canonical_product_id = ? AND n.market_pool IN (${underlyingMarketPools(marketPool).map(() => '?').join(',')}) AND n.condition_code = ?
         AND s.currency = ? AND s.observed_at >= ? AND s.observed_at <= ?
         AND n.normalization_version = ?
         AND n.parser_version = ? AND n.rule_version = ? AND n.filter_version = ?
         AND n.price_eligible = 0`).all(
-          canonicalProductId, marketPool, condition, currency, from, asOf,
+          canonicalProductId, ...underlyingMarketPools(marketPool), condition, currency, from, asOf,
           normalizationVersion, parserVersion, ruleVersion, filterVersion
         );
     const exclusionReasons = {};
@@ -2989,6 +3049,9 @@ export class PcPartsLedger {
         market_pool: marketPool,
         condition,
         currency,
+        ...(marketPool === 'KR_DOMESTIC_USED' ? { included_market_pools: underlyingMarketPools(marketPool),
+          domestic_rule: '국내 개인 중고와 쇼핑몰 중고의 유효 표시가격',
+          danawa_rule: '중고 상품 규격별 일반 최저 표시가격 1건; 판매처 수는 표본 수가 아님' } : {}),
         active_rule: "기간 내 매물별 마지막 유효 관측",
         sold_rule: "기간 내 최초 SOLD 관측에서 확인한 마지막 유효 표시가격",
         sample_thresholds: { representative_null_below: 3, mean_from: 5, trimmed_mean_and_iqr_from: 10 }

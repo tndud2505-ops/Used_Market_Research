@@ -4,7 +4,7 @@ import { PcPartsLedger } from '../aws-runner/pc-parts-ledger.mjs';
 import { PcShadowPipeline } from '../aws-runner/pc-shadow-pipeline.mjs';
 import { storeCompletedPricePublication, storedPricePublicationKey, readCompletedPricePublication } from '../aws-runner/pc-stored-price-publication.mjs';
 import { coherentStats, metricValue, buildTotals } from '../web-backend/public/pc-tools-core.mjs';
-import { priceStatsResponse, parsePriceStatsRequest } from '../aws-runner/pc-price-stats-http.mjs';
+import { priceStatsResponse, parsePriceStatsRequest, priceHistoryResponse } from '../aws-runner/pc-price-stats-http.mjs';
 import { pcStatsTraceability } from '../aws-runner/pc-stats-traceability.mjs';
 
 const db = new DatabaseSync(':memory:');
@@ -39,6 +39,18 @@ try {
   assert.equal(exact.active.mean, 100_000);
   assert.equal(exact.by_source.find(r => r.source_id === 'bunjang').active.median, 70_000);
   const before = ledger.getStoredDailyPriceStats(options);
+  const historyQuery=parsePriceStatsRequest(new URL(`https://test.invalid/api/products/${encodeURIComponent(id)}/price-stats?days=100&as_of=2026-09-14`),new Date('2026-09-23'));
+  const historyStats=ledger.getStoredDailyPriceStats({...options,days:100,asOf:historyQuery.asOf,dailyOnly:true});
+  const history=priceHistoryResponse(historyQuery,historyStats);
+  assert.equal(history.view,'daily');
+  assert.equal(history.window.days,100);
+  assert.equal(history.coverage.status,'PARTIAL');
+  assert.ok(history.daily.length>0);
+  assert.ok(history.daily.every(row=>row.date>=history.window.from && row.date<=history.window.to));
+  assert.ok(history.coverage.to<=history.window.to);
+  assert.equal(history.active,undefined,'daily response must not expose incomplete period aggregates');
+  assert.equal(history.reference_price,undefined);
+  assert.ok(history.by_source.every(row=>row.active===undefined && row.daily.every(day=>day.date<=history.window.to)));
   assert.equal(before.active.average, null, 'incomplete daily means cannot become an invented weighted average');
   assert.equal(before.by_source.find(r => r.source_id === 'bunjang').active.average, null);
   const row = { canonical_product_id: id, market_pool: 'KR_C2C_USED', condition_code: 'USED_WORKING', currency: 'KRW', days: 30, as_of: asOf, stats_json: exact };

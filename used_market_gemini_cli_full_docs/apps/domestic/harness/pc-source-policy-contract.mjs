@@ -54,7 +54,7 @@ const runtimeCanary = { ...liveCanary, observed_at: new Date().toISOString() };
 
 assert.equal(new Set(PC_SOURCE_REGISTRY.map((source) => source.key)).size, PC_SOURCE_REGISTRY.length);
 assert.deepEqual(Object.fromEntries(PC_SOURCE_REGISTRY.map((source) => [source.key, source.cadence.kst_minutes])), {
-  joonggonara: [4, 34], bunjang: [11], daangn: [15], danawa: [19, 49], hellomarket: [27],
+  joonggonara: [4, 34], bunjang: [11], daangn: [15], danawa: [19], hellomarket: [27],
   rethinkmall: [36], ebay: [44], coolenjoy: [52]
 });
 assert.ok(PC_SOURCE_REGISTRY.every((source) => source.cadence.jitter_max_seconds === 120));
@@ -118,10 +118,10 @@ assert.equal(getPcSource("daangn").policy_status, "DENIED");
 assert.equal(getPcSource("daangn").policy_basis_url, "https://www.daangn.com/robots.txt");
 assert.equal(OPERATIONAL_TARGET_SITES.includes("daangn"), false);
 assert.equal(getPcSource("danawa").policy_status, "APPROVED");
-assert.equal(getPcSource("danawa").runtime_status, "DISABLED");
-assert.equal(getPcSource("danawa").directory_source, false);
+assert.equal(getPcSource("danawa").runtime_status, "ENABLED");
+assert.equal(getPcSource("danawa").directory_source, true);
 assert.equal(OPERATIONAL_TARGET_SITES.includes("danawa"), false, "specialist collection must not re-enable foreground live search");
-assert.equal(OPERATIONAL_PC_DIRECTORY_SITES.includes("danawa"), false);
+assert.equal(OPERATIONAL_PC_DIRECTORY_SITES.includes("danawa"), true);
 assert.equal(getPcSource("joonggonara").directory_source, true,
   "approved Joonggonara collection must feed the precollected PC directory");
 assert.equal(getPcSource("hellomarket").directory_source, false,
@@ -139,7 +139,7 @@ assert.equal(OPERATIONAL_PC_DIRECTORY_SITES.includes("rethinkmall"), false);
 assert.equal(getPcSource("bunjang").directory_source, true,
   "approved Bunjang collection must feed the precollected PC directory");
 assert.deepEqual(OPERATIONAL_PC_DIRECTORY_SITES,
-  ["joonggonara", "bunjang", "ebay"]);
+  ["joonggonara", "bunjang", "danawa", "ebay"]);
 assert.equal(OPERATIONAL_PC_DIRECTORY_SITES.includes("bunjang"), true);
 assert.equal(getPcSource("ebay").access.strategy, "official_browse_api");
 assert.equal(getPcSource("ebay").access.api_only_required, true);
@@ -151,7 +151,7 @@ const bunjangTargets = collectionTargetSet.targets.filter((target) => target.sou
 const rethinkmallTargets = collectionTargetSet.targets.filter((target) => target.sourceKeys.includes("rethinkmall"));
 const hourlyMarketplaceTargets = marketplaceTargets.filter((target) => target.cadenceClass === "HOURLY_CATEGORY");
 const dailyMarketplaceTargets = marketplaceTargets.filter((target) => target.cadenceClass === "DAILY_MASTER");
-assert.equal(specialistTargets.length, 0);
+assert.equal(specialistTargets.length, marketplaceTargets.length);
 assert.equal(hourlyMarketplaceTargets.length, 19);
 assert.equal(hellomarketTargets.length, 0,
   "disabled Hellomarket must not receive collection targets");

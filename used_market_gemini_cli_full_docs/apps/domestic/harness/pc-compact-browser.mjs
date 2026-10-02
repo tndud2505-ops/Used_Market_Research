@@ -237,7 +237,7 @@ report.browser_started = true;
     if (category === 'RAM') { await quantity.fill('2'); await quantity.press('Tab'); }
   }
   await page.locator('[data-action="save-build"]').click();
-  assert.ok((await page.locator('#build-save-status').innerText()).includes('저장되었습니다'));
+  assert.equal(await page.locator('#build-save-status').isVisible(), false);
   await page.locator('[data-action="share-build"]').click();
   const generatedShareUrl = await page.locator('#share-output').inputValue();
   const shared = JSON.parse(new URLSearchParams(new URL(generatedShareUrl).hash.slice(1)).get('build'));
@@ -270,7 +270,7 @@ report.browser_started = true;
     const unit = independentPrice(statsById.get(id)[key]);
     if (unit != null) assert.equal(await page.locator(`[data-unit-price="${id}"][data-series="${key}"]`).innerText(), lineMoney(unit));
   }
-  assert.ok((await page.locator('#build-compatibility').innerText()).includes('충돌'),
+  assert.ok(await page.locator('.build-warning-trigger[data-status="conflict"]').count(),
     'mixed CPU/board and DDR examples must not be described as a compatible recommended build');
   report.full_build = { categories: 9, units: 10, expected, line_items:build.map(entry=>({ ...entry,
     site:'domestic_all',scope:statsById.get(entry.id).methodology,publication_id:statsById.get(entry.id).publication_id,
@@ -278,7 +278,7 @@ report.browser_started = true;
     active_unit:independentPrice(statsById.get(entry.id)?.active),sold_unit:independentPrice(statsById.get(entry.id)?.sold),
     active_line:independentPrice(statsById.get(entry.id)?.active)==null?null:independentPrice(statsById.get(entry.id).active)*entry.quantity,
     sold_line:independentPrice(statsById.get(entry.id)?.sold)==null?null:independentPrice(statsById.get(entry.id).sold)*entry.quantity })),
-    actual_display:await page.locator('#tools-summary').innerText(), compatibility:await page.locator('#build-compatibility').innerText() };
+    actual_display:await page.locator('#tools-summary').innerText(), compatibility:await page.locator('.build-warning-trigger').allTextContents() };
   report.checks.push('All nine production component prices reach one quote; RAM counted twice; missing prices remain partial; compatibility conflict visible');
   await page.screenshot({ path: path.join(out, 'builder-all-parts-desktop.png'), fullPage: true });
   for (const width of [1440, 1024, 768, 390, 360, 320]) {

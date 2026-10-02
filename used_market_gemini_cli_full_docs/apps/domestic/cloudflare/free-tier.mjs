@@ -255,6 +255,7 @@ export async function browsePcListingsD1(request, env) {
         items: [],
         total: 0,
         source_counts: {},
+        model_counts: {},
         pagination: { has_more: false, next_cursor: null },
         as_of: asOf,
         freshness: {
@@ -396,6 +397,7 @@ export async function browsePcListingsD1(request, env) {
   let latestObservedAt;
   let hasMoreCandidates;
   let sourceCounts = {};
+  let modelCounts = {};
   // Authoritative reconciliation and incremental imports publish one eligible row per stable item_id,
   // so normal and audit reads can share bounded raw keyset pagination without request-time deduplication.
   let anchor = null;
@@ -406,10 +408,15 @@ export async function browsePcListingsD1(request, env) {
     if (!anchor) return cursorExpired();
   }
   if (!cursorState) {
-    const sourceCountResult = await env.DB.prepare(`SELECT site, COUNT(*) AS count
-      FROM listings WHERE ${sourceCountWhereClause} GROUP BY site`).bind(...sourceCountBindings).all();
-    sourceCounts = Object.fromEntries(asArray(sourceCountResult.results)
-      .map((row) => [String(row.site || ""), Number(row.count || 0)]).filter(([site]) => site));
+    const sourceCountResult = await env.DB.prepare(`SELECT site, canonical_product_id, COUNT(*) AS count
+      FROM listings WHERE ${sourceCountWhereClause} GROUP BY site, canonical_product_id`).bind(...sourceCountBindings).all();
+    for (const row of asArray(sourceCountResult.results)) {
+      const site = String(row.site || "");
+      const id = String(row.canonical_product_id || "");
+      const count = Number(row.count || 0);
+      if (site) sourceCounts[site] = (sourceCounts[site] || 0) + count;
+      if (id && (!query.sites.length || query.sites.includes(site))) modelCounts[id] = (modelCounts[id] || 0) + count;
+    }
   }
   const pageConditions = [...conditions];
   const pageBindings = [...bindings];
@@ -483,6 +490,7 @@ export async function browsePcListingsD1(request, env) {
       items: page.map(pcListingItem),
       total,
       source_counts: sourceCounts,
+      model_counts: modelCounts,
       pagination: { has_more: Boolean(nextCursor), next_cursor: nextCursor },
       as_of: asOf,
       freshness: {
@@ -613,6 +621,12 @@ function responseForCache(response, ttlSeconds) {
   });
 }
 
+function responseForPcBrowser(response) {
+  // Keep the Worker cache while revalidating browser copies after corrections.
+  if (/\bno-store\b/i.test(response.headers.get("cache-control") || "")) return response;
+  return responseWithHeader(response, "cache-control", "no-cache, max-age=0, must-revalidate");
+}
+
 export async function fetchThroughFreeCache(request, env, originFetch) {
   const url = new URL(request.url);
   const config = freeTierConfig(env);
@@ -651,7 +665,7 @@ export async function fetchThroughPcReadCache(request, env, originFetch, validat
   const url = new URL(request.url);
   if (request.method !== "GET" || !isPcReadCacheable(url)
     || url.searchParams.has("reconciliation_audit") || !globalThis.caches?.default) {
-    return readOrigin();
+    return isPcReadCacheable(url) ? responseForPcBrowser(await readOrigin()) : readOrigin();
   }
   const normalizedUrl = new URL(url);
   const normalizedEntries = [...url.searchParams.entries()]
@@ -661,7 +675,7 @@ export async function fetchThroughPcReadCache(request, env, originFetch, validat
   normalizedUrl.search = "";
   normalizedEntries.forEach(([key, value]) => normalizedUrl.searchParams.append(key, value));
   const cacheKey = new Request(
-    `https://used-market-pc-read-cache-v3.invalid${normalizedUrl.pathname}${normalizedUrl.search}`,
+    `https://used-market-pc-read-cache-v4.invalid${normalizedUrl.pathname}${normalizedUrl.search}`,
     { method: "GET" }
   );
   let cached;
@@ -672,7 +686,7 @@ export async function fetchThroughPcReadCache(request, env, originFetch, validat
   }
   if (cached) {
     const checked = await validateResponse(request, cached);
-    if (reusable(checked)) return responseWithHeader(checked, "x-pc-read-cache", "HIT");
+    if (reusable(checked)) return responseForPcBrowser(responseWithHeader(checked, "x-pc-read-cache", "HIT"));
     // Do not turn a stale successful response into a sticky 503. Evict it and
     // make exactly one stored-data read; never collect or rebuild on this path.
     try { await globalThis.caches.default.delete?.(cacheKey); }
@@ -680,7 +694,7 @@ export async function fetchThroughPcReadCache(request, env, originFetch, validat
   }
 
   const response = await readOrigin();
-  if (!reusable(response)) return response;
+  if (!reusable(response)) return responseForPcBrowser(response);
   const ttlSeconds = readPositiveInteger(
     env.PC_READ_CACHE_TTL_SECONDS,
     PC_READ_CACHE_TTL_SECONDS,
@@ -688,10 +702,10 @@ export async function fetchThroughPcReadCache(request, env, originFetch, validat
   );
   try {
     await globalThis.caches.default.put(cacheKey, responseForCache(response.clone(), ttlSeconds));
-    return responseWithHeader(response, "x-pc-read-cache", "MISS");
+    return responseForPcBrowser(responseWithHeader(response, "x-pc-read-cache", "MISS"));
   } catch (error) {
     console.warn("PC read cache write failed", error);
-    return responseWithHeader(response, "x-pc-read-cache", "BYPASS");
+    return responseForPcBrowser(responseWithHeader(response, "x-pc-read-cache", "BYPASS"));
   }
 }
 

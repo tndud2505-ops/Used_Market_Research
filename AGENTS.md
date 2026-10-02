@@ -30,6 +30,12 @@ whether the current execution path actually uses Chat On Steroids.
 
 Read `README.md` and `used_market_gemini_cli_full_docs/SETUP.md` first.
 
+- Always apply the local skill `used-pick-sample-preserving-filters` at
+  `C:/Users/tndud/.codex/skills/used-pick-sample-preserving-filters/SKILL.md`
+  when changing listing classification or statistics filters. Prevent excessive
+  exclusion and overfitting that shrink valid samples as the first filtering
+  quality priority, while preserving data integrity and verified product identity.
+
 - `apps/domestic` is the only application. eBay is a supported search site inside this application.
 - Use the application's own `package-lock.json`, `.env.example`, tests, deployment scripts, and documentation.
 - Never commit `.env`, credentials, tokens, private keys, browser profiles, generated results, backups, HAR files, or deployment probe output.

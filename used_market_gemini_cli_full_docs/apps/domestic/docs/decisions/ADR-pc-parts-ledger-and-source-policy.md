@@ -32,13 +32,15 @@ USED-PICK은 범용 중고 검색 데이터를 `legacy_general`로 보존하고,
 
 기존 중고나라 HTML/Next, 번개장터 사이트 JSON, 헬로마켓 JSON/렌더링, 리씽크 HTML+Livewire, eBay Browse API 방식을 유지한다. API-only 전환은 하지 않는다. 다나와·퀘이사존·쿨엔조이도 각각의 사이트 adapter를 사용하며 운영자 승인 기록과 런타임 상태를 source registry에서 관리한다.
 
-AWS Runner가 고주기 수집 scheduler의 단일 소유자다. Cloudflare cron은 전환 후 watchdog·복구 경계만 담당한다. 실제 사이트 canary와 정책 확인은 자동 테스트가 아니라 운영자 명시 작업이다.
+AWS Runner가 고주기 수집 scheduler의 단일 소유자다. Cloudflare cron은 watchdog과 하루 한 번의 AWS `daily-price-refresh` 호출을 담당한다. 실제 사이트 canary와 정책 확인은 자동 테스트가 아니라 운영자 명시 작업이다.
 
 승인 source도 정상 공개 경로만 사용하며 HTTP 차단·captcha를 우회하지 않는다. 실패는 source별 backoff·격리로 처리하고 다른 source와 마지막 공개 데이터를 보존한다. 30일 품질 지표는 최초·최근 성공 시각뿐 아니라 최근 31일의 성공일과 최대 공백을 계속 보고하되, 거짓 SOLD·시장군 혼합·중복 publication 같은 무결성 오류만 fail-closed로 차단한다.
 
 ## 공개와 복구
 
 `GET /api/products/:canonicalProductId/price-stats`는 market pool과 통화를 하나씩만 허용한다. 판매완료 통계는 실제 거래가격이 아니라 마지막 표시가격이라는 고지를 포함한다. D1에는 완성된 `public_product_stats` publication만 row count·checksum 검증 후 active pointer를 원자적으로 교체한다.
+
+2026-09-24 보완: 전체 저장 행·청크의 readback 검증은 인증된 AWS 경로가 수행하고 Worker는 일치하는 판정·이전 활성 게시·행/청크 수를 확인한 뒤 트랜잭션으로 전환한다. Free CPU 한도 때문에 검증을 생략하지 않는다. 역할과 재발 대응은 [게시 운영 위키](../wiki/09-price-publication-operations.md)에 기록한다.
 
 기존 `price_history`는 legacy read-only이며 새 30일 통계에 사용하지 않는다. 30일 shadow 병행 수집이 끝나기 전에는 기존 공개 검색을 PC 전용으로 전환하지 않는다. `legacy_general` query와 projection은 일반 cache retention에서 제외해 명시적 rollback 종료 전까지 유지한다.
 

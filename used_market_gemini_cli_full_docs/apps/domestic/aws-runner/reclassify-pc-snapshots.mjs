@@ -111,6 +111,22 @@ export function reclassifyPcSnapshots(options) {
   return options.ledger.withReclassificationAliasSnapshot(() => reclassifyPcSnapshotsCore(options));
 }
 
+export function preservePcPriceAnomaly(previous, normalized) {
+  if (!previous || previous.canonical_product_id !== normalized.canonicalProductId
+    || previous.market_pool !== normalized.marketPool || previous.condition_code !== normalized.conditionCode
+    || previous.price_scope !== normalized.priceScope || Number(previous.quantity) !== Number(normalized.quantity)
+    || Boolean(previous.exact_product) !== normalized.exactProduct) return normalized;
+  const anomalies = [...new Set([
+    ...parseJson(previous.exclusion_reasons_json, []),
+    ...parseJson(previous.statistics_exclusion_reasons_json, [])
+  ])].filter(reason => ['ANOMALOUS_LOW_PRICE', 'ANOMALOUS_PRICE'].includes(reason));
+  if (!anomalies.length) return normalized;
+  // Skipping a historical median must not promote an unchanged rejected price.
+  return { ...normalized, priceEligible: false, statisticsEligible: false,
+    exclusionReasons: [...new Set([...(normalized.exclusionReasons || []), ...anomalies])],
+    statisticsExclusionReasons: [...new Set([...(normalized.statisticsExclusionReasons || []), ...anomalies])] };
+}
+
 function reclassifyPcSnapshotsCore({ ledger, pipeline, versions, versionKey = null, apply = false, batchSize = 250, limit = Infinity }) {
   validateTarget(ledger, versions);
   if (apply) {
@@ -209,7 +225,8 @@ function reclassifyPcSnapshotsCore({ ledger, pipeline, versions, versionKey = nu
         ? pipeline.normalizeItem(item, row.observed_at, versions, { reclassification: true })
         : { normalized: preserveHistoricalNormalization(row.snapshot_id) };
       const previous = latestNormalization.get(row.snapshot_id);
-      const next = result.normalized;
+      const next = preservePcPriceAnomaly(previous, result.normalized);
+      result.normalized = next;
       if (previous?.category_code === "MOTHERBOARD" || next.categoryCode === "MOTHERBOARD") {
         motherboardAudit.scanned += 1;
         const reasons = [...(next.statisticsExclusionReasons || []), ...(next.exclusionReasons || [])];
