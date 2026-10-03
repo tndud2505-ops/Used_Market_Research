@@ -17,11 +17,11 @@ const node = (tag, className = '', text = '') => {
 };
 const dateLabel = date => date.slice(5).replace('-', '.');
 
-export function marketLinePath(points, x, y) {
+export function marketLinePath(points, x, y, { connectObservations = false } = {}) {
   let path = '', previous = null;
   for (const point of points) {
-    if (!valid(point.value)) { previous = null; continue; }
-    const adjacent = previous && Date.parse(point.date) - Date.parse(previous.date) === 86400000;
+    if (!valid(point.value)) { if (!connectObservations) previous = null; continue; }
+    const adjacent = previous && (connectObservations || Date.parse(point.date) - Date.parse(previous.date) === 86400000);
     path += `${adjacent ? 'L' : 'M'}${x(point.date)},${y(point.value)} `;
     previous = point;
   }
@@ -77,11 +77,14 @@ export function buildMarketView(series, dates, count, offset, width, height, { a
 export function drawMarketChart(container, input, { label = '가격 추이', currency = 'KRW', identity = '', averagePeriod = 0, showSamples = false } = {}) {
   cleanups.get(container)?.(); container.replaceChildren();
   const series = input.map(line => ({ ...line, currency: line.currency || currency,
-    color: line.id.startsWith('bunjang:') ? (line.metricKey === 'sold' ? '#d96b9b' : '#c73546')
-      : /^(joonggonara|daangn):/.test(line.id) ? (line.metricKey === 'sold' ? '#218f9a' : '#346fca')
-      : (line.metricKey === 'sold' ? '#a677d3' : '#7446be'),
+    sourceId: line.id.split(':')[0], sourceLabel: line.label.split(' · ')[0],
+    color: line.id.startsWith('bunjang:') ? '#c73546'
+      : line.id.startsWith('danawa:') ? '#a66b12'
+      : /^(joonggonara|daangn):/.test(line.id) ? '#346fca' : '#7446be',
     points: [...line.points].sort((a,b) => a.date.localeCompare(b.date))
   })).filter(line => line.currency === currency && line.points.some(point => valid(point.value)));
+  const sourceOrder = ['joonggonara', 'bunjang', 'danawa', 'ebay'];
+  series.sort((a,b) => (sourceOrder.indexOf(a.sourceId)+1 || 99)-(sourceOrder.indexOf(b.sourceId)+1 || 99));
   for (const line of series) line.averages = averagePeriod ? movingAverage(line.points,averagePeriod) : [];
   if (!series.length) {
     const state = container.dataset.priceState;
@@ -95,25 +98,35 @@ export function drawMarketChart(container, input, { label = '가격 추이', cur
   views.set(container, view);
   view.count = clamp(view.count, 1, dates.length);
   const summary = node('div', 'market-chart-summary'); summary.setAttribute('role', 'group'); summary.setAttribute('aria-label', '가격선 표시');
+  const sourceGroups = new Map();
   for (const line of series) {
+    if (!sourceGroups.has(line.sourceId)) {
+      const group = node('div', 'market-source-legend'); group.style.setProperty('--series-color', line.color);
+      group.append(node('strong', 'market-source-name', line.sourceLabel));
+      sourceGroups.set(line.sourceId, group); summary.append(group);
+    }
     const button = node('button', 'market-series'); button.type = 'button'; button.dataset.series = line.id;
     button.dataset.metric = line.metricKey;
     button.style.setProperty('--series-color', line.color); button.setAttribute('aria-pressed', String(!view.hidden.has(line.id)));
+    button.setAttribute('aria-label', line.label);
     button.title = `${line.label} 표시 전환`;
-    const title = node('span', 'market-series-name', line.label); title.prepend(node('i'));
+    const title = node('span', 'market-series-name', line.priceBasis === 'listed-minimum' ? '중고 최저 표시가' : line.metricKey === 'sold' ? '판매완료 표시가' : '판매중'); title.prepend(node('i'));
     button.append(title);
     button.addEventListener('click', () => {
       if (view.hidden.has(line.id)) view.hidden.delete(line.id); else view.hidden.add(line.id);
       button.setAttribute('aria-pressed', String(!view.hidden.has(line.id))); paint();
     });
-    summary.append(button);
+    sourceGroups.get(line.sourceId).append(button);
   }
   if (averagePeriod) summary.append(node('span','market-average-legend',`${averagePeriod}일 평균`));
   const stage = node('div', 'market-chart-stage');
   const svg = svgNode('svg', { tabindex: 0, role: 'group', 'aria-roledescription': '가격 차트', 'aria-label': `${label}. 좌우 키: 날짜, +와 -: 확대·축소, Home: 전체 보기, Escape: 선택 해제` });
   const plot = svgNode('g'), cursor = svgNode('g', { 'pointer-events': 'none' }); svg.append(plot, cursor);
   const readout = node('div', 'market-chart-readout'); readout.hidden = true; readout.setAttribute('role', 'dialog'); readout.setAttribute('aria-label', '날짜별 가격');
-  stage.append(svg, readout); container.append(summary, stage);
+  const note = node('p', 'market-chart-note', series.some(line => line.metricKey === 'sold')
+    ? '판매완료 점선은 기록이 있는 날짜를 연결합니다. 표시가는 실제 체결가와 다를 수 있습니다.' : '가격 기록이 없는 날짜는 빈 구간으로 표시합니다.');
+  const hint = node('span', '', '날짜를 선택하면 가격과 표본을 볼 수 있습니다.'); note.append(hint);
+  stage.append(svg, readout); container.append(summary, stage, note);
   let geometry, width, height, drag = null, activeIndex = dates.length - 1, frame;
   const visible = () => series.filter(line => !view.hidden.has(line.id));
   const clearCursor = () => { cursor.replaceChildren(); readout.hidden = true; };
@@ -125,19 +138,29 @@ export function drawMarketChart(container, input, { label = '가격 추이', cur
     const close = node('button', 'market-tooltip-close', '×'); close.type = 'button'; close.setAttribute('aria-label', '가격 도움말 닫기');
     close.addEventListener('click', () => { view.pinned = null; clearCursor(); svg.focus({ preventScroll: true }); });
     heading.append(time, close);
-    const values = node('div', 'market-tooltip-values'); readout.replaceChildren(heading, values);
+    const values = node('table', 'market-tooltip-values'); values.setAttribute('aria-label', `${date} 사이트별 가격`);
+    const head = node('thead'), headings = node('tr');
+    for (const text of ['사이트', '판매중', '판매완료 표시가']) { const cell = node('th', '', text); cell.scope = 'col'; headings.append(cell); }
+    head.append(headings); const body = node('tbody'); values.append(head, body); readout.replaceChildren(heading, values);
     const { x, y, pad, plotHeight } = geometry;
     cursor.append(svgNode('line', { x1:x(date), x2:x(date), y1:pad.top, y2:showSamples ? geometry.sampleBottom : pad.top+plotHeight, class:'market-crosshair' }));
-    for (const line of visible()) {
-      const value = line.points.find(point => point.date === date)?.value;
-      const row = node('div', 'market-tooltip-value'); row.dataset.series = line.id;
-      const caption = node('span', '', line.label); caption.style.color = line.color;
-      row.append(caption, node('strong', '', valid(value) ? money(value, currency) : '자료 없음')); values.append(row);
-      const average = line.averages.find(point=>point.date===date);
-      if (averagePeriod) row.append(node('small','',`${averagePeriod}일 평균 ${valid(average?.value) ? money(average.value,currency) : '자료 부족'}`));
-      const sampleCount = line.points.find(point=>point.date===date)?.sampleCount;
-      if (showSamples) row.append(node('small','',`표본 ${Number.isInteger(sampleCount) ? sampleCount.toLocaleString('ko-KR')+'건' : '자료 없음'}`));
-      if (valid(value)) cursor.append(svgNode('circle', {cx:x(date), cy:y(value), r:3.5, fill:line.color}));
+    for (const sourceId of sourceGroups.keys()) {
+      const sourceLines = visible().filter(line => line.sourceId === sourceId);
+      if (!sourceLines.length) continue;
+      const row = node('tr'), caption = node('th', '', sourceLines[0].sourceLabel); caption.scope = 'row'; caption.style.color = sourceLines[0].color; row.append(caption);
+      for (const metric of ['active', 'sold']) {
+        const line = series.find(line => line.sourceId === sourceId && line.metricKey === metric);
+        const cell = node('td', 'market-tooltip-value'); row.append(cell);
+        if (!line || view.hidden.has(line.id)) { cell.append(node('span', '', line ? '숨김' : '자료 없음')); continue; }
+        cell.dataset.series = line.id;
+        const point = line.points.find(point => point.date === date), value = point?.value;
+        cell.append(node(valid(value) ? 'strong' : 'span', '', valid(value) ? money(value, currency) : '자료 없음'));
+        if (line.priceBasis === 'listed-minimum' && valid(value)) cell.append(node('small', '', '중고 최저 표시가'));
+        if (Number.isInteger(point?.sampleCount)) cell.append(node('small', '', `표본 ${point.sampleCount.toLocaleString('ko-KR')}건`));
+        if (averagePeriod) { const average = line.averages.find(point=>point.date===date); cell.append(node('small','',`${averagePeriod}일 평균 ${valid(average?.value) ? money(average.value,currency) : '자료 부족'}`)); }
+        if (valid(value)) cursor.append(svgNode('circle', {cx:x(date), cy:y(value), r:4.5, fill:metric === 'sold' ? 'white' : line.color, stroke:line.color, 'stroke-width':2}));
+      }
+      body.append(row);
     }
     readout.hidden = false;
     const selectedValues = visible().map(line => line.points.find(point => point.date === date)?.value).filter(valid);
@@ -162,10 +185,9 @@ export function drawMarketChart(container, input, { label = '가격 추이', cur
       plot.append(svgNode('text', {x:edge+10, y:tick.y+4, class:'market-axis', 'data-price-y':tick.y}, currency === 'USD' ? `$${tick.value.toFixed(2)}` : Math.round(tick.value).toLocaleString('ko-KR')));
     }
     for (const date of dateTicks) {
-      plot.append(svgNode('line', {x1:x(date), x2:x(date), y1:pad.top, y2:showSamples ? geometry.sampleBottom : pad.top+plotHeight, class:'market-grid'}));
+      plot.append(svgNode('line', {x1:x(date), x2:x(date), y1:height-30, y2:height-24, class:'market-grid'}));
       plot.append(svgNode('text', {x:x(date), y:height-10, 'text-anchor':'middle', class:'market-axis'}, dateLabel(date)));
     }
-    const priceLabels = [];
     if (showSamples) {
       const {sampleTop,sampleBottom,sampleY,maxSamples,step} = geometry;
       plot.append(svgNode('text',{x:pad.left,y:sampleTop-8,class:'market-axis'},'표본 수 (건)'));
@@ -184,33 +206,17 @@ export function drawMarketChart(container, input, { label = '가격 추이', cur
     }
     for (const line of visible()) {
       const group = svgNode('g', {'data-series':line.id}), points = line.points.filter(point => shownSet.has(point.date));
-      const path = marketLinePath(points, x, y);
+      const sold = line.metricKey === 'sold';
+      const singleObservation = points.filter(point => valid(point.value)).length === 1;
+      const path = marketLinePath(points, x, y, { connectObservations: sold });
+      group.append(svgNode('path', {d:path, fill:'none', stroke:line.color, 'stroke-width':sold ? 2 : 2.3, 'stroke-linejoin':'round', ...(sold ? {'stroke-dasharray':'6 5'} : {})}));
       for (const point of points) {
         if (!valid(point.value)) continue;
-        group.append(svgNode('circle', {cx:x(point.date), cy:y(point.value), r:points.length < 80 ? 2.5 : 1.5, fill:line.color, 'data-date':point.date}));
+        group.append(svgNode('circle', {cx:x(point.date), cy:y(point.value), r:singleObservation ? 4 : sold ? (points.length < 80 ? 3.5 : 2.5) : (points.length < 80 ? 2 : 1.5), fill:sold ? 'white' : line.color, stroke:line.color, 'stroke-width':sold ? 1.8 : 0, 'data-date':point.date}));
       }
-      group.append(svgNode('path', {d:path, fill:'none', stroke:line.color, 'stroke-width':1.6, 'stroke-linejoin':'round', ...(line.metricKey === 'sold' ? {'stroke-dasharray':'5 3'} : {})})); plot.append(group);
+      plot.append(group);
       const averages=line.averages.filter(point=>shownSet.has(point.date));
       if (averages.some(point=>valid(point.value))) plot.append(svgNode('path',{d:marketLinePath(averages,x,y),fill:'none',stroke:line.color,'stroke-width':2.6,opacity:.5,'stroke-dasharray':'9 4','pointer-events':'none',class:'market-average-line','data-average-series':line.id}));
-      const last = points.filter(point => valid(point.value)).at(-1);
-      if (last && last.date === geometry.shownDates.at(-1)) priceLabels.push({value:last.value, py:y(last.value), color:line.color});
-    }
-    // Price badges refer only to the last visible date, never carry sparse sold prices forward.
-    priceLabels.sort((a,b) => a.py-b.py);
-    priceLabels.forEach((item,i) => {
-      let py = Math.max(pad.top+11, item.py);
-      if (i) py = Math.max(py, priceLabels[i-1].placed+24);
-      item.placed = py;
-    });
-    const overflow = Math.max(0, (priceLabels.at(-1)?.placed || 0) - (pad.top+plotHeight-11));
-    for (const item of priceLabels) {
-      const py = item.placed-overflow;
-      plot.append(svgNode('line', {x1:pad.left,x2:edge,y1:item.py,y2:item.py,stroke:item.color,'stroke-dasharray':'2 3',opacity:.4}));
-      plot.append(svgNode('rect', {x:edge+3,y:py-10,width:pad.right-6,height:20,fill:item.color}));
-      plot.append(svgNode('text', {x:edge+pad.right/2,y:py+4,'text-anchor':'middle',class:'market-price-label'}, currency==='USD'?`$${item.value.toFixed(2)}`:Math.round(item.value).toLocaleString('ko-KR')));
-    }
-    for (const tick of plot.querySelectorAll('[data-price-y]')) {
-      if (priceLabels.some(item => Math.abs(item.placed-overflow-Number(tick.dataset.priceY))<18)) tick.setAttribute('visibility','hidden');
     }
     if (view.pinned) show(view.pinned);
   }
@@ -237,7 +243,12 @@ export function drawMarketChart(container, input, { label = '가격 추이', cur
       const next = dx*dx + dy*dy;
       if (next <= distance) { nearest = point; distance = next; }
     }
-    return nearest;
+    if (nearest) return nearest;
+    // Select the calendar date anywhere in the plot; the readout uses actual values only.
+    const px = (event.clientX-bounds.left)/scaleX, py = (event.clientY-bounds.top)/scaleY;
+    if (px < geometry.pad.left || px > geometry.pad.left+geometry.plotWidth || py < geometry.pad.top || py > (showSamples ? geometry.sampleBottom : geometry.pad.top+geometry.plotHeight)) return null;
+    const index = clamp(Math.floor((px-geometry.pad.left)/geometry.step), 0, geometry.shownDates.length-1);
+    return {date:geometry.shownDates[index], value:null};
   };
   svg.addEventListener('wheel', event => {
     if (!geometry) return; event.preventDefault();
@@ -254,7 +265,11 @@ export function drawMarketChart(container, input, { label = '가격 추이', cur
       if (Math.abs(drag.x-event.clientX)>4) drag.moved=true;
       if (drag.moved) { view.offset=clamp(drag.offset+Math.round((drag.x-event.clientX)/(geometry.plotWidth/view.count)),0,dates.length-view.count);view.pinned=null;paint();return; }
     }
+    if (!drag && !view.pinned && event.pointerType === 'mouse') {
+      const point = pointAtPointer(event); if (point) { view.anchorValue=point.value; show(point.date); } else clearCursor();
+    }
   });
+  stage.addEventListener('pointerleave',()=>{if(!view.pinned)clearCursor();});
   svg.addEventListener('pointerup', event => {
     if (!drag || drag.id!==event.pointerId) return;
     if (!drag.moved) { const point=pointAtPointer(event);view.pinned=point?.date || null;view.anchorValue=point?.value;if(view.pinned)show(view.pinned);else clearCursor(); }

@@ -143,7 +143,7 @@ try {
   assert.match(overallLegend, /중고나라|번개장터/);
   assert.doesNotMatch(overallLegend, /헬로마켓/i);
   assert.doesNotMatch(overallLegend, /eBay|USD/);
-  const legendColors = await page.locator('#price-chart .market-series').evaluateAll(items => items.map(item => ({
+  const legendColors = await page.locator('#price-chart .market-series[data-metric="active"]').evaluateAll(items => items.map(item => ({
     label: item.textContent,
     color: item.style.getPropertyValue('--series-color'),
   })));
@@ -184,11 +184,11 @@ try {
   assert.equal(await chart.evaluate(node => getComputedStyle(node).cursor), 'default');
   const point = chart.locator('circle[data-date]').last();
   await point.hover();
-  assert.equal(await page.locator('.market-chart-readout').isVisible(), false, 'hover does not show a price card');
+  assert.equal(await page.locator('.market-chart-readout').isVisible(), true, 'hover previews the actual date before pinning');
   const selectedDate = await point.getAttribute('data-date');
   await point.click();
   assert.equal(await page.locator('.market-chart-readout time').getAttribute('datetime'), selectedDate);
-  assert.equal(await page.locator('.market-tooltip-value').count(), await page.locator('.market-series[aria-pressed="true"]').count());
+  assert.equal(await page.locator('.market-tooltip-value[data-series]').count(), await page.locator('.market-series[aria-pressed="true"]').count());
   await toggle.click();
   assert.equal(await page.locator(`.market-tooltip-value[data-series="${seriesId}"]`).count(), 0, 'disabled series is removed from the open tooltip');
   await toggle.click();

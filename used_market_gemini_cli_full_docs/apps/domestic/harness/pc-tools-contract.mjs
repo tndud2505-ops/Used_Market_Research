@@ -118,6 +118,11 @@ const gapPoints = [{ date: '2026-10-01', value: 100 }, { date: '2026-10-02', val
 const gapPath = points => marketLinePath(points, date => Number(date.slice(-2)), value => value);
 assert.equal(gapPath(gapPoints), 'M1,100 M3,110 L4,120', 'SVG paths break across missing days');
 assert.equal(gapPath(gapPoints.filter(point => point.value != null)), 'M1,100 M3,110 L4,120', 'omitted days also break the path');
+const soldPath = points => marketLinePath(points, date => Number(date.slice(-2)), value => value, { connectObservations: true });
+assert.equal(soldPath(gapPoints), 'M1,100 L3,110 L4,120', 'sold lines connect only actual observations across missing days');
+assert.equal(gapPoints[1].value, null, 'drawing connections must not interpolate missing daily prices');
+assert.equal(soldPath(gapPoints.filter(point => point.value != null)), 'M1,100 L3,110 L4,120');
+assert.equal(soldPath([{ date: '2026-10-01', value: null }, { date: '2026-10-02', value: 120 }]), 'M2,120');
 assert.match(danawaSeries[0].label, /중고 최저 표시가/);
 assert.equal(metricValue(listed), null, 'displaying a listing must not relax the representative-price threshold');
 assert.deepEqual(buildAnalysisSeries(listedFixture, { source: 'bunjang', allowedSourceIds: ['bunjang'], days: 2 }), []);

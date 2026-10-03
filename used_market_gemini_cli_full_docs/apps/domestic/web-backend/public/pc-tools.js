@@ -1,6 +1,6 @@
 import { SERIES, idOf, nameOf, naturalCompare, money, metricValue, soldMeanValue, metricPresentation, listedPriceRange, statsUnavailable, priceRecordIssue, analysisSelectionUrl, groupProducts, scopedStats, sourceStats, priceDateRange, modelPageItems, buildTotals, compactBuild, compatibility, validateBuild, dailySeries, percentChange, buildAnalysisSeries } from './pc-tools-core.mjs?v=danawa-display-v2';
 import { readJson, createPriceStore } from './pc-tools-data.mjs?v=danawa-display-v2';
-import { drawMarketChart as drawChart } from './pc-market-chart.mjs?v=danawa-display-v2';
+import { drawMarketChart as drawChart } from './pc-market-chart.mjs?v=sold-chart-v3';
 import { createDatePicker } from './pc-tools-calendar.mjs?v=coverage-v4';
 import { createAdfitSlot } from './adfit.js?v=adfit-rail-v1';
 import { createContextualAffiliate } from './affiliate.js?v=compact-ad-v2';
