@@ -55,6 +55,34 @@ Worker의 기존 범위 축소·유표본 범위 급감 보호도 유지한다. 
 
 ## 장애 시 읽기 전용 확인 순서
 
+### 소규모 오류 복구
+
+오류 수정 때문에 전체 과거 통계를 다시 계산하지 않는다. `npm run pc:repair-stats`는
+명시한 모델·시장군·상태·통화 범위만 미리 계산하고 원장 변경을 되돌린다.
+대표가격(평균·중앙값 등, 사이트·제조사·일별 값 포함)의 차이가 3,000원 미만이면
+다음 정기 갱신으로 넘긴다. 모델 혼입, 통화·수량 단위 오류, 손상된 근거 또는
+대표가격의 표시 가능 여부가 바뀌면 해당 범위만 교정한다. 정상 표본은 보존한다.
+
+운영 입력은 `RUNNER_INDEX_PATH`, 기존 인증 환경과 함께 `PC_STATS_REPAIR_BASE_ID`,
+`PC_STATS_REPAIR_SCOPES_JSON`(정확한 `canonical_product_id`, `market_pool`, `condition_code`,
+`currency`, `days: 30` 목록), `PC_STATS_REPAIR_REASON`을 지정한다. 기본 사유는 `PRICE_CHANGE`이며
+확인된 무결성 교정에는 `PRODUCT_IDENTITY`, `CURRENCY_OR_UNIT`, `CORRUPT_DATA`를 사용한다.
+`PC_STATS_REPAIR_THRESHOLD_KRW`로 금액 기준을 바꿀 수 있다. `--apply`에는 복구 파일의
+새 경로 `PC_STATS_REPAIR_OUTPUT`이 필요하다. 빈 대상이나 다른 버전·기준일의 혼합은 거절한다.
+
+기준 게시본을 D1에서 전부 읽어 체크섬을 검증하지만 **재계산은 지정한 범위만** 한다.
+나머지 행은 바이트 내용과 실제 기준일을 유지한다. 전송과 활성화는 기존 전체 게시본
+검증을 그대로 거치므로 전체 전송이 전체 재계산을 뜻하지 않는다. 새로운 날짜의 통계로
+위장하지 않으며, 오래된 기준 게시본의 교정만으로 현재 날짜의 준비 상태가 복구된다고
+판단하지 않는다. 계산 결과와 기준 게시본은 게시 전에 복구 파일로 보존한다.
+
+전역적인 데이터 손상이나 범위를 한정할 수 없는 계산 기준 변경만 전체 복구 대상으로
+검토한다. 명시한 범위가 없거나 부분 교정이 실패했다고 전체 계산으로 자동 전환하지 않는다.
+정기 일일 갱신은 이 오류 복구 정책과 별개다. 관련 하네스는
+`harness/pc-scoped-stats-repair-contract.mjs`이며 `test:pc-release`에 포함된다.
+
+### 운영 상태 확인
+
 1. `https://runner.used-pick.com/health`와 내부 `http://127.0.0.1:8787/health`를 확인한다. `search_index.process_instance.id`가 같고 Runner/Tunnel 모두 `active`·`enabled`여야 한다. 디스크·메모리·`publication_active`도 확인한다.
 2. 수집은 ACTIVE target set의 enabled 대상만 `source_keys_json`으로 펼치고 runtime을 `(source_id,target_id)`로 LEFT JOIN한다. PC 수집 소스는 bunjang/joonggonara/danawa/ebay다. 미성공·실패·지연을 11개 부품군별로 구분하고 시간별 3시간, 일별 48시간을 초기 경고 기준으로 사용한다. 진행 중 작업도 함께 판단한다.
 3. 최근 24시간 `crawl_runs`의 성공/실패/진행 중과 `request_failure_count`, `http_blocked_count`, `collected_count`를 확인한다. 과거 target set이나 비활성 소스 이력을 현재 장애로 세지 않는다.

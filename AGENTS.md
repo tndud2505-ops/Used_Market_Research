@@ -40,5 +40,14 @@ Read `README.md` and `used_market_gemini_cli_full_docs/SETUP.md` first.
 - Use the application's own `package-lock.json`, `.env.example`, tests, deployment scripts, and documentation.
 - Never commit `.env`, credentials, tokens, private keys, browser profiles, generated results, backups, HAR files, or deployment probe output.
 - Run the deterministic tests before committing. Run `scripts/verify.ps1` or `scripts/verify.sh` when a change affects repository packaging.
+- For defect recovery, do not launch a full historical recalculation or use
+  `daily-price-refresh` as a routine repair. Use `pc:repair-stats` with explicit
+  affected product/pool/condition/currency scopes. Defer representative-price
+  changes below KRW 3,000 to the scheduled refresh. Product identity, currency,
+  unit, corrupt evidence, or representative availability errors require only
+  the affected scopes to be repaired. Preserve untouched prices and their
+  actual as-of dates. A full repair is exceptional: require demonstrated
+  systemic corruption or a calculation-basis migration that cannot be scoped.
+  This recovery rule does not cancel the normal scheduled daily refresh.
 - Treat live marketplace tests and production deployments as explicit operator actions; deterministic tests must not require production credentials.
 - Always apply `external-ai-orchestrator` when selecting or running external AI accounts, direct CLI/roster agents, or agent-driven browser verification. The approved workspace copy is `external-ai-orchestrator/SKILL.md`; keep provider, quota, CLI, browser, and failure-handling details there rather than duplicating them here.

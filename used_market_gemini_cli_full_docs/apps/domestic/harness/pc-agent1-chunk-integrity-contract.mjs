@@ -9,6 +9,7 @@ import worker from '../cloudflare/worker.mjs';
 import { readActiveStatsScopes, publishStatsInChunks } from '../aws-runner/pc-stats-publication-client.mjs';
 import { fullPublicationScopes } from '../aws-runner/pc-publication-scopes.mjs';
 import { verifyStoredStatsOnAws } from '../aws-runner/pc-stats-readback.mjs';
+import { readVerifiedRepairBase } from '../aws-runner/pc-stats-repair-base.mjs';
 
 // Actual SQLite tables and constraints, but only an isolated in-memory DB.
 class LocalD1 {
@@ -277,6 +278,22 @@ await check('AWS readback refills bounded lanes while an earlier page is delayed
     assert.equal(started, Math.ceil(rows.length / 4));
     assert.equal(result.row_checksum_verified, true, 'out-of-order replies still verify the complete ordered publication');
   } finally { clearTimeout(fallback); releaseFirst(); globalThis.fetch = originalFetch; }
+});
+await check('repair reads a complete verified active cohort without relaxing activation', async db => {
+  const manifest = await stage(db, 'repair-base');
+  await activateStagedProductStats(db, manifest);
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async (url, options) => worker.fetch(new Request(url, options), { DB: db, MANUAL_RUN_TOKEN: 'fixture-secret' });
+    const base = await readVerifiedRepairBase({importUrl:'https://publication.test/admin/import-product-stats',
+      token:'fixture-secret',publicationId:'repair-base',normalizationVersion:18});
+    assert.equal(base.rows.length,rows.length);
+    assert.equal(base.proof.row_checksum_verified,true);
+    assert.equal(await statsChecksum(base.rows),checksum);
+    await assert.rejects(()=>verifyStoredStatsOnAws({importUrl:'https://publication.test/admin/import-product-stats',
+      token:'fixture-secret',publication:{...manifest,expectedActive:1}}),/PAGE_INVALID/,
+      'request payload cannot allow an active publication through the activation verifier');
+  } finally { globalThis.fetch=originalFetch; }
 });
 await check('public readback and caller-supplied verification bypasses are rejected', async db => {
   const env = { DB: db, MANUAL_RUN_TOKEN: 'fixture-secret' };

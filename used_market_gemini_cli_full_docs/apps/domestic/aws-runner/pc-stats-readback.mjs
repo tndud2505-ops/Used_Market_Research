@@ -3,7 +3,8 @@ import { verifyProductStatsReadback } from '../cloudflare/public-product-stats.m
 
 // Called only by the authenticated runner route. Fetch targets come from the
 // protected server configuration, never from the activation request.
-export async function verifyStoredStatsOnAws({ importUrl, token, publication }) {
+export async function verifyStoredStatsOnAws({ importUrl, token, publication, expectedActive = 0, includeRows = false }) {
+  if (![0, 1].includes(expectedActive)) throw new Error('INVALID_READBACK_ACTIVE_STATE');
   const started = performance.now();
   const cpuStarted = process.cpuUsage();
   if (!Number.isSafeInteger(publication.expected_row_count) || publication.expected_row_count < 1
@@ -27,7 +28,7 @@ export async function verifyStoredStatsOnAws({ importUrl, token, publication }) 
     if (kind === 'rows') url.searchParams.set('row_ids', identities.slice(offset, offset + limit).map(row => row.storage_rowid).join(','));
     const result = (await getStatsJson(url, token, 15_000)).page;
     const stored = result?.publication;
-    if (!stored || stored.active !== 0 || result.kind !== kind || result.offset !== offset || result.limit !== limit
+    if (!stored || stored.active !== expectedActive || result.kind !== kind || result.offset !== offset || result.limit !== limit
       || !Array.isArray(result.items) || result.items.length !== Math.min(limit, count - offset))
       throw new Error('PUBLICATION_READBACK_PAGE_INVALID');
     for (const key of ['publication_id', 'checksum', 'expected_row_count', 'expected_non_empty_scope_count',
@@ -75,5 +76,5 @@ export async function verifyStoredStatsOnAws({ importUrl, token, publication }) 
   const proof = await verifyProductStatsReadback(publication, rows, chunks);
   const cpu = process.cpuUsage(cpuStarted);
   return { ...proof, pages, d1_usage: d1Usage, elapsed_ms: Math.round(performance.now() - started),
-    process_cpu_ms: Math.round((cpu.user + cpu.system) / 1000) };
+    process_cpu_ms: Math.round((cpu.user + cpu.system) / 1000), ...(includeRows ? { rows } : {}) };
 }
