@@ -310,7 +310,7 @@ export function pcCollectionTargetSetV2() {
     }
   }
   return {
-    targetSetVersion: `pc-targets:${PC_PRODUCT_MASTER_V2_VERSION}:full-master-v15`,
+    targetSetVersion: `pc-targets:${PC_PRODUCT_MASTER_V2_VERSION}:full-master-v16`,
     directoryVersion: PC_PRODUCT_MASTER_V2_VERSION,
     targets: [...categoryTargets, ...generalTargets, ...exactTargets,
       ...collectionProducts.filter(product => product.category === 'RAM' && product.manufacturer === 'G.Skill')

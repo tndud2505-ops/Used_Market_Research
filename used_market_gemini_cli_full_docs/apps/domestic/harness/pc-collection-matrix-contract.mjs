@@ -30,7 +30,7 @@ assert.ok(targets.length > PC_PART_CATEGORY_CODES.length, "the active target set
 assert.equal(new Set(targets.map((target) => target.categoryCode)).size, categorySet.size,
   "every PC part category must have an active collection target");
 assert.doesNotMatch(JSON.stringify(targetSet), /quasarzone/iu, "retired Quasarzone must not be an active collection target");
-assert.equal(targetSet.targetSetVersion, "pc-targets:5:full-master-v15");
+assert.equal(targetSet.targetSetVersion, "pc-targets:5:full-master-v16");
 assert.ok(targetSet.targets.every((target) => /^pc-target:5:(?:category|market|master)-v15:/u.test(target.targetId)),
   "a new target set owns new IDs and cannot reuse an old set's immutable ownership");
 const koreanGskill = targets.filter(target => target.targetId.endsWith(':domestic:ko'));
