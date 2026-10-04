@@ -274,6 +274,8 @@ journalctl -u used-market-tunnel.service -n 100 --no-pager
 
 ## 6. 운영 점검표
 
+저장 공간 정책은 [장기 통계·백업 운영 지침](../docs/wiki/10-storage-operations.md)을 따른다. 설치 시 `used-market-backup-storage.timer`도 활성화하며, 매일 06:30 KST에 검증된 백업·완료 staging만 정리한다. 복구 자료의 7일 보관을 최종 가격 이력에 적용하지 않는다. 실제 완료는 타이머 등록이 아니라 서비스 성공과 `action=complete` 영수증으로 판정한다.
+
 - [ ] Cloudflare Public Hostname이 `http://127.0.0.1:8787`을 가리킨다.
 - [ ] Worker의 `CLOUDFLARE_RUNNER_URL`이 Tunnel URL의 `/api/runner/run`까지 포함한다.
 - [ ] Worker `RUNNER_TOKEN`과 AWS `CLOUDFLARE_RUNNER_TOKEN`이 동일하다.

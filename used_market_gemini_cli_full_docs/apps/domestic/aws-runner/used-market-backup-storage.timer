@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily USED WEB backup storage maintenance
+
+[Timer]
+OnCalendar=*-*-* 06:30:00 Asia/Seoul
+Persistent=true
+Unit=used-market-backup-storage.service
+
+[Install]
+WantedBy=timers.target

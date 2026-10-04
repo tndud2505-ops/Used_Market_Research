@@ -4,6 +4,8 @@
 
 기본 suite는 `pc-domain`, `pc-source-policy`, `pc-publication`, `pc-service` 네 축이다. `npm run index:harness`와 `npm run cloudflare:harness`는 설치·릴리스 호환 alias이며 같은 필수 계약을 재사용한다.
 
+저장 공간 계약은 `npm run test:storage`로 기본 suite에 연결되어 있다. Linux에서는 실제 임시 SQLite 파일로 압축·복구 검증·만료·pin·완료 staging 보호를 검사한다. Windows 검증에 더해 운영 Linux의 `harness/backup-storage-contract.py` 실행 결과를 확인한다. `pc-stored-price-publication`은 2년 이상 뒤에도 일별·출처별·기간 최종값이 유지되고 손상된 압축 통계를 반환하지 않는지 검증한다.
+
 ## 기본 검증
 
 ```powershell

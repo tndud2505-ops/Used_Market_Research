@@ -1,4 +1,4 @@
-import { createContextualAffiliate } from "./affiliate.js?v=compact-ad-v2";
+import { createContextualAffiliate } from "./affiliate.js?v=ad-connection-help-v1";
 import { createAdfitSlot } from "./adfit.js?v=adfit-rail-v1";
 import { createListingPricePreview } from "./listing-price-preview.mjs?v=daily-history-v1";
 

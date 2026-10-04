@@ -1,0 +1,17 @@
+[Unit]
+Description=USED WEB verified backup compression and daily retention
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/usr/bin/python3 /opt/used-market-runner/aws-runner/maintain-backup-storage.py --daily --apply
+Nice=15
+IOSchedulingClass=idle
+MemoryMax=128M
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/used-market-runner/backups /var/lib/used-market-runner/staging
+ProtectHome=true
+PrivateTmp=true
+TimeoutStartSec=2h

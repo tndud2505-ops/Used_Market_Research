@@ -44,7 +44,7 @@ assert.match(runnerSource, /observationRetentionDays: 30/u,
   'post-publication compaction must retain the entire active 30-day member window');
 assert.doesNotMatch(runnerSource, /observationRetentionDays: 1[,\s]/u,
   'one-day pruning would break the just-published complete member trace');
-assert.match(runnerSource, /async function runPcSourceSchedulerTick\(\) \{[\s\S]{0,160}pcSchedulerActive \|\| pcPublicationActive\) return/u,
+assert.match(runnerSource, /async function runPcSourceSchedulerTick\(\) \{[\s\S]{0,160}pcSchedulerActive \|\| pcPublicationActive(?: \|\| pcStatsVerificationActive)?\) return/u,
   'a scheduled collection must not start while full statistics are being published');
 assert.match(runnerSource, /pcSchedulerLastSucceededAt = persistedSchedulerSuccesses\.at\(-1\) \|\| null/u,
   "runner restarts must recover truthful scheduler readiness from persisted source successes");

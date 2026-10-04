@@ -1,8 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, renameSync, statSync, unlinkSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { comparePcListingRows, dedupePcListingRows } from "../cloudflare/pc-listings-contract.mjs";
+import { assertBackupSpace } from './backup-storage-policy.mjs';
 
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
@@ -1926,26 +1927,24 @@ export class SearchIndex {
     mkdirSync(this.backupDir, { recursive: true });
     const destination = path.join(this.backupDir, `search-index-${iso(this.now()).slice(0, 10)}.sqlite`);
     if (!existsSync(destination)) {
-      const escaped = destination.replaceAll("'", "''");
-      this.db.exec(`VACUUM INTO '${escaped}'`);
+      assertBackupSpace(this.filePath, this.backupDir);
+      const temporary = `${destination}.${randomUUID()}.partial`;
+      try {
+        this.db.exec(`VACUUM INTO '${temporary.replaceAll("'", "''")}'`);
+        renameSync(temporary, destination);
+      } finally {
+        if (existsSync(temporary)) unlinkSync(temporary);
+      }
     }
     this.pruneBackups();
     return destination;
   }
 
   pruneBackups(maxBackups = 3) {
-    if (!this.backupDir || !existsSync(this.backupDir)) return [];
-    const keep = Math.max(1, Number(maxBackups) || 3);
-    const backups = readdirSync(this.backupDir)
-      .filter((name) => /^search-index(?:-|$).*\.sqlite$/u.test(name))
-      .map((name) => ({ name, path: path.join(this.backupDir, name), modified: statSync(path.join(this.backupDir, name)).mtimeMs }))
-      .sort((left, right) => right.modified - left.modified || right.name.localeCompare(left.name));
-    const removed = [];
-    for (const backup of backups.slice(keep)) {
-      unlinkSync(backup.path);
-      removed.push(backup.path);
-    }
-    return removed;
+    // Expiry belongs to maintain-backup-storage.py: it verifies survivor CRCs,
+    // age and active file references. Never delete migration/recovery snapshots
+    // just because three newer backups appeared.
+    return [];
   }
 
   recentMigrationBackupExists(fromVersion, maxAgeMs = DAY_MS) {
@@ -1963,9 +1962,15 @@ export class SearchIndex {
     mkdirSync(this.backupDir, { recursive: true });
     const timestamp = iso(this.now()).replace(/[:.]/gu, "-");
     const destination = path.join(this.backupDir, `search-index-pre-migration-v${Number(fromVersion) || 0}-${timestamp}.sqlite`);
-    const escaped = destination.replaceAll("'", "''");
+    assertBackupSpace(this.filePath, this.backupDir);
+    const temporary = `${destination}.${randomUUID()}.partial`;
     this.db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
-    this.db.exec(`VACUUM INTO '${escaped}'`);
+    try {
+      this.db.exec(`VACUUM INTO '${temporary.replaceAll("'", "''")}'`);
+      renameSync(temporary, destination);
+    } finally {
+      if (existsSync(temporary)) unlinkSync(temporary);
+    }
     this.pruneBackups();
     return destination;
   }

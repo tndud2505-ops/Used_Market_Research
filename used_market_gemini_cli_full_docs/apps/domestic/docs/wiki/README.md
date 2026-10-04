@@ -11,6 +11,7 @@
 | [하네스 운영](./05-harness-loop.md) | fixture/live 검증과 개선 루프 |
 | [캐시와 검색 UX](./08-cache-search-ux.md) | 사이트·정렬·가격·페이지 전환의 캐시와 수집 경계 |
 | [가격 통계 게시·장애 대응](./09-price-publication-operations.md) | AWS 검증·Worker 역할, 주기, 읽기 점검과 복구 |
+| [저장 공간·장기 통계 운영](./10-storage-operations.md) | 최종 통계 장기 보존, 30일 상세, 7일 백업·완료 staging, 자동 정리와 복구 검증 |
 | [2026-09-24 장애·변경 기록](../worklog/2026-09-24-aws-publication-verification.md) | Free CPU 장애 원인, 결정, 배포·게시 증거와 남은 문제 |
 
 ## 현재 운영 (2026-10-01)

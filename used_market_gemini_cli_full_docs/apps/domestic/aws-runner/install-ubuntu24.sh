@@ -86,7 +86,7 @@ done
 export DEBIAN_FRONTEND=noninteractive
 log '기본 패키지 설치'
 apt-get update
-apt-get install -y ca-certificates curl gnupg jq software-properties-common
+apt-get install -y ca-certificates curl gnupg jq software-properties-common python3
 
 node_major=0
 if command -v node >/dev/null 2>&1; then
@@ -322,6 +322,8 @@ node --check "$APP_ROOT/aws-runner/runner.mjs"
 node --check "$APP_ROOT/aws-runner/publish-pc-stats-runner.mjs"
 node --check "$APP_ROOT/aws-runner/pc-stats-publication-client.mjs"
 node --check "$APP_ROOT/aws-runner/search-index.mjs"
+node --check "$APP_ROOT/aws-runner/backup-storage-policy.mjs"
+node "$APP_ROOT/aws-runner/backup-storage-policy.mjs"
 node --check "$APP_ROOT/aws-runner/migration-smoke.mjs"
 migration_smoke_dir="$(mktemp -d)"
 node "$APP_ROOT/aws-runner/migration-smoke.mjs" "$migration_smoke_dir/search-index.sqlite"
@@ -356,6 +358,7 @@ node --check "$APP_ROOT/cloudflare/target-sites.mjs"
 
 systemctl daemon-reload
 systemctl enable used-market-runner.service
+bash "$APP_ROOT/aws-runner/install-backup-storage.sh" "$APP_ROOT"
 
 if [[ -s "$TUNNEL_TOKEN_FILE" ]]; then
   configured_public_url="${RUNNER_PUBLIC_URL:-$(awk -F= '$1 == "RUNNER_PUBLIC_URL" { sub(/^[^=]*=/, ""); print; exit }' "$RUNNER_ENV_FILE")}"

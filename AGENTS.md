@@ -50,4 +50,13 @@ Read `README.md` and `used_market_gemini_cli_full_docs/SETUP.md` first.
   systemic corruption or a calculation-basis migration that cannot be scoped.
   This recovery rule does not cancel the normal scheduled daily refresh.
 - Treat live marketplace tests and production deployments as explicit operator actions; deterministic tests must not require production credentials.
+- Follow `used_market_gemini_cli_full_docs/apps/domestic/docs/wiki/10-storage-operations.md`
+  for storage maintenance. Final daily/source/period price results are durable
+  history; do not shorten them to the raw-data or backup window. Keep required
+  observation detail for 30 days and use verified lossless archival for older
+  publication responses. Backup and successfully completed staging retention is
+  at most 7 days, with explicit unresolved-recovery `.keep` pins and a last-known-
+  good recovery exception. Use the storage tool and harness; do not create repeated
+  full-DB copies inside code backups or staging. Run capacity preflight before
+  a large recovery copy. Respect the backup maintenance lock during restores.
 - Always apply `external-ai-orchestrator` when selecting or running external AI accounts, direct CLI/roster agents, or agent-driven browser verification. The approved workspace copy is `external-ai-orchestrator/SKILL.md`; keep provider, quota, CLI, browser, and failure-handling details there rather than duplicating them here.

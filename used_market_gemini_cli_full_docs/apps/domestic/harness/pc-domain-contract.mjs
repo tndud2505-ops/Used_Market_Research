@@ -1840,7 +1840,8 @@ const compacted = ledger.compactStorage({
   observationRetentionDays: 1,
   pruneObservationDetails: true
 });
-assert.equal(compacted.stats_retention_days, 730);
+assert.equal(compacted.stats_retention_days, null, 'final daily aggregates do not expire with raw evidence');
+assert.equal(compacted.publication_uncompressed_days, 30);
 assert.equal(compacted.observation_snapshots_removed > 0, true,
   "completed-day observation detail must be removed after aggregate statistics are retained");
 assert.equal(Number(db.prepare("SELECT COUNT(*) AS count FROM listing_snapshots").get().count) < snapshotCountBeforeCompaction, true);

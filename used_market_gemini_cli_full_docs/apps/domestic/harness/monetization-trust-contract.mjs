@@ -338,7 +338,7 @@ try {
   assert.equal(root.hidden, false);
   const flatten = (node) => [node, ...node.children.flatMap(flatten)];
   const disclosureDetails = flatten(root).find((child) => child.tag === "details");
-  assert.equal(disclosureDetails.children[0].textContent, "광고", "the compact row must still identify advertising and expose its disclosure");
+  assert.match(disclosureDetails.children[0].textContent, /^광고/u, "the compact row must still identify advertising and expose its disclosure");
   assert.match(disclosureDetails.children[1].textContent, new RegExp(`^${COUPANG_COMMISSION_DISCLOSURE}`), "full disclosure must remain available next to the ad link");
   const adLink = flatten(root).find((child) => child.tag === "a");
   assert.equal(adLink.rel, "sponsored noopener noreferrer");

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { gzipSync, gunzipSync } from 'node:zlib';
 
 const METRICS = ['active', 'reserved', 'sold', 'confirmed_transactions'];
 const keyOf = row => JSON.stringify([row.canonical_product_id, row.market_pool, row.condition_code, row.currency, row.days]);
@@ -133,13 +134,48 @@ export function readCompletedPricePublication(db, options) {
     options.canonicalProductId, options.marketPool, options.condition, options.currency, options.days,
     options.normalizationVersion, options.parserVersion, options.ruleVersion, options.filterVersion, through,
     new Date(options.asOf).toISOString());
-  return row ? JSON.parse(row.stats_json) : null;
+  return row ? decodeStoredPublicationStats(row.stats_json) : null;
 }
 
-export function pruneCompletedPricePublications(db, throughDate) {
-  // Keep every scope from a publication together. Remove only complete
-  // publications outside the same retention window as the daily aggregates.
-  return db.prepare('DELETE FROM pc_stored_price_publications WHERE substr(as_of, 1, 10) < ?').run(throughDate);
+export function decodeStoredPublicationStats(value) {
+  const stored = JSON.parse(value);
+  if (stored?.__used_pick_storage !== 'gzip-json-v1') return stored;
+  const raw = gunzipSync(Buffer.from(stored.data, 'base64'), { maxOutputLength: 32 * 1024 * 1024 });
+  if (createHash('sha256').update(raw).digest('hex') !== stored.raw_sha256) {
+    throw new Error('STORED_PUBLICATION_ARCHIVE_CHECKSUM_MISMATCH');
+  }
+  return JSON.parse(raw.toString('utf8'));
+}
+
+export function compactCompletedPricePublications(db, throughDate) {
+  // Preserve every previously published final value, including period medians
+  // and manufacturer summaries that cannot be reconstructed from daily means.
+  // Old repeated daily arrays compress cheaply; no history is recalculated.
+  const runtimeExists = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='pc_publication_runtime'").get();
+  const runtimeGuard = runtimeExists
+    ? 'AND publication_id NOT IN (SELECT publication_id FROM pc_publication_runtime)' : '';
+  const candidates = db.prepare(`SELECT r.rowid, r.stats_json FROM pc_stored_price_publication_rows r
+    WHERE r.publication_id IN (SELECT publication_id FROM pc_stored_price_publications
+      WHERE substr(as_of, 1, 10) < ?
+        AND publication_id NOT IN (SELECT publication_id FROM pc_stored_price_publications
+          ORDER BY published_at DESC, publication_id DESC LIMIT 1)
+        ${runtimeGuard})
+      AND json_extract(r.stats_json, '$.__used_pick_storage') IS NULL`);
+  const update = db.prepare('UPDATE pc_stored_price_publication_rows SET stats_json = ? WHERE rowid = ?');
+  let changes = 0, sourceBytes = 0, storedBytes = 0;
+  for (const row of candidates.iterate(throughDate)) {
+    const raw = Buffer.from(row.stats_json, 'utf8');
+    if (raw.length > 32 * 1024 * 1024) continue; // Preserve unusually large valid rows in their readable form.
+    const compressed = gzipSync(raw, { level: 1 });
+    if (!gunzipSync(compressed).equals(raw)) throw new Error('STORED_PUBLICATION_ARCHIVE_ROUNDTRIP_MISMATCH');
+    const archive = JSON.stringify({ __used_pick_storage: 'gzip-json-v1',
+      raw_sha256: createHash('sha256').update(raw).digest('hex'), data: compressed.toString('base64') });
+    update.run(archive, row.rowid);
+    changes += 1;
+    sourceBytes += raw.length;
+    storedBytes += Buffer.byteLength(archive);
+  }
+  return { changes, source_bytes: sourceBytes, stored_bytes: storedBytes };
 }
 
 export { keyOf as storedPricePublicationKey };

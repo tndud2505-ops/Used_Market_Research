@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { PcPartsLedger } from '../aws-runner/pc-parts-ledger.mjs';
 import { PcShadowPipeline } from '../aws-runner/pc-shadow-pipeline.mjs';
-import { storeCompletedPricePublication, storedPricePublicationKey, readCompletedPricePublication } from '../aws-runner/pc-stored-price-publication.mjs';
+import { storeCompletedPricePublication, storedPricePublicationKey, readCompletedPricePublication, compactCompletedPricePublications } from '../aws-runner/pc-stored-price-publication.mjs';
 import { coherentStats, metricValue, buildTotals } from '../web-backend/public/pc-tools-core.mjs';
 import { priceStatsResponse, parsePriceStatsRequest, priceHistoryResponse } from '../aws-runner/pc-price-stats-http.mjs';
 import { pcStatsTraceability } from '../aws-runner/pc-stats-traceability.mjs';
@@ -90,5 +90,28 @@ try {
   assert.equal(ledger.getStoredDailyPriceStats(options).active.mean, 100_000, 'compaction preserves the exact summary');
   assert.equal(ledger.getStoredDailyPriceStats(options).sold.arithmetic_mean,19000,'compaction preserves the true sold mean');
   assert.deepEqual(pcStatsTraceability(ledger, options), memberTrace, 'post-publication compaction preserves the complete member count AND checksum');
+  // Years of final chart values survive expiration of overlapping full copies
+  // and detailed evidence. Compare actual public daily/source metrics.
+  const historical = ledger.getStoredDailyPriceStats({ ...options, dailyOnly: true });
+  storeCompletedPricePublication(db, { ...publication, publicationId: 'newer-copy', publishedAt: '2026-09-17T12:00:00Z' });
+  const yearsLater = ledger.compactStorage({ asOf: '2029-10-04T12:00:00Z',
+    observationRetentionDays: 30, pruneObservationDetails: true });
+  assert.equal(yearsLater.expired_stats_removed, 0);
+  assert.equal(yearsLater.publication_archive.changes, 1, 'old repeated copies compact, newest publication remains plain');
+  assert.equal(db.prepare('SELECT count(*) AS n FROM pc_stored_price_publications').get().n, 2, 'all historical final period results remain');
+  assert.equal(readCompletedPricePublication(db, options).publication_id, 'newer-copy');
+  const afterYears = ledger.getStoredDailyPriceStats({ ...options, dailyOnly: true });
+  assert.deepEqual(afterYears.daily, historical.daily, 'final daily chart metrics survive more than two years');
+  assert.deepEqual(afterYears.by_source, historical.by_source, 'source-level final metrics survive evidence cleanup');
+  assert.equal(compactCompletedPricePublications(db, '2030-01-01').changes, 0, 'compaction is idempotent and leaves the newest publication usable');
+  db.prepare("DELETE FROM pc_stored_price_publications WHERE publication_id = 'newer-copy'").run();
+  const restoredHistorical = readCompletedPricePublication(db, options);
+  assert.deepEqual(restoredHistorical.active, persisted.active);
+  assert.deepEqual(restoredHistorical.by_source, persisted.by_source, 'archived source medians and exact daily values roundtrip without recalculation');
+  const archivedRow = db.prepare('SELECT rowid, stats_json FROM pc_stored_price_publication_rows').get();
+  const corruptedArchive = JSON.parse(archivedRow.stats_json);
+  corruptedArchive.raw_sha256 = '0'.repeat(64);
+  db.prepare('UPDATE pc_stored_price_publication_rows SET stats_json=? WHERE rowid=?').run(JSON.stringify(corruptedArchive), archivedRow.rowid);
+  assert.throws(() => readCompletedPricePublication(db, options), /ARCHIVE_CHECKSUM_MISMATCH/, 'corrupt archive is never served as a price');
   console.log(JSON.stringify({ status: 'passed', contract: 'pc-stored-price-publication', gskill_samples: 6, bunjang_median: 70_000, mean: 100_000 }));
 } finally { db.close(); }

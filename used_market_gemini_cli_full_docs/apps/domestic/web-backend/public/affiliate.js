@@ -145,12 +145,23 @@ export function createContextualAffiliate(root, { now = Date.now } = {}) {
     const details = document.createElement("details");
     details.className = "affiliate-details";
     const summary = document.createElement("summary");
-    summary.textContent = "광고";
-    summary.setAttribute("aria-label", "쿠팡 파트너스 광고·수수료 상세 안내");
+    summary.textContent = "광고 · 도움말";
+    summary.setAttribute("aria-label", "쿠팡 파트너스 광고·수수료 및 연결 도움말");
     const disclosure = document.createElement("p");
     disclosure.className = "affiliate-disclosure";
     disclosure.textContent = `${offer.disclosure.commission} ${offer.context_type === "category" && context.canonical_product_id
       ? "선택 모델과 다른 상품이 포함될 수 있습니다. " : ""}${offer.disclosure.independence}`;
+    const recovery = document.createElement("span");
+    recovery.textContent = "쿠팡에서 ‘사용권한이 없습니다’가 나오면 쿠팡 홈에서 상품을 검색한 뒤 이 광고를 다시 열어 보세요. 계속 안 열리면 잠시 후 다시 시도해 주세요. ";
+    const homeLink = document.createElement("a");
+    homeLink.href = "https://www.coupang.com/";
+    homeLink.target = "_blank";
+    homeLink.rel = "noopener noreferrer";
+    homeLink.referrerPolicy = "no-referrer";
+    homeLink.textContent = "쿠팡 홈 열기";
+    homeLink.setAttribute("aria-label", "연결 문제 해결을 위한 쿠팡 홈 열기 · 새 창");
+    recovery.append(homeLink);
+    disclosure.append(document.createElement("br"), document.createElement("br"), recovery);
     details.append(summary, disclosure);
     details.addEventListener("keydown", (event) => {
       if (event.key === "Escape") { details.open = false; summary.focus(); }

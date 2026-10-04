@@ -3,7 +3,7 @@ import { readJson, createPriceStore } from './pc-tools-data.mjs?v=danawa-display
 import { drawMarketChart as drawChart } from './pc-market-chart.mjs?v=sold-chart-v3';
 import { createDatePicker } from './pc-tools-calendar.mjs?v=coverage-v4';
 import { createAdfitSlot } from './adfit.js?v=adfit-rail-v1';
-import { createContextualAffiliate } from './affiliate.js?v=compact-ad-v2';
+import { createContextualAffiliate } from './affiliate.js?v=ad-connection-help-v1';
 import { toolBrand, toolFilterSchema, toolFacetValues, toolFacetLabel, filterToolProducts, visibleSelection, toolScopeNote } from './pc-tools-catalog.mjs?v=parts-ux-v4';
 
 const builder = document.body.dataset.page === 'builder';

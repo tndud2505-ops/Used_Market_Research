@@ -21,6 +21,7 @@
     "test:pc": "node harness/pc-domain-contract.mjs && node harness/pc-public-catalog-contract.mjs && node harness/pc-directory-contract.mjs && node harness/pc-browse-flow-contract.mjs && node harness/ssd-browse-flow-contract.mjs && node harness/psu-browse-flow-contract.mjs && node harness/pc-collection-matrix-contract.mjs && node harness/pc-source-coverage-contract.mjs && node harness/pc-source-policy-contract.mjs && node harness/bunjang-lifecycle-contract.mjs && node harness/pc-publication-contract.mjs && node harness/pc-service-contract.mjs && node harness/aws-runner-deploy-contract.mjs && node harness/pc-ui-contract.mjs",
     "test:pc:live-specialist": "node harness/pc-specialist-live.mjs",
     "test:danawa": "node harness/danawa-domestic-contract.mjs",
+    "test:storage": "node harness/backup-storage-policy-contract.mjs",
     "pc:probe-source": "node aws-runner/probe-pc-source-coverage.mjs",
     "pc:collect-local": "node --env-file-if-exists=.env aws-runner/collect-pc-local.mjs",
     "pc:contract": "npm run test:pc",
@@ -42,7 +43,7 @@
     "test:pc-release": "node harness/pc-agent1-publication-http-contract.mjs && node harness/pc-agent1-chunk-integrity-contract.mjs && node harness/pc-scoped-stats-repair-contract.mjs",
     "test:pc-final": "node harness/pc-agent2-ui-contract.mjs && node harness/pc-agent2-resume-contract.mjs && node harness/pc-agent3-independent-price-contract.mjs && node harness/pc-agent3-publication-bootstrap-contract.mjs && node harness/pc-agent3-stats-readiness-contract.mjs && node harness/pc-final-price-readiness-contract.mjs && node harness/pc-price-recovery-contract.mjs",
     "test:ui-a": "node harness/pc-ui-concept-a-contract.mjs && node harness/pc-search-modal-contract.mjs",
-    "test": "npm run build && npm run test:danawa && npm run test:pc && npm run test:pc-tools && npm run test:pc-release && npm run test:pc-final && npm run test:ui-a"
+    "test": "npm run build && npm run test:storage && npm run test:danawa && npm run test:pc && npm run test:pc-tools && npm run test:pc-release && npm run test:pc-final && npm run test:ui-a"
   },
   "dependencies": {
     "commander": "^14.0.0",

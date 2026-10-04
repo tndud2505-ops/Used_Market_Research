@@ -5,7 +5,7 @@ import { DatabaseSync } from "node:sqlite";
 import { canonicalSourceListingIdentity } from "./pc-source-listing-identity.mjs";
 import { reviewedPcListingExclusion } from "../market/logic/pc-reviewed-listing-exclusions.mjs";
 import { underlyingMarketPools } from '../market/logic/pc-market-pools.mjs';
-import { migrateStoredPricePublications, readCompletedPricePublication, pruneCompletedPricePublications } from './pc-stored-price-publication.mjs';
+import { migrateStoredPricePublications, readCompletedPricePublication, compactCompletedPricePublications } from './pc-stored-price-publication.mjs';
 
 const HOUR_MS = 60 * 60 * 1000;
 const HOURLY_COLLECTION_GUARD_MS = 55 * 60 * 1000;
@@ -3198,9 +3198,12 @@ export class PcPartsLedger {
   compactStorage(options = {}) {
     const asOf = options.asOf instanceof Date ? options.asOf : new Date(options.asOf || this.now());
     if (!Number.isFinite(asOf.getTime())) throw new TypeError("invalid compaction asOf");
-    const statsRetentionDays = Math.min(730, Math.max(30, Number(options.statsRetentionDays) || 730));
+    // Final daily/source aggregates are the durable historical record. Their
+    // lifetime is independent of raw evidence and repeated 30-day publications.
+    const statsRetentionDays = null;
+    const publicationRetentionDays = 30;
     const crawlRunRetentionDays = Math.min(365, Math.max(7, Number(options.crawlRunRetentionDays) || 35));
-    const statsCutoff = dayKey(new Date(asOf.getTime() - (statsRetentionDays - 1) * DAY_MS));
+    const publicationCutoff = dayKey(new Date(asOf.getTime() - (publicationRetentionDays - 1) * DAY_MS));
     const crawlCutoff = new Date(asOf.getTime() - crawlRunRetentionDays * DAY_MS).toISOString();
     const activeVersion = this.getActivePipelineVersion();
     const rollbackVersion = activeVersion?.previous_version_key
@@ -3235,11 +3238,8 @@ export class PcPartsLedger {
           from_date = CASE WHEN excluded.from_date < from_date THEN excluded.from_date ELSE from_date END,
           through_date = CASE WHEN excluded.through_date > through_date THEN excluded.through_date ELSE through_date END,
           as_of = CASE WHEN excluded.as_of > as_of THEN excluded.as_of ELSE as_of END`);
-      const expiredStats = this.db.prepare("DELETE FROM daily_price_stats WHERE stat_date < ?").run(statsCutoff);
-      pruneCompletedPricePublications(this.db, statsCutoff);
-      this.db.prepare("DELETE FROM daily_price_stat_windows WHERE through_date < ?").run(statsCutoff);
-      this.db.prepare(`UPDATE daily_price_stat_windows
-        SET from_date = CASE WHEN from_date < ? THEN ? ELSE from_date END`).run(statsCutoff, statsCutoff);
+      const expiredStats = { changes: 0 };
+      const compactedPublications = compactCompletedPricePublications(this.db, publicationCutoff);
       const emptyStats = this.db.prepare("DELETE FROM daily_price_stats WHERE sample_count = 0").run();
       const emptySourceStats = this.db.prepare("DELETE FROM daily_source_price_stats WHERE sample_count = 0").run();
       const expiredCrawlRuns = this.db.prepare("DELETE FROM crawl_runs WHERE started_at < ?").run(crawlCutoff);
@@ -3309,6 +3309,8 @@ export class PcPartsLedger {
       }
       return {
         stats_retention_days: statsRetentionDays,
+        publication_uncompressed_days: publicationRetentionDays,
+        publication_archive: compactedPublications,
         crawl_run_retention_days: crawlRunRetentionDays,
         retained_normalization_versions: retainedNormalizationVersions,
         expired_stats_removed: Number(expiredStats.changes || 0),
