@@ -364,6 +364,9 @@ export class PcShadowPipeline {
         ? this.ledger.getCanonicalProduct(alias.canonical_product_id, alias.master_version)
         : facetProduct ? this.ledger.getCanonicalProduct(facetProduct.id, PC_PRODUCT_MASTER_V2_VERSION) : null;
     if (!cpuProductMatchesClassification(classified, product)) product = null;
+    // Laptop/workstation GPU names must not regain a desktop identity through
+    // alias lookup after public classification has rejected that identity.
+    if (classified.category_code === 'GPU' && marketSegment !== 'CONSUMER_DESKTOP') product = null;
     const matched = Boolean(product);
     const exclusionReasons = [...classified.exclusion_reasons];
     if (reviewedExclusion) exclusionReasons.push(`REVIEWED_${reviewedExclusion.reason}`);

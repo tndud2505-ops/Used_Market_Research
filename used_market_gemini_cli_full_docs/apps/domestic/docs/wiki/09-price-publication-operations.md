@@ -43,7 +43,7 @@ AWS 수집 tick은 30초, 소스별 jitter는 0~120초다. `HOURLY_CATEGORY` 최
 2. 게시 자식 프로세스가 전체 통계를 계산한다. 현재 활성 D1 범위는 `GET /admin/product-stats-scopes?offset=0&after_rowid=0`부터 100개씩 커서로 읽고 페이지별 게시 ID·체크섬을 맞춘다. 선택적인 `PC_STATS_PUBLICATION_OUTPUT`은 첫 전송 전에 새 계산 결과를 덮어쓰기 없이 저장하는 운영 복구 파일이다.
 3. `POST /admin/stage-product-stats`로 4행씩 staging한다. 손실된 성공 응답 등 일부 일시적 오류만 동일 게시 ID·청크 번호·체크섬으로 한 번 재시도한다. 인증·검증 거절은 재시도하지 않는다.
 4. Worker의 `/admin/activate-product-stats`가 설정된 AWS `/api/runner/verify-stats-publication`을 인증 호출한다. 클라이언트가 준 검증 완료 주장이나 임의 검증 URL을 신뢰하지 않는다.
-5. AWS가 인증된 `/admin/product-stats-readback`으로 행 ID 100개씩 커서 조회하고, 실제 행 4개씩·청크 명세 40개씩 다시 읽는다. 실제 행과 청크 요청은 최대 4개 병렬로 처리하며 전체 행·청크 체크섬, 버전·추적성·표본 수를 검증한다. 읽기 영수증은 D1의 실제 `rows_read`·`rows_written`을 포함한다.
+5. AWS가 인증된 `/admin/product-stats-readback`으로 행 ID 100개씩 커서 조회하고, 실제 행 4개씩·청크 명세 40개씩 다시 읽는다. 실제 행과 청크 요청은 최대 8개 병렬로 처리하며, 끝난 요청 자리에는 다음 페이지를 즉시 배정한다. 느린 페이지 하나가 다른 요청 전체를 대기시키지 않으며 전체 행·청크 체크섬, 버전·추적성·표본 수를 검증한다. 읽기 영수증은 D1의 실제 `rows_read`·`rows_written`을 포함한다.
 6. Worker는 `aws-readback-v1`의 게시 ID·체크섬·개수 응답을 대조한다. D1 트랜잭션 안에서 이전 활성 게시와 새 게시 행/청크 수를 다시 확인한 후 활성 포인터를 전환한다. 충돌하면 트랜잭션 전체를 취소한다.
 7. AWS는 검증된 같은 게시본을 `pc_stored_price_publications`에 저장하고 `pc_publication_runtime`에 성공을 기록한다. 이후 백업·기존 보존 정책에 따른 압축까지 끝나야 작업 완료 응답이 나온다.
 

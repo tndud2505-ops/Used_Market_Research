@@ -65,7 +65,15 @@ test('no eager requests; opening loads just the chosen model and shows loading h
   t.preview.open(product);assert.equal(t.stores[0].loads.length,1,'double open cannot duplicate requests');
 });
 test('source-specific daily values, currency and compact chart are retained',()=>{
-  const t=setup();t.preview.open(product,'joonggonara');t.stores[0].respond({state:'ready',data:priceData()});t.flush();
+  const t=setup();
+  assert.equal(t.stores[0].options.dailyOnly,true);
+  assert.equal(t.stores[1].options.dailyOnly,true);
+  const data=priceData();
+  // Daily history remains usable while a distinct-period publication is late.
+  delete data.active;delete data.sold;
+  for(const row of data.by_source){delete row.active;delete row.sold;}
+  data.view='daily';data.coverage={status:'PARTIAL',to:'2026-09-19'};
+  t.preview.open(product,'joonggonara');t.stores[0].respond({state:'ready',data});t.flush();
   assert.equal(t.nodes.get('chart').dataset.priceState,'ready');assert.equal(t.nodes.get('status').hidden,true);
   assert.match(t.nodes.get('scope').textContent,/중고나라 · KRW · 2026-08-21 ~ 2026-09-19/);
   const draw=t.draws.at(-1);assert.equal(draw.options.compact,true);

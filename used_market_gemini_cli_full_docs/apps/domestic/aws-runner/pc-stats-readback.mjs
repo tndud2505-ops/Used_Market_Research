@@ -40,16 +40,21 @@ export async function verifyStoredStatsOnAws({ importUrl, token, publication }) 
     return result.items;
   }
   async function readAll(kind, count, limit) {
-    const values = [];
+    const values = new Array(Math.ceil(count / limit));
     // Each Worker request reads only a few rows; bounded concurrency keeps the
     // callback below the origin response timeout without a CPU-heavy Worker.
-    for (let offset = 0; offset < count; offset += limit * 4) {
-      const requests = [];
-      for (let at = offset; at < Math.min(count, offset + limit * 4); at += limit)
-        requests.push(page(kind, at, count, limit));
-      values.push(...(await Promise.all(requests)).flat());
-    }
-    return values;
+    // Refill each lane as it finishes: one slow/retried page must not idle all
+    // the other lanes at a batch barrier. Preserve page order for verification.
+    let next = 0;
+    let failed = false;
+    await Promise.all(Array.from({ length: Math.min(8, values.length) }, async () => {
+      while (!failed && next < values.length) {
+        const index = next++;
+        try { values[index] = await page(kind, index * limit, count, limit); }
+        catch (error) { failed = true; throw error; }
+      }
+    }));
+    return values.flat();
   }
   // Inventory only integer row IDs first, then use indexed point reads. Using
   // OFFSET on every large stats page would spend the free D1 read quota on scans.

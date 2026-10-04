@@ -11,6 +11,7 @@ import { resolveMotherboardDirectoryNode, resolveExactMotherboardProduct } from 
 // Keep the GPU pattern narrow: integrated Vega 8/11 is not a discrete card.
 const LEGACY_DISCRETE_GPU_PATTERN = /\b(?:RADEON\s*VII|(?:RX\s*)?VEGA\s*(?:56|64))\b/iu;
 const CORE_ULTRA_PATTERN = /(?:\b(?:INTEL\s*)?(?:CORE\s*)?ULTRA|(?:인텔\s*)?(?:코어\s*)?울트라)\s*([579])\s*[- ]?\s*(2\d{2}[A-Z]{0,3})(?![A-Z0-9])/iu;
+const PORTABLE_GPU_SYSTEM_PATTERN = /(?:ASUS|아수스|에이수스)\s*TUF\s*(?:DASH\s*)?[AF]\d{2}\b|(?:DELL|델)\s*XPS\s*(?:13|15|16|17)\b/iu;
 
 const CONDITION_EXCLUSIONS = Object.freeze({
   BROKEN: 'BROKEN',
@@ -240,7 +241,9 @@ function detectSpecialKind(text, evidence, title = text) {
     && /(?:분리|탈거|적출|장착\s*테스트|테스트\s*후|컴퓨터\s*부품|데스크탑\s*부품)/iu.test(title);
   const clearDesktopSystem = !cpuComponentWording && !componentRemovalWording
     && /(?:^|[^A-Z])PC\s*(?:팝니다|판매(?:합니다)?|팔아요|급처)|(?:데스크탑|데스크톱)\s*(?:본체\s*)?(?:팝니다|판매(?:합니다)?|팔아요|급처)|(?:중고|게임용|사무용|업무용|브랜드)\s*컴퓨터|(?:게임용|사무용|업무용)\s*(?:PC|데스크탑)|미니\s*컴퓨터|HP\s*(?:PRODESK|프로\s*데스크|ELITEDESK|엘리트\s*데스크|PAVILION|파빌리온|일체형)|컴퓨터.{0,30}(?:RYZEN|라이젠|\d{4,5}X(?:3D)?|울트라\s*[3579]?[- ]?\d{3}[A-Z]*|I[3579][ -]?\d{4,5}[A-Z]*)|(?:RYZEN|라이젠|\d{4,5}X(?:3D)?|울트라\s*[3579]?[- ]?\d{3}[A-Z]*|I[3579][ -]?\d{4,5}[A-Z]*).{0,30}(?:데스크탑(?:\s*PC)?|컴퓨터\s*(?:팝니다|판매|급처)?)/iu.test(title);
-  const fullSystem = explicitSystem || describedSystem || describedPortableSystem || namedPortableSystem
+  const namedGpuPortable = hasGpuModel && PORTABLE_GPU_SYSTEM_PATTERN.test(title)
+    && !/(?:탈거|분리|적출|부품|쿨러|팬|키보드|배터리|어댑터|호환|장착\s*테스트|에서\s*사용)/iu.test(title);
+  const fullSystem = explicitSystem || describedSystem || describedPortableSystem || namedPortableSystem || namedGpuPortable
     || workstationSystem || describedCompactSystem || componentRichSystem || clearDesktopSystem;
   if (fullSystem) {
     addEvidence(evidence, 'listing_kind', fullSystem.matchedText || [...componentGroups].join('+'), 'FULL_SYSTEM');
@@ -336,9 +339,13 @@ function detectCategory(text, specialKind, evidence) {
   return 'UNKNOWN';
 }
 
-function gpuModel(text) {
+function gpuModel(text, title = '') {
   if (/\b(?:RTX\s*)?5090\s*D(?:\s*V2)?\b/i.test(text)) return null;
   if (/(?:RTX\s*4090.{0,12}48\s*G(?:B)?|48\s*G(?:B)?.{0,12}RTX\s*4090)/iu.test(text)) return null;
+  // A model in the sale title takes precedence over performance comparisons
+  // in the description. Still use the body for short, model-less titles.
+  const titleModel = title ? gpuModel(title) : null;
+  if (titleModel) return titleModel;
   const rtx = text.match(/\b(?:GEFORCE\s*)?RTX\s*(\d{4})(?:\s*(TI))?(?:\s*(SUPER))?\b/i);
   if (rtx) {
     const suffix = [rtx[2], rtx[3]].filter(Boolean).map((value) => value.toUpperCase()).join(' ');
@@ -504,8 +511,8 @@ function ratedPsuWatts(text) {
   return namedModel ? Number(namedModel[1] || namedModel[2] || namedModel[3]) : null;
 }
 
-function detectModel(text, category, specialKind, evidence, quantityResult = {}, manufacturer = null) {
-  const gpu = gpuModel(text);
+function detectModel(text, category, specialKind, evidence, quantityResult = {}, manufacturer = null, title = '') {
+  const gpu = gpuModel(text, title);
   let result = null;
   if (category === 'GPU') result = gpu;
   if (category === 'CPU') {
@@ -839,7 +846,7 @@ export function classifyPcPartListing(input) {
   const sellerType = detectSellerType(text, evidence, input);
   const quantityResult = detectQuantity(text, categoryCode, evidence);
   const productManufacturer = detectProductManufacturer(text, categoryCode, evidence);
-  const canonicalModel = detectModel(text, categoryCode, specialKind, evidence, quantityResult, productManufacturer);
+  const canonicalModel = detectModel(text, categoryCode, specialKind, evidence, quantityResult, productManufacturer, title);
   const gpuBoardManufacturer = categoryCode === 'GPU' ? detectGpuBoardManufacturer(text, evidence) : null;
   const priceScope = detectPriceScope(text, specialKind, quantityResult, evidence);
   const listingKind = specialKind ?? (quantityResult.quantity >= 2 ? 'SAME_PRODUCT_LOT' : 'SINGLE_COMPONENT');
@@ -944,9 +951,11 @@ function publicCategoryCode(category, text, listingKind) {
   return 'UNSUPPORTED_CATEGORY';
 }
 
-function publicMarketSegment(text, category) {
+function publicMarketSegment(text, category, title = '') {
   if (/(?:서버|SERVER|ENTERPRISE|기업용|데이터\s*센터|DATACENTER|\bSAS\b|\bU\.2\b|XEON|EPYC|THREADRIPPER|RDIMM|LRDIMM)/iu.test(text)) return 'SERVER_ENTERPRISE';
   if (/(?:노트북|NOTEBOOK|LAPTOP|SO-DIMM|SODIMM)/iu.test(text)) return 'LAPTOP';
+  if (PORTABLE_GPU_SYSTEM_PATTERN.test(title)
+    && !/(?:에서|으로)\s*(?:사용|테스트)|장착\s*테스트|\bEGPU\b|외장\s*그래픽/iu.test(title)) return 'LAPTOP';
   if (/(?:워크스테이션|WORKSTATION)/iu.test(text)) return 'WORKSTATION';
   return category === 'UNSUPPORTED_CATEGORY' ? 'UNKNOWN' : 'CONSUMER_DESKTOP';
 }
@@ -954,7 +963,7 @@ function publicMarketSegment(text, category) {
 // The builder has two additional comparison categories; this does not expand
 // public listing routes or change their seven-category contract.
 export function pcPartMarketSegment(input, category) {
-  return publicMarketSegment(normalizedText(input), category);
+  return publicMarketSegment(normalizedText(input), category, normalizedTitle(input));
 }
 
 function publicListingType(listingKind) {
@@ -1137,7 +1146,7 @@ export function classifyPcPartListingPublic(input, options = {}) {
   const text = normalizedText(input);
   const listingType = publicListingType(base.listing_kind);
   const category = publicCategoryCode(base.category_code, text, base.listing_kind);
-  const marketSegment = publicMarketSegment(text, category);
+  const marketSegment = publicMarketSegment(text, category, normalizedTitle(input));
   const conditionGroup = publicConditionGroup(base.condition);
   const model = base.canonical_model;
   const motherboardResolution = category === 'MOTHERBOARD' && ['SINGLE', 'MULTI_SAME'].includes(listingType)

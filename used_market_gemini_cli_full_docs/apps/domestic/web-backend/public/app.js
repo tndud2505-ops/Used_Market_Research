@@ -1,6 +1,6 @@
 import { createContextualAffiliate } from "./affiliate.js?v=compact-ad-v2";
 import { createAdfitSlot } from "./adfit.js?v=adfit-rail-v1";
-import { createListingPricePreview } from "./listing-price-preview.mjs?v=domestic-danawa-v1";
+import { createListingPricePreview } from "./listing-price-preview.mjs?v=daily-history-v1";
 
 const PRODUCT_QUERY_KEYS = new Set([
   "manufacturer", "model", "gpu_model", "board_brand", "usage", "configuration", "socket", "chipset", "form_interface", "capacity", "purpose", "rated_wattage",

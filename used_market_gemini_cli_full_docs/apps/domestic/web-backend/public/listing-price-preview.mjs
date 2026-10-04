@@ -13,8 +13,8 @@ export function createListingPricePreview(dialog, opener) {
     if (!dialog.open || frame) return;
     frame = requestAnimationFrame(() => { frame = 0; render(); });
   };
-  const domestic = createPriceStore(schedule);
-  const overseas = createPriceStore(schedule, { marketPool: 'OVERSEAS_USED', currency: 'USD' });
+  const domestic = createPriceStore(schedule, { dailyOnly: true });
+  const overseas = createPriceStore(schedule, { marketPool: 'OVERSEAS_USED', currency: 'USD', dailyOnly: true });
   const store = () => selection?.source === 'ebay' ? overseas : domestic;
   const clearChart = () => {
     // drawChart releases its document-level pointer listener on replacement.

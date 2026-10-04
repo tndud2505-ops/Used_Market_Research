@@ -250,6 +250,34 @@ await check('client-to-Worker publication survives a lost chunk acknowledgement 
     assert.ok(seen.some(item => item.path === '/admin/product-stats-readback'));
   } finally { globalThis.fetch = originalFetch; }
 });
+await check('AWS readback refills bounded lanes while an earlier page is delayed', async db => {
+  const manifest = await stage(db, 'delayed-page');
+  const originalFetch = globalThis.fetch;
+  let releaseFirst;
+  const firstPage = new Promise(resolve => { releaseFirst = resolve; });
+  let inFlight = 0, peak = 0, started = 0, refilled = false, releasedByFallback = false;
+  const fallback = setTimeout(() => { releasedByFallback = true; releaseFirst(); }, 1000);
+  try {
+    globalThis.fetch = async (url, options) => {
+      const requestUrl = new URL(url);
+      if (requestUrl.searchParams.get('kind') !== 'rows')
+        return worker.fetch(new Request(url, options), { DB: db, MANUAL_RUN_TOKEN: 'fixture-secret' });
+      inFlight++; peak = Math.max(peak, inFlight); started++;
+      if (started === 9) { refilled = true; releaseFirst(); }
+      try {
+        if (requestUrl.searchParams.get('offset') === '0') await firstPage;
+        return await worker.fetch(new Request(url, options), { DB: db, MANUAL_RUN_TOKEN: 'fixture-secret' });
+      } finally { inFlight--; }
+    };
+    const result = await verifyStoredStatsOnAws({ importUrl: 'https://publication.test/admin/import-product-stats',
+      token: 'fixture-secret', publication: manifest });
+    assert.equal(refilled, true, 'later pages must start before the delayed page finishes');
+    assert.equal(releasedByFallback, false, 'readback must not wait for the slowest page in a batch');
+    assert.ok(peak <= 8, 'readback concurrency must remain bounded');
+    assert.equal(started, Math.ceil(rows.length / 4));
+    assert.equal(result.row_checksum_verified, true, 'out-of-order replies still verify the complete ordered publication');
+  } finally { clearTimeout(fallback); releaseFirst(); globalThis.fetch = originalFetch; }
+});
 await check('public readback and caller-supplied verification bypasses are rejected', async db => {
   const env = { DB: db, MANUAL_RUN_TOKEN: 'fixture-secret' };
   assert.equal((await worker.fetch(new Request('https://publication.test/admin/product-stats-readback?publication_id=x&kind=rows'), env)).status, 401);
