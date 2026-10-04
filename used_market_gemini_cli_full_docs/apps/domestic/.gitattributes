@@ -1,0 +1,2 @@
+# Keep Linux installers executable when this application subtree is archived on Windows.
+*.sh text eol=lf
