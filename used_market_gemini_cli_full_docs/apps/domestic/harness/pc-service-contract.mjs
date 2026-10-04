@@ -2074,9 +2074,9 @@ const d1ListingItemsBeforeFreshnessMirror = structuredClone(workerListingsPayloa
 const sourceRuntimeCollectedAt = new Date(Date.now() - 30_000).toISOString();
 const unrelatedSourceRuntimeCollectedAt = new Date(Date.now() - 5_000).toISOString();
 const freshnessTargetIds = Object.freeze({
-  bunjangGpu: "pc-target:5:market-v15:GPU:0",
-  joonggonaraGpu: "pc-target:5:market-v15:GPU:0",
-  joonggonaraCpu: "pc-target:5:market-v15:CPU:1"
+  bunjangGpu: "pc-target:5:market-v16:GPU:0",
+  joonggonaraGpu: "pc-target:5:market-v16:GPU:0",
+  joonggonaraCpu: "pc-target:5:market-v16:CPU:1"
 });
 const mirrorCollectionManifest = async (sourceId, asOf, successfulTargetIds) => {
   const response = await worker.fetch(new Request("https://used-pick.test/admin/import-listings", {
