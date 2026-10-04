@@ -1702,7 +1702,7 @@ function pcSourceAdapter(sourceKey) {
 }
 
 async function runPcSourceSchedulerTick() {
-  if (!PC_PARTS_SCHEDULER_ENABLED || !pcPipeline || !pcLedger || pcSchedulerActive || pcPublicationActive) return;
+  if (!PC_PARTS_SCHEDULER_ENABLED || !pcPipeline || !pcLedger || pcSchedulerActive || pcPublicationActive || pcStatsVerificationActive) return;
   const admission = schedulerReadDeferral({
     lastPublicReadAtMs: lastPcPublicReadAt,
     deferralStartedAtMs: pcSchedulerReadDeferralStartedAt,
@@ -2508,7 +2508,8 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'POST' && url.pathname === '/api/runner/verify-stats-publication') {
     if (!tokenMatches((req.headers.authorization || '').replace(/^Bearer\s+/i, ''), RUNNER_TOKEN))
       return json(res, 401, { ok: false, error: 'Unauthorized' });
-    if (pcStatsVerificationActive) return json(res, 409, { ok: false, error: 'Publication verification busy' });
+    if (pcStatsVerificationActive || pcSchedulerActive)
+      return json(res, 409, { ok: false, error: 'Publication verification busy' });
     pcStatsVerificationActive = true;
     try {
       const publication = await readJson(req);
