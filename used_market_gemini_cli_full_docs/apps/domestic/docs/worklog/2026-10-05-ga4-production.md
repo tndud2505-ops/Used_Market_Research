@@ -9,13 +9,13 @@ The live Worker was Wrangler version `a5ccac39-2c3e-4535-9967-7607ddd2c318`, aft
 - Common final HTML handling in `cloudflare/html-analytics.mjs`; initialize measurement `G-2L2ETG06B1` through `/analytics.js` exactly once per document.
 - Worker-first paths cover home, HTML files, and category routes. Successful HTML documents are transformed after asset/cache routing. API, binary, error, redirect and exact Search Console verification responses remain unchanged.
 - Preserve existing CSP sources/directives; add Google tag and www/region1 GA collection hosts. Disable Google signals and advertising personalization in initialization. Update the privacy notice.
-- Strip original HTML conditional validators before asset fetch; clear obsolete encoding/length/validators after transformation and require HTML revalidation. No zone purge, API cache reset, statistics refresh, AWS change, or historical recalculation.
+- Strip original HTML conditional validators before asset fetch; clear obsolete encoding/length/validators after transformation and require public HTML revalidation while preserving existing private/no-store restrictions. No zone purge, API cache reset, statistics refresh, AWS change, or historical recalculation.
 - Release checks now reject a home or analysis page missing the common tag/CSP. See [Worker runbook](../../cloudflare/README.md#htmlga4-운영-경로).
 
 ## Evidence
 
 - `scripts/verify.ps1`: deterministic suite passed; updated HTML analytics contract passed independently after the verification-file exclusion.
-- Wrangler dry-run passed. `npm run cloudflare:app-release` exited 0, version `5c4ee30a-7f06-45c7-97cf-7905777efbb5`; both public domains healthy.
+- Wrangler dry-run passed. `npm run cloudflare:app-release` exited 0, final version `4d80995b-2375-46d6-a8ca-7582408b508f`; both public domains healthy.
 - Query-free home, index, categories, GPU category, guide, analysis, builder, privacy and terms returned HTTP 200 with exactly one tag and bootstrap, updated CSP, no ETag, and revalidation. Home and multiple internal pages still reported asset-cache HIT, proving transformation also runs after cache hits. Sending the old home ETag returned a newly transformed HTTP 200.
 - `/api/categories`, `/analytics.js`, SVG and Search Console verification body retained their types/payloads. Verification body matched the repository file exactly.
 - Chrome observed `gtag/js?id=G-2L2ETG06B1` and resource requests to `www.google-analytics.com/g/collect` with `tid=G-2L2ETG06B1`, `en=page_view` on home and `/guide.html`. No browser console errors or CSP violations on those pages.

@@ -52,6 +52,9 @@ export async function withHtmlAnalytics(response, request) {
   }
   // The asset binding may HIT an old cached shell. Transform after that cache,
   // and require HTML browser revalidation without purging unrelated assets/API.
-  headers.set('cache-control', 'no-cache, max-age=0, must-revalidate');
+  const cacheControl = headers.get('cache-control') || '';
+  if (!/\bno-store\b/iu.test(cacheControl)) {
+    headers.set('cache-control', `${/\bprivate\b/iu.test(cacheControl) ? 'private, ' : ''}no-cache, max-age=0, must-revalidate`);
+  }
   return new Response(body, { status: response.status, statusText: response.statusText, headers });
 }

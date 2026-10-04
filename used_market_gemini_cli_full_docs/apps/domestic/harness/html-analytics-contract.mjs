@@ -18,6 +18,12 @@ assert.equal((html.match(/src="\/analytics.js"/gu) || []).length, 1);
 assert.equal(await (await withHtmlAnalytics(makeHtml(html), request)).text(), html);
 for (const header of ['etag', 'content-length', 'content-encoding', 'last-modified']) assert.equal(first.headers.get(header), null);
 assert.match(first.headers.get('cache-control'), /must-revalidate/u);
+for (const cacheControl of ['private, max-age=3600', 'private, no-store', 'no-store']) {
+  const privatePage = makeHtml();
+  privatePage.headers.set('cache-control', cacheControl);
+  const transformed = await withHtmlAnalytics(privatePage, request);
+  assert.ok(transformed.headers.get('cache-control').includes(cacheControl.includes('no-store') ? 'no-store' : 'private'));
+}
 for (const directive of baseline.split(';').map((value) => value.trim())) {
   const [name, ...sources] = directive.split(/\s+/u);
   const result = first.headers.get('content-security-policy').split(';').find((value) => value.trim().startsWith(`${name} `));
