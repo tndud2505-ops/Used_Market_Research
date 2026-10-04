@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { PcPartsLedger } from '../aws-runner/pc-parts-ledger.mjs';
 
 import { pcCollectionCapacityPlan, pcCollectionTargetSetV2 } from "../cloudflare/pc-directory-http.mjs";
 import { collectOne, pcSearchQueryVariants } from "../cloudflare/live-search.mjs";
@@ -9,6 +10,14 @@ import { SearchIndex } from "../aws-runner/search-index.mjs";
 import { publicPcProducts } from "../market/logic/pc-public-catalog.mjs";
 
 const targetSet = pcCollectionTargetSetV2();
+const upgradeLedger = new PcPartsLedger();
+upgradeLedger.migrate();
+upgradeLedger.activateCollectionTargets({ ...targetSet, targetSetVersion: 'pc-targets:5:full-master-v15',
+  targets: targetSet.targets.map(t => ({ ...t, targetId: t.targetId.replace('-v16:', '-v15:') })) });
+upgradeLedger.activateCollectionTargets(targetSet);
+assert.equal(upgradeLedger.listActiveCollectionTargets().length, targetSet.targets.length,
+  'expanded catalog upgrades an existing production target set without reusing immutable IDs');
+upgradeLedger.db.close();
 const targets = targetSet.targets.filter((target) => target.enabled !== false);
 const targetIds = targets.map((target) => target.targetId);
 const categorySet = new Set(PC_PART_CATEGORY_CODES);
@@ -31,7 +40,7 @@ assert.equal(new Set(targets.map((target) => target.categoryCode)).size, categor
   "every PC part category must have an active collection target");
 assert.doesNotMatch(JSON.stringify(targetSet), /quasarzone/iu, "retired Quasarzone must not be an active collection target");
 assert.equal(targetSet.targetSetVersion, "pc-targets:5:full-master-v16");
-assert.ok(targetSet.targets.every((target) => /^pc-target:5:(?:category|market|master)-v15:/u.test(target.targetId)),
+assert.ok(targetSet.targets.every((target) => /^pc-target:5:(?:category|market|master)-v16:/u.test(target.targetId)),
   "a new target set owns new IDs and cannot reuse an old set's immutable ownership");
 const koreanGskill = targets.filter(target => target.targetId.endsWith(':domestic:ko'));
 assert.equal(koreanGskill.length, 27);

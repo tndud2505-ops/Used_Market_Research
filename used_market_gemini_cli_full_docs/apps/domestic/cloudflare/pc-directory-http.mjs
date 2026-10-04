@@ -214,7 +214,7 @@ export function pcCollectionTargetSetV2() {
     ["ODD", "블루레이 ODD"]
   ];
   const categoryTargets = PC_PART_CATEGORY_SEEDS_V2.map((category, index) => ({
-    targetId: `pc-target:${PC_PRODUCT_MASTER_V2_VERSION}:category-v15:${category.code}`,
+    targetId: `pc-target:${PC_PRODUCT_MASTER_V2_VERSION}:category-v16:${category.code}`,
     canonicalProductId: null,
     categoryCode: category.code,
     queryText: category.label,
@@ -225,7 +225,7 @@ export function pcCollectionTargetSetV2() {
     enabled: true
   }));
   const generalTargets = generalQueries.map(([categoryCode, queryText], index) => ({
-    targetId: `pc-target:${PC_PRODUCT_MASTER_V2_VERSION}:market-v15:${categoryCode}:${index}`,
+    targetId: `pc-target:${PC_PRODUCT_MASTER_V2_VERSION}:market-v16:${categoryCode}:${index}`,
     canonicalProductId: null,
     categoryCode,
     queryText,
@@ -296,7 +296,7 @@ export function pcCollectionTargetSetV2() {
     for (let queryIndex = 0; queryIndex < uniquePlans.length; queryIndex += 1) {
       const plan = uniquePlans[queryIndex];
       exactTargets.push({
-        targetId: `pc-target:${PC_PRODUCT_MASTER_V2_VERSION}:master-v15:${product.id}:${plan.scope}:${queryIndex}`,
+        targetId: `pc-target:${PC_PRODUCT_MASTER_V2_VERSION}:master-v16:${product.id}:${plan.scope}:${queryIndex}`,
         canonicalProductId: product.id,
         categoryCode: product.category,
         queryText: plan.queryText,
@@ -315,7 +315,7 @@ export function pcCollectionTargetSetV2() {
     targets: [...categoryTargets, ...generalTargets, ...exactTargets,
       ...collectionProducts.filter(product => product.category === 'RAM' && product.manufacturer === 'G.Skill')
         .map((product, index) => ({
-          targetId: `pc-target:${PC_PRODUCT_MASTER_V2_VERSION}:master-v15:${product.id}:domestic:ko`,
+          targetId: `pc-target:${PC_PRODUCT_MASTER_V2_VERSION}:master-v16:${product.id}:domestic:ko`,
           canonicalProductId: product.id,
           categoryCode: 'RAM',
           queryText: `지스킬 ${product.spec.memory_generation} ${product.spec.module_capacity_gb}GB`,
