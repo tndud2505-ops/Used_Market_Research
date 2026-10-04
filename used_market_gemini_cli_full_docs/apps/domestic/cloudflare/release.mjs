@@ -121,6 +121,13 @@ async function checkPublicSite(baseUrl) {
     || !analysis.includes('DAN-gvTVDnxVn9S3leR5')) {
     throw new Error(`${baseUrl}/price-analysis.html did not return the price-analysis shell`);
   }
+  for (const [label, response, html] of [['home', homeResponse, home], ['analysis', analysisResponse, analysis]]) {
+    if ((html.match(/gtag\/js\?id=G-2L2ETG06B1/gu) || []).length !== 1
+      || (html.match(/src="\/analytics.js"/gu) || []).length !== 1
+      || !response.headers.get('content-security-policy')?.includes('https://www.google-analytics.com')) {
+      throw new Error(`${baseUrl}/${label} missing common GA4 HTML processing`);
+    }
+  }
   const adfitResponse = await fetch(`${baseUrl}/adfit.js?release_check=${Date.now()}`);
   const adfit = adfitResponse.ok ? await adfitResponse.text() : '';
   if (!adfit.includes('https://t1.kakaocdn.net/kas/static/ba.min.js')) {

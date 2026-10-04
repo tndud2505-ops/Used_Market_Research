@@ -19,7 +19,15 @@
 
 사전수집은 Cloudflare Browser Run이 아니라 AWS 러너에서 처리한다. 공개 PC 읽기 API는 요청 중 원 사이트를 호출하지 않는다. 매물과 가격 통계는 AWS SQLite를 먼저 읽고 Worker Cache API에 5분간 응답을 저장한다. D1 매물 fallback은 기본 비활성이며, 검증된 일일 가격 통계는 AWS 읽기 실패 때 D1 fallback을 사용할 수 있다. 전체 통계가 Worker 한 요청에서 처리할 만큼 작다고 가정하지 않는다. 명시적 과거 as_of 요청은 현재 D1 통계로 대체하지 않는다. Worker의 `RUNNER_URL`과 legacy `SEARCH_RUNNER_URL`은 Cloudflare Tunnel 공개 URL이어야 하며, 로컬 `localhost`는 사용할 수 없다.
 
-## 로컬 검증
+## HTML·GA4 운영 경로
+
+운영 소스는 이 저장소의 `cloudflare/worker.mjs`, `wrangler.jsonc`, `web-backend/public`이며 `npm run cloudflare:app-release`로 배포한다. Dashboard 편집만 한 변경은 다음 Wrangler 배포에서 덮어써지므로 사용하지 않는다.
+
+홈·`*.html`·카테고리 경로는 `assets.run_worker_first`로 Worker를 먼저 거친다. 홈/카테고리 별칭을 정적 에셋에 연결한 뒤 공통 `html-analytics.mjs`가 성공한 GET HTML에만 `G-2L2ETG06B1` 태그와 `/analytics.js` 초기화를 한 번 넣는다. JSON·API·이미지·오류·리디렉션은 그대로 유지한다. Google tag와 www/region1 GA 수집 호스트만 기존 CSP에 추가하며 광고 개인화/Google signals는 사용하지 않는다.
+
+`CF-Cache-Status: HIT`는 ASSETS의 원본 HTML 캐시에서도 나타난다. 태그 처리는 그 캐시를 읽은 **뒤**에 하며, HTML 원본의 조건부 요청 헤더를 제거하고 변환 후 length/encoding/ETag/Last-Modified를 폐기한다. HTML은 브라우저 재검증을 요구한다. JS·이미지·API 캐시 및 과거 가격 통계는 갱신 대상이 아니다. 전체 존 purge는 하지 않는다. 배포 검증은 쿼리 없는 홈·내부 HTML에서도 태그/CSP를 검사하고 실제 브라우저의 `gtag.js`, `g/collect` 측정 ID·page_view 및 해당 GA4 속성 실시간 수신을 확인한다.
+
+## 로컬 검증 명령
 
 ```powershell
 npm run cloudflare:harness

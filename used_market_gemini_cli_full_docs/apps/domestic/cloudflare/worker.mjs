@@ -1,3 +1,4 @@
+import { withHtmlAnalytics } from './html-analytics.mjs';
 import {
   fetchThroughFreeCache,
   fetchThroughPcReadCache,
@@ -472,7 +473,14 @@ async function servePcProducts(url, env) {
 
 async function serveAssets(request, env) {
   if (!env.ASSETS || typeof env.ASSETS.fetch !== "function") return null;
-  const response = await env.ASSETS.fetch(request);
+  // A validator for the unmodified asset must not produce a 304 before the
+  // common HTML transform. Binary assets retain their original request.
+  const pathname = new URL(request.url).pathname;
+  const assetRequest = /\.html$/iu.test(pathname) ? new Request(request) : request;
+  if (assetRequest !== request) {
+    for (const header of ['if-none-match', 'if-modified-since', 'range', 'if-range']) assetRequest.headers.delete(header);
+  }
+  const response = await env.ASSETS.fetch(assetRequest);
   return response.status === 404 ? null : response;
 }
 
@@ -1370,8 +1378,7 @@ function scheduledJobNames(controller) {
   return [...mappedJobs];
 }
 
-export default {
-  async fetch(request, env) {
+async function fetchResponse(request, env) {
     const url = new URL(request.url);
 
     if (url.hostname.toLowerCase() === "www.used-pick.com") {
@@ -1865,6 +1872,11 @@ export default {
       console.error("Origin proxy failed", error);
       return json(502, { ok: false, error: "Origin server is unavailable" });
     }
+}
+
+export default {
+  async fetch(request, env) {
+    return withHtmlAnalytics(await fetchResponse(request, env), request);
   },
 
   async scheduled(controller, env, ctx) {

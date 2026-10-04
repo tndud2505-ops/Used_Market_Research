@@ -31,7 +31,7 @@
     "pc:publish-stats-now": "node aws-runner/publish-pc-stats-now.mjs",
     "pc:repair-stats": "node aws-runner/repair-pc-stats-publication.mjs",
     "pc:apply-reviewed-exclusions": "node aws-runner/apply-reviewed-pc-exclusions.mjs",
-    "cloudflare:harness": "node harness/pc-source-policy-contract.mjs && node harness/pc-publication-contract.mjs && node harness/pc-service-contract.mjs",
+    "cloudflare:harness": "node harness/html-analytics-contract.mjs && node harness/pc-source-policy-contract.mjs && node harness/pc-publication-contract.mjs && node harness/pc-service-contract.mjs",
     "index:harness": "node harness/pc-service-contract.mjs",
     "cloudflare:dev": "npx wrangler dev --config cloudflare/wrangler.jsonc",
     "cloudflare:migrate:remote": "npx wrangler d1 migrations apply used-market-free --remote --config cloudflare/wrangler.jsonc",
@@ -43,7 +43,7 @@
     "test:pc-release": "node harness/pc-agent1-publication-http-contract.mjs && node harness/pc-agent1-chunk-integrity-contract.mjs && node harness/pc-scoped-stats-repair-contract.mjs",
     "test:pc-final": "node harness/pc-agent2-ui-contract.mjs && node harness/pc-agent2-resume-contract.mjs && node harness/pc-agent3-independent-price-contract.mjs && node harness/pc-agent3-publication-bootstrap-contract.mjs && node harness/pc-agent3-stats-readiness-contract.mjs && node harness/pc-final-price-readiness-contract.mjs && node harness/pc-price-recovery-contract.mjs",
     "test:ui-a": "node harness/pc-ui-concept-a-contract.mjs && node harness/pc-search-modal-contract.mjs",
-    "test": "npm run build && npm run test:storage && npm run test:danawa && npm run test:pc && npm run test:pc-tools && npm run test:pc-release && npm run test:pc-final && npm run test:ui-a"
+    "test": "npm run build && node harness/html-analytics-contract.mjs && npm run test:storage && npm run test:danawa && npm run test:pc && npm run test:pc-tools && npm run test:pc-release && npm run test:pc-final && npm run test:ui-a"
   },
   "dependencies": {
     "commander": "^14.0.0",
