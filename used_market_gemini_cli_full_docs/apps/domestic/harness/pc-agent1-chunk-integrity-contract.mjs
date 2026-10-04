@@ -98,6 +98,25 @@ await check('all 41 rows activate only after both complete chunks', async db => 
   assert.equal(activated.row_count, rows.length);
   assert.equal(db.active(), 'complete');
 });
+await check('new upload removes expired staging but preserves active, recent, and resumed publications', async db => {
+  const active = await stage(db, 'retained-active');
+  await activateStagedProductStats(db, active);
+  await stage(db, 'abandoned');
+  const resume = await stage(db, 'resumed');
+  db.sqlite.prepare('UPDATE public_stats_publication_chunks SET staged_at=?')
+    .run(new Date(Date.now() - 7 * 60 * 60 * 1000).toISOString());
+  await stage(db, 'resumed');
+  assert.equal(db.sqlite.prepare('SELECT COUNT(*) AS n FROM public_product_stats WHERE publication_id=?').get('abandoned').n, 0);
+  assert.equal(db.active(), 'retained-active');
+  assert.equal(db.sqlite.prepare('SELECT COUNT(*) AS n FROM public_product_stats WHERE publication_id=?').get('resumed').n, rows.length);
+  // Recent uploads survive even when their statistical reference date is old.
+  await stage(db, 'recent');
+  await stage(db, 'replacement');
+  assert.deepEqual(db.sqlite.prepare('SELECT publication_id FROM public_stats_publications ORDER BY publication_id')
+    .all().map(row => row.publication_id), ['recent', 'replacement', 'resumed', 'retained-active']);
+  await activateStagedProductStats(db, resume);
+  assert.deepEqual(db.sqlite.prepare('SELECT publication_id FROM public_stats_publications').all().map(row => row.publication_id), ['resumed']);
+});
 await check('large multi-page statistics keep the same exact checksum', async db => {
   const largeRows=Array.from({length:201},(_,i)=>({...rows[0],canonical_product_id:`ram:fixture:large-${String(i).padStart(3,'0')}`,
     stats_json:{...rows[0].stats_json,fixture_detail:'가격 관측 '.repeat(4000)}}));

@@ -391,6 +391,20 @@ export async function stageProductStatsChunk(db, input) {
   let stored = await db.prepare(`SELECT publication_id, checksum, expected_row_count,
       expected_non_empty_scope_count, parser_version, rule_version, filter_version, created_at, active
     FROM public_stats_publications WHERE publication_id = ?`).bind(metadata.publicationId).first();
+  assertPublicationMetadata(input, stored);
+  if (stored && Number(stored.active) !== 0) throw new Error("publication is already active");
+  if (chunkIndex === 0) {
+    // Use actual upload activity, never the statistics' historical as_of date.
+    // Keep the active publication, this retry, and uploads active within 6h.
+    const cutoff = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
+    const pruned = await db.prepare(`DELETE FROM public_stats_publications
+      WHERE active = 0 AND publication_id <> ?
+        AND publication_id IN (SELECT publication_id FROM public_stats_publication_chunks
+          GROUP BY publication_id HAVING MAX(staged_at) < ?)`)
+      .bind(metadata.publicationId, cutoff).run();
+    mutationUsage.rows_read += Number(pruned.meta?.rows_read || 0);
+    mutationUsage.rows_written += Number(pruned.meta?.rows_written || 0);
+  }
   if (!stored) {
     const insertedPublication = await db.prepare(`INSERT INTO public_stats_publications (
         publication_id, checksum, expected_row_count, expected_non_empty_scope_count,
@@ -421,7 +435,16 @@ export async function stageProductStatsChunk(db, input) {
     }])[0];
     const actual = canonicalChunkManifest([existingChunk])[0];
     if (JSON.stringify(actual) !== JSON.stringify(expected)) throw new Error("staged publication chunk conflict");
-    return { publication_id: metadata.publicationId, chunk_index: chunkIndex, already_staged: true };
+    if (chunkIndex === 0) {
+      // A valid resumed upload is live again even while replaying old chunks.
+      const renewed = await db.prepare(`UPDATE public_stats_publication_chunks SET staged_at = ?
+        WHERE publication_id = ? AND chunk_index = 0`)
+        .bind(new Date().toISOString(), metadata.publicationId).run();
+      mutationUsage.rows_read += Number(renewed.meta?.rows_read || 0);
+      mutationUsage.rows_written += Number(renewed.meta?.rows_written || 0);
+    }
+    return { publication_id: metadata.publicationId, chunk_index: chunkIndex, already_staged: true,
+      mutation_d1_usage: mutationUsage };
   }
 
   const statements = inputRows.map((row) => db.prepare(`INSERT INTO public_product_stats (
