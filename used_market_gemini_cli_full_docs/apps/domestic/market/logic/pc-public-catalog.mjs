@@ -61,7 +61,7 @@ function compact(value) {
 const MOTHERBOARD_MANUFACTURERS = Object.freeze([
   ["ASUS", /(?:\bASUS\b|에이수스|아수스)/iu],
   ["GIGABYTE", /(?:\bGIGABYTE\b|기가바이트)/iu],
-  ["MSI", /\bMSI\b/iu],
+  ["MSI", /(?:\bMSI\b|엠에스아이)/iu],
   ["ASRock", /(?:\bASRock\b|애즈락|아스락)/iu],
   ["Biostar", /(?:\bBiostar\b|바이오스타)/iu]
 ]);
@@ -101,6 +101,8 @@ export function resolveExactMotherboardProduct(value) {
       const spec = productSpec(product);
       const official = motherboardMatchText(spec.official_model || product.name);
       const revisionMatch = sourceText.match(/(?:\bREV(?:ISION)?\b|리비전)\s*(\d+(?:\.\d+)+)/iu);
+      const modelRevision = sourceText.match(/\bR\d+(?:\.\d+)+\b/iu)?.[0];
+      if (modelRevision && !official.includes(motherboardMatchText(modelRevision))) return false;
       const hasWifiVariant = /\b(?:(?:WIFI|WI FI)(?:\s*[67](?:E)?)?|AX)\b/u;
       if (hasWifiVariant.test(text) && spec.wifi === false && !hasWifiVariant.test(official)) return false;
       if (/\bDDR[345]\b/u.test(text) && !text.includes(` ${String(spec.memory_generation || "").toUpperCase()} `)) return false;

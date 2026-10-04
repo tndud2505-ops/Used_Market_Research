@@ -138,7 +138,7 @@ try {
   assert.equal(ledger.getActiveCollectionTargetSummary().enabled_target_count, nextSet.targets.length);
 } finally { db.close(); }
 const targetSet = pcCollectionTargetSetV2();
-const capacity = pcCollectionCapacityPlan(85);
-assert.equal(capacity.all_sources_sufficient, true, 'collection changes cannot exceed the existing 85-target budget');
+const capacity = pcCollectionCapacityPlan();
+assert.equal(capacity.all_sources_sufficient, true, 'collection changes must fit the configured default target budget');
 console.log(JSON.stringify({ status: 'passed', contract: 'pc-light-user', public_models: publicIds.size, reachable_tool_models: searchableTools.length,
   pipeline_categories: fixtures.length, target_set: targetSet.targetSetVersion || targetSet.target_set_version }, null, 2));

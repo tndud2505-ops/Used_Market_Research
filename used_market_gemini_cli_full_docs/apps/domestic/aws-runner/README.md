@@ -130,7 +130,7 @@ sudo bash /opt/used-market-runner/aws-runner/configure-ubuntu24.sh
 - `D1_BACKGROUND_MIRROR_ENABLED`: 기본 `false`. `true`일 때만 수집·상태 확인 결과를 D1에 연속 복제
 - `D1_STATS_IMPORT_URL`: PC 전환 시 필수. checksum·row count가 포함된 완성 통계 publication을 받는 `/admin/import-product-stats`
 - `PC_STATS_PRODUCT_IDS`: 현재 운영 게시기는 값이 있으면 `PC_STATS_PARTIAL_PUBLICATION_DISABLED`로 중단한다. 일부 제품만 기존 활성 통계에 병합하는 설정으로 사용하지 않는다.
-- `PC_SOURCE_TARGETS_PER_RUN`: 사이트별 한 번의 수집 배치 크기. 기본 `85`, 현재 최소 `83`; 전체 일일 모델 순회에 부족하면 설정·health가 실패한다.
+- `PC_SOURCE_TARGETS_PER_RUN`: 사이트별 한 번의 수집 배치 크기. 기본 `100`, 현재 최소 `100`; 전체 일일 모델 순회에 부족하면 설정·health가 실패한다.
 - `PC_SOURCE_TARGET_CONCURRENCY`: 사이트 내부 동시 요청 수. 기본 `6`, 허용 범위 `1~8`
 - `CLOUDFLARE_MANUAL_RUN_TOKEN`: 선택한 import API의 Bearer 토큰
 - `Cloudflare Tunnel token`: Dashboard에서 복사한 Tunnel 토큰
@@ -153,10 +153,10 @@ systemctl status used-market-tunnel.service --no-pager
 
 기존 서버에 새 release를 올릴 때도 설치 스크립트를 사용한다. Tunnel 토큰이 이미 있으면 스크립트가 `runner → tunnel` 순서로 재시작하고 로컬·외부 health를 필수 검증한다.
 
-구버전 기본값처럼 기존 `PC_SOURCE_TARGETS_PER_RUN`이 `71` 미만이면 자동으로 덮어쓰지 않고 설치를 중단한다. 운영자가 처리량 변경을 승인한 뒤 다음처럼 명시적으로 올린다.
+구버전 기본값처럼 기존 `PC_SOURCE_TARGETS_PER_RUN`이 `100` 미만이면 자동으로 덮어쓰지 않고 설치를 중단한다. 운영자가 처리량 변경을 승인한 뒤 다음처럼 명시적으로 올린다.
 
 ```bash
-sudo env PC_SOURCE_TARGETS_PER_RUN_OVERRIDE=85 PC_SOURCE_TARGET_CONCURRENCY_OVERRIDE=6 \
+sudo env PC_SOURCE_TARGETS_PER_RUN_OVERRIDE=100 PC_SOURCE_TARGET_CONCURRENCY_OVERRIDE=6 \
   RUNNER_PUBLIC_URL=https://runner.example.com \
   bash aws-runner/install-ubuntu24.sh /home/ubuntu/used-market-release
 ```
@@ -200,7 +200,7 @@ sudo systemctl start used-market-runner.service
 
 신규 PC 사전수집 대상 source는 registry의 운영자 승인 기록, `directory_source:true`, `runtime_status:"ENABLED"`를 모두 갖춰야 한다. 비활성 소스는 새 스케줄 대상에서 제외하지만 과거 공개 projection의 잔존 행까지 자동 제거됐다고 가정하지 않는다. 2026-09-24에 확인한 과거 소스·분류 품질 과제는 변경 기록에서 계속 추적한다. source 실패 시 이전 데이터 보존, backoff, 격리 기록을 남긴다.
 
-collection target은 `HOURLY_CATEGORY`와 `DAILY_MASTER`로 나뉜다. 전자는 모든 11개 부품군을 매시간 확인하고, 후자는 GPU·CPU 정확 모델과 RAM 세대·용량·제조사, 저장장치 용량·제조사 등 versioned master 전체를 24시간 간격으로 순회한다. `PC_SOURCE_TARGETS_PER_RUN`은 한 사이트를 한 번에 과도하게 호출하지 않도록 배치를 제한한다. `/health`의 `pc_parts.collection_capacity`는 현재 target set과 사이트별 실행 횟수로 전체 순회 가능 여부를 계산하며, 기본값 `85`는 현재 운영 소스의 정상 회차 기준 일일 순회량을 충족한다. 다나와는 매시 19분에 최대 85개를 순차 요청하고 요청 사이를 최소 5초 띄운다. 403·429·접근 차단이 나오면 해당 회차를 중단하며, 이미 수집한 자료는 보존한다. 수동 수집도 같은 간격과 중단 정책을 사용한다.
+collection target은 `HOURLY_CATEGORY`와 `DAILY_MASTER`로 나뉜다. 전자는 모든 11개 부품군을 매시간 확인하고, 후자는 GPU·CPU 정확 모델과 RAM 세대·용량·제조사, 저장장치 용량·제조사 등 versioned master 전체를 24시간 간격으로 순회한다. `PC_SOURCE_TARGETS_PER_RUN`은 한 사이트를 한 번에 과도하게 호출하지 않도록 배치를 제한한다. `/health`의 `pc_parts.collection_capacity`는 현재 target set과 사이트별 실행 횟수로 전체 순회 가능 여부를 계산하며, 기본값 `100`는 현재 운영 소스의 정상 회차 기준 일일 순회량을 충족한다. 다나와는 매시 19분에 최대 100개를 순차 요청하고 요청 사이를 최소 5초 띄운다. 403·429·접근 차단이 나오면 해당 회차를 중단하며, 이미 수집한 자료는 보존한다. 수동 수집도 같은 간격과 중단 정책을 사용한다.
 
 실패한 개별 target은 다음 소스 실행부터 지수 백오프로 재시도한다. `/health`의 `source_readiness[].target_coverage`는 성공 target 수, 실패 target 수, 2회 주기 이상 성공하지 못한 stale target 수를 공개하며, `--require-pc-continuous`는 stale target이 남아 있으면 통과하지 않는다.
 
@@ -308,3 +308,20 @@ journalctl -u used-market-tunnel.service -n 100 --no-pager
 | `configure-d1-backup.sh` | stdin 토큰으로 D1 변경분 백업 경계를 설정 |
 | `seed-d1-backup.mjs` | 활성 색인의 사이트별 최근 2,500개를 D1에 1회 시드 |
 | `.env.example` | 환경변수 이름과 저장 위치 예시 |
+
+
+### 미분류 제조사·메인보드 모델의 한정 보정
+
+`pc:repair-unknown-identities`는 SSD/HDD 미분류 용량 버킷과 메인보드 플랫폼 버킷만 대상으로 한다. 같은 용량·수량·판매 단위·상태에서 근거가 확인된 제품으로만 이동하며, 원문·가격·수집 시각·기존 제외 사유는 유지한다. 활성 가격 게시물의 30일 관측 범위와 그 이후 관측만 보정한다. 전체 과거 재분류나 전체 DB 복사는 수행하지 않는다.
+
+수집·게시가 idle인 상태에서 스케줄러를 잠시 중지하고, 기존 Runner 환경을 사용해 아래 순서로 실행한다. 복구 계획은 보호된 운영 디렉터리의 새 파일에 저장한다.
+
+```sh
+node aws-runner/repair-pc-unknown-identities.mjs plan /protected/path/identity-plan.json
+node aws-runner/repair-pc-unknown-identities.mjs apply /protected/path/identity-plan.json
+node aws-runner/repair-pc-unknown-identities.mjs mirror /protected/path/identity-plan.json
+```
+
+계획의 `normalizations`, `listings`, `scopes`, `checksum`을 검토한 뒤 적용한다. 적용 시 원본 행·증거·파이프라인이 달라졌으면 전체 트랜잭션을 취소한다. 계획에는 복구용 이전 행이 있으므로 일반 로그나 Git에 넣지 않는다. `mirror`는 변경된 활성 항목만 D1에 반영하며 같은 계획으로 재시도할 수 있다.
+
+이동한 제품의 기존 게시 범위는 `pc:repair-stats`의 `PRODUCT_IDENTITY` 사유로 한정 보정한다. 기존 게시물에 없는 신규 제품 범위는 정상 예약 가격 갱신에서 생성한다. 보정 및 게시 확인 후 기존 스케줄러 설정을 복구한다.

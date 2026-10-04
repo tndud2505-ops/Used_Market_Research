@@ -1465,7 +1465,7 @@ for (const [token, title, capacityBucket] of [
     description: 'NVMe PCIe 슬롯 호환 여부를 확인하세요', price: 100_000, currency: 'KRW',
     url: `https://m.bunjang.co.kr/products/${token}`, status: 'ACTIVE'
   }, new Date(now).toISOString(), null, { reclassification: true }).normalized;
-  assert.equal(result.canonicalProductId, `ssd:other-unclassified:capacity-bucket:${capacityBucket}`);
+  assert.equal(result.canonicalProductId, `ssd:${token === 'ssd-comparison' ? 'imation' : 'other-unclassified'}:capacity-bucket:${capacityBucket}`);
   if (token === 'ssd-liteon') assert.equal(result.productKind, 'M2_SATA');
 }
 pipeline.recordItem({

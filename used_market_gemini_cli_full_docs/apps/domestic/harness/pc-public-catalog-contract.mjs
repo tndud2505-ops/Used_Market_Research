@@ -58,7 +58,7 @@ assert.deepEqual(new Set(models.map((model) => model.canonical_product_id)), new
 ]));
 for (const model of models) for (const field of requiredModelFields) assert.ok(Object.hasOwn(model, field), `model field missing: ${field}`);
 
-const expectedAggregateCounts = { SSD: 70, HDD: 40, PSU: 84 };
+const expectedAggregateCounts = { SSD: 161, HDD: 70, PSU: 84 };
 for (const [category, expectedCount] of Object.entries(expectedAggregateCounts)) {
   const aggregateModels = publicPcModelsForApi({ category }).models;
   assert.equal(aggregateModels.length, expectedCount, `${category} public aggregate count`);
@@ -161,6 +161,15 @@ assert.equal(motherboard.socket, "AM5");
 assert.equal(motherboard.chipset, "B650");
 assert.equal(motherboard.form_factor, "Micro-ATX");
 const exactMotherboardCases = [
+  ["ASUS PRIME B460M-A", "motherboard:asus:prime-b460m-a"],
+  ["ASUS Z170-A", "motherboard:asus:z170-a"],
+  ["MSI H110M PRO-D", "motherboard:msi:h110m-pro-d"],
+  ["애즈락 B460M 스틸레전드", "motherboard:asrock:b460m-steel-legend"],
+  ["ASRock B650M PG Lightning", "motherboard:asrock:b650m-pg-lightning"],
+  ["ASUS EX-H110M-V", "motherboard:asus:ex-h110m-v"],
+  ["ASRock B150M Pro4", "motherboard:asrock:b150m-pro4"],
+  ["ASUS ROG CROSSHAIR VIII IMPACT", "motherboard:asus:rog-crosshair-viii-impact"],
+  ["엠에스아이 B650M 박격포 와이파이", "motherboard:msi:mag-b650m-mortar-wifi"],
   ["MSI MAG B650 TOMAHAWK WIFI", "motherboard:msi:mag-b650-tomahawk-wifi"],
   ["MSI B650 토마호크 와이파이 메인보드", "motherboard:msi:mag-b650-tomahawk-wifi"],
   ["MSI PRO B760M-A WIFI DDR4", "motherboard:msi:pro-b760m-a-wifi-ddr4"],
@@ -176,7 +185,7 @@ const exactMotherboardCases = [
   ["GIGABYTE X870 AORUS ELITE WIFI7 ICE rev 1.2 메인보드", "motherboard:gigabyte:x870-aorus-elite-wifi7-ice"]
 ];
 const registeredMotherboards = publicPcModelsForApi({ category: "MOTHERBOARD" }).models;
-assert.equal(registeredMotherboards.filter((product) => product.key_specs.directory_node_type === "PRODUCT").length, 32);
+assert.equal(registeredMotherboards.filter((product) => product.key_specs.directory_node_type === "PRODUCT").length, 45);
 assert.equal(registeredMotherboards.some((product) => product.canonical_product_id === "motherboard:asus:tuf-gaming-b760m-a-d4"), false,
   "an unverified/non-existent supplemental model must not survive outside the master");
 for (const [title, id] of exactMotherboardCases) {
@@ -187,6 +196,8 @@ for (const [title, id] of exactMotherboardCases) {
 }
 for (const title of [
   "MSI MAG B650 TOMAHAWK WIFI DDR4",
+  "ASUS PRIME B460M-A R2.0",
+  "ASRock B650M PG Lightning WIFI",
   "MSI PRO B760M-A WIFI DDR5",
   "ASRock B550M Steel Legend WIFI",
   "ASUS B550 메인보드",
@@ -209,7 +220,8 @@ for (const title of [
   "GIGABYTE A520M K V2 II rev 1.0 메인보드",
   "ASUS PRIME B550M-A rev 1.2",
   "ASUS PRIME B550M-A 또는 TUF GAMING B550-PRO 중 하나 랜덤 출고",
-  "ASUS MSI MAG B650M MORTAR WIFI"
+  "ASUS MSI MAG B650M MORTAR WIFI",
+  "ASUS 엠에스아이 MAG B650M MORTAR WIFI"
 ]) {
   const exact = resolveExactMotherboardProduct(title);
   assert.equal(exact.product, null, `${title} must not invent an exact model`);
@@ -218,6 +230,28 @@ for (const title of [
   assert.ok(result.statistics_exclusion_reasons.includes("EXACT_MODEL_REQUIRED"));
 }
 assert.equal(resolveMotherboardDirectoryNode("ASUS B550 메인보드").product?.id, "motherboard:platform:amd:asus");
+for (const title of [
+  "FOR ASUS TUF GAMING B760M-PLUS WIFI D4 DDR4*4 128GB LGA1700 mATX Motherboard",
+  "FOR GIGABYTE A520M K V2 DDR4*2 64GB AMD AM4 Micro ATX Motherboard Test OK",
+  "FOR MSI PRO B760M-A WIFI DDR4 II LGA1700 128GB HDMI DisplayPort mATX Motherboard"
+]) {
+  const result = classifyPcPartListingPublic({ title, description: "Used", price: 100_000 });
+  assert.equal(result.category_code, "MOTHERBOARD", `${title} maximum board memory is not a RAM listing`);
+  assert.equal(result.statistics_eligible, false, `${title} unresolved variant must still stay out of exact model statistics`);
+}
+assert.equal(classifyPcPartListingPublic({
+  title: "삼성 DDR4 8GB RAM ASUS B550 메인보드 호환", price: 20_000
+}).category_code, "RAM", "compatible memory must retain its own category");
+for (const model of ["ASUS ROG CROSSHAIR VIII IMPACT", "ASUS PRIME B460M-A", "ASRock B650M PG Lightning"]) {
+  for (const suffix of ["호환 브라켓", "브라켓만", "브라켓", "backplate"]) {
+    assert.equal(classifyPcPartListingPublic({
+      title: `${model} ${suffix}`, price: 10_000
+    }).statistics_eligible, false, "exact board name on an accessory must not become a board sample");
+  }
+}
+assert.equal(classifyPcPartListingPublic({
+  title: "ASUS ROG CROSSHAIR VIII IMPACT 브라켓 포함", price: 100_000
+}).statistics_eligible, true, "included brackets must preserve a valid board sample");
 const includedIoShield = classifyPcPartListingPublic({
   title: "ASUS PRIME B550M-A 메인보드", description: "정상 작동, IO 실드 포함", price: 80_000, currency: "KRW"
 });
@@ -303,6 +337,36 @@ for (const [title, expectedId] of [
   ["삼성 980 500GB", "ssd:samsung:capacity-bucket:257-512-gb"],
   ["삼성 PM9A1 512GB", "ssd:samsung:capacity-bucket:257-512-gb"],
   ["SK하이닉스 P41 2TB", "ssd:sk-hynix:capacity-bucket:gt-1-tb-le-2-tb"],
+  ["Hynix SSD 512GB", "ssd:sk-hynix:capacity-bucket:257-512-gb"],
+  ["P31 1TB SSD", "ssd:sk-hynix:capacity-bucket:513-gb-1-tb"],
+  ["P41 2TB NVMe SSD", "ssd:sk-hynix:capacity-bucket:gt-1-tb-le-2-tb"],
+  ["Solidigm P41 Plus 2TB NVMe SSD", "ssd:solidigm:capacity-bucket:gt-1-tb-le-2-tb"],
+  ["870 EVO 1TB SSD", "ssd:samsung:capacity-bucket:513-gb-1-tb"],
+  ["MX500 1TB SSD", "ssd:crucial:capacity-bucket:513-gb-1-tb"],
+  ["마이크론 Crucial MX500 1TB SSD", "ssd:crucial:capacity-bucket:513-gb-1-tb"],
+  ["마이크론 Micron MX500 1TB SSD", "ssd:crucial:capacity-bucket:513-gb-1-tb"],
+  ["마이크론 Micron 2400E 512GB NVMe SSD", "ssd:micron:capacity-bucket:257-512-gb"],
+  ["ADATA SSD 512GB", "ssd:adata:capacity-bucket:257-512-gb"],
+  ["TeamGroup SSD 512GB", "ssd:teamgroup:capacity-bucket:257-512-gb"],
+  ["트랜센드 SSD 512GB", "ssd:transcend:capacity-bucket:257-512-gb"],
+  ["PNY SSD 512GB", "ssd:pny:capacity-bucket:257-512-gb"],
+  ["Sabrent SSD 512GB", "ssd:sabrent:capacity-bucket:257-512-gb"],
+  ["Lexar SSD 512GB", "ssd:lexar:capacity-bucket:257-512-gb"],
+  ["Intel SSD 512GB", "ssd:intel:capacity-bucket:257-512-gb"],
+  ["Toshiba SSD 512GB", "ssd:toshiba:capacity-bucket:257-512-gb"],
+  ["HGST HDD 4TB", "hdd:hgst:capacity-bucket:gt-2-tb-le-4-tb"],
+  ["Hitachi HDD 4TB", "hdd:hitachi:capacity-bucket:gt-2-tb-le-4-tb"],
+  ["삼성 HDD 1TB", "hdd:samsung:capacity-bucket:le-1-tb"],
+  ["WD6TB HDD", "hdd:western-digital:capacity-bucket:gt-4-tb-le-6-tb"],
+  ["N300 8TB HDD", "hdd:toshiba:capacity-bucket:gt-6-tb-le-8-tb"],
+  ["삼성 SSD 500기가", "ssd:samsung:capacity-bucket:257-512-gb"],
+  ["삼성 SSD 512G", "ssd:samsung:capacity-bucket:257-512-gb"],
+  ["삼성 SSD 1T", "ssd:samsung:capacity-bucket:513-gb-1-tb"],
+  ["시게이트 HDD 4테라바이트", "hdd:seagate:capacity-bucket:gt-2-tb-le-4-tb"],
+  ["웨스턴디지털 SSD 1TB", "ssd:western-digital:capacity-bucket:513-gb-1-tb"],
+  ["웨스턴 디지털 HDD 4TB", "hdd:western-digital:capacity-bucket:gt-2-tb-le-4-tb"],
+  ["시게이트 SSD 1TB", "ssd:seagate:capacity-bucket:513-gb-1-tb"],
+  ["시게이트 HDD 4TB", "hdd:seagate:capacity-bucket:gt-2-tb-le-4-tb"],
   ["WD Blue SN580 1TB", "ssd:western-digital:capacity-bucket:513-gb-1-tb"],
   ["SN850X 2TB", "ssd:western-digital:capacity-bucket:gt-1-tb-le-2-tb"],
   ["IronWolf Pro 16TB", "hdd:seagate:capacity-bucket:gt-12-tb-le-16-tb"],
@@ -315,6 +379,14 @@ for (const [title, expectedId] of [
   assert.equal(result.statistics_eligible, true, `${title} consumer storage remains statistics eligible`);
 }
 
+for (const title of ["삼성 SSD 500G 1T", "HGST HDD 2T 4T"]) {
+  assert.equal(classifyPcPartListingPublic({ title, price: 100_000 }).canonical_product_id, null,
+    `${title} must retain ambiguous capacity`);
+}
+for (const title of ["ADATA Samsung SSD 1TB", "Hynix MX500 SSD 1TB"]) {
+  assert.equal(classifyPcPartListingPublic({ title, price: 100_000 }).canonical_manufacturer,
+    "기타/미분류 제조사", `${title} must not choose one conflicting maker`);
+}
 const externalHdd = classifyPcPartListingPublic({ title: "외장하드 WD 4TB USB", price: 100_000, currency: "KRW" });
 assert.equal(externalHdd.category_code, "HDD");
 assert.equal(externalHdd.placement, "EXTERNAL");
@@ -347,7 +419,7 @@ for (const title of [
   "삼성 M.2 SATA SSD 128GB (LITE-ON)"
 ]) {
   const result = classifyPcPartListingPublic({ title, price: 100_000, currency: "KRW" });
-  assert.ok(result.canonical_product_id.startsWith('ssd:other-unclassified:'), `${title} actual maker is not Samsung`);
+  assert.ok(result.canonical_product_id.startsWith(title.includes('LITE-ON') ? 'ssd:other-unclassified:' : 'ssd:imation:'), `${title} actual maker is not Samsung`);
 }
 const reverseComparison = classifyPcPartListingPublic({ title: "이메이션 SSD 1TB과 동급인 삼성 870 EVO SSD 1TB", price: 100_000, currency: "KRW" });
 assert.equal(reverseComparison.canonical_product_id, sataSsdIdentityCase.canonical_product_id);

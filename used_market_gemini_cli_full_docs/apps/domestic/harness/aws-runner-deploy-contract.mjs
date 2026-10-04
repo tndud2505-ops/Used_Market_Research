@@ -193,7 +193,7 @@ assert.doesNotMatch(collectSourceScript,
   "searchable non-statistical listings must not be dropped from one-shot publication");
 assert.match(runnerScript, /const PC_SCHEDULER_CATCHUP_MS = 0;/u,
   "runner startup must not synchronously replay a multi-hour scheduler backlog");
-assert.match(runnerScript, /process\.env\.PC_SOURCE_TARGETS_PER_RUN \|\| "85"/u,
+assert.match(runnerScript, /process\.env\.PC_SOURCE_TARGETS_PER_RUN \|\| "100"/u,
   "the runtime default must cover the largest hourly plus daily source target budget");
 assert.match(runnerScript, /requireAsOfCoverage:\s*(?:!dailyOnly\s*&&\s*)?query\.isHistorical/u,
   "the runner must reject uncovered historical windows without rejecting ordinary current-stat reads");
@@ -201,23 +201,23 @@ assert.match(runnerScript, /process\.env\.PC_SOURCE_TARGET_CONCURRENCY \|\| "6"/
   "the runtime default must process the expanded target budget within the scheduler window");
 assert.match(runnerScript, /collection_capacity: collectionCapacity/u,
   "runner health must expose whether the configured batch can sustain the full target set");
-assert.match(installScript, /^PC_SOURCE_TARGETS_PER_RUN=85$/mu,
+assert.match(installScript, /^PC_SOURCE_TARGETS_PER_RUN=100$/mu,
   "new AWS environments must persist the target throughput required for full daily master coverage");
 assert.match(installScript, /^PC_SOURCE_TARGET_CONCURRENCY=6$/mu,
   "new AWS environments must persist bounded source concurrency");
 assert.match(installScript,
-  /if ! grep -q '\^PC_SOURCE_TARGETS_PER_RUN=' "\$RUNNER_ENV_FILE"; then\s+set_env_value PC_SOURCE_TARGETS_PER_RUN 85/u,
+  /if ! grep -q '\^PC_SOURCE_TARGETS_PER_RUN=' "\$RUNNER_ENV_FILE"; then\s+set_env_value PC_SOURCE_TARGETS_PER_RUN 100/u,
   "repeat installs must add missing target throughput without overriding an explicit operator limit");
 assert.match(installScript,
   /if ! grep -q '\^PC_SOURCE_TARGET_CONCURRENCY=' "\$RUNNER_ENV_FILE"; then\s+set_env_value PC_SOURCE_TARGET_CONCURRENCY 6/u,
   "repeat installs must add missing concurrency without overriding an explicit operator limit");
 assert.match(installScript, /PC_SOURCE_TARGETS_PER_RUN_OVERRIDE/u,
   "repeat installs must provide an explicit operator-authorized legacy throughput upgrade path");
-assert.match(installScript, /configured_pc_source_targets_per_run < 81 \|\| configured_pc_source_targets_per_run > 128/u,
+assert.match(installScript, /configured_pc_source_targets_per_run < 100 \|\| configured_pc_source_targets_per_run > 128/u,
   "repeat installs must stop before restarting an undersized continuous collector");
-assert.match(configureScript, /existing_pc_source_targets_per_run >= 81/u,
+assert.match(configureScript, /existing_pc_source_targets_per_run >= 100/u,
   "interactive reconfiguration must replace an obsolete undersized default while preserving sufficient explicit settings");
-assert.match(configureScript, /pc_source_targets_per_run < 81 \|\| pc_source_targets_per_run > 128/u,
+assert.match(configureScript, /pc_source_targets_per_run < 100 \|\| pc_source_targets_per_run > 128/u,
   "interactive reconfiguration must enforce the current sustained target minimum");
 assert.match(configureScript, /pc_source_target_concurrency < 1 \|\| pc_source_target_concurrency > 8/u,
   "interactive reconfiguration must preserve valid operator concurrency");

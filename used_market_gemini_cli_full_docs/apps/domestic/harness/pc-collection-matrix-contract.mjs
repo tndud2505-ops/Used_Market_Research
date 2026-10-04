@@ -18,7 +18,7 @@ const publicProducts = publicPcProducts();
 const defaultCapacity = pcCollectionCapacityPlan();
 assert.equal(defaultCapacity.all_sources_sufficient, true,
   "the default per-run budget must cover hourly searches and the full daily model sweep");
-assert.equal(defaultCapacity.configured_targets_per_run, 85);
+assert.equal(defaultCapacity.configured_targets_per_run, 100);
 assert.ok(defaultCapacity.sources.every((source) => source.minimum_targets_per_run <= defaultCapacity.configured_targets_per_run));
 const legacyLowCapacity = pcCollectionCapacityPlan(12);
 assert.equal(legacyLowCapacity.all_sources_sufficient, false,

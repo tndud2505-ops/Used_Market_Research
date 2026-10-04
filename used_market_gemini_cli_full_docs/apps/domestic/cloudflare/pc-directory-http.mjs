@@ -328,7 +328,7 @@ export function pcCollectionTargetSetV2() {
   };
 }
 
-export function pcCollectionCapacityPlan(targetsPerRun = 85) {
+export function pcCollectionCapacityPlan(targetsPerRun = 100) {
   const configuredTargetsPerRun = Number(targetsPerRun);
   if (!Number.isInteger(configuredTargetsPerRun) || configuredTargetsPerRun < 1 || configuredTargetsPerRun > 128) {
     throw new TypeError("targetsPerRun must be an integer from 1 to 128");
