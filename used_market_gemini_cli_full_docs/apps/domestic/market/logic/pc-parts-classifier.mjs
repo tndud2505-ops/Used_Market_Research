@@ -154,7 +154,10 @@ function detectSpecialKind(text, evidence, title = text) {
     addEvidence(evidence, 'listing_kind', title, 'ACCESSORY_ONLY');
     return 'ACCESSORY_ONLY';
   }
-  const wanted = firstMatch(text, /(?:\[\s*(?:구매|삽니다|매입)\s*\]|대량\s*매입(?:합니다)?|(?:RTX|GTX|RX\s*\d{3,4}|그래픽\s*카드|\d{4,5}X(?:3D)?).{0,40}(?:삽니다|구합니다|구해요|구합니당|구매[합힙]니다|구매\s*원해요|매입합니(?:다|가)|사\s*봅니다|구해\s*봅니다|원합니다)|(?:^|[\s([{<])(?:삽니다|구합니다|구해요|구합니당|매입합니다|구매합니다|구매해요|구매원합니다|구매\s*원해요)(?=$|[\s)\]}>.,!?]))/iu);
+  // A standalone title label expresses intent; purchase history/receipts in
+  // ordinary sale descriptions do not. Keep verb matching for body-only intent.
+  const wanted = firstMatch(title, /(?:^|[\s([{<])(?:구매|구입)(?=$|\s*[)\]}>.,!?]\s*$)/iu)
+    || firstMatch(text, /(?:\[\s*(?:구매|구입|삽니다|매입)\s*\]|대량\s*매입(?:합니다)?|(?:RTX|GTX|RX\s*\d{3,4}|그래픽\s*카드|\d{4,5}X(?:3D)?).{0,40}(?:삽니다|구합니다|구입합니다|구해요|구합니[다드당]|구매[합힙]니다|구매\s*원해요|매입합니(?:다|가)|사\s*봅니다|구해\s*봅니다|원합니다)|(?:^|[\s([{<])(?:삽니다|구합니다|구입합니다|구해요|구합니[다드당]|매입합니다|구매합니다|구매해요|구매원합니다|구매\s*원해요)(?=$|[\s)\]}>.,!?]))/iu);
   if (wanted) {
     addEvidence(evidence, 'listing_kind', wanted.matchedText, 'WANTED');
     return 'WANTED';
@@ -380,11 +383,6 @@ function gpuModel(text, title = '') {
     const suffix = [rtx[2], rtx[3]].filter(Boolean).map((value) => value.toUpperCase()).join(' ');
     return { model: `RTX ${rtx[1]}${suffix ? ` ${suffix}` : ''}`, matchedText: rtx[0] };
   }
-  const bareRtx = text.match(/\b(30[5-9]0|40[5-9]0|50[5-9]0)\s*(TI)?\s*(SUPER)?\b/i);
-  if (bareRtx) {
-    const suffix = [bareRtx[2], bareRtx[3]].filter(Boolean).map((value) => value.toUpperCase()).join(' ');
-    return { model: `RTX ${bareRtx[1]}${suffix ? ` ${suffix}` : ''}`, matchedText: bareRtx[0] };
-  }
   const gtx = text.match(/\bGTX\s*(\d{3,4})(?:\s*(TI|SUPER))?\b/i);
   if (gtx) return { model: `GTX ${gtx[1]}${gtx[2] ? ` ${gtx[2].toUpperCase()}` : ''}`, matchedText: gtx[0] };
   const rx = text.match(/\bRX\s*(\d{3,4})(?:\s*(XTX|XT))?\b/i);
@@ -395,6 +393,13 @@ function gpuModel(text, title = '') {
   if (radeonVii) return { model: 'RADEON VII', matchedText: radeonVii[0] };
   const vega = text.match(/\b(?:RADEON\s*)?(?:RX\s*)?VEGA\s*(56|64)\b/i);
   if (vega) return { model: `RX VEGA ${vega[1]}`, matchedText: vega[0] };
+  // Explicit families beat incidental numbers in comparison/search keywords.
+  // Model-less titles such as "3060 12g" still retain their supported alias.
+  const bareRtx = text.match(/\b(30[5-9]0|40[5-9]0|50[5-9]0)\s*(TI)?\s*(SUPER)?\b/i);
+  if (bareRtx) {
+    const suffix = [bareRtx[2], bareRtx[3]].filter(Boolean).map((value) => value.toUpperCase()).join(' ');
+    return { model: `RTX ${bareRtx[1]}${suffix ? ` ${suffix}` : ''}`, matchedText: bareRtx[0] };
+  }
   return null;
 }
 

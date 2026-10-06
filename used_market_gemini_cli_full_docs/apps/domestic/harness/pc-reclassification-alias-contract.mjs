@@ -18,10 +18,21 @@ try {
     { title: '3060 12g', expected: 'gpu:nvidia:rtx-3060' },
     { title: '그래픽카드 판매합니다', description: '갤럭시 RTX 3060 12GB 단품 정상작동', expected: 'gpu:nvidia:rtx-3060' },
     { title: 'ASUS TUF RTX 3060 그래픽카드', expected: 'gpu:nvidia:rtx-3060' },
+    { site: 'danawa', seller_type: 'DEALER', title: '그래픽 카드 RX 560 4GB 128bit gddr5 Rx 560d VGA amd 시리즈 rx560 470 570 460 3060 RTX 중고', expected: 'gpu:amd:rx-560' },
+    { title: 'RX560 4GB 그래픽카드', description: '3060으로 업그레이드해서 판매합니다.', expected: 'gpu:amd:rx-560' },
+    { title: 'RTX3060 12GB 판매', description: '2024년 구매한 제품, 구매 영수증 있습니다.', expected: 'gpu:nvidia:rtx-3060' },
   ]) {
     const row = normalize({ ...item, price: 230000 });
     assert.equal(row.canonicalProductId, item.expected, item.title);
     assert.equal(row.statisticsEligible, true, `preserve valid component: ${item.title}`);
+  }
+  for (const title of ['rtx 3060 12gb 구입합니다. 25만원', 'RTX 3060 그래픽카드 구매',
+    'RTX 3060 12g 구합니드', 'RTX3060 구합니다', '[구입] RTX 3060',
+    '삼성 DDR4 16GB 구입합니다']) {
+    const row = normalize({ title, price: 250000 });
+    assert.equal(row.listingKind, 'WANTED', title);
+    assert.equal(row.priceEligible, false, title);
+    assert.equal(row.statisticsEligible, false, title);
   }
   for (const item of [
     { title: 'Asus tuf dash f15 fx516pm i7 rtx 3060', search_text: '게이밍노트북 에이수스tuf 노트북' },
