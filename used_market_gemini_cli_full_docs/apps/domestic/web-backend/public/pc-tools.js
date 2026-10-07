@@ -1,6 +1,6 @@
-import { SERIES, idOf, nameOf, naturalCompare, money, metricValue, soldMeanValue, metricPresentation, listedPriceRange, statsUnavailable, priceRecordIssue, analysisSelectionUrl, groupProducts, scopedStats, sourceStats, priceDateRange, shiftDate, modelPageItems, buildTotals, compactBuild, compatibility, validateBuild, dailySeries, percentChange, buildAnalysisSeries } from './pc-tools-core.mjs?v=danawa-display-v2';
-import { readJson, createPriceStore } from './pc-tools-data.mjs?v=timeline-v1';
-import { drawMarketChart as drawChart } from './pc-market-chart.mjs?v=timeline-v1';
+import { SERIES, idOf, nameOf, naturalCompare, money, metricValue, soldMeanValue, metricPresentation, listedPriceRange, statsUnavailable, priceRecordIssue, analysisSelectionUrl, groupProducts, scopedStats, sourceStats, priceDateRange, shiftDate, modelPageItems, buildTotals, compactBuild, compatibility, validateBuild, dailySeries, percentChange, buildAnalysisSeries } from './pc-tools-core.mjs?v=readable-chart-v2';
+import { readJson, createPriceStore } from './pc-tools-data.mjs?v=readable-chart-v2';
+import { drawMarketChart as drawChart } from './pc-market-chart.mjs?v=readable-chart-v2';
 import { createAdfitSlot } from './adfit.js?v=adfit-rail-v1';
 import { createContextualAffiliate } from './affiliate.js?v=ad-connection-help-v1';
 import { toolBrand, toolFilterSchema, toolFacetValues, toolFacetLabel, filterToolProducts, visibleSelection, toolScopeNote } from './pc-tools-catalog.mjs?v=parts-ux-v4';
@@ -17,8 +17,10 @@ const state = {
   entries: [], selectedId: '', selectedManufacturer: '',
   days: builder ? 30 : 60, range: priceDateRange(builder ? '' : shiftDate(new Date().toISOString().slice(0,10),-59)), chartDate: '', source: '', ready: false,
   historyPending: false,
+  priceKind: 'active',
+  priceKindExplicit: false,
 };
-let repaintTimer, statusTimer;
+let repaintTimer, statusTimer, pickerRepaintTimer;
 const displayPrice = (value, currency = 'KRW') => value == null ? '—' : money(value, currency);
 function quotePrice(value, currency = 'KRW') {
   // Keep fractional-won representatives on both sides of unit × quantity.
@@ -43,9 +45,13 @@ function pricePresentation(metric, seriesKey = 'active', currency = 'KRW', recor
   }
   return metricPresentation(metric, seriesKey, currency);
 }
-const scheduleRepaint = () => {
+const scheduleRepaint = id => {
+  if(!builder&&id&&id!==state.selectedId){
+    if($('#analysis-model-dialog')?.open&&pageGroups().some(group=>group.products.some(product=>idOf(product)===id))){clearTimeout(pickerRepaintTimer);pickerRepaintTimer=setTimeout(renderModelTable,80);}
+    return;
+  }
   clearTimeout(repaintTimer);
-  repaintTimer = setTimeout(() => { renderSummary(); renderModelTable(); if (builder) renderBuild(); else renderAnalysis(); }, 50);
+  repaintTimer = setTimeout(() => { renderSummary(); if(builder||$('#analysis-model-dialog')?.open)renderModelTable(); if (builder) renderBuild(); else renderAnalysis(); }, 50);
 };
 const prices = createPriceStore(scheduleRepaint, { dailyOnly: !builder });
 const overseasPrices = builder ? null : createPriceStore(scheduleRepaint, {
@@ -124,6 +130,7 @@ function groups() {
 function pageGroups() { return groups().slice((state.page - 1) * PAGE_SIZE, state.page * PAGE_SIZE); }
 function revealModel(id) {
   const product = state.byId.get(id); if (!product) return;
+  if(!builder)return;
   state.category = product.category_code; state.manufacturer = brandOf(product); state.generation = generationOf(product);
   state.capacity = ''; state.query = '';
   const rows = groups(), index = rows.findIndex(g => g.products.some(p => idOf(p) === id));
@@ -154,9 +161,9 @@ function renderControls() {
     controls.append(selectControl(label, index === 0 ? 'tool-generation' : 'tool-capacity',
       [['', `전체 ${label}`], ...options.map(value => [value, toolFacetLabel(key, value)])], index === 0 ? state.generation : state.capacity));
   });
-  controls.append(selectControl('정렬', 'tool-sort', [['name', '모델명순'], ['price', !builder && state.source === 'ebay' ? 'eBay 낮은가격순 (전체·USD)' : '판매중 낮은가격순 (전체)']], state.sort));
+  if(builder)controls.append(selectControl('정렬', 'tool-sort', [['name', '모델명순'], ['price','판매중 낮은가격순 (전체)']], state.sort));
   controls.append(action('조건 초기화', 'reset-filters', {}, 'tools-reset'));
-  $('#model-controls').replaceChildren(controls, el('p', 'tools-scope-note', toolScopeNote(state.category)));
+  $('#model-controls').replaceChildren(controls,...(builder||state.category?[el('p','tools-scope-note',toolScopeNote(state.category))]:[]));
   if (builder) $('#picker-title').textContent = `${labelOf(state.category)} 모델 선택`;
   else {
     const tabs = $('#analysis-categories'); tabs.replaceChildren();
@@ -214,6 +221,22 @@ function renderDanawaPrice(node, data, record, id, manufacturer = '') {
   node.title = `최근 30일 다나와 중고 등록가 · ${range.count}건 · 국내 통합 시세 합계와 별도 비교`;
 }
 function chosen(id, manufacturer = '') { return state.entries.some(e => e.id === id && e.manufacturer === manufacturer); }
+function pickerPrice(id) {
+  const store=state.source==='ebay'?overseasPrices:prices;
+  const record=store.get(id,60)||((id===state.selectedId)?analysisRecord(id):null);
+  if(!record||record.state==='loading')return {state:'loading',text:'기록 확인 중'};
+  if(record.state==='error'||statsUnavailable(record.data))return {state:'unknown',text:'조회 실패'};
+  const data=sourceStats(record.data,state.source),days=data?.methodology?.days||60;
+  const lines=buildAnalysisSeries(data,{source:state.source||'overall',allowedSourceIds:[state.source||'overall'],days,includeSparse:true});
+  const points=lines.flatMap(line=>line.points.map(point=>({...point,metricKey:line.metricKey}))).filter(point=>point.value!=null||point.lower!=null).sort((a,b)=>b.date.localeCompare(a.date)||a.metricKey.localeCompare(b.metricKey));
+  const point=points[0],currency=record.data?.methodology?.currency||'KRW';
+  return point?{state:'ready',text:point.value!=null?money(point.value,currency):`${money(point.lower,currency)}~${money(point.upper,currency)}`,detail:`${point.priceLabel} · ${point.date}`,date:point.date}:{state:'empty',text:'최근 60일 기록 없음'};
+}
+function loadPickerPrices() {
+  if(builder||!$('#analysis-model-dialog')?.open)return;
+  const store=state.source==='ebay'?overseasPrices:prices;
+  void store.load(pageGroups().flatMap(group=>group.products),60,'',{background:true});
+}
 function renderModelTable() {
   const container = $('#model-table');
   const priceStatus = $('#model-price-status');
@@ -233,7 +256,7 @@ function renderModelTable() {
   const focus = document.activeElement;
   const focusKey = container.contains(focus) ? { ...focus.dataset } : null;
   const visibleSeries = builder ? SERIES.filter(s => s.key !== 'confirmed_transactions') : [];
-  const { table, body } = makeTable(['모델', ...visibleSeries.map(s => s.label), ...(builder ? ['다나와 중고 표시가'] : []), builder ? '조합' : '보기']);
+  const { table, body } = makeTable(['모델', ...visibleSeries.map(s => s.label), ...(builder ? ['다나와 중고 표시가'] : ['최근 확인 가격']), builder ? '조합' : '보기']);
   for (const group of pageGroups()) {
     const product = group.products[0], id = idOf(product), record = chartRecord(id), data = record?.data;
     const row = el('tr', state.selectedId === id ? 'is-selected' : '');
@@ -252,14 +275,23 @@ function renderModelTable() {
     if (builder) {
       const cell = el('td', 'price danawa-price'); renderDanawaPrice(cell, data, record, id); row.append(cell);
     }
+    const priceInfo=builder?null:pickerPrice(id);
+    if(!builder&&priceInfo.state==='ready'){link.href=analysisSelectionUrl(new URL('/price-analysis.html',location.href).href,id);link.dataset.action='analyze';link.dataset.id=id;}
+    else if(!builder)name.replaceChildren(el('span','model-name-link',nameOf(product)));
+    if(!builder){const cell=el('td','analysis-model-price',priceInfo.text);if(priceInfo.detail)cell.append(el('small','',priceInfo.detail));cell.dataset.priceState=priceInfo.state;row.append(cell);}
     const control = el('td');
     const currentAnalysisModel = !builder && state.selectedId === id;
     const button = action(builder ? chosen(id) ? '선택됨' : '선택' : currentAnalysisModel ? '현재 모델' : '보기', builder ? 'choose' : 'analyze', { id });
     if (builder && chosen(id)) button.classList.add('primary');
     if (currentAnalysisModel) { button.disabled = true; button.setAttribute('aria-current', 'true'); }
-    control.append(button); row.append(control); body.append(row);
+    if(!builder&&priceInfo.state==='loading'){button.textContent='확인 중';button.disabled=true;}
+    if(!builder&&priceInfo.state==='empty'&&!currentAnalysisModel){
+      const listings=el('a','model-name-link','매물 보기');listings.href=link.href;control.append(listings);
+    }else if(!builder&&priceInfo.state==='unknown'&&!currentAnalysisModel){control.append(action('재조회','picker-retry'));}
+    else control.append(button);
+    row.append(control); body.append(row);
   }
-  if (!body.children.length) { const tr = el('tr'), td = el('td', 'tools-empty', '해당 조건의 모델이 없습니다.'); td.colSpan = visibleSeries.length + (builder ? 3 : 2); tr.append(td); body.append(tr); }
+  if (!body.children.length) { const tr = el('tr'), td = el('td', 'tools-empty', '해당 조건의 모델이 없습니다.'); td.colSpan = visibleSeries.length + 3; tr.append(td); body.append(tr); }
   container.replaceChildren(table);
   if (focusKey) {
     const replacement = [...container.querySelectorAll('button')].find(b => Object.entries(focusKey).every(([k, v]) => b.dataset[k] === v));
@@ -496,6 +528,25 @@ function analysisSources() {
     return { id, record, data, currency: id === 'ebay' ? 'USD' : 'KRW' };
   });
 }
+function renderLatestPrices(series,record) {
+  const container=$('#analysis-prices');if(!container)return;
+  container.replaceChildren();
+  const {table,body}=makeTable(['사이트','최근 확인 가격','기준 · 날짜']);table.className='market-latest-table';
+  const order=['joonggonara','bunjang','danawa','ebay'];
+  for(const line of [...series].sort((a,b)=>order.indexOf(a.id.split(':')[0])-order.indexOf(b.id.split(':')[0]))){
+    const point=line.points.filter(point=>point.value!=null||point.lower!=null).at(-1);if(!point)continue;
+    const row=el('tr'),price=point.value!=null?money(point.value,line.currency):`${money(point.lower,line.currency)}~${money(point.upper,line.currency)}`;
+    const basis=point.priceLabel||'등록 가격',count=basis.includes('1건')?'':` · ${point.sampleCount??'—'}건`;
+    row.append(el('th','',line.label.split(' · ')[0]),el('td','market-latest-amount',price),el('td','market-latest-detail',`${basis}${count} · ${point.date}`));body.append(row);
+  }
+  if(body.children.length){container.append(table);return;}
+  const message=!record||record.state==='loading'?'가격 기록을 확인하고 있습니다.':record.state==='error'||statsUnavailable(record.data)?'가격 기록을 불러오지 못했습니다.':'이 기간에 확인된 가격 기록이 없습니다.';
+  const empty=el('div','market-price-empty');empty.append(el('p','',message),action('다른 모델 찾기','open-analysis-picker'));
+  if(record?.state==='error'||statsUnavailable(record?.data))empty.append(action('다시 조회','retry'));
+  const product=state.byId.get(state.selectedId);if(product){const link=el('a','','이 모델 매물 보기');link.href=searchReturnPath(product);empty.append(link);}
+  if(record?.state==='ready'&&!statsUnavailable(record.data)&&state.days<priceDateRange(state.range.earliest,state.range.to).days)empty.append(action('이전 기록 확인','history-more'));
+  container.append(empty);
+}
 function renderAnalysis() {
   const record = analysisRecord(state.selectedId), base = record?.data;
   const data = sourceStats(scopedStats(base, state.selectedManufacturer), state.source);
@@ -511,11 +562,15 @@ function renderAnalysis() {
   });
   const coverage = $('#chart-coverage'); coverage.replaceChildren(); coverage.hidden = true;
   const sources = analysisSources();
-  const series = sources.flatMap(item => buildAnalysisSeries(statsUnavailable(item.data) ? null : item.data, {
-    source: item.id, allowedSourceIds: [item.id], days: item.data?.methodology?.days || state.days, sourceLabels: SOURCE_LABELS,
-  }).filter(line => ['active', 'sold'].includes(line.metricKey)).map(line => ({ ...line,
+  const availableSeries = sources.flatMap(item => buildAnalysisSeries(statsUnavailable(item.data) ? null : item.data, {
+    source: item.id, allowedSourceIds: [item.id], days: item.data?.methodology?.days || state.days, sourceLabels: SOURCE_LABELS,includeSparse:true,
+  }).map(line => ({ ...line,
     label: `${SOURCE_LABELS[item.id] || item.id} · ${line.priceBasis === 'listed-minimum' ? '중고 최저 표시가' : line.metricKey === 'sold' ? '판매완료 표시가' : '판매중'}`, currency: item.currency })));
+  if(!state.priceKindExplicit)state.priceKind=availableSeries.some(line=>line.metricKey==='active')?'active':availableSeries.some(line=>line.metricKey==='sold')?'sold':'active';
+  const series=availableSeries.filter(line=>line.metricKey===state.priceKind);
   const dates = [...new Set(series.flatMap(item => item.points.map(point => point.date)))].sort();
+  renderLatestPrices(series,record);
+  $('#chart-price-kind').value=state.priceKind;
   const totalDates = dates.length;
   const workspace = $('#analysis-workspace');
   if (workspace) workspace.dataset.chartPointCount = String(totalDates);
@@ -531,6 +586,7 @@ function renderAnalysis() {
   $('#price-chart').dataset.modelId = state.selectedId;
   $('#price-chart').dataset.priceState = !state.selectedId ? 'empty' : pending ? 'loading'
     : series.length ? 'ready' : failedSource ? 'error' : sparsePrices ? 'insufficient' : 'unavailable';
+  $('#price-chart').hidden=!series.length;
   const issue = !state.selectedId ? '선택 조건에 맞는 모델이 없습니다.'
     : failedSource ? `${SOURCE_LABELS[failedSource.id] || failedSource.id} · ${priceRecordIssue(failedSource.record, failedSource.data)}`
     : priceRecordIssue(record, data);
@@ -553,7 +609,7 @@ function renderAnalysis() {
   const historyStatus=$('#chart-history-status');
   if(historyStatus)historyStatus.textContent=state.historyPending?'이전 기록 불러오는 중':'';
   renderAnalysisContext(record, data, currency);
-  drawChart($('#price-chart'), series, { label: `${modelName} 가격 추이`, currency, identity: `${state.selectedId}:${state.selectedManufacturer}:${state.source}:${window.to}`,
+  drawChart($('#price-chart'), series, { label: `${modelName} 가격 추이`, currency, identity: `${state.selectedId}:${state.selectedManufacturer}:${state.source}:${state.priceKind}:${window.to}`,
     onLoadEarlier:loadEarlierPrices,loadingEarlier:state.historyPending,
     canLoadEarlier:state.days<priceDateRange(window.earliest,window.to).days&&!record?.historyError,
     onViewChange:range=>{if(windowStatus)windowStatus.textContent=`${range.from} ~ ${range.to}`;syncAnalysisUrl(range);}
@@ -587,7 +643,7 @@ function renderAnalysisContext(record, data, currency) {
 
 function render() { renderControls(); renderSummary(); renderModelTable(); if (builder) renderBuild(); else renderAnalysis(); }
 function refreshPrices() {
-  const targets = state.sort === 'price' ? currentProducts() : builder && $('#builder-model-dialog')?.open ? pageGroups().flatMap(g => g.products) : [];
+  const targets = builder&&state.sort === 'price' ? currentProducts() : builder && $('#builder-model-dialog')?.open ? pageGroups().flatMap(g => g.products) : [];
   const selected = state.byId.get(state.selectedId);
   const contextProduct = selected?.category_code === state.category ? selected : null;
   void affiliate?.update({ hasResults: state.ready && currentProducts().length > 0,
@@ -598,8 +654,10 @@ function refreshPrices() {
   const asOf = requestedPriceAsOf();
   void prices.load(overseas ? [] : targets, builder ? 30 : state.days, asOf);
   if (!builder) void overseasPrices.load(overseas ? targets : [], state.days, asOf);
+  if(!builder)loadPickerPrices();
 }
 function selectCategory(category) {
+  if(!builder){state.category=category;state.manufacturer='';state.generation='';state.capacity='';state.query='';state.page=1;renderControls();renderModelTable();loadPickerPrices();return;}
   state.category = category; state.manufacturer = ''; state.generation = ''; state.capacity = ''; state.query = ''; state.page = 1; state.selectedManufacturer = ''; state.chartDate = ''; resetChartView();
   state.source = '';
   if (builder) {
@@ -618,9 +676,14 @@ function selectCategory(category) {
 }
 document.addEventListener('click', event => {
   const button = event.target.closest('[data-action]'); if (!button || !state.ready) return;
+  if(button.tagName==='A'&&(event.ctrlKey||event.metaKey||event.shiftKey||event.altKey))return;
   const { action: type, id, manufacturer = '', key, category } = button.dataset;
+  if(type==='analyze')event.preventDefault();
   if (type === 'open-picker') { openModelPicker(); refreshPrices(); return; }
-  if (type === 'open-analysis-picker') { $('#analysis-model-dialog').showModal(); $('#analysis-picker-title').focus({ preventScroll: true }); refreshPrices(); return; }
+  if (type === 'open-analysis-picker') {
+    state.category='';state.manufacturer='';state.generation='';state.capacity='';state.query='';state.page=1;
+    renderControls();renderModelTable();$('#analysis-model-dialog').showModal();$('#tool-query').focus({ preventScroll: true });loadPickerPrices();return;
+  }
   if (type === 'close-analysis-picker') { $('#analysis-model-dialog').close(); return; }
   if (type === 'close-picker') { closeModelPicker(); return; }
   if (type === 'save-build') {
@@ -638,6 +701,9 @@ document.addEventListener('click', event => {
     resetChartView();return;
   }
   if(type==='history-retry'){loadEarlierPrices({retry:true});return;}
+  if(type==='history-more'){loadEarlierPrices();return;}
+  if(type==='picker-retry'){loadPickerPrices();return;}
+  if(type==='chart-pan'||type==='chart-zoom'){$('#price-chart').dispatchEvent(new CustomEvent(type,{detail:button.dataset.direction}));return;}
   if (type === 'quantity-step') {
     const entry = state.entries.find(e => e.id === id), delta = Number(button.dataset.quantityStep);
     if (!entry || ![-1,1].includes(delta) || entry.quantity + delta < 1 || entry.quantity + delta > 16) return;
@@ -657,7 +723,7 @@ document.addEventListener('click', event => {
     state.page = Math.max(1, Math.min(Math.ceil(groups().length / PAGE_SIZE) || 1, Number(button.dataset.page)));
     renderModelTable(); $('#model-table').scrollTop = 0;
     // 전체 가격 정렬은 이미 필터 결과 전부를 조회 중이므로 페이지 이동으로 다시 시작하지 않습니다.
-    if (state.sort !== 'price') refreshPrices();
+    if(!builder)loadPickerPrices();else if (state.sort !== 'price') refreshPrices();
     return;
   }
   if (type === 'choose') {
@@ -670,6 +736,7 @@ document.addEventListener('click', event => {
   if (type === 'remove') { state.entries = state.entries.filter(e => e.id !== id); persistBuild(); status(''); }
   if (type === 'analyze') {
     $('#analysis-model-dialog')?.close();
+    state.priceKind='active';state.priceKindExplicit=false;
     state.selectedId = id; state.selectedManufacturer = manufacturer; state.chartDate = ''; resetHistoryWindow();resetChartView();
     syncAnalysisUrl();
   }
@@ -679,6 +746,7 @@ document.addEventListener('click', event => {
 document.addEventListener('change', event => {
   const target = event.target;
   if (target.id === 'chart-sources') { state.source = target.value; state.page = 1; resetHistoryWindow();resetChartView(); syncAnalysisUrl(); renderControls(); renderModelTable(); renderAnalysis(); refreshPrices(); return; }
+  if(target.id==='chart-price-kind'){state.priceKind=target.value==='sold'?'sold':'active';state.priceKindExplicit=true;renderAnalysis();return;}
   if (target.dataset.quantity) {
     const entry = state.entries.find(e => e.id === target.dataset.quantity); const n = Number(target.value);
     if (!entry) return;
@@ -701,13 +769,7 @@ function resetToolFilters() {
 }
 function applyModelFilters({ renderFilterControls = true } = {}) {
   state.page = 1;
-  if (!builder) {
-    const previousId=state.selectedId;
-    state.selectedId = visibleSelection(currentProducts(), state.selectedId);
-    if(previousId!==state.selectedId)resetHistoryWindow();
-    state.selectedManufacturer = ''; state.chartDate = ''; resetChartView();
-    syncAnalysisUrl();
-  }
+  if(!builder){if(renderFilterControls)renderControls();renderModelTable();loadPickerPrices();return;}
   if (renderFilterControls) renderControls();
   renderSummary(); renderModelTable(); if (!builder) renderAnalysis(); refreshPrices();
 }
@@ -796,9 +858,4 @@ for (const dialog of document.querySelectorAll('#builder-model-dialog, #analysis
 void start();
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible' && state.ready) refreshPrices();
-});
-let resizeFrame;
-window.addEventListener('resize', () => {
-  if (builder || !state.ready) return;
-  cancelAnimationFrame(resizeFrame); resizeFrame = requestAnimationFrame(renderAnalysis);
 });

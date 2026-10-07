@@ -177,7 +177,7 @@ const ANALYSIS_SOURCE_COLORS = Object.freeze({
   ebay: { active: '#7c3aed', sold: '#0e7490' },
 });
 export function buildAnalysisSeries(data, {
-  source = '', allowedSourceIds = [], days = 30, sourceLabels = {}
+  source = '', allowedSourceIds = [], days = 30, sourceLabels = {}, includeSparse = false
 } = {}) {
   if (!data) return [];
   const allowed = new Set((Array.isArray(allowedSourceIds) ? allowedSourceIds : [])
@@ -187,8 +187,8 @@ export function buildAnalysisSeries(data, {
   const appendPair = (scope, scopeId, scopeLabel, colors) => {
     for (const metric of SERIES.slice(0, 2)) {
       const listedMinimum = scopeId === 'danawa' && metric.key === 'active';
-      const points = dailySeries(scope, metric.key, days, { listedMinimum });
-      if (!points.some(point => point.value != null)) continue;
+      const points = dailySeries(scope, metric.key, days, { listedMinimum, includeSparse });
+      if (!points.some(point => point.value != null || point.lower != null)) continue;
       output.push({
         id: `${scopeId}:${metric.key}`,
         key: metric.key,
@@ -362,7 +362,7 @@ export function compactBuild(input, products, categories) {
     return entry;
   });
 }
-export function dailySeries(data, key, days = 30, { listedMinimum = false } = {}) {
+export function dailySeries(data, key, days = 30, { listedMinimum = false, includeSparse = false } = {}) {
   const rows = Array.isArray(data?.daily) ? data.daily : [];
   const latestPublished = String(data?.availability?.status || '').toUpperCase() === 'LAST_PUBLISHED';
   const date = String((latestPublished ? data?.published_window?.to : '') || data?.window?.to || data?.as_of || rows.at(-1)?.date || rows.at(-1)?.stat_date || '').slice(0, 10);
@@ -373,9 +373,21 @@ export function dailySeries(data, key, days = 30, { listedMinimum = false } = {}
   return Array.from({ length: days }, (_, i) => {
     const day = new Date(start + i * 86400000).toISOString().slice(0, 10);
     const metric = map.get(day);
-    return { date: day, value: listedMinimum ? listedPriceRange(metric)?.minimum ?? null
+    const point = { date: day, value: listedMinimum ? listedPriceRange(metric)?.minimum ?? null
       : key === 'sold' ? soldMeanValue(metric) ?? metricValue(metric) : metricValue(metric),
       sampleCount: Number.isInteger(metric?.sample_count) && metric.sample_count >= 0 && metric.aggregate_incomplete !== true ? metric.sample_count : null };
+    if (includeSparse) {
+      const range = listedPriceRange(metric);
+      point.priceLabel = listedMinimum ? '중고 최저 표시가' : key === 'sold'
+        ? soldMeanValue(metric) != null ? '판매완료 표시가 평균' : '판매완료 표시가 중앙값'
+        : metricPresentation(metric).label;
+      if (!listedMinimum && key === 'active' && point.value == null && range && range.count < 3) {
+        point.priceLabel = range.count === 1 ? '등록가 1건' : '등록가 범위';
+        if (range.minimum === range.maximum) point.value = range.minimum;
+        else { point.lower=range.minimum;point.upper=range.maximum; }
+      }
+    }
+    return point;
   });
 }
 export function percentChange(points) {

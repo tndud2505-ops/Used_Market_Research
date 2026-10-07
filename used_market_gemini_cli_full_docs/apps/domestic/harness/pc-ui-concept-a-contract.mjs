@@ -25,16 +25,16 @@ test('all six pages use search-first v2 assets, unique IDs and common navigation
   }
 });
 test('restored UI assets use a fresh cache identity while data and calculation versions remain current', () => {
-  assert.ok(script.includes('pc-tools-core.mjs?v=danawa-display-v2'));
+  assert.match(script,/pc-tools-core\.mjs\?v=[\w-]+/);
   assert.ok(script.includes('pc-tools-catalog.mjs?v=parts-ux-v4'));
   assert.match(script, /pc-tools-data\.mjs\?v=[\w-]+/);
-  assert.match(script, /pc-market-chart\.mjs\?v=timeline-v1/);
+  assert.match(script, /pc-market-chart\.mjs\?v=[\w-]+/);
   assert.match(read('index.html'), /app\.js\?v=[\w-]+/);
   assert.match(read('index.html'), /search-controls\.css\?v=search-modal-v4/);
   assert.match(read('computer-builder.html'), /pc-tools\.js\?v=[\w-]+/);
   assert.match(read('price-analysis.html'), /pc-tools\.js\?v=[\w-]+/);
 });
-test('analysis has one chart workspace with both price kinds', () => {
+test('analysis shows recent prices and separates the two price kinds in one chart', () => {
   const html=read('price-analysis.html');
   assert.match(html,/id="analysis-chart-pane"/);
   assert.doesNotMatch(html,/id="analysis-table-pane"|data-action="analysis-pane"|id="chart-metric"/);
@@ -42,7 +42,8 @@ test('analysis has one chart workspace with both price kinds', () => {
   assert.ok(html.includes('id="chart-window-status"'));
   assert.doesNotMatch(html,/id="chart-(indicators|average-enabled|average-period|samples-enabled)"/);
   assert.doesNotMatch(html,/data-action="chart-period"|id="chart-custom-range"|data-days=/);
-  assert.match(script,/\['active', 'sold'\]\.includes\(line\.metricKey\)/);
+  assert.ok(html.includes('id="analysis-prices"'));assert.ok(html.includes('id="chart-price-kind"'));
+  assert.match(script,/line\.metricKey===state\.priceKind/);
 });
 
 test('analysis uses KSTOCK window geometry without scrollable plot or separate sliders', () => {
@@ -127,7 +128,7 @@ function setup({ builder = false, source = '', manufacturer = '', storageFails =
     document: { createElement: tag => new Node(tag), createTextNode: text => Object.assign(new Node(), { textContent: text }) },
     localStorage: { setItem(key, value) { if (storageFails) throw new Error('quota'); stored.set(key, value); } },
     location: { href: 'https://example.test/computer-builder.html' }, history: { replaceState: (...args) => historyCalls.push(args) },
-    prices: { get: () => selectedRecord }, overseasPrices: { get: () => selectedRecord },
+    prices: { get: () => selectedRecord, getAvailable:()=>selectedRecord }, overseasPrices: { get: () => selectedRecord, getAvailable:()=>selectedRecord },
     displayPrice: value => value == null ? '—' : core.money(value), clearTimeout() {},
   });
   const factories = script.slice(script.indexOf('const el = '), script.indexOf('function status('));
@@ -173,6 +174,20 @@ test('models outside public listings have no false link', () => {
 test('empty model selection clears the context instead of retaining another model price', () => {
   const t = setup(); t.state.selectedId = ''; t.context.renderAnalysisContext(null, null, 'KRW');
   assert.equal(t.nodes.get('#analysis-listing-link').hidden, true);
+});
+test('analysis browsing and category filters do not change the chosen chart or silently narrow its facets',()=>{
+  const t=setup(),selected=t.state.selectedId;
+  t.state.manufacturer='';t.state.generation='';t.state.capacity='';
+  t.context.revealModel(selected);assert.equal(t.state.manufacturer,'');assert.equal(t.state.generation,'');
+  t.context.renderControls=()=>{};t.context.renderModelTable=()=>{};t.context.loadPickerPrices=()=>{};
+  t.context.selectCategory('CPU');assert.equal(t.state.selectedId,selected);assert.equal(t.state.category,'CPU');
+});
+test('picker reports genuine sparse history and keeps empty history distinct from a failed lookup',()=>{
+  const root={canonical_product_id:product.canonical_product_id,methodology:{days:60,currency:'KRW'},window:{to:'2026-10-07'},daily:[{date:'2026-10-06',active:{sample_count:1,min:45000,max:45000,mean:null,median:null}}]};
+  const t=setup({record:{state:'ready',data:root}}),info=t.context.pickerPrice(product.canonical_product_id);
+  assert.equal(info.state,'ready');assert.equal(info.text,'45,000원');assert.match(info.detail,/등록가 1건.*2026-10-06/);
+  const empty=setup({record:{state:'ready',data:{...root,daily:[]}}});assert.equal(empty.context.pickerPrice(product.canonical_product_id).state,'empty');
+  const failed=setup({record:{state:'error',error:'HTTP503'}});assert.equal(failed.context.pickerPrice(product.canonical_product_id).state,'unknown');
 });
 test('footer totals align price columns and retain quantity-adjusted prices without empty coverage counts', () => {
   const t = setup({ builder: true });

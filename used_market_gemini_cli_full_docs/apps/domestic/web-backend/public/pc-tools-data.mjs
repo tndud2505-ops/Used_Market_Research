@@ -1,4 +1,4 @@
-import { idOf, coherentStats } from './pc-tools-core.mjs?v=danawa-display-v2';
+import { idOf, coherentStats } from './pc-tools-core.mjs?v=readable-chart-v2';
 
 export async function readJson(url, signal, onStatus) {
   const request = new AbortController();
@@ -65,13 +65,14 @@ export function createPriceStore(onChange, options = {}) {
         const id = idOf(unique[offset++]);
         const key = keyOf(id, days, asOf);
         const previous = cache.get(key);
+        if(background&&previous?.state==='loading')continue;
         if (previous?.state === 'ready' && Date.now() - previous.loadedAt < 300000) continue;
         const params = new URLSearchParams({ days: String(days), market_pool: marketPool, condition, currency });
         if (options.dailyOnly) params.set('view','daily');
         if (asOf) params.set('as_of', asOf);
         const diagnostics = { requestUrl: `/api/products/${encodeURIComponent(id)}/price-stats?${params}`, httpStatus: null };
         cache.set(key, { state: 'loading', ...diagnostics });
-        onChange();
+        onChange(id);
         try {
           const data = await readJson(diagnostics.requestUrl, signal, code => { diagnostics.httpStatus = code; });
           if (signal.aborted) break;
@@ -92,12 +93,11 @@ export function createPriceStore(onChange, options = {}) {
           if (signal.aborted) { if (current === generation && cache.get(key)?.state === 'loading') cache.delete(key); break; }
           cache.set(key, { state: 'error', error: error.message, errorCode: error.code || '', ...diagnostics, httpStatus: error.httpStatus || diagnostics.httpStatus });
         }
-        if (current === generation) onChange();
+        if (current === generation) onChange(id);
       }
     };
     await Promise.all(Array.from({ length: Math.min(4, unique.length) }, worker));
     backgroundControllers.delete(requestController);
-    if (current === generation) onChange();
   }
   return { get, getAvailable, load, clear: () => { controller.abort();for(const pending of backgroundControllers)pending.abort();backgroundControllers.clear();generation++; cache.clear(); } };
 }

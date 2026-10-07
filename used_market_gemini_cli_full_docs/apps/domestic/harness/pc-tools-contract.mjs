@@ -64,6 +64,15 @@ assert.equal(points[1].sampleCount,null,'missing daily samples are not zero');
 assert.equal(movingAverage(points,3)[2].value,105,'calendar average excludes missing price days');
 assert.equal(movingAverage(points,3)[1].value,null,'average does not invent a missing daily observation');
 assert.equal(points[1].value, null, 'missing dates must be gaps, never zero or interpolated');
+const sparseDaily={window:{to:'2026-10-07'},daily:[{date:'2026-10-06',active:{sample_count:1,min:40000,max:40000,mean:null,median:null}},
+  {date:'2026-10-07',active:{sample_count:2,min:40000,max:60000,mean:null,median:null}}]};
+const sparsePoints=dailySeries(sparseDaily,'active',2,{includeSparse:true});
+assert.equal(sparsePoints[0].value,40000);assert.equal(sparsePoints[0].priceLabel,'등록가 1건');
+assert.equal(sparsePoints[1].value,null,'two observed registration prices must not become a fabricated mean');
+assert.equal(sparsePoints[1].lower,40000);assert.equal(sparsePoints[1].upper,60000);
+assert.ok(buildMarketView([{points:sparsePoints}],sparsePoints.map(point=>point.date),2,0,900,400));
+const medianOnly=dailySeries({window:{to:'2026-10-07'},daily:[{date:'2026-10-07',active:{sample_count:6,min:40000,max:60000,mean:null,median:50000}}]},'active',1,{includeSparse:true})[0];
+assert.equal(medianOnly.value,50000);assert.equal(medianOnly.priceLabel,'중앙값','a median fallback must not be presented as an average');
 assert.ok(Math.abs(percentChange(points) - 10) < 0.00001);
 assert.equal(overviewIndex([data], 'active', 3).points[1].value, null);
 assert.equal(overviewIndex([data], 'sold', 3).covered, 0);
@@ -253,17 +262,19 @@ try {
 
 // Extending the chart must not cancel prices still loading in the model table.
 try {
-  const pending=new Map();
+  const pending=new Map();let calls=0;
   const response=(id,days)=>new Response(JSON.stringify({data:{canonical_product_id:id,
     methodology:{days,market_pool:'KR_DOMESTIC_USED',condition:'USED_WORKING',currency:'KRW'},
     active:{sample_count:5,min:90,max:110,mean:100},daily:[],by_source:[]}}),{status:200});
   globalThis.fetch=(input,{signal})=>new Promise((resolve,reject)=>{
+    calls++;
     const url=new URL(input,'https://example.test');
     pending.set(`${decodeURIComponent(url.pathname.split('/')[3])}:${url.searchParams.get('days')}`,{resolve,signal});
     signal.addEventListener('abort',()=>reject(new DOMException('Aborted','AbortError')),{once:true});
   });
   const store=createPriceStore(()=>{});
   const main=store.load([ram],30),history=store.load([cpu],60,'',{background:true});
+  await store.load([cpu],60,'',{background:true});assert.equal(calls,2,'a visible-page refresh reuses a pending request instead of duplicating it');
   assert.equal(pending.get('ram:30').signal.aborted,false,'background history leaves the model-table request active');
   pending.get('ram:30').resolve(response('ram',30));pending.get('cpu:60').resolve(response('cpu',60));
   await Promise.all([main,history]);
@@ -284,7 +295,7 @@ assert.equal(marketLinePath(emptyWindowPoints.slice(-10),gapView.x,gapView.y),''
 const savedDom=Object.fromEntries(['document','ResizeObserver','requestAnimationFrame','cancelAnimationFrame'].map(key=>[key,globalThis[key]]));
 class ChartNode {
   constructor(tag){this.tag=tag;this.children=[];this.dataset={};this.attributes={};this.events={};this.clientWidth=900;this.clientHeight=400;this.offsetWidth=220;this.offsetHeight=120;this.style={setProperty(){}};}
-  append(...items){this.children.push(...items);} prepend(item){this.children.unshift(item);} replaceChildren(...items){this.children=items;}
+  append(...items){this.children.push(...items);} prepend(item){this.children.unshift(item);} replaceChildren(...items){this.children=items;this.replaceCount=(this.replaceCount||0)+1;}
   setAttribute(key,value){this.attributes[key]=String(value);} addEventListener(key,fn){this.events[key]=fn;} removeEventListener(key){delete this.events[key];}
   setPointerCapture(){} hasPointerCapture(){return true;} releasePointerCapture(){} focus(){} contains(){return true;}
   getBoundingClientRect(){return {left:0,top:0,width:this.clientWidth,height:this.clientHeight};}
@@ -322,5 +333,28 @@ try{
   chart.emit('chart-reset');assert.equal(Number(updatedSvg.dataset.offset),0);assert.equal(Number(updatedSvg.dataset.visibleCount),initialCount);
   for(let i=0;i<16;i++)updatedSvg.emit('keydown',{key:'-'});
   assert.ok(olderRequests>0,'zooming out to the earliest loaded edge requests earlier history');
+  const frames=new Map();let frameId=0;
+  globalThis.requestAnimationFrame=fn=>{frames.set(++frameId,fn);return frameId;};globalThis.cancelAnimationFrame=id=>frames.delete(id);
+  const longChart=new ChartNode('div'),longTimeline=Array.from({length:730},(_,i)=>({date:shiftDate('2026-10-07',i-729),value:100+i,sampleCount:5}));
+  drawMarketChart(longChart,[{...line,points:longTimeline}],{identity:'long'});
+  const longSvg=longChart.children[1].children[0],plot=longSvg.children[0],before=plot.replaceCount;
+  longSvg.emit('pointerdown');for(let i=0;i<60;i++)longSvg.emit('pointermove',{clientX:510+i*3});
+  assert.equal(frames.size,1,'sixty drag events schedule one paint for the next browser frame');
+  assert.equal(plot.replaceCount,before,'drag input does not synchronously rebuild SVG nodes');
+  [...frames.values()][0]();frames.clear();assert.equal(plot.replaceCount,before+1);
+  longSvg.emit('pointerup',{clientX:687});
+  const rangeChart=new ChartNode('div'),rangeTimeline=longTimeline.map(point=>({...point,value:null,lower:point.value,upper:point.value+50,sampleCount:2}));
+  drawMarketChart(rangeChart,Array.from({length:6},(_,i)=>({...line,id:`range-${i}`,points:rangeTimeline})),{identity:'dense-ranges'});
+  const rangeSvg=rangeChart.children[1].children[0];
+  for(let i=0;i<24;i++)rangeSvg.emit('keydown',{key:'-'});
+  [...frames.values()].forEach(fn=>fn());frames.clear();
+  const rangeGroups=rangeSvg.children[0].children.filter(node=>node.tag==='g'&&node.attributes['data-series']);
+  assert.equal(rangeGroups.length,6);
+  for(const group of rangeGroups){
+    const paths=group.children.filter(node=>node.attributes['data-range-series']);
+    assert.equal(paths.length,1,'all daily ranges use one SVG node per series');
+    assert.equal((paths[0].attributes.d.match(/M/g)||[]).length,730,'dense rendering preserves every observed range');
+    assert.equal(group.children.filter(node=>node.tag==='line').length,0);
+  }
 }finally{for(const [key,value] of Object.entries(savedDom))if(value===undefined)delete globalThis[key];else globalThis[key]=value;}
 console.log('PC tools: grouping, independent prices, partial sums, quantity, compatibility, storage validation and chart gaps passed');

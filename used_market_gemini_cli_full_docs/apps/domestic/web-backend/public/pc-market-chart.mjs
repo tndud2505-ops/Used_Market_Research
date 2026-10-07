@@ -1,4 +1,4 @@
-import { money } from './pc-tools-core.mjs?v=price-clarity-v1';
+import { money } from './pc-tools-core.mjs?v=readable-chart-v2';
 
 // Ported from KSTOCK StockPriceChart.tsx (chart-clean-canvas, cf7cdca7d):
 // visible window/offset, price padding, nice ticks, date stride, wheel factors,
@@ -7,6 +7,7 @@ const views = new WeakMap(), cleanups = new WeakMap();
 const NS = 'http://www.w3.org/2000/svg';
 const clamp = (n, min, max) => Math.min(max, Math.max(min, n));
 const valid = value => typeof value === 'number' && Number.isFinite(value) && value > 0;
+const observed = point => valid(point.value) || (valid(point.lower) && valid(point.upper) && point.upper>=point.lower);
 const svgNode = (tag, attrs = {}, text = '') => {
   const node = document.createElementNS(NS, tag);
   for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, value);
@@ -61,25 +62,28 @@ export function buildMarketView(series, dates, count, offset, width, height, { a
   const end = dates.length - clamp(Math.round(offset), 0, maxOffset);
   const shownDates = dates.slice(Math.max(0, end - shownCount), end);
   const shownSet = new Set(shownDates);
-  const values = series.flatMap(line => [...line.points, ...(averagePeriod ? line.averages || movingAverage(line.points,averagePeriod) : [])].filter(point => shownSet.has(point.date) && valid(point.value)).map(point => point.value));
+  const priceValues = point => valid(point.value) ? [point.value] : observed(point) ? [point.lower,point.upper] : [];
+  const values = series.flatMap(line => [...line.points, ...(averagePeriod ? line.averages || movingAverage(line.points,averagePeriod) : [])].filter(point => shownSet.has(point.date)).flatMap(priceValues));
   const emptyViewport = !values.length;
   // A data gap still needs a navigable time axis. These values set its scale
   // only; points and readouts remain empty until an observed date is visible.
-  if (emptyViewport) values.push(...series.flatMap(line=>line.points.filter(point=>valid(point.value)).map(point=>point.value)));
+  if (emptyViewport) values.push(...series.flatMap(line=>line.points.flatMap(priceValues)));
   if (!values.length) return null;
   const pad = { left: 16, right: width < 480 ? 76 : 90, top: 26, bottom: 34 };
   // KSTOCK volume pane: shared dates, 17% height, 44–110px and an independent scale.
   const sampleHeight = showSamples ? Math.min(110, Math.max(44, height*.17)) : 0;
   const plotWidth = Math.max(1, width - pad.left - pad.right), plotHeight = Math.max(1, height - pad.top - pad.bottom - (showSamples ? sampleHeight+24 : 0));
   const sampleTop = pad.top+plotHeight+24, sampleBottom = sampleTop+sampleHeight;
-  const sampleTotals = shownDates.map(date=>series.reduce((sum,line)=>sum+(line.points.find(point=>point.date===date)?.sampleCount || 0),0));
+  const sampleMaps=showSamples?series.map(line=>line.pointsByDate||new Map(line.points.map(point=>[point.date,point]))):[];
+  const sampleTotals = showSamples?shownDates.map(date=>sampleMaps.reduce((sum,map)=>sum+(map.get(date)?.sampleCount || 0),0)):[];
   const maxSamples = Math.max(1,...sampleTotals), sampleY = value => sampleBottom-value/maxSamples*sampleHeight;
   const min = Math.min(...values), max = Math.max(...values);
   const margin = Math.max((max - min) * 0.07, max * 0.005, series[0]?.currency === 'USD' ? 0.01 : 1);
   const scaleMin = Math.max(0, min - margin), scaleMax = max + margin, range = scaleMax - scaleMin;
   const y = value => pad.top + (scaleMax - value) / range * plotHeight;
   const step = plotWidth / Math.max(1, shownDates.length);
-  const x = date => pad.left + step * shownDates.indexOf(date) + step / 2;
+  const dateIndices = new Map(shownDates.map((date,index)=>[date,index]));
+  const x = date => pad.left + step * dateIndices.get(date) + step / 2;
   const rawTickStep = range / Math.max(2, Math.floor(plotHeight / 68));
   const magnitude = 10 ** Math.floor(Math.log10(rawTickStep));
   const tickStep = ([1, 2, 2.5, 5, 10].find(value => value * magnitude >= rawTickStep) ?? 10) * magnitude;
@@ -108,8 +112,9 @@ export function drawMarketChart(container, input, options = {}) {
     color: line.id.startsWith('bunjang:') ? '#c73546'
       : line.id.startsWith('danawa:') ? '#a66b12'
       : /^(joonggonara|daangn):/.test(line.id) ? '#346fca' : '#7446be',
-    points: [...line.points].sort((a,b) => a.date.localeCompare(b.date))
-  })).filter(line => line.currency === currency && line.points.some(point => valid(point.value)));
+    points: [...line.points].sort((a,b) => a.date.localeCompare(b.date)),
+    pointsByDate:new Map(line.points.map(point=>[point.date,point]))
+  })).filter(line => line.currency === currency && line.points.some(observed));
   const sourceOrder = ['joonggonara', 'bunjang', 'danawa', 'ebay'];
   series.sort((a,b) => (sourceOrder.indexOf(a.sourceId)+1 || 99)-(sourceOrder.indexOf(b.sourceId)+1 || 99));
   for (const line of series) line.averages = averagePeriod ? movingAverage(line.points,averagePeriod) : [];
@@ -119,7 +124,8 @@ export function drawMarketChart(container, input, options = {}) {
       : state === 'insufficient' ? '대표가격 표본 부족' : '가격 자료 없음'));
     return;
   }
-  const dates = [...new Set(series.flatMap(line => line.points.map(point => point.date)))].sort();
+  const measuredDates=[...new Set(series.flatMap(line=>line.points.filter(observed).map(point=>point.date)))].sort();
+  const dates = [...new Set(series.flatMap(line => line.points.map(point => point.date)))].sort().filter(date=>date>=measuredDates[0]&&date<=measuredDates.at(-1));
   let view = views.get(container);
   if (!view || view.identity !== identity) view = { identity, count: responsiveDateCount(container.clientWidth), spacing: 18, offset: 0, hidden: new Set() };
   views.set(container, view);
@@ -148,13 +154,13 @@ export function drawMarketChart(container, input, options = {}) {
   }
   if (averagePeriod) summary.append(node('span','market-average-legend',`${averagePeriod}일 평균`));
   const stage = node('div', 'market-chart-stage');
-  const svg = svgNode('svg', { tabindex: 0, role: 'group', 'aria-roledescription': '가격 차트', 'aria-label': `${label}. 드래그: 좌우 이동, 휠·핀치: 확대·축소, 좌우 키: 날짜, Home: 최근으로, Escape: 선택 해제` });
+  const svg = svgNode('svg', { tabindex: 0, role: 'group', 'aria-roledescription': '가격 차트', 'aria-label': `${label}. 드래그: 좌우 이동, Ctrl+휠·핀치: 확대·축소, 좌우 키: 날짜, Home: 최근으로, Escape: 선택 해제` });
   const plot = svgNode('g'), cursor = svgNode('g', { 'pointer-events': 'none' }); svg.append(plot, cursor);
   const readout = node('div', 'market-chart-readout'); readout.hidden = true; readout.setAttribute('role', 'dialog'); readout.setAttribute('aria-label', '날짜별 가격');
-  const note = node('p', 'market-chart-note', '점선 연결 구간은 가격 기록이 없는 날짜입니다.');
+  const note = node('p', 'market-chart-note', '점선은 가격 기록 사이의 간격입니다.');
   if (series.some(line => line.metricKey === 'sold')) note.append(node('span', '', '판매완료 표시가는 실제 체결가와 다를 수 있습니다.'));
   stage.append(svg, readout); container.append(summary, stage, note);
-  let geometry, width, height, drag = null, activeIndex = dates.length - 1, frame, pinch = null;
+  let geometry, width, height, drag = null, activeIndex = dates.length - 1, frame, pinch = null, shownDate=null;
   const pointers = new Map();
   const finishInteraction=()=>{
     view.interacting=pointers.size>0;
@@ -162,9 +168,11 @@ export function drawMarketChart(container, input, options = {}) {
   };
   const requestEarlier = () => { if (canLoadEarlier && !loadingEarlier) onLoadEarlier?.(); };
   const visible = () => series.filter(line => !view.hidden.has(line.id));
-  const clearCursor = () => { cursor.replaceChildren(); readout.hidden = true; };
+  const clearCursor = () => { cursor.replaceChildren(); readout.hidden = true;shownDate=null; };
   function show(date) {
     if (!geometry || !geometry.shownSet.has(date)) { clearCursor(); return; }
+    if(shownDate===date&&!readout.hidden)return;
+    shownDate=date;
     activeIndex = dates.indexOf(date); cursor.replaceChildren();
     const heading = node('div', 'market-tooltip-heading'), time = node('time', '', date.slice(2).replaceAll('-', '.'));
     time.dateTime = date;
@@ -173,36 +181,32 @@ export function drawMarketChart(container, input, options = {}) {
     heading.append(time, close);
     const values = node('table', 'market-tooltip-values'); values.setAttribute('aria-label', `${date} 사이트별 가격`);
     const head = node('thead'), headings = node('tr');
-    for (const text of ['사이트', '판매중', '판매완료 표시가']) { const cell = node('th', '', text); cell.scope = 'col'; headings.append(cell); }
+    for (const text of ['사이트', '가격', '표본']) { const cell = node('th', '', text); cell.scope = 'col'; headings.append(cell); }
     head.append(headings); const body = node('tbody'); values.append(head, body); readout.replaceChildren(heading, values);
     const { x, y, pad, plotHeight } = geometry;
     cursor.append(svgNode('line', { x1:x(date), x2:x(date), y1:pad.top, y2:showSamples ? geometry.sampleBottom : pad.top+plotHeight, class:'market-crosshair' }));
-    for (const sourceId of sourceGroups.keys()) {
-      const sourceLines = visible().filter(line => line.sourceId === sourceId);
-      if (!sourceLines.length) continue;
-      const row = node('tr'), caption = node('th', '', sourceLines[0].sourceLabel); caption.scope = 'row'; caption.style.color = sourceLines[0].color; row.append(caption);
-      for (const metric of ['active', 'sold']) {
-        const line = series.find(line => line.sourceId === sourceId && line.metricKey === metric);
+    for (const line of visible()) {
+        const point=line.pointsByDate.get(date);
+        if(!point||!observed(point))continue;
+        const row = node('tr'), caption = node('th', '', line.sourceLabel); caption.scope = 'row'; caption.style.color = line.color; row.append(caption);
         const cell = node('td', 'market-tooltip-value'); row.append(cell);
-        if (!line || view.hidden.has(line.id)) { cell.append(node('span', '', line ? '숨김' : '자료 없음')); continue; }
         cell.dataset.series = line.id;
-        const point = line.points.find(point => point.date === date), value = point?.value;
-        cell.append(node(valid(value) ? 'strong' : 'span', '', valid(value) ? money(value, currency) : '자료 없음'));
-        if (line.priceBasis === 'listed-minimum' && valid(value)) cell.append(node('small', '', '중고 최저 표시가'));
-        if (Number.isInteger(point?.sampleCount)) cell.append(node('small', '', `표본 ${point.sampleCount.toLocaleString('ko-KR')}건`));
+        const value=point.value;
+        cell.append(node('strong', '', valid(value) ? money(value,currency) : `${money(point.lower,currency)}~${money(point.upper,currency)}`));
+        cell.append(node('small','',point.priceLabel || (line.priceBasis==='listed-minimum'?'중고 최저 표시가':line.metricKey==='sold'?'판매완료 표시가':'판매중 가격')));
+        row.append(node('td','',Number.isInteger(point.sampleCount)?`${point.sampleCount.toLocaleString('ko-KR')}건`:'—'));
         if (averagePeriod) { const average = line.averages.find(point=>point.date===date); cell.append(node('small','',`${averagePeriod}일 평균 ${valid(average?.value) ? money(average.value,currency) : '자료 부족'}`)); }
-        if (valid(value)) cursor.append(svgNode('circle', {cx:x(date), cy:y(value), r:4.5, fill:metric === 'sold' ? 'white' : line.color, stroke:line.color, 'stroke-width':2}));
-      }
-      body.append(row);
+        if (valid(value)) cursor.append(svgNode('circle', {cx:x(date), cy:y(value), r:4.5, fill:line.metricKey === 'sold' ? 'white' : line.color, stroke:line.color, 'stroke-width':2}));
+        body.append(row);
     }
     readout.hidden = false;
-    const selectedValues = visible().map(line => line.points.find(point => point.date === date)?.value).filter(valid);
+    const selectedValues = visible().map(line => line.pointsByDate.get(date)?.value).filter(valid);
     const selectedY = selectedValues.length ? y(selectedValues.includes(view.anchorValue) ? view.anchorValue : selectedValues[0]) : pad.top;
     const left = clamp(x(date) + 14, 8, Math.max(8, width - readout.offsetWidth - 8));
     const top = clamp(selectedY - readout.offsetHeight - 14 < 8 ? selectedY + 14 : selectedY - readout.offsetHeight - 14, 8, Math.max(8, height - readout.offsetHeight - 8));
     readout.style.left = `${left}px`; readout.style.top = `${top}px`;
   }
-  function paint() {
+  function paintNow() {
     width = stage.clientWidth; height = stage.clientHeight;
     if (width < 120 || height < 100) return;
     svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
@@ -232,7 +236,7 @@ export function drawMarketChart(container, input, options = {}) {
       for (const date of geometry.shownDates) {
         let total=0;
         for (const line of visible()) {
-          const count=line.points.find(point=>point.date===date)?.sampleCount;
+          const count=line.pointsByDate.get(date)?.sampleCount;
           if (!(count>0)) continue;
           plot.append(svgNode('rect',{x:x(date)-barWidth/2,y:sampleY(total+count),width:barWidth,height:sampleY(total)-sampleY(total+count),fill:line.color,opacity:.6,class:'market-sample-bar','data-date':date,'data-series':line.id,'data-count':count}));
           total+=count;
@@ -247,8 +251,14 @@ export function drawMarketChart(container, input, options = {}) {
       group.append(svgNode('path', {d:path, fill:'none', stroke:line.color, 'stroke-width':sold ? 2 : 2.3, 'stroke-linejoin':'round', ...(sold ? {'stroke-dasharray':'6 5'} : {})}));
       const gapPath = marketGapPath(points, x, y);
       if (gapPath) group.append(svgNode('path', {d:gapPath, fill:'none', stroke:line.color, 'stroke-width':1.8, 'stroke-dasharray':'2 5', opacity:.65, 'data-gap-bridge':'true'}));
+      // Keep every exact observed range in one path instead of creating a DOM
+      // node per day. Readouts still use the original daily records.
+      const ranges = points.filter(point=>valid(point.lower)&&valid(point.upper));
+      if(ranges.length) group.append(svgNode('path',{d:ranges.map(point=>`M${x(point.date)},${y(point.lower)}V${y(point.upper)}`).join(' '),fill:'none',stroke:line.color,'stroke-width':3,'data-range-series':line.id}));
       for (const point of points) {
+        if(valid(point.lower)&&valid(point.upper))continue;
         if (!valid(point.value)) continue;
+        if(points.length>180&&!singleObservation)continue;
         group.append(svgNode('circle', {cx:x(point.date), cy:y(point.value), r:singleObservation ? 4 : sold ? (points.length < 80 ? 3.5 : 2.5) : (points.length < 80 ? 2 : 1.5), fill:sold ? 'white' : line.color, stroke:line.color, 'stroke-width':sold ? 1.8 : 0, 'data-date':point.date}));
       }
       plot.append(group);
@@ -257,9 +267,10 @@ export function drawMarketChart(container, input, options = {}) {
     }
     if (view.pinned) show(view.pinned);
   }
+  const paint=()=>{cancelAnimationFrame(frame);frame=requestAnimationFrame(paintNow);};
   const redraw = () => { cancelAnimationFrame(frame); frame = requestAnimationFrame(() => {
     view.count=clamp(responsiveDateCount(stage.clientWidth, view.spacing),Math.min(5,dates.length),dates.length);
-    view.offset=clamp(view.offset,0,dates.length-view.count);paint();
+    view.offset=clamp(view.offset,0,dates.length-view.count);paintNow();
   }); };
   const reset = () => { view.spacing=18;view.count=Math.min(dates.length,responsiveDateCount(stage.clientWidth));view.offset=0;view.pinned=null;paint(); };
   const pan = offset => {
@@ -267,6 +278,7 @@ export function drawMarketChart(container, input, options = {}) {
     if (dates.length-view.offset-view.count<=Math.max(2,Math.floor(view.count*.15))) requestEarlier();
   };
   const zoom = (factor, anchor=.5) => {
+    if(!geometry)return;
     const before = view.count, requested = Math.max(5,Math.round(before*factor)), next = Math.min(requested,dates.length);
     const start = dates.length-view.offset-before;
     view.spacing=geometry.plotWidth/requested;
@@ -281,23 +293,18 @@ export function drawMarketChart(container, input, options = {}) {
       const date=geometry.shownDates.find(date=>Math.abs(event.clientX-bounds.left-geometry.x(date)*scaleX)<=Math.max(6,geometry.step*scaleX/2));
       if (date && visible().some(line=>(line.points.find(point=>point.date===date)?.sampleCount || 0)>0)) return {date,value:null};
     }
-    let nearest = null, distance = (event.pointerType === 'touch' ? 20 : 12) ** 2;
-    for (const line of visible()) for (const point of line.points) {
-      if (!valid(point.value) || !geometry.shownSet.has(point.date)) continue;
-      const dx = event.clientX - bounds.left - geometry.x(point.date)*scaleX;
-      const dy = event.clientY - bounds.top - geometry.y(point.value)*scaleY;
-      const next = dx*dx + dy*dy;
-      if (next <= distance) { nearest = point; distance = next; }
-    }
-    if (nearest) return nearest;
     // Select the calendar date anywhere in the plot; the readout uses actual values only.
     const px = (event.clientX-bounds.left)/scaleX, py = (event.clientY-bounds.top)/scaleY;
     if (px < geometry.pad.left || px > geometry.pad.left+geometry.plotWidth || py < geometry.pad.top || py > (showSamples ? geometry.sampleBottom : geometry.pad.top+geometry.plotHeight)) return null;
     const index = clamp(Math.floor((px-geometry.pad.left)/geometry.step), 0, geometry.shownDates.length-1);
-    return {date:geometry.shownDates[index], value:null};
+    for(let distance=0;distance<geometry.shownDates.length;distance++)for(const candidate of [index-distance,index+distance]){
+      const date=geometry.shownDates[candidate];
+      if(date&&visible().some(line=>observed(line.pointsByDate.get(date)||{})))return {date,value:null};
+    }
+    return null;
   };
   svg.addEventListener('wheel', event => {
-    if (!geometry) return; event.preventDefault();
+    if (!geometry||(!event.ctrlKey&&!event.shiftKey&&Math.abs(event.deltaX)<=Math.abs(event.deltaY))) return; event.preventDefault();
     if (event.shiftKey || Math.abs(event.deltaX)>Math.abs(event.deltaY)) pan(view.offset-(event.deltaX || event.deltaY)/geometry.step);
     else if(event.deltaY) zoom(event.ctrlKey ? Math.exp(clamp(event.deltaY,-100,100)*.01) : event.deltaY<0?.86:1.16,clamp((event.clientX-svg.getBoundingClientRect().left-geometry.pad.left)/geometry.plotWidth,0,1));
   },{passive:false});
@@ -309,7 +316,7 @@ export function drawMarketChart(container, input, options = {}) {
       const [a,b]=[...pointers.values()];pinch={distance:Math.hypot(a.x-b.x,a.y-b.y),count:view.count};
       if(drag)drag.moved=true;
     }
-    drag={id:event.pointerId,x:event.clientX,offset:view.offset,moved:false};svg.setPointerCapture(event.pointerId);
+    drag={id:event.pointerId,x:event.clientX,y:event.clientY,offset:view.offset,moved:false};svg.setPointerCapture(event.pointerId);
   });
   svg.addEventListener('pointermove', event => {
     if (!geometry) return;
@@ -320,7 +327,7 @@ export function drawMarketChart(container, input, options = {}) {
       return;
     }
     if (drag && drag.id===event.pointerId) {
-      if (Math.abs(drag.x-event.clientX)>4) drag.moved=true;
+      if (Math.abs(drag.x-event.clientX)>4&&Math.abs(drag.x-event.clientX)>Math.abs(drag.y-event.clientY)*1.2) drag.moved=true;
       if (drag.moved) { pan(drag.offset+(event.clientX-drag.x)/(geometry.plotWidth/view.count));return; }
     }
     if (!drag && !view.pinned && event.pointerType === 'mouse') {
@@ -350,9 +357,11 @@ export function drawMarketChart(container, input, options = {}) {
       view.pinned=dates[activeIndex];paint();if(event.key==='ArrowLeft'&&activeIndex<=Math.max(2,Math.floor(view.count*.15)))requestEarlier(); }
   });
   container.addEventListener('chart-reset',reset);
+  const navigate=event=>{if(event.type==='chart-pan')pan(view.offset+(event.detail==='older'?1:-1)*Math.max(1,Math.round(view.count*.65)));else zoom(event.detail==='in'?.75:1.35);};
+  container.addEventListener('chart-pan',navigate);container.addEventListener('chart-zoom',navigate);
   const dismissOutside = event => { if (!container.contains(event.target)) { view.pinned=null;clearCursor(); } };
   document.addEventListener('pointerdown',dismissOutside);
   readout.addEventListener('keydown',event=>{if(event.key==='Escape'){event.stopPropagation();view.pinned=null;clearCursor();svg.focus({preventScroll:true});}});
-  const resize=new ResizeObserver(redraw);resize.observe(stage);paint();
-  cleanups.set(container,()=>{resize.disconnect();cancelAnimationFrame(frame);container.removeEventListener('chart-reset',reset);document.removeEventListener('pointerdown',dismissOutside);});
+  const resize=new ResizeObserver(redraw);resize.observe(stage);paintNow();
+  cleanups.set(container,()=>{resize.disconnect();cancelAnimationFrame(frame);container.removeEventListener('chart-reset',reset);container.removeEventListener('chart-pan',navigate);container.removeEventListener('chart-zoom',navigate);document.removeEventListener('pointerdown',dismissOutside);});
 }
