@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { SERIES, money, metricValue, soldMeanValue, metricIsConsistent, listedPriceRange, buildTotals, compactBuild, compatibility, groupProducts, validateBuild, dailySeries, percentChange, overviewIndex, priceDateRange, shiftDate, sourceStats, coherentStats, modelPageItems, buildAnalysisSeries } from '../web-backend/public/pc-tools-core.mjs';
-import { movingAverage, marketLinePath } from '../web-backend/public/pc-market-chart.mjs';
+import { movingAverage, marketLinePath, marketGapPath, responsiveDateCount, buildMarketView, drawMarketChart } from '../web-backend/public/pc-market-chart.mjs';
 import { createPriceStore } from '../web-backend/public/pc-tools-data.mjs';
 import { pcCatalogResponse } from '../cloudflare/pc-directory-http.mjs';
 const p = (id, category, name, specs = {}) => ({ canonical_product_id: id, category_code: category, canonical_display_name: name, key_specs: specs });
@@ -121,6 +121,9 @@ assert.equal(gapPath(gapPoints.filter(point => point.value != null)), 'M1,100 M3
 const soldPath = points => marketLinePath(points, date => Number(date.slice(-2)), value => value, { connectObservations: true });
 assert.equal(soldPath(gapPoints), 'M1,100 L3,110 L4,120', 'sold lines connect only actual observations across missing days');
 assert.equal(gapPoints[1].value, null, 'drawing connections must not interpolate missing daily prices');
+assert.equal(marketGapPath(gapPoints,date=>Number(date.slice(-2)),value=>value),'M1,100 L3,110');
+assert.equal(marketGapPath(gapPoints.filter(point=>point.value!=null),date=>Number(date.slice(-2)),value=>value),'M1,100 L3,110');
+assert.ok(responsiveDateCount(1200)>responsiveDateCount(390),'a wider viewport fits more calendar dates');
 assert.equal(soldPath(gapPoints.filter(point => point.value != null)), 'M1,100 L3,110 L4,120');
 assert.equal(soldPath([{ date: '2026-10-01', value: null }, { date: '2026-10-02', value: 120 }]), 'M2,120');
 assert.match(danawaSeries[0].label, /중고 최저 표시가/);
@@ -235,7 +238,89 @@ try {
     'the builder total must consume the same published price-stat response used by the UI');
   assert.equal(dailySeries(loaded.data, 'active', 30).at(-1).value, 105,
     'price analysis must render the published daily series from the shared price store');
+  assert.equal(store.getAvailable('cpu',60).data,loaded.data,'wider-window loading preserves the verified timeline');
+  assert.equal(store.getAvailable('ram',60),undefined,'history fallback cannot cross model identities');
+  assert.equal(store.getAvailable('cpu',60,'2026-09-07'),undefined,'history fallback cannot cross end dates');
+  globalThis.fetch=async()=>new Response(JSON.stringify({status:'error',error:{code:'HISTORICAL_PRICE_STATS_UNAVAILABLE'}}),{status:503});
+  await store.load([cpu],60);
+  assert.equal(store.getAvailable('cpu',60).data,loaded.data,'failed earlier-history requests retain verified prices');
+  assert.equal(store.getAvailable('cpu',60).historyState,'error');
+  await store.load([cpu],60,'',{background:true});
+  assert.equal(store.getAvailable('cpu',60).data,loaded.data,'retrying failed history preserves the shorter ready window');
 } finally {
   globalThis.fetch = originalFetch;
 }
+
+// Extending the chart must not cancel prices still loading in the model table.
+try {
+  const pending=new Map();
+  const response=(id,days)=>new Response(JSON.stringify({data:{canonical_product_id:id,
+    methodology:{days,market_pool:'KR_DOMESTIC_USED',condition:'USED_WORKING',currency:'KRW'},
+    active:{sample_count:5,min:90,max:110,mean:100},daily:[],by_source:[]}}),{status:200});
+  globalThis.fetch=(input,{signal})=>new Promise((resolve,reject)=>{
+    const url=new URL(input,'https://example.test');
+    pending.set(`${decodeURIComponent(url.pathname.split('/')[3])}:${url.searchParams.get('days')}`,{resolve,signal});
+    signal.addEventListener('abort',()=>reject(new DOMException('Aborted','AbortError')),{once:true});
+  });
+  const store=createPriceStore(()=>{});
+  const main=store.load([ram],30),history=store.load([cpu],60,'',{background:true});
+  assert.equal(pending.get('ram:30').signal.aborted,false,'background history leaves the model-table request active');
+  pending.get('ram:30').resolve(response('ram',30));pending.get('cpu:60').resolve(response('cpu',60));
+  await Promise.all([main,history]);
+  assert.equal(store.get('ram',30).state,'ready');assert.equal(store.get('cpu',60).state,'ready');
+  const obsolete=store.load([cpu],120,'',{background:true});
+  store.clear();await obsolete;
+  assert.equal(pending.get('cpu:120').signal.aborted,true,'clearing a selection cancels background history');
+  assert.equal(store.get('cpu',120),undefined,'cancelled history cannot repopulate cleared selection data');
+} finally { globalThis.fetch=originalFetch; }
+
+const gapDates=Array.from({length:30},(_,i)=>shiftDate('2026-10-07',i-29));
+const emptyWindowPoints=gapDates.map((date,i)=>({date,value:i===0?100:null}));
+const gapView=buildMarketView([{points:emptyWindowPoints}],gapDates,10,0,900,400);
+assert.equal(gapView.emptyViewport,true,'a viewport without observations remains navigable');
+assert.equal(marketLinePath(emptyWindowPoints.slice(-10),gapView.x,gapView.y),'','the empty viewport has no invented price line');
+
+// Exercise the actual renderer's event handlers without browser/network state.
+const savedDom=Object.fromEntries(['document','ResizeObserver','requestAnimationFrame','cancelAnimationFrame'].map(key=>[key,globalThis[key]]));
+class ChartNode {
+  constructor(tag){this.tag=tag;this.children=[];this.dataset={};this.attributes={};this.events={};this.clientWidth=900;this.clientHeight=400;this.offsetWidth=220;this.offsetHeight=120;this.style={setProperty(){}};}
+  append(...items){this.children.push(...items);} prepend(item){this.children.unshift(item);} replaceChildren(...items){this.children=items;}
+  setAttribute(key,value){this.attributes[key]=String(value);} addEventListener(key,fn){this.events[key]=fn;} removeEventListener(key){delete this.events[key];}
+  setPointerCapture(){} hasPointerCapture(){return true;} releasePointerCapture(){} focus(){} contains(){return true;}
+  getBoundingClientRect(){return {left:0,top:0,width:this.clientWidth,height:this.clientHeight};}
+  emit(type,props={}){this.events[type]?.({button:0,pointerId:1,pointerType:'touch',clientX:500,clientY:200,preventDefault(){},...props});}
+}
+try{
+  globalThis.document={createElement:tag=>new ChartNode(tag),createElementNS:(_,tag)=>new ChartNode(tag),addEventListener(){},removeEventListener(){}};
+  globalThis.ResizeObserver=class{observe(){}disconnect(){}};
+  globalThis.requestAnimationFrame=fn=>{fn();return 1;};globalThis.cancelAnimationFrame=()=>{};
+  const chart=new ChartNode('div'),timeline=Array.from({length:120},(_,i)=>({date:shiftDate('2026-10-07',i-119),value:100+i,sampleCount:5}));
+  let olderRequests=0,lastView;
+  const options={identity:'cpu:KRW',canLoadEarlier:true,onLoadEarlier:()=>olderRequests++,onViewChange:range=>{lastView=range;}};
+  const line={id:'bunjang:active',metricKey:'active',label:'번개장터 · 판매중',points:timeline};
+  const partialChart=new ChartNode('div');
+  drawMarketChart(partialChart,[{...line,points:timeline.slice(-15)}],{identity:'partial'});
+  drawMarketChart(partialChart,[line],{identity:'partial'});
+  assert.equal(Number(partialChart.children[1].children[0].dataset.visibleCount),responsiveDateCount(900),
+    'a shorter cached fallback must not overwrite the responsive date spacing when the full window arrives');
+  drawMarketChart(chart,[line],options);
+  const stage=chart.children[1],svg=stage.children[0],initialCount=Number(svg.dataset.visibleCount);
+  assert.ok(initialCount<120,'first view uses readable date density rather than the full loaded period');
+  svg.emit('pointerdown');svg.emit('pointermove',{clientX:700});svg.emit('pointerup',{clientX:700});
+  assert.ok(Number(svg.dataset.offset)>0,'dragging the plot right reveals earlier dates');
+  const offset=Number(svg.dataset.offset);
+  svg.emit('wheel',{deltaX:-90,deltaY:0});
+  assert.ok(Number(svg.dataset.offset)>offset,'scrolling left reveals earlier dates');
+  const anchored={...lastView};
+  drawMarketChart(chart,[{...line,points:[...Array.from({length:60},(_,i)=>({date:shiftDate(timeline[0].date,i-60),value:80,sampleCount:5})),...timeline]}],options);
+  assert.deepEqual(lastView,anchored,'prepending history preserves the viewed dates');
+  const updatedSvg=chart.children[1].children[0],beforePinch=Number(updatedSvg.dataset.visibleCount);
+  updatedSvg.emit('pointerdown',{pointerId:1,clientX:350});updatedSvg.emit('pointerdown',{pointerId:2,clientX:450});
+  updatedSvg.emit('pointermove',{pointerId:2,clientX:550});
+  assert.ok(Number(updatedSvg.dataset.visibleCount)<beforePinch,'spreading two pointers zooms into the time axis');
+  updatedSvg.emit('pointerup',{pointerId:2,clientX:550});updatedSvg.emit('pointerup',{pointerId:1,clientX:350});
+  chart.emit('chart-reset');assert.equal(Number(updatedSvg.dataset.offset),0);assert.equal(Number(updatedSvg.dataset.visibleCount),initialCount);
+  for(let i=0;i<16;i++)updatedSvg.emit('keydown',{key:'-'});
+  assert.ok(olderRequests>0,'zooming out to the earliest loaded edge requests earlier history');
+}finally{for(const [key,value] of Object.entries(savedDom))if(value===undefined)delete globalThis[key];else globalThis[key]=value;}
 console.log('PC tools: grouping, independent prices, partial sums, quantity, compatibility, storage validation and chart gaps passed');

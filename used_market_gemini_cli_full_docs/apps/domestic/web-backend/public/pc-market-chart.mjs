@@ -28,6 +28,23 @@ export function marketLinePath(points, x, y, { connectObservations = false } = {
   return path.trim();
 }
 
+// Connect only measured endpoints. Missing dates keep their null values and
+// receive a separate dotted bridge rather than a fabricated observation.
+export function marketGapPath(points, x, y) {
+  let path = '', previous = null;
+  for (const point of points) {
+    if (!valid(point.value)) continue;
+    if (previous && Date.parse(point.date) - Date.parse(previous.date) > 86400000)
+      path += `M${x(previous.date)},${y(previous.value)} L${x(point.date)},${y(point.value)} `;
+    previous = point;
+  }
+  return path.trim();
+}
+
+export function responsiveDateCount(width, spacing = 18) {
+  return Math.max(5, Math.floor(Math.max(1, width - (width < 480 ? 92 : 106)) / spacing+1e-6));
+}
+
 export function movingAverage(points, period = 20) {
   const days = Math.max(2, Math.min(300, Math.round(period))), sorted = [...points].sort((a,b)=>a.date.localeCompare(b.date));
   const first = Date.parse(sorted[0]?.date);
@@ -45,6 +62,10 @@ export function buildMarketView(series, dates, count, offset, width, height, { a
   const shownDates = dates.slice(Math.max(0, end - shownCount), end);
   const shownSet = new Set(shownDates);
   const values = series.flatMap(line => [...line.points, ...(averagePeriod ? line.averages || movingAverage(line.points,averagePeriod) : [])].filter(point => shownSet.has(point.date) && valid(point.value)).map(point => point.value));
+  const emptyViewport = !values.length;
+  // A data gap still needs a navigable time axis. These values set its scale
+  // only; points and readouts remain empty until an observed date is visible.
+  if (emptyViewport) values.push(...series.flatMap(line=>line.points.filter(point=>valid(point.value)).map(point=>point.value)));
   if (!values.length) return null;
   const pad = { left: 16, right: width < 480 ? 76 : 90, top: 26, bottom: 34 };
   // KSTOCK volume pane: shared dates, 17% height, 44–110px and an independent scale.
@@ -71,10 +92,16 @@ export function buildMarketView(series, dates, count, offset, width, height, { a
     if (x(last) - x(dateTicks.at(-1)) < 85 && dateTicks.length > 1) dateTicks.pop();
     if (x(last) - x(dateTicks.at(-1)) >= 45) dateTicks.push(last);
   }
-  return { shownDates, shownSet, shownCount, maxOffset, pad, plotWidth, plotHeight, priceTicks, dateTicks, x, y, sampleTop, sampleBottom, sampleHeight, maxSamples, sampleY, step };
+  return { shownDates, shownSet, shownCount, maxOffset, pad, plotWidth, plotHeight, priceTicks, dateTicks, x, y, sampleTop, sampleBottom, sampleHeight, maxSamples, sampleY, step, emptyViewport };
 }
 
-export function drawMarketChart(container, input, { label = '가격 추이', currency = 'KRW', identity = '', averagePeriod = 0, showSamples = false } = {}) {
+export function drawMarketChart(container, input, options = {}) {
+  const { label = '가격 추이', currency = 'KRW', identity = '', averagePeriod = 0, showSamples = false,
+    onLoadEarlier, canLoadEarlier = false, loadingEarlier = false, onViewChange } = options;
+  const currentView=views.get(container);
+  if(currentView?.interacting && currentView.identity===identity){
+    currentView.pendingRender=()=>drawMarketChart(container,input,options);return;
+  }
   cleanups.get(container)?.(); container.replaceChildren();
   const series = input.map(line => ({ ...line, currency: line.currency || currency,
     sourceId: line.id.split(':')[0], sourceLabel: line.label.split(' · ')[0],
@@ -94,9 +121,10 @@ export function drawMarketChart(container, input, { label = '가격 추이', cur
   }
   const dates = [...new Set(series.flatMap(line => line.points.map(point => point.date)))].sort();
   let view = views.get(container);
-  if (!view || view.identity !== identity) view = { identity, count: dates.length, offset: 0, hidden: new Set() };
+  if (!view || view.identity !== identity) view = { identity, count: responsiveDateCount(container.clientWidth), spacing: 18, offset: 0, hidden: new Set() };
   views.set(container, view);
-  view.count = clamp(view.count, 1, dates.length);
+  view.count = clamp(responsiveDateCount(container.clientWidth,view.spacing),Math.min(5,dates.length),dates.length);
+  view.offset = clamp(view.offset,0,dates.length-view.count);
   const summary = node('div', 'market-chart-summary'); summary.setAttribute('role', 'group'); summary.setAttribute('aria-label', '가격선 표시');
   const sourceGroups = new Map();
   for (const line of series) {
@@ -120,14 +148,19 @@ export function drawMarketChart(container, input, { label = '가격 추이', cur
   }
   if (averagePeriod) summary.append(node('span','market-average-legend',`${averagePeriod}일 평균`));
   const stage = node('div', 'market-chart-stage');
-  const svg = svgNode('svg', { tabindex: 0, role: 'group', 'aria-roledescription': '가격 차트', 'aria-label': `${label}. 좌우 키: 날짜, +와 -: 확대·축소, Home: 전체 보기, Escape: 선택 해제` });
+  const svg = svgNode('svg', { tabindex: 0, role: 'group', 'aria-roledescription': '가격 차트', 'aria-label': `${label}. 드래그: 좌우 이동, 휠·핀치: 확대·축소, 좌우 키: 날짜, Home: 최근으로, Escape: 선택 해제` });
   const plot = svgNode('g'), cursor = svgNode('g', { 'pointer-events': 'none' }); svg.append(plot, cursor);
   const readout = node('div', 'market-chart-readout'); readout.hidden = true; readout.setAttribute('role', 'dialog'); readout.setAttribute('aria-label', '날짜별 가격');
-  const note = node('p', 'market-chart-note', series.some(line => line.metricKey === 'sold')
-    ? '판매완료 점선은 기록이 있는 날짜를 연결합니다. 표시가는 실제 체결가와 다를 수 있습니다.' : '가격 기록이 없는 날짜는 빈 구간으로 표시합니다.');
-  const hint = node('span', '', '날짜를 선택하면 가격과 표본을 볼 수 있습니다.'); note.append(hint);
+  const note = node('p', 'market-chart-note', '점선 연결 구간은 가격 기록이 없는 날짜입니다.');
+  if (series.some(line => line.metricKey === 'sold')) note.append(node('span', '', '판매완료 표시가는 실제 체결가와 다를 수 있습니다.'));
   stage.append(svg, readout); container.append(summary, stage, note);
-  let geometry, width, height, drag = null, activeIndex = dates.length - 1, frame;
+  let geometry, width, height, drag = null, activeIndex = dates.length - 1, frame, pinch = null;
+  const pointers = new Map();
+  const finishInteraction=()=>{
+    view.interacting=pointers.size>0;
+    if(!view.interacting&&view.pendingRender){const render=view.pendingRender;view.pendingRender=null;queueMicrotask(render);}
+  };
+  const requestEarlier = () => { if (canLoadEarlier && !loadingEarlier) onLoadEarlier?.(); };
   const visible = () => series.filter(line => !view.hidden.has(line.id));
   const clearCursor = () => { cursor.replaceChildren(); readout.hidden = true; };
   function show(date) {
@@ -178,7 +211,9 @@ export function drawMarketChart(container, input, { label = '가격 추이', cur
     plot.replaceChildren(); clearCursor();
     if (!geometry) { plot.append(svgNode('text', { x:16, y:height/2 }, '표시할 가격 없음')); return; }
     const { pad, plotWidth, plotHeight, priceTicks, dateTicks, shownSet, x, y } = geometry;
+    onViewChange?.({ from: geometry.shownDates[0], to: geometry.shownDates.at(-1) });
     const edge = pad.left + plotWidth;
+    if(geometry.emptyViewport)plot.append(svgNode('text',{x:pad.left+plotWidth/2,y:pad.top+plotHeight/2,'text-anchor':'middle'},'이 구간에는 가격 기록이 없습니다'));
     plot.append(svgNode('text', {x:edge+10, y:14, class:'market-axis'}, currency === 'USD' ? 'USD' : '원'));
     for (const tick of priceTicks) {
       plot.append(svgNode('line', {x1:pad.left, x2:edge, y1:tick.y, y2:tick.y, class:'market-grid'}));
@@ -208,8 +243,10 @@ export function drawMarketChart(container, input, { label = '가격 추이', cur
       const group = svgNode('g', {'data-series':line.id}), points = line.points.filter(point => shownSet.has(point.date));
       const sold = line.metricKey === 'sold';
       const singleObservation = points.filter(point => valid(point.value)).length === 1;
-      const path = marketLinePath(points, x, y, { connectObservations: sold });
+      const path = marketLinePath(points, x, y);
       group.append(svgNode('path', {d:path, fill:'none', stroke:line.color, 'stroke-width':sold ? 2 : 2.3, 'stroke-linejoin':'round', ...(sold ? {'stroke-dasharray':'6 5'} : {})}));
+      const gapPath = marketGapPath(points, x, y);
+      if (gapPath) group.append(svgNode('path', {d:gapPath, fill:'none', stroke:line.color, 'stroke-width':1.8, 'stroke-dasharray':'2 5', opacity:.65, 'data-gap-bridge':'true'}));
       for (const point of points) {
         if (!valid(point.value)) continue;
         group.append(svgNode('circle', {cx:x(point.date), cy:y(point.value), r:singleObservation ? 4 : sold ? (points.length < 80 ? 3.5 : 2.5) : (points.length < 80 ? 2 : 1.5), fill:sold ? 'white' : line.color, stroke:line.color, 'stroke-width':sold ? 1.8 : 0, 'data-date':point.date}));
@@ -220,13 +257,22 @@ export function drawMarketChart(container, input, { label = '가격 추이', cur
     }
     if (view.pinned) show(view.pinned);
   }
-  const redraw = () => { cancelAnimationFrame(frame); frame = requestAnimationFrame(paint); };
-  const reset = () => { view.count=dates.length;view.offset=0;view.pinned=null;paint(); };
+  const redraw = () => { cancelAnimationFrame(frame); frame = requestAnimationFrame(() => {
+    view.count=clamp(responsiveDateCount(stage.clientWidth, view.spacing),Math.min(5,dates.length),dates.length);
+    view.offset=clamp(view.offset,0,dates.length-view.count);paint();
+  }); };
+  const reset = () => { view.spacing=18;view.count=Math.min(dates.length,responsiveDateCount(stage.clientWidth));view.offset=0;view.pinned=null;paint(); };
+  const pan = offset => {
+    view.offset=clamp(Math.round(offset),0,dates.length-view.count);view.pinned=null;paint();
+    if (dates.length-view.offset-view.count<=Math.max(2,Math.floor(view.count*.15))) requestEarlier();
+  };
   const zoom = (factor, anchor=.5) => {
-    const before = view.count, next = clamp(Math.round(before*factor), Math.min(5,dates.length), dates.length);
+    const before = view.count, requested = Math.max(5,Math.round(before*factor)), next = Math.min(requested,dates.length);
     const start = dates.length-view.offset-before;
+    view.spacing=geometry.plotWidth/requested;
     view.count=next; view.offset=clamp(Math.round(dates.length-(start+anchor*before+(1-anchor)*next)),0,dates.length-next);
     view.pinned=null; paint();
+    if (factor>1 && dates.length-view.offset-view.count<=Math.max(2,Math.floor(view.count*.15))) requestEarlier();
   };
   const pointAtPointer = event => {
     if (!geometry) return null;
@@ -252,18 +298,30 @@ export function drawMarketChart(container, input, { label = '가격 추이', cur
   };
   svg.addEventListener('wheel', event => {
     if (!geometry) return; event.preventDefault();
-    if (Math.abs(event.deltaX)>Math.abs(event.deltaY)) { view.offset=clamp(view.offset+Math.trunc(event.deltaX/18),0,dates.length-view.count);paint(); }
-    else if(event.deltaY) zoom(event.deltaY<0?.86:1.16,clamp((event.clientX-svg.getBoundingClientRect().left-geometry.pad.left)/geometry.plotWidth,0,1));
+    if (event.shiftKey || Math.abs(event.deltaX)>Math.abs(event.deltaY)) pan(view.offset-(event.deltaX || event.deltaY)/geometry.step);
+    else if(event.deltaY) zoom(event.ctrlKey ? Math.exp(clamp(event.deltaY,-100,100)*.01) : event.deltaY<0?.86:1.16,clamp((event.clientX-svg.getBoundingClientRect().left-geometry.pad.left)/geometry.plotWidth,0,1));
   },{passive:false});
   svg.addEventListener('pointerdown', event => {
     if (!geometry || event.button!==0) return;
+    pointers.set(event.pointerId,{x:event.clientX,y:event.clientY});
+    view.interacting=true;
+    if (pointers.size===2) {
+      const [a,b]=[...pointers.values()];pinch={distance:Math.hypot(a.x-b.x,a.y-b.y),count:view.count};
+      if(drag)drag.moved=true;
+    }
     drag={id:event.pointerId,x:event.clientX,offset:view.offset,moved:false};svg.setPointerCapture(event.pointerId);
   });
   svg.addEventListener('pointermove', event => {
     if (!geometry) return;
+    if(pointers.has(event.pointerId))pointers.set(event.pointerId,{x:event.clientX,y:event.clientY});
+    if(pinch && pointers.size===2) {
+      const [a,b]=[...pointers.values()],distance=Math.hypot(a.x-b.x,a.y-b.y);
+      if(distance>0)zoom(pinch.count*pinch.distance/distance/view.count,clamp(((a.x+b.x)/2-svg.getBoundingClientRect().left-geometry.pad.left)/geometry.plotWidth,0,1));
+      return;
+    }
     if (drag && drag.id===event.pointerId) {
       if (Math.abs(drag.x-event.clientX)>4) drag.moved=true;
-      if (drag.moved) { view.offset=clamp(drag.offset+Math.round((drag.x-event.clientX)/(geometry.plotWidth/view.count)),0,dates.length-view.count);view.pinned=null;paint();return; }
+      if (drag.moved) { pan(drag.offset+(event.clientX-drag.x)/(geometry.plotWidth/view.count));return; }
     }
     if (!drag && !view.pinned && event.pointerType === 'mouse') {
       const point = pointAtPointer(event); if (point) { view.anchorValue=point.value; show(point.date); } else clearCursor();
@@ -271,11 +329,14 @@ export function drawMarketChart(container, input, { label = '가격 추이', cur
   });
   stage.addEventListener('pointerleave',()=>{if(!view.pinned)clearCursor();});
   svg.addEventListener('pointerup', event => {
-    if (!drag || drag.id!==event.pointerId) return;
+    pointers.delete(event.pointerId);
+    if(pinch){pinch=null;drag=null;if(svg.hasPointerCapture(event.pointerId))svg.releasePointerCapture(event.pointerId);finishInteraction();return;}
+    if (!drag || drag.id!==event.pointerId){finishInteraction();return;}
     if (!drag.moved) { const point=pointAtPointer(event);view.pinned=point?.date || null;view.anchorValue=point?.value;if(view.pinned)show(view.pinned);else clearCursor(); }
     drag=null;if(svg.hasPointerCapture(event.pointerId))svg.releasePointerCapture(event.pointerId);
+    finishInteraction();
   });
-  svg.addEventListener('pointercancel',()=>{drag=null;});
+  svg.addEventListener('pointercancel',event=>{pointers.delete(event.pointerId);pinch=null;drag=null;finishInteraction();});
   svg.addEventListener('dblclick',reset);
   svg.addEventListener('keydown',event=>{
     if(!['ArrowLeft','ArrowRight','+','=','-','Home','Escape'].includes(event.key))return;event.preventDefault();
@@ -286,7 +347,7 @@ export function drawMarketChart(container, input, { label = '가격 추이', cur
       const start=dates.length-view.offset-view.count;
       if(activeIndex<start)view.offset=dates.length-view.count-activeIndex;
       if(activeIndex>=start+view.count)view.offset=dates.length-activeIndex-1;
-      view.pinned=dates[activeIndex];paint(); }
+      view.pinned=dates[activeIndex];paint();if(event.key==='ArrowLeft'&&activeIndex<=Math.max(2,Math.floor(view.count*.15)))requestEarlier(); }
   });
   container.addEventListener('chart-reset',reset);
   const dismissOutside = event => { if (!container.contains(event.target)) { view.pinned=null;clearCursor(); } };

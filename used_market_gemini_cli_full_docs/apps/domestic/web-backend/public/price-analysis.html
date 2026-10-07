@@ -7,7 +7,7 @@
   <link rel="canonical" href="https://used-pick.com/price-analysis.html">
   <link rel="icon" href="/assets/mark.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/styles.css?v=pc-tools-v1"><link rel="stylesheet" href="/pc-tools.css?v=price-clarity-v1"><link rel="stylesheet" href="/ui-concept-a.css?v=aligned-shell-v1">
-  <link rel="stylesheet" href="/pc-workspace.css?v=sold-chart-v3">
+  <link rel="stylesheet" href="/pc-workspace.css?v=timeline-v1">
   <link rel="stylesheet" href="/adfit-layout.css?v=adfit-rail-v2">
   <link rel="stylesheet" href="/site-header-links.css?v=1">
 </head>
@@ -24,13 +24,9 @@
     <div id="tools-status" role="status" aria-live="polite">불러오는 중</div>
     <div class="market-toolbar">
       <select id="chart-sources" aria-label="차트 사이트"></select>
-      <div class="market-periods" role="group" aria-label="분석 기간">
-        <button type="button" data-action="chart-period" data-days="30" aria-pressed="true">30일</button>
-        <button type="button" data-action="chart-period" data-days="60" aria-pressed="false">60일</button>
-        <button type="button" data-action="chart-period" data-days="100" aria-pressed="false">100일</button>
-        <button type="button" data-action="chart-period" data-days="300" aria-pressed="false">300일</button>
-        <details id="chart-custom-range"><summary aria-label="기간 직접 선택"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="16" rx="2"/><path d="M8 3v4m8-4v4M4 11h16"/></svg></summary><div id="chart-navigation" class="tools-chart-controls chart-period" role="group" aria-label="분석 기간 직접 선택"></div></details>
-      </div>
+      <span id="chart-window-status" class="market-window-status"></span>
+      <span id="chart-history-status" role="status" aria-live="polite"></span>
+      <button type="button" data-action="chart-recent">최근으로</button>
     </div>
     <section id="analysis-workspace" aria-label="가격 분석">
       <div id="analysis-chart-pane"><div id="price-chart" class="market-chart"></div><p id="chart-coverage" class="tools-caption" hidden></p></div>
@@ -48,6 +44,6 @@
       <template data-format="mobile"><ins class="kakao_ad_area" style="display:none;" data-ad-unit="DAN-gvTVDnxVn9S3leR5" data-ad-width="320" data-ad-height="100"></ins></template>
     </aside>
   </div>
-  <script type="module" src="/pc-tools.js?v=ad-connection-help-v1"></script>
+  <script type="module" src="/pc-tools.js?v=timeline-v1"></script>
 </body>
 </html>

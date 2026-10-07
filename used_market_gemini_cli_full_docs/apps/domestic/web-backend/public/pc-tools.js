@@ -1,7 +1,6 @@
-import { SERIES, idOf, nameOf, naturalCompare, money, metricValue, soldMeanValue, metricPresentation, listedPriceRange, statsUnavailable, priceRecordIssue, analysisSelectionUrl, groupProducts, scopedStats, sourceStats, priceDateRange, modelPageItems, buildTotals, compactBuild, compatibility, validateBuild, dailySeries, percentChange, buildAnalysisSeries } from './pc-tools-core.mjs?v=danawa-display-v2';
-import { readJson, createPriceStore } from './pc-tools-data.mjs?v=danawa-display-v2';
-import { drawMarketChart as drawChart } from './pc-market-chart.mjs?v=sold-chart-v3';
-import { createDatePicker } from './pc-tools-calendar.mjs?v=coverage-v4';
+import { SERIES, idOf, nameOf, naturalCompare, money, metricValue, soldMeanValue, metricPresentation, listedPriceRange, statsUnavailable, priceRecordIssue, analysisSelectionUrl, groupProducts, scopedStats, sourceStats, priceDateRange, shiftDate, modelPageItems, buildTotals, compactBuild, compatibility, validateBuild, dailySeries, percentChange, buildAnalysisSeries } from './pc-tools-core.mjs?v=danawa-display-v2';
+import { readJson, createPriceStore } from './pc-tools-data.mjs?v=timeline-v1';
+import { drawMarketChart as drawChart } from './pc-market-chart.mjs?v=timeline-v1';
 import { createAdfitSlot } from './adfit.js?v=adfit-rail-v1';
 import { createContextualAffiliate } from './affiliate.js?v=ad-connection-help-v1';
 import { toolBrand, toolFilterSchema, toolFacetValues, toolFacetLabel, filterToolProducts, visibleSelection, toolScopeNote } from './pc-tools-catalog.mjs?v=parts-ux-v4';
@@ -16,7 +15,8 @@ const state = {
   products: [], byId: new Map(), categories: [], sources: [], category: builder ? 'CPU' : 'GPU',
   manufacturer: '', generation: '', capacity: '', query: '', sort: 'name', page: 1,
   entries: [], selectedId: '', selectedManufacturer: '',
-  days: 30, range: priceDateRange(), chartDate: '', source: '', ready: false,
+  days: builder ? 30 : 60, range: priceDateRange(builder ? '' : shiftDate(new Date().toISOString().slice(0,10),-59)), chartDate: '', source: '', ready: false,
+  historyPending: false,
 };
 let repaintTimer, statusTimer;
 const displayPrice = (value, currency = 'KRW') => value == null ? '—' : money(value, currency);
@@ -71,25 +71,25 @@ function specOf(p) { return p.key_specs || {}; }
 const brandOf = toolBrand;
 function generationOf(p) { return toolFacetValues(p, toolFilterSchema(p.category_code)[0]?.[0])[0] || ''; }
 function requestedPriceAsOf() { return builder || state.range.to === state.range.latest ? '' : state.range.to; }
-function chartRecord(id) { return prices.get(id, builder ? 30 : state.days, requestedPriceAsOf()); }
+function chartRecord(id) { return builder ? prices.get(id, 30) : prices.getAvailable(id, state.days, requestedPriceAsOf()); }
 function payload(id) {
   const record = chartRecord(id);
   return record?.state === 'ready' && !statsUnavailable(record.data) ? record.data : null;
 }
 function analysisRecord(id) {
   return !builder && state.source === 'ebay'
-    ? overseasPrices?.get(id, state.days, requestedPriceAsOf())
+    ? overseasPrices?.getAvailable(id, state.days, requestedPriceAsOf())
     : chartRecord(id);
 }
 function analysisData(id) {
   const record = analysisRecord(id);
   return record?.state === 'ready' && !statsUnavailable(record.data) ? sourceStats(record.data, state.source) : null;
 }
-function syncAnalysisUrl() {
+function syncAnalysisUrl(range = state.range) {
   if (builder) return;
   const url = new URL(analysisSelectionUrl(location.href, state.selectedId, state.selectedManufacturer));
   if (state.source) url.searchParams.set('source', state.source); else url.searchParams.delete('source');
-  url.searchParams.set('from', state.range.from); url.searchParams.set('to', state.range.to);
+  url.searchParams.set('from', range.from); url.searchParams.set('to', range.to);
   history.replaceState(null, '', url.href);
 }
 function buildEntryData(entry) {
@@ -468,10 +468,29 @@ function openCompatibilityHelp(kind) {
 function resetChartView() {
   $('#price-chart')?.dispatchEvent(new CustomEvent('chart-reset'));
 }
+function resetHistoryWindow() {
+  state.days=60;state.range=priceDateRange(shiftDate(state.range.latest,-59),state.range.latest);state.historyPending=false;
+}
+function loadEarlierPrices({retry=false} = {}) {
+  const product=state.byId.get(state.selectedId),store=state.source==='ebay'?overseasPrices:prices;
+  if (!product || state.historyPending || (!retry&&store.get(state.selectedId,state.days,requestedPriceAsOf())?.state==='error')) return;
+  const maxDays=priceDateRange(state.range.earliest,state.range.to).days;
+  if(!retry&&state.days>=maxDays)return;
+  const identity=`${state.selectedId}:${state.source}:${state.range.to}`;
+  if(!retry)state.days=Math.min(maxDays,state.days+60);
+  state.range=priceDateRange(shiftDate(state.range.to,1-state.days),state.range.to);
+  state.historyPending=true;
+  const task=store.load([product],state.days,requestedPriceAsOf(),{background:true});
+  scheduleRepaint();
+  void task.finally(()=>{
+    if(identity!==`${state.selectedId}:${state.source}:${state.range.to}`)return;
+    state.historyPending=false;syncAnalysisUrl();scheduleRepaint();
+  });
+}
 function analysisSources() {
   const allowedSources = new Set(state.sources.map(source => String(source.source_id || source.id || source.key || '')));
   return (state.source ? [state.source] : [...allowedSources].filter(id => id !== 'ebay')).filter(id => allowedSources.has(id)).map(id => {
-    const record = id === 'ebay' ? overseasPrices?.get(state.selectedId, state.days, requestedPriceAsOf()) : chartRecord(state.selectedId);
+    const record = id === 'ebay' ? overseasPrices?.getAvailable(state.selectedId, state.days, requestedPriceAsOf()) : chartRecord(state.selectedId);
     const data = record?.state === 'ready' && !statsUnavailable(record.data)
       ? sourceStats(scopedStats(record.data, state.selectedManufacturer), id) : null;
     return { id, record, data, currency: id === 'ebay' ? 'USD' : 'KRW' };
@@ -482,17 +501,6 @@ function renderAnalysis() {
   const data = sourceStats(scopedStats(base, state.selectedManufacturer), state.source);
   const currency = base?.methodology?.currency || (state.source === 'ebay' ? 'USD' : 'KRW');
   const window = state.range;
-  const controls = $('#chart-navigation');
-  if (!$('#chart-from')) {
-    [['from', '시작일'], ['to', '종료일']].forEach(([key, label]) => {
-      const field = el('div', `tools-range-field tools-range-${key}`), caption = el('label', '', label);
-      caption.htmlFor = `chart-${key}`; field.append(caption); controls.append(field);
-      const input = createDatePicker(field, { id: `chart-${key}`, label });
-      input.min = window.earliest; input.max = window.latest; input.value = window[key];
-    });
-    const apply = action('적용', 'range-apply'); apply.setAttribute('aria-label', '선택 기간 적용'); controls.append(apply);
-  }
-  controls.title = `${window.from} ~ ${window.to} · ${window.days}일`;
   const sourceControls = $('#chart-sources'); sourceControls.replaceChildren();
   const sourceOrder = ['joonggonara', 'bunjang', 'danawa', 'ebay'];
   const availableSources = new Set(state.sources.map(source => String(source.source_id || source.id || source.key || '')));
@@ -501,11 +509,10 @@ function renderAnalysis() {
   [['', '국내 비교'], ...sourceIds.map(id => [id, id === 'ebay' ? 'eBay (USD)' : SOURCE_LABELS[id] || id])].forEach(([id, label]) => {
     const option = el('option', '', label); option.value = id; option.selected = state.source === id; sourceControls.append(option);
   });
-  for (const button of document.querySelectorAll('[data-action="chart-period"]')) button.setAttribute('aria-pressed', String(Number(button.dataset.days) === state.days));
   const coverage = $('#chart-coverage'); coverage.replaceChildren(); coverage.hidden = true;
   const sources = analysisSources();
   const series = sources.flatMap(item => buildAnalysisSeries(statsUnavailable(item.data) ? null : item.data, {
-    source: item.id, allowedSourceIds: [item.id], days: state.days, sourceLabels: SOURCE_LABELS,
+    source: item.id, allowedSourceIds: [item.id], days: item.data?.methodology?.days || state.days, sourceLabels: SOURCE_LABELS,
   }).filter(line => ['active', 'sold'].includes(line.metricKey)).map(line => ({ ...line,
     label: `${SOURCE_LABELS[item.id] || item.id} · ${line.priceBasis === 'listed-minimum' ? '중고 최저 표시가' : line.metricKey === 'sold' ? '판매완료 표시가' : '판매중'}`, currency: item.currency })));
   const dates = [...new Set(series.flatMap(item => item.points.map(point => point.date)))].sort();
@@ -542,8 +549,15 @@ function renderAnalysis() {
       coverage.textContent = '등록 가격은 있지만 표본이 부족해 대표가격을 표시하지 않습니다.'; coverage.hidden = false;
     }
   }
+  if(record?.historyError){coverage.textContent='이전 기록을 불러오지 못했습니다. 현재 기록은 유지됩니다.';coverage.append(action('다시 시도','history-retry'));coverage.hidden=false;}
+  const historyStatus=$('#chart-history-status');
+  if(historyStatus)historyStatus.textContent=state.historyPending?'이전 기록 불러오는 중':'';
   renderAnalysisContext(record, data, currency);
-  drawChart($('#price-chart'), series, { label: `${modelName} 가격 추이`, currency, identity: `${state.selectedId}:${state.selectedManufacturer}:${state.source}:${window.from}:${window.to}` });
+  drawChart($('#price-chart'), series, { label: `${modelName} 가격 추이`, currency, identity: `${state.selectedId}:${state.selectedManufacturer}:${state.source}:${window.to}`,
+    onLoadEarlier:loadEarlierPrices,loadingEarlier:state.historyPending,
+    canLoadEarlier:state.days<priceDateRange(window.earliest,window.to).days&&!record?.historyError,
+    onViewChange:range=>{if(windowStatus)windowStatus.textContent=`${range.from} ~ ${range.to}`;syncAnalysisUrl(range);}
+  });
 }
 
 function searchReturnPath(product) {
@@ -594,6 +608,7 @@ function selectCategory(category) {
     else state.selectedId = '';
   }
   if (!builder) {
+    resetHistoryWindow();
     state.selectedId = idOf(currentProducts()[0]);
     syncAnalysisUrl();
   }
@@ -618,14 +633,11 @@ document.addEventListener('click', event => {
     $('#compatibility-dialog').close(); selectCategory(button.dataset.category); return;
   }
   if (type === 'print-build') { window.print(); return; }
-  if (type === 'chart-period') {
-    const days = Number(button.dataset.days);
-    if (![30,60,100,300].includes(days)) return;
-    const to = state.range.latest, from = new Date(Date.parse(to) - (days - 1) * 86400000).toISOString().slice(0,10);
-    state.range = priceDateRange(from, to); state.days = state.range.days; resetChartView();
-    $('#chart-from').value = from; $('#chart-to').value = to;
-    syncAnalysisUrl(); renderAnalysis(); refreshPrices(); return;
+  if (type === 'chart-recent') {
+    if(state.range.to!==state.range.latest){resetHistoryWindow();syncAnalysisUrl();renderAnalysis();refreshPrices();}
+    resetChartView();return;
   }
+  if(type==='history-retry'){loadEarlierPrices({retry:true});return;}
   if (type === 'quantity-step') {
     const entry = state.entries.find(e => e.id === id), delta = Number(button.dataset.quantityStep);
     if (!entry || ![-1,1].includes(delta) || entry.quantity + delta < 1 || entry.quantity + delta > 16) return;
@@ -636,17 +648,6 @@ document.addEventListener('click', event => {
   }
   if (type === 'category') { selectCategory(category); return; }
   if (type === 'reset-filters') { resetToolFilters(); return; }
-  if (type === 'range-apply') {
-    try {
-      const from = $('#chart-from').value, to = $('#chart-to').value;
-      if (!from || !to) throw new Error('시작일과 종료일을 선택하세요.');
-      const range = priceDateRange(from, to);
-      state.range = range; state.days = range.days; state.chartDate = ''; resetChartView(); syncAnalysisUrl();
-      $('#chart-custom-range').open = false;
-      status(''); renderSummary(); renderModelTable(); renderAnalysis(); refreshPrices();
-    } catch (error) { status(error.message, true); }
-    return;
-  }
   if (type === 'retry') {
     prices.clear(); overseasPrices?.clear(); status(''); refreshPrices();
     renderSummary(); renderModelTable(); if (builder) renderBuild(); else renderAnalysis();
@@ -669,7 +670,7 @@ document.addEventListener('click', event => {
   if (type === 'remove') { state.entries = state.entries.filter(e => e.id !== id); persistBuild(); status(''); }
   if (type === 'analyze') {
     $('#analysis-model-dialog')?.close();
-    state.selectedId = id; state.selectedManufacturer = manufacturer; state.chartDate = ''; resetChartView();
+    state.selectedId = id; state.selectedManufacturer = manufacturer; state.chartDate = ''; resetHistoryWindow();resetChartView();
     syncAnalysisUrl();
   }
   renderSummary(); renderModelTable(); if (builder) renderBuild(); else renderAnalysis(); refreshPrices();
@@ -677,7 +678,7 @@ document.addEventListener('click', event => {
 });
 document.addEventListener('change', event => {
   const target = event.target;
-  if (target.id === 'chart-sources') { state.source = target.value; state.page = 1; resetChartView(); syncAnalysisUrl(); renderControls(); renderModelTable(); renderAnalysis(); refreshPrices(); return; }
+  if (target.id === 'chart-sources') { state.source = target.value; state.page = 1; resetHistoryWindow();resetChartView(); syncAnalysisUrl(); renderControls(); renderModelTable(); renderAnalysis(); refreshPrices(); return; }
   if (target.dataset.quantity) {
     const entry = state.entries.find(e => e.id === target.dataset.quantity); const n = Number(target.value);
     if (!entry) return;
@@ -701,7 +702,9 @@ function resetToolFilters() {
 function applyModelFilters({ renderFilterControls = true } = {}) {
   state.page = 1;
   if (!builder) {
+    const previousId=state.selectedId;
     state.selectedId = visibleSelection(currentProducts(), state.selectedId);
+    if(previousId!==state.selectedId)resetHistoryWindow();
     state.selectedManufacturer = ''; state.chartDate = ''; resetChartView();
     syncAnalysisUrl();
   }

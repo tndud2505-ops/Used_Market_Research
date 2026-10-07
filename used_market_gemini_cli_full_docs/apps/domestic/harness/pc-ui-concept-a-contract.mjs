@@ -28,7 +28,7 @@ test('restored UI assets use a fresh cache identity while data and calculation v
   assert.ok(script.includes('pc-tools-core.mjs?v=danawa-display-v2'));
   assert.ok(script.includes('pc-tools-catalog.mjs?v=parts-ux-v4'));
   assert.match(script, /pc-tools-data\.mjs\?v=[\w-]+/);
-  assert.match(script, /pc-market-chart\.mjs\?v=sold-chart-v3/);
+  assert.match(script, /pc-market-chart\.mjs\?v=timeline-v1/);
   assert.match(read('index.html'), /app\.js\?v=[\w-]+/);
   assert.match(read('index.html'), /search-controls\.css\?v=search-modal-v4/);
   assert.match(read('computer-builder.html'), /pc-tools\.js\?v=[\w-]+/);
@@ -38,9 +38,10 @@ test('analysis has one chart workspace with both price kinds', () => {
   const html=read('price-analysis.html');
   assert.match(html,/id="analysis-chart-pane"/);
   assert.doesNotMatch(html,/id="analysis-table-pane"|data-action="analysis-pane"|id="chart-metric"/);
-  assert.ok(html.includes('id="chart-custom-range"'));
+  assert.ok(html.includes('data-action="chart-recent"'));
+  assert.ok(html.includes('id="chart-window-status"'));
   assert.doesNotMatch(html,/id="chart-(indicators|average-enabled|average-period|samples-enabled)"/);
-  for(const days of [30,60,100,300]) assert.ok(html.includes(`data-days="${days}"`));
+  assert.doesNotMatch(html,/data-action="chart-period"|id="chart-custom-range"|data-days=/);
   assert.match(script,/\['active', 'sold'\]\.includes\(line\.metricKey\)/);
 });
 

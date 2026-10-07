@@ -31,14 +31,33 @@ export function createPriceStore(onChange, options = {}) {
   const cache = new Map();
   let generation = 0;
   let controller = new AbortController();
+  const backgroundControllers=new Set();
   const keyOf = (id, days, asOf = '') => `${id}:${days}:${asOf}`;
   const get = (id, days = 30, asOf = '') => cache.get(keyOf(id, days, asOf));
-  async function load(products, days = 30, asOf = '') {
-    const current = ++generation;
-    controller.abort();
-    for (const [key, value] of cache) if (value.state === 'loading') cache.delete(key);
-    controller = new AbortController();
-    const signal = controller.signal;
+  // Keep the already verified timeline visible while a wider window loads.
+  // Scope and end date must match; never borrow another model or historical end.
+  const getAvailable = (id, days = 30, asOf = '') => {
+    const current = get(id, days, asOf);
+    if (current?.state === 'ready') return current;
+    let previous = null, previousDays = 0;
+    for (const [key, record] of cache) {
+      const count = Number(record.data?.methodology?.days);
+      if (record.state === 'ready' && count <= days && count > previousDays && key === keyOf(id, count, asOf)) {
+        previous = record; previousDays = count;
+      }
+    }
+    return previous ? { ...previous, historyState: current?.state, historyError: current?.error } : current;
+  };
+  async function load(products, days = 30, asOf = '', {background=false} = {}) {
+    const current = background ? generation : ++generation;
+    if(!background){
+      controller.abort();for(const pending of backgroundControllers)pending.abort();backgroundControllers.clear();
+      for (const [key, value] of cache) if (value.state === 'loading') cache.delete(key);
+      controller = new AbortController();
+    }
+    const requestController=background?new AbortController():controller;
+    if(background)backgroundControllers.add(requestController);
+    const signal = requestController.signal;
     const unique = [...new Map(products.map(p => [idOf(p), p])).values()];
     let offset = 0;
     const worker = async () => {
@@ -77,7 +96,8 @@ export function createPriceStore(onChange, options = {}) {
       }
     };
     await Promise.all(Array.from({ length: Math.min(4, unique.length) }, worker));
+    backgroundControllers.delete(requestController);
     if (current === generation) onChange();
   }
-  return { get, load, clear: () => { controller.abort(); generation++; cache.clear(); } };
+  return { get, getAvailable, load, clear: () => { controller.abort();for(const pending of backgroundControllers)pending.abort();backgroundControllers.clear();generation++; cache.clear(); } };
 }
