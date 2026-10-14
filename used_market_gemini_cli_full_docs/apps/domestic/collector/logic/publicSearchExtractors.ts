@@ -24,14 +24,8 @@ type BunjangApiProduct = {
   free_shipping?: boolean;
 };
 
-type BunjangApiResponse = {
-  result?: string;
-  no_result?: boolean;
-  no_result_message?: string | null;
-  list?: BunjangApiProduct[];
-};
-
 type BunjangWebProduct = {
+  type?: string;
   pid?: number | string;
   name?: string;
   price?: number | string;
@@ -430,10 +424,6 @@ function getDaangnOverfetchMultiplier() {
   return readPositiveIntegerEnv("PUBLIC_SEARCH_DAANGN_OVERFETCH_MULTIPLIER", 2);
 }
 
-function getBunjangOverfetchMultiplier() {
-  return readPositiveIntegerEnv("PUBLIC_SEARCH_BUNJANG_OVERFETCH_MULTIPLIER", 3);
-}
-
 async function getEbayBrowseToken(): Promise<string> {
   const configuredToken = process.env.EBAY_BROWSE_API_TOKEN?.trim();
   if (configuredToken) return configuredToken;
@@ -803,16 +793,16 @@ function mapDaangnItem(product: DaangnLdJsonProduct, area: string, index: number
 }
 
 async function fetchBunjangSearchPayload(
-  input: SearchCommandInput,
-  fetchLimit = input.limit
-): Promise<BunjangApiResponse & { list: BunjangApiProduct[] }> {
-  const url = new URL("https://api.bunjang.co.kr/api/1/find_v2.json");
+  input: SearchCommandInput
+): Promise<BunjangCategoryCursor & { list: BunjangApiProduct[]; nextCursor: string | null }> {
+  const cursor = decodeBunjangCategoryCursor(input.cursor);
+  if (!cursor) throw new BunjangSearchApiError("invalid cursor");
+  const url = new URL("https://api.bunjang.co.kr/api/search/v8/web/search");
   url.searchParams.set("q", input.keyword);
-  url.searchParams.set("n", String(Math.max(1, fetchLimit)));
-  url.searchParams.set("page", String(parsePageCursor(input.cursor)));
-  url.searchParams.set("order", "date");
-  url.searchParams.set("stat_device", "w");
-  url.searchParams.set("version", "4");
+  url.searchParams.set("policyKey", "pw.product.keyword");
+  url.searchParams.set("size", "60");
+  url.searchParams.set("sort", "latest");
+  if (cursor.upstreamCursor) url.searchParams.set("cursor", cursor.upstreamCursor);
 
   const response = await fetch(url, {
     headers: {
@@ -828,16 +818,21 @@ async function fetchBunjangSearchPayload(
     throw new BunjangSearchApiError(`HTTP ${response.status}`);
   }
 
-  let payload: BunjangApiResponse;
+  let payload: BunjangWebSearchResponse;
   try {
-    payload = await response.json() as BunjangApiResponse;
+    payload = await response.json() as BunjangWebSearchResponse;
   } catch {
     throw new BunjangSearchApiError("invalid JSON response");
   }
-  if (!Array.isArray(payload.list)) {
+  const page = payload.data?.responses?.mainGrid?.searchResponse;
+  if (!page || !isBunjangWebProductPage(page.data)) {
     throw new BunjangSearchApiError("unsupported response shape");
   }
-  return payload as BunjangApiResponse & { list: BunjangApiProduct[] };
+  return {
+    ...cursor,
+    list: page.data.map(bunjangWebProductToApiProduct),
+    nextCursor: typeof page.cursor === "string" && page.cursor.trim() ? page.cursor : null
+  };
 }
 
 async function fetchBunjangCategorySearchPayload(
@@ -857,6 +852,7 @@ async function fetchBunjangCategorySearchPayload(
   url.searchParams.set("categoryId", sourceCategoryId);
   url.searchParams.set("policyKey", "pw.product.category");
   url.searchParams.set("size", "60");
+  url.searchParams.set("sort", "latest");
   if (cursor.upstreamCursor) {
     url.searchParams.set("cursor", cursor.upstreamCursor);
   }
@@ -886,15 +882,15 @@ async function fetchBunjangCategorySearchPayload(
     throw new BunjangCategoryApiError("invalid JSON response");
   }
   const searchResponse = payload.data?.responses?.mainGrid?.searchResponse;
-  if (!searchResponse || !Array.isArray(searchResponse.data)) {
+  if (!searchResponse || !isBunjangWebProductPage(searchResponse.data)) {
     throw new BunjangCategoryApiError("unsupported response shape");
   }
 
   return {
     products: searchResponse.data,
     total: typeof searchResponse.totalCount === "number" ? searchResponse.totalCount : undefined,
-    nextCursor: typeof searchResponse.nextCursor === "string" && searchResponse.nextCursor.trim() !== ""
-      ? searchResponse.nextCursor
+    nextCursor: typeof searchResponse.cursor === "string" && searchResponse.cursor.trim() !== ""
+      ? searchResponse.cursor
       : null,
     upstreamCursor: cursor.upstreamCursor,
     itemOffset: cursor.itemOffset
@@ -902,6 +898,11 @@ async function fetchBunjangCategorySearchPayload(
 }
 
 const BUNJANG_CATEGORY_CURSOR_PREFIX = "slice:v1:";
+
+function isBunjangWebProductPage(rows: unknown): rows is BunjangWebProduct[] {
+  return Array.isArray(rows) && rows.every(row => row?.type === "EXT_AD" ||
+    (/^\d+$/.test(String(row?.pid ?? "")) && typeof row?.name === "string" && row.name.trim() !== ""));
+}
 
 function encodeBunjangCategoryCursor(upstreamCursor: string | null, itemOffset: number): string {
   return `${BUNJANG_CATEGORY_CURSOR_PREFIX}${Buffer.from(JSON.stringify({
@@ -1147,10 +1148,10 @@ function mapBunjangItem(product: BunjangApiProduct, index: number): SearchItem {
   };
 }
 
-function mapBunjangWebItem(product: BunjangWebProduct, index: number): SearchItem {
+function bunjangWebProductToApiProduct(product: BunjangWebProduct): BunjangApiProduct {
   const updatedAt = typeof product.updatedAt === "string" ? product.updatedAt : "";
   const updateTime = updatedAt ? Date.parse(updatedAt) / 1000 : undefined;
-  return mapBunjangItem({
+  return {
     pid: product.pid == null ? undefined : String(product.pid),
     name: product.name,
     price: product.price == null ? undefined : String(product.price),
@@ -1161,7 +1162,11 @@ function mapBunjangWebItem(product: BunjangWebProduct, index: number): SearchIte
     product_image: product.productImage,
     ad: product.ad,
     free_shipping: product.freeShipping
-  }, index);
+  };
+}
+
+function mapBunjangWebItem(product: BunjangWebProduct, index: number): SearchItem {
+  return mapBunjangItem(bunjangWebProductToApiProduct(product), index);
 }
 
 export async function tryExtractPublicSearchResult(
@@ -1248,24 +1253,24 @@ export async function tryExtractPublicSearchResult(
       }
     }
     try {
-      const payload = await fetchBunjangSearchPayload(
-        input,
-        Math.min(Math.max(input.limit * getBunjangOverfetchMultiplier(), input.limit), 100)
-      );
-      const baseWarnings = payload.no_result && payload.no_result_message
-        ? [`bunjang reported no results: ${payload.no_result_message}`]
-        : [];
+      const payload = await fetchBunjangSearchPayload(input);
       const filtered = filterBunjangProducts(input, payload.list);
-      const items = filtered.kept.slice(0, input.limit).map(mapBunjangItem);
-      const fetchLimit = Math.min(Math.max(input.limit * getBunjangOverfetchMultiplier(), input.limit), 100);
+      const mapped = filtered.kept.map(mapBunjangItem)
+        .filter((item) => item.title !== "" && item.price !== null && item.url !== "");
+      const pageStart = Math.min(payload.itemOffset, mapped.length);
+      const items = mapped.slice(pageStart, pageStart + input.limit);
+      const pageEnd = pageStart + items.length;
+      const nextCursor = pageEnd < mapped.length
+        ? encodeBunjangCategoryCursor(payload.upstreamCursor, pageEnd)
+        : payload.nextCursor ? encodeBunjangCategoryCursor(payload.nextCursor, 0) : null;
       return buildResult(
         adapter,
         input,
         items,
-        [...baseWarnings, ...filtered.warnings],
+        filtered.warnings,
         filtered.filteredCount,
         [],
-        buildSearchPagination(adapter, input, payload.list.length >= fetchLimit ? input.limit : items.length)
+        { has_more: Boolean(nextCursor), next_cursor: nextCursor }
       );
     } catch (error) {
       const message = error instanceof BunjangSearchApiError

@@ -1,5 +1,124 @@
 # AWS Ubuntu 러너 운영
 
+## 2026-10-11 조회/통계 메모리 격리
+
+2026-10-14 20:40~20:42 KST: 숫자 `9600` 검색이 K/KF/X 계열을 찾도록
+검색 전용 matcher를 수정했다. 정확한 `9600K` 선택과 제품 identity는 유지한다.
+지정 모델 매물 조회는 기존 product 인덱스의 equality/IN seek를 사용한다.
+운영 DB 읽기 전용 비교에서 결과 전체가 같았고 Corsair 표본은 648ms→6ms,
+9600 계열은 155ms→6ms였다. 모든 과거 시간 초과의 원인이 입증된 것은 아니다.
+브라우저 GET은 일시 네트워크/timeout 및 의미 오류 코드 없는 502/504에 한 번만
+재시도하며 사용자 취소·인증·자료 무결성 오류를 빈 결과로 바꾸지 않는다.
+다른 진행 중 UI 변경을 섞지 않고 운영 기준의 4개 에셋과 matcher만 Worker
+`9a7d1686-c7a6-49b2-835d-d465a12df461`로 배포했다. AWS는 유휴 확인 후
+정상 설치기로 search-index와 matcher 두 모듈을 반영하고 SHA256을 대조했다.
+내부/외부 인스턴스 `ae3b8cda-7bab-4622-a01e-74c4a914587b` 일치,
+새 OOM·자동 재시작 0, 기존 합산 3397MiB 배분 유지. 코드·환경 복구본은
+`/home/ubuntu/used-market-deploy-backups/lookup-before-20261014.tar.gz`이며 DB는 없다.
+두 공개 도메인 health·홈·모델 API 및 실제 브라우저 9600 검색/KF 선택,
+Corsair 응답, Hitachi 차트의 데스크톱/모바일 표시를 확인했다.
+public-catalog·price-recovery·pc-service·pc-tools·HTML analytics 계약과 build는 통과했다.
+pc-ui 계약의 기존 stale projection/source table 불일치는 남아 있으며 전체 suite 성공은 아니다.
+추가 발견: Corsair >1200W의 국내 6행은 무선랜카드로, AX 숫자를 PSU 모델·출력으로
+해석하는 분류와 구조화 카테고리 신뢰 경로의 별도 교정이 필요하다.
+이번 배포는 해당 identity·원장·가격 이력을 변경하지 않았다. 응답 성공을 분류 정확성으로 보지 않는다.
+
+2026-10-13 13:24 KST: 최신 identity 상태 조회의 외부 쿼리가 source 인덱스로
+사이트 전체 이력을 반복 스캔하던 경로를 후보 snapshot의 rowid 조회로 고정했다.
+같은 운영 DB 읽기 트랜잭션에서 기존/수정 결과 Map의 완전 일치를 확인했다.
+3RSYS 풀타워 표본은 9,779ms→3ms, i5-8400은 248ms→31ms,
+i3-6100은 331ms→51ms였다. 무결성 검사는 범위·판정 기준을 그대로 유지하고
+iterator로 읽어 전체 행 배열을 보관하지 않는다. 게시 전 단계 로그도 분리했다.
+정상 설치기 완료, 변경 2개 모듈 SHA256 일치, 내부/외부 Runner 인스턴스 일치를
+확인했다. 코드 복구본은 `query-before-20261013.tar.gz`이며 DB는 포함하지 않는다.
+메인 사이트 health·PSU·i5-8400·Samsung DDR3 4GB·i3-6100·HGST 일별 조회는
+200이었다. 단, 기간 요약은 여전히 10월 10일 계산의 LAST_PUBLISHED이며,
+이는 10월 13일 전체 작업의 2시간 제한 실패를 성공으로 바꾸지 않는다.
+수정 후 다음 정상 예약 전체 실행의 계산·검증·활성 게시 완료는 별도 확인해야 한다.
+한정 계약 검사는 통과했으나 전체 npm test는 기존 광고 동의 UI/계약 불일치로
+실패했다. 해당 UI를 이 통계 수정에 섞어 배포하지 않았다.
+
+`used-market-stats.service`는 로컬 Unix 소켓으로만 통계 작업을 받는다. 공개 Runner와
+별도 cgroup이며 DB·최종 가격 결과는 기존 저장소를 그대로 사용한다. 각 작업은 2시간
+후 TERM, 5초 후 KILL로 종료된다. Runner 연결 종료도 고아 작업을 중단한다.
+통계 계산뿐 아니라 게시 후 백업·압축도 이 서비스에서 수행한다. 개별 HTTP 요청
+시간 제한과 작업 전체 제한은 별개다. 예약 호출의 HTTP 202는 접수이지 완료가 아니다.
+실제 완료는 Runner의 `pc_publication_job_finished` 및 기존 게시 영수증으로 확인한다.
+`publication-job-state.json` 한 파일에 대기 요청과 최근 8개 결과를 보존한다.
+대기 요청은 재시작 후 실행하지만 실행 중 중단된 요청은 `interrupted`로 남겨
+게시 ID 대조 전 자동 재게시하지 않는다. 다른 수집 작업 때문에 접수만 하고
+사라지는 경로가 없으며 통계 서비스 준비 전에는 대기 상태를 유지한다.
+
+`install-memory-budget.sh`가 OS용 1GiB를 제외한 실제 MemTotal의 절반(내림)을
+`usedpick.slice`의 합산 MemoryMax로 계산한다. 2026-10-12부터 네 서비스의
+개별 최대치를 합산 예산과 분리해, 쉬고 있는 백업 등의 여유를 통계가 사용할 수 있다.
+현재 3,397MiB 합산 예산에서 Runner 최대 1,536MiB, 통계 최대 2,501MiB,
+백업 최대 512MiB, Tunnel 최대 128MiB다. 동시에 이 최대치를 모두 쓸 수는 없다.
+Runner/Tunnel의 MemoryLow와 OOM 우선순위를 설정해 조회를 우선 보호하고,
+공통 MemoryHigh 감속은 사용하지 않는다. 완전한 OOM 방지 보장은 아니며
+실제 합산 예산을 초과하면 통계가 실패할 수 있다. 통계 Node heap은
+통계 상한의 55%다. 별도 384MiB heap 검증 자식도 같은 통계 서비스 안에서 실행하며
+조회 서버는 검증 결과만 전달한다. 이는 예약 메모리가 아니며 OS 여유와 실제 사용량도 점검해야 한다.
+Kstock 설정은 이 설치기가 변경하지 않는다.
+
+2026-10-12 03시 정기 작업은 04:23 KST에 통계 cgroup 상한 1,733MiB를 넘어
+OOM으로 종료됐다. 마지막 범위 계산/추적 로그 이후에 발생했으며, 정확한
+할당 위치는 확정되지 않았다. 전체 결과를 검증하면서 두 번째 결과 배열과
+대형 JSON 문자열을 유지하던 경로를 행 단위 검증·해시·저장으로 바꿨다.
+기존 체크섬 형식과 트랜잭션 무결성은 유지한다. 추적 DB 행도 iterator로
+읽으며, 단계별 heap/external/RSS 로그와 단계 사이 회수를 추가했다.
+96MiB heap에서 약 40MiB 입력의 실제 검증·저장 계약 검사가 통과했다.
+이는 다음 전체 예약 작업의 완료 증거를 대신하지 않는다.
+
+일별 차트 조회는 사용하지 않는 기간 요약의 압축 해제를 생략한다.
+health의 구형 색인 확인은 존재 여부만 읽는다. 다나와는 알려진 상품 카드가
+있는 경우 바깥 wrapper 이름 변경만으로 실패하지 않게 했지만, HTTP 403은
+해결된 것으로 간주하지 않으며 기존 10초/시간당·회당 20요청/6시간 격리를 유지한다.
+
+2026-10-12 10:54~10:57 KST 적용 확인: 정상 설치기가 성공했고 8개 변경 파일의
+운영 SHA256이 로컬과 일치했다. 실제 cgroup은 `/usedpick.slice`이며 합산
+`memory.max=3562012672`, 세 상시 서비스가 그 아래로 이동했다. 백업 서비스의
+Slice 설정도 동일하다. 새 slice의 OOM·high 이벤트는 0이다.
+공개 health·PSU 매물 5건·i5-8400 및 Samsung DDR3 4GB 일별 차트 39행을
+HTTP 200 / success로 확인했다(해당 표본 응답 약 1.0~2.4초).
+일별 자료가 존재하더라도 중단된 전체 게시의 성공으로 보지 않는다.
+코드만 포함한 복구본은
+`/home/ubuntu/used-market-deploy-backups/stats-memory-before-20261012.tar.gz`다.
+Kstock의 합산 slice 이행은 거래 재생성 안전 절차가 별도로 필요하며,
+USED 설치 성공으로 Kstock 배분까지 완료됐다고 판단하지 않는다.
+
+2026-10-12 14:39~14:43 KST 재확인: 위 8개 파일의 운영 SHA256 및 실제
+slice/개별 상한이 일치하며 배포 후 자동 재시작·OOM은 0이다. Runner의 약
+1.5GiB 사용량 중 당시 anon은 약 249MB, 파일 캐시는 약 1.34GB였다.
+child memory.max에 따른 캐시 회수 이벤트는 있으나 현재 memory pressure
+avg10/60/300은 0이다. 공개 health·PSU·두 가격 조회는 200/success였다.
+전체 통계 게시 영수증은 여전히 배포 전 실패 건이며 새 전체 실행은 미검증이다.
+다나와 배포 후 12:20 실행은 20요청·20수집·39파싱·3파싱 실패로 부분 결과가
+있었지만 실행 상태는 FAILED다. 0카드 HTTP 200은 자료 없음으로 처리하지 않았다.
+이 결과만으로 실제 대체 wrapper 성공을 입증하지 않는다. 13:20 실행은 첫 요청
+403으로 QUARANTINED, 정상 재시도 가능 시각은 19:20:20 KST다. 강제 재시도나
+격리 해제 없이 반영 완료와 소스 접근 복구 미완료를 구분했다.
+
+공개 `/health`는 인증된 CPU 매물 1건 조회가 5초 안에 정상 응답해야 200을 반환한다.
+조회 장애는 503으로 드러나며 프로세스 실행 여부만으로 정상 판정하지 않는다.
+별도 전체 재계산은 장애 복구 검증으로 실행하지 않는다. 다음 정상 예약 게시의
+완료·메모리 최대치·복구 백업 생성은 실제 실행 후 확인한다.
+
+2026-10-11 최종 배포: 사용자 승인으로 OS 1,024MiB를 남겼다. MemTotal 8,005,632KiB에서
+USED 상한 합계는 3,397MiB (Runner 1,024 / 통계 1,733 / 백업 512 / Tunnel 128)다.
+Kstock도 합계 3,397MiB를 적용했으며 컨테이너를 재시작하지 않았다.
+공개 Worker 버전은 `ffcf04be-b5fc-46db-a357-892fce1d3a31`다.
+실제 조회 기반 health, PSU 목록, i5-8400 및 Samsung DDR3 4GB 가격 조회가
+HTTP 200으로 확인됐다. 이 확인은 다음 정기 전체 게시 성공을 의미하지 않는다.
+코드 복구본은 `/home/ubuntu/used-market-deploy-backups/runtime-final-before-20261011.tar.gz`이며
+DB 복사본을 포함하지 않는다. 집중 계약은 통과했으나 전체 verify는 기존
+`pc-service-contract` 개인정보 안내 문구 기대값에서 실패했다.
+게시 후 백업의 게시 ID·체크섬·행 수가 새 결과와 다르면 정리를 건너뛰고
+`partial_success`로 기록한다. 같은 날 오래된 복구본을 새 복구본으로 오인하거나
+백업 경고를 이유로 이미 성공한 게시를 재실행하지 않는다.
+배포 후 현재 활성 게시본 4,932행의 읽기 전용 전체 검증도 통과했다
+(21.1초, 프로세스 최대 RSS 418,228KiB, D1 쓰기 0). 새 정기 계산 성공의 대체 증거는 아니다.
+
 ## Price publication verification (2026-09-24)
 
 Collection, classification, and daily price calculations remain on AWS. The
@@ -26,11 +145,44 @@ verifier's process CPU measure can include concurrent Runner work.
 
 ## Bunjang lifecycle tracking (2026-09-14)
 
+2026-10-11 복구: `pc_lifecycle_queue`는 매물별 최신 상태만 담는 재생성 가능한 색인이다.
+관측/원자료 변경 트리거가 이를 같은 트랜잭션에서 갱신하며, 기존 이력은 별도 스레드에서
+고정 종료점까지 100개 identity씩 이행한다. 완료 전 진단은 `INITIALIZING`이며 0건으로 표시하지 않는다.
+가격 이력·통계 필터는 변경하지 않는다. 항목별 실패 재시도 시간과 소스 차단 대기를 분리하고,
+재확인 실행 결과는 `pc_lifecycle_runs`의 소스별 마지막 영수증 및 `pc_lifecycle_recheck_finished` 로그로 확인한다.
+검색 수집 성공은 판매완료 복구 완료를 뜻하지 않는다. 중단 전 확인한 상태 변경도 공개 색인에 반영한다.
+
+다나와 복구 단계는 10초 간격·회당/최근 1시간 20요청 상한이다. 예약/수동 경로는 같은 원장 예산을
+확인하며, 요청 전에 RUNNING 실행을 남겨 재시작으로 예산이 초기화되지 않게 한다.
+403/429는 즉시 중단·6시간 격리하고, 연속 2회 구조 오류는 해당 배치를 중단한다.
+구조 오류가 있는 실행은 부분 성공 및 기존 단계별 지연으로 기록한다. 알려지지 않은 빈 화면은
+자료 없음으로 간주하지 않는다. 실패 응답의 상태·유형·해시만 기록하고 HTML/쿠키는 저장하지 않는다.
+이 상한에서는 전체 모델의 일일 갱신을 보장하지 않으며 접근 회복 확인 전 요청량을 올리지 않는다.
+
+2026-10-11 23시 KST 운영 반영: AWS 설치·서비스 시작 및 주요 모듈 SHA256 일치를 확인했고,
+Worker 배포 버전은 `059bcefb-25e6-44fb-8023-2f74a96c3266`이다. 파워 매물 및 i5-8400
+가격 조회는 HTTP 200으로 확인했다. 이는 최신 집계·판매완료 누적 복구·다나와 접근 회복의
+완료 증거가 아니다. 배포 임시 파일은 정리했으며, 10월 12일 05:15 KST 기존 1회 점검에서
+색인 준비 상태·실제 재확인 영수증·다나와 예약 실행 결과를 함께 검증한다.
+
+Keyword collection uses Bunjang's public web `/api/search/v8/web/search`
+contract (`q`, `policyKey=pw.product.keyword`, `sort=latest`, `size=60`).
+The retired `find_v2` endpoint returned HTTP 404 during the 2026-10-09 incident.
+Follow `data.responses.mainGrid.searchResponse.cursor` for subsequent pages;
+numeric product IDs must retain their decimal string identity in the ledger.
+An empty grid is a valid empty result, but unrecognized response/product fields
+are collection failures, not evidence that no listings exist. External ad rows
+without product IDs do not become listings. The source-policy and bounded-query
+contracts cover these distinctions, pagination, and the CLI extractor.
+
 The scheduled Bunjang collection rechecks stored listing URLs through the same
 public `/api/pms/v1/products/{pid}/detail/web` endpoint used by Bunjang's web app.
 Product identity must match; `SOLD_OUT` is sold, `DELETED` is deleted, and hidden
 or inaccessible products are not counted as sales. Bunjang numeric status `2`
 means deleted and `3` means sold.
+If legacy privacy redaction masked the product URL, a strictly numeric stored
+source listing ID can recover the endpoint; the detail response must still
+match that ID. Privacy masking itself is not relaxed.
 
 Each source run checks up to 1,500 Bunjang listings, with 200 ms pacing and an
 eight-minute budget. Listings last checked at least six hours ago are eligible;
@@ -80,6 +232,8 @@ AWS Ubuntu
 중요: `runner.mjs`는 `../cloudflare/live-search.mjs`를 import한다. 따라서 AWS로 올릴 때 `aws-runner/` 폴더만 따로 올리지 말고 프로젝트 루트 전체를 올리거나, 설치 스크립트의 첫 번째 인자로 프로젝트 루트를 지정한다.
 
 ## 1. Cloudflare Tunnel 준비
+
+다나와 운영 DB를 대상으로 한 별도 수동 수집은 Runner 서비스가 중지된 경우에만 허용한다. DB를 열기 전에 서비스 상태를 확인하며 중지 상태에서도 저장된 대기·격리는 유지한다. 운영 상태를 모르는 새 로컬 DB의 `pc:collect-local`은 다나와를 기본 대상에서 제외하고 명시적 요청도 거부한다. 구형 dmall 수집기는 fixture 테스트 전용이며 기본 live 호출을 거부한다. 접근 차단 진단을 위해 다른 경로로 반복 요청하지 않는다. 85건은 회차 상한이며 별도 수동 작업을 반복 실행해 시간당 호출을 늘리면 안 된다.
 
 Cloudflare Dashboard에서 다음을 만든다.
 
@@ -200,7 +354,7 @@ sudo systemctl start used-market-runner.service
 
 신규 PC 사전수집 대상 source는 registry의 운영자 승인 기록, `directory_source:true`, `runtime_status:"ENABLED"`를 모두 갖춰야 한다. 비활성 소스는 새 스케줄 대상에서 제외하지만 과거 공개 projection의 잔존 행까지 자동 제거됐다고 가정하지 않는다. 2026-09-24에 확인한 과거 소스·분류 품질 과제는 변경 기록에서 계속 추적한다. source 실패 시 이전 데이터 보존, backoff, 격리 기록을 남긴다.
 
-collection target은 `HOURLY_CATEGORY`와 `DAILY_MASTER`로 나뉜다. 전자는 모든 11개 부품군을 매시간 확인하고, 후자는 GPU·CPU 정확 모델과 RAM 세대·용량·제조사, 저장장치 용량·제조사 등 versioned master 전체를 24시간 간격으로 순회한다. `PC_SOURCE_TARGETS_PER_RUN`은 한 사이트를 한 번에 과도하게 호출하지 않도록 배치를 제한한다. `/health`의 `pc_parts.collection_capacity`는 현재 target set과 사이트별 실행 횟수로 전체 순회 가능 여부를 계산하며, 기본값 `100`는 현재 운영 소스의 정상 회차 기준 일일 순회량을 충족한다. 다나와는 매시 19분에 최대 100개를 순차 요청하고 요청 사이를 최소 5초 띄운다. 403·429·접근 차단이 나오면 해당 회차를 중단하며, 이미 수집한 자료는 보존한다. 수동 수집도 같은 간격과 중단 정책을 사용한다.
+collection target은 `HOURLY_CATEGORY`와 `DAILY_MASTER`로 나뉜다. 전자는 모든 11개 부품군을 매시간 확인하고, 후자는 GPU·CPU 정확 모델과 RAM 세대·용량·제조사, 저장장치 용량·제조사 등 versioned master 전체를 24시간 간격으로 순회한다. `PC_SOURCE_TARGETS_PER_RUN`은 공통 배치 상한이며 기본값은 `100`이다. 다나와는 별도 보호 상한을 적용해 매시 19분에 최대 85개를 순차 요청하고 시작 사이를 최소 10초 띄운다. 403·429·접근 차단이 한 번이라도 나오면 해당 회차를 중단하고 즉시 6시간 격리한다. 수동 수집도 같은 간격·상한·저장된 대기/격리 상태를 준수한다. 기존 자료와 미요청 대상은 보존한다. `/health`의 `pc_parts.collection_capacity`는 다나와 상한을 반영하므로 일일 전체 순회량이 부족하면 그대로 보고한다. 하네스 `node harness/danawa-domestic-contract.mjs`는 동시 호출 간격, 배치 상한, 차단 후 중단·자료 보존·격리, 수동 재시도 금지를 원 사이트 호출 없이 검증한다.
 
 실패한 개별 target은 다음 소스 실행부터 지수 백오프로 재시도한다. `/health`의 `source_readiness[].target_coverage`는 성공 target 수, 실패 target 수, 2회 주기 이상 성공하지 못한 stale target 수를 공개하며, `--require-pc-continuous`는 stale target이 남아 있으면 통과하지 않는다.
 
@@ -296,6 +450,7 @@ journalctl -u used-market-tunnel.service -n 100 --no-pager
 | `runner.mjs` | 승인된 3개 사이트 제한 병렬 수집·캐시 우선 검색 HTTP 서버 |
 | `search-index.mjs` | SQLite WAL·FTS5 색인, 갱신·보관·백업·비교 지표 |
 | `pc-parts-ledger.mjs` | 불변 원본·관측·상태·제품 master·30일 가격 통계 원장 |
+| `lifecycle-status-cache.mjs` | 상태 재확인 대기 건수의 읽기 전용 별도 스레드 진단; 5분 캐시·15초 제한 |
 | `pc-shadow-pipeline.mjs` | 분류·master match·시장군 분리 후 shadow dual-write |
 | `install-ubuntu24.sh` | Ubuntu 24.04 설치·파일 배치·systemd 등록 |
 | `configure-ubuntu24.sh` | 비밀값 입력·권한 설정·서비스 시작 |
@@ -308,6 +463,11 @@ journalctl -u used-market-tunnel.service -n 100 --no-pager
 | `configure-d1-backup.sh` | stdin 토큰으로 D1 변경분 백업 경계를 설정 |
 | `seed-d1-backup.mjs` | 활성 색인의 사이트별 최근 2,500개를 D1에 1회 시드 |
 | `.env.example` | 환경변수 이름과 저장 위치 예시 |
+
+판매 상태 재확인 대기 건수는 HTTP 이벤트 루프 밖에서 계산한다. 진단이 시간 초과되면
+`PENDING`/`UNAVAILABLE`, 이전 성공값이 있으면 `STALE`로 표시하며, 이를 대기 0건이나
+수집 정상으로 판정하지 않는다. `checked_at`과 소스별 실제 수집 완료 영수증을 함께 확인한다.
+가격 조회의 `LAST_PUBLISHED` 응답도 조회 복구이지 최신 집계 완료 증거가 아니다.
 
 
 ### 미분류 제조사·메인보드 모델의 한정 보정

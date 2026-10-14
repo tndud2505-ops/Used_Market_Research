@@ -54,8 +54,8 @@ for (const [label, source] of [["install", installScript], ["configure", configu
 assert.match(healthScript, /--require-public/u);
 assert.match(healthScript, /--require-pc-continuous/u,
   "operators need one explicit health mode that proves continuous PC collection readiness");
-assert.match(healthScript, /\.pc_parts\.collection_capacity\.all_sources_sufficient == true/u,
-  "deployment health must reject a target budget that cannot finish the daily model sweep");
+assert.match(healthScript, /\(\$require_pc_continuous == false or \(\s*\.pc_parts\.collection_capacity\.all_sources_sufficient == true/u,
+  "continuous readiness rejects a daily coverage shortfall without blocking basic service repair deployments");
 assert.match(healthScript, /\.pc_parts\.scheduler_enabled == true[\s\S]*\.pc_parts\.all_sources_ready == true/u,
   "continuous health must require both the scheduler and recent committed source collection");
 assert.match(healthScript, /\["bunjang", "ebay", "joonggonara"\]/u,
@@ -242,17 +242,30 @@ assert.match(installScript, /node --check "\$APP_ROOT\/aws-runner\/publish-pc-st
   "AWS deployment must syntax-check the isolated statistics publisher before restarting services");
 assert.match(installScript, /node --check "\$APP_ROOT\/aws-runner\/pc-stats-publication-client\.mjs"/u,
   "AWS deployment must syntax-check the chunked publication client before restarting services");
-assert.match(runnerScript, /spawn\(childCommand, childArgs/u,
-  "product-stat generation must run outside the public runner event loop");
-assert.match(runnerScript, /\["-c", "3", "\/usr\/bin\/nice", "-n", "10", process\.execPath, scriptPath\]/u,
-  "production statistics work must yield CPU and disk priority to public requests");
+assert.match(runnerScript, /return requestIsolatedPublication\(\)/u,
+  "product-stat generation must run in a separately limited service");
+const isolatedStatsUnit = await read('aws-runner/used-market-stats.service');
+assert.match(isolatedStatsUnit, /^Nice=10$/mu);
+assert.match(isolatedStatsUnit, /^IOSchedulingClass=idle$/mu);
+assert.match(isolatedStatsUnit, /^MemoryMax=/mu);
+const memoryBudgetInstaller = await read('aws-runner/install-memory-budget.sh');
+assert.match(memoryBudgetInstaller, /MemTotal:[\s\S]*?1024.*?\/ 2/u,
+  'the project aggregate budget must preserve the host reserve and equal share');
+assert.match(memoryBudgetInstaller, /MemoryMax=%sM[\s\S]*?budget_mib.*?systemd\/system\/usedpick\.slice/u,
+  'pooled child ceilings require an enforced aggregate slice cap');
+assert.equal((memoryBudgetInstaller.match(/Slice=usedpick\.slice/g) || []).length, 4,
+  'runner, statistics, backup and tunnel must all belong to the capped project');
+assert.doesNotMatch(memoryBudgetInstaller, /MemoryHigh=(?!infinity)[^\\\r\n]+/u,
+  'shared high throttling must not freeze HTTP when an offline job grows');
 assert.match(runnerScript, /const publication = await runPcStatsPublisher\(\);/u);
-assertOrdered(runnerScript, [
-  "const storageCompactionBackup = searchIndex?.createBackup();",
-  'if (!storageCompactionBackup) throw new Error("PC_STORAGE_COMPACTION_BACKUP_REQUIRED");',
-  "const storageCompaction = pcLedger.compactStorage({"
+const publicationMaintenance = await read('aws-runner/pc-publication-maintenance.mjs');
+assertOrdered(publicationMaintenance, [
+  "const storageCompactionBackup = index.createBackup();",
+  "if (!storageCompactionBackup) throw new Error('PC_STORAGE_COMPACTION_BACKUP_REQUIRED');",
+  'assertPublicationBackup(storageCompactionBackup, publication);',
+  "const storageCompaction = ledger.compactStorage({"
 ], "daily compaction recovery backup");
-assert.match(runnerScript, /observationRetentionDays:\s*30[,\s]/u,
+assert.match(publicationMaintenance, /observationRetentionDays:\s*30[,\s]/u,
   "daily compaction must preserve every observation in the active 30-day publication's member trace");
 assert.doesNotMatch(runnerScript, /compactStatsForPublication\(pcLedger\.rebuildAndGetPriceStats/u,
   "the public runner process must not build every product-stat scope synchronously");
@@ -299,10 +312,10 @@ assertOrdered(runnerScript, [
   "const runtimeBeforeCrawlAudit = recoveredFromQuarantine",
   "if (recoveredFromQuarantine) pcLedger.updateSourceRuntime(result.source_key, runtimeBeforeCrawlAudit);",
   'if (result.status === "failed")',
-  "const failedRunId = pcLedger.startCrawlRun({",
+  "const failedRunId = failureMetrics.crawl_run_id || pcLedger.startCrawlRun({",
   "pcLedger.updateSourceRuntime(result.source_key, result.next_runtime);",
   "let runId = null;",
-  "runId = pcLedger.startCrawlRun({",
+  "runId = result.result.metrics?.crawl_run_id || pcLedger.startCrawlRun({",
   "sourceRuntimeAfterFailure(result.source_key, runtimeBeforeCrawlAudit, error, result.run_at)"
 ], "expired quarantine recovery before crawl audit persistence");
 assert.equal(runnerScript.match(/const recoveredFromQuarantine =/gu)?.length, 1,

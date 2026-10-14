@@ -9,6 +9,7 @@ import {
   decodePcListingsCursor,
   encodePcListingsCursor,
   parsePcListingsRequest,
+  pcListingStatisticsCoverage,
   pcListingsFreshness
 } from "./pc-listings-contract.mjs";
 
@@ -256,6 +257,7 @@ export async function browsePcListingsD1(request, env) {
         total: 0,
         source_counts: {},
         model_counts: {},
+        statistics_coverage: pcListingStatisticsCoverage([], 0),
         pagination: { has_more: false, next_cursor: null },
         as_of: asOf,
         freshness: {
@@ -377,7 +379,8 @@ export async function browsePcListingsD1(request, env) {
   const selectListings = (boardManufacturerColumn, selectedWhere, selectedBindings, suffix = "", indexHint = "") => env.DB.prepare(`SELECT item_id, site, category_id, title, price_value, currency, url,
       image_url, posted_at, updated_at, canonical_product_id, canonical_display_name, canonical_manufacturer,
       ${boardManufacturerColumn}, listing_kind, pc_category_code, quantity, price_scope, condition_code, lifecycle_status, market_pool,
-      confidence_json, evidence_json, price_eligible, exclusion_reasons_json, good_listing_eligible, reference_price, listing_facets_json
+      confidence_json, evidence_json, price_eligible, exclusion_reasons_json, good_listing_eligible, reference_price, listing_facets_json,
+      statistics_eligible, statistics_exclusion_reasons_json
     FROM listings${indexHint} WHERE ${selectedWhere} ${suffix}`).bind(...selectedBindings).all();
   const executeListingSelect = async (selectedWhere, selectedBindings, suffix = "", indexHint = "") => {
     try {
@@ -398,6 +401,7 @@ export async function browsePcListingsD1(request, env) {
   let hasMoreCandidates;
   let sourceCounts = {};
   let modelCounts = {};
+  let statisticsCoverage = null;
   // Authoritative reconciliation and incremental imports publish one eligible row per stable item_id,
   // so normal and audit reads can share bounded raw keyset pagination without request-time deduplication.
   let anchor = null;
@@ -408,8 +412,10 @@ export async function browsePcListingsD1(request, env) {
     if (!anchor) return cursorExpired();
   }
   if (!cursorState) {
-    const sourceCountResult = await env.DB.prepare(`SELECT site, canonical_product_id, COUNT(*) AS count
-      FROM listings WHERE ${sourceCountWhereClause} GROUP BY site, canonical_product_id`).bind(...sourceCountBindings).all();
+    const sourceCountResult = await env.DB.prepare(`SELECT site, canonical_product_id, statistics_eligible,
+        statistics_exclusion_reasons_json, COUNT(*) AS count
+      FROM listings WHERE ${sourceCountWhereClause}
+      GROUP BY site, canonical_product_id, statistics_eligible, statistics_exclusion_reasons_json`).bind(...sourceCountBindings).all();
     for (const row of asArray(sourceCountResult.results)) {
       const site = String(row.site || "");
       const id = String(row.canonical_product_id || "");
@@ -417,6 +423,8 @@ export async function browsePcListingsD1(request, env) {
       if (site) sourceCounts[site] = (sourceCounts[site] || 0) + count;
       if (id && (!query.sites.length || query.sites.includes(site))) modelCounts[id] = (modelCounts[id] || 0) + count;
     }
+    statisticsCoverage = pcListingStatisticsCoverage(asArray(sourceCountResult.results)
+      .filter((row) => !query.sites.length || query.sites.includes(String(row.site || ""))));
   }
   const pageConditions = [...conditions];
   const pageBindings = [...bindings];
@@ -491,6 +499,7 @@ export async function browsePcListingsD1(request, env) {
       total,
       source_counts: sourceCounts,
       model_counts: modelCounts,
+      statistics_coverage: statisticsCoverage,
       pagination: { has_more: Boolean(nextCursor), next_cursor: nextCursor },
       as_of: asOf,
       freshness: {

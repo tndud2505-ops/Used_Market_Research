@@ -11,6 +11,10 @@ export function bunjangProductIdFromListing({ url, sourceListingId } = {}) {
     const match = String(value || '').match(/(?:^|\/)products\/(\d+)(?:\/?(?:[?#].*)?$)/iu);
     if (match) return match[1];
   }
+  // Legacy payload redaction can mask an all-digit product URL as [PHONE].
+  // The ledger's stable Bunjang source ID remains verified product identity.
+  const stableId = String(sourceListingId ?? '').trim();
+  if (/^\d+$/u.test(stableId)) return stableId;
   return null;
 }
 

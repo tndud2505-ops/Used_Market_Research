@@ -1,4 +1,4 @@
-import { SERIES, idOf, nameOf, sourceStats, dailySeries, priceRecordIssue } from './pc-tools-core.mjs?v=parts-ux-v5';
+import { SERIES, idOf, nameOf, sourceStats, dailySeries, priceRecordIssue } from './pc-tools-core.mjs?v=shared-price-v2';
 import { createPriceStore } from './pc-tools-data.mjs?v=domestic-danawa-v1';
 import { drawChart } from './pc-tools-chart.mjs?v=search-modal-v3';
 
@@ -36,7 +36,12 @@ export function createListingPricePreview(dialog, opener) {
     chart.setAttribute('aria-busy', String(loading));
     const window = record?.data?.published_window || record?.data?.window;
     find('scope').textContent = `${labels[source] || source} · ${currency} · ${window?.from && window?.to ? `${window.from} ~ ${window.to}` : '최근 30일'}`;
-    status.textContent = issue || (hasPoints ? '' : '이 기간에 표시할 일별 대표가격 자료가 없습니다.');
+    const eligible = Number(selection.statisticsCoverage?.eligible_count);
+    const minimum = Number(selection.statisticsCoverage?.minimum_representative_sample_count || 3);
+    const candidatesNeedStats = Number.isSafeInteger(eligible) && Number.isSafeInteger(minimum) && eligible >= minimum;
+    status.textContent = record?.state === 'ready' && candidatesNeedStats && (issue || !hasPoints)
+      ? `통계 후보 ${eligible}건이 확인됐지만 공개 대표가격이 없습니다. 집계 상태를 확인 중입니다.`
+      : issue || (hasPoints ? '' : '이 기간에 표시할 일별 대표가격 자료가 없습니다.');
     status.hidden = !status.textContent;
     retry.hidden = record?.state !== 'error';
     chart.hidden = !hasPoints;
@@ -72,9 +77,9 @@ export function createListingPricePreview(dialog, opener) {
   });
   observer.observe(dialog);
   return {
-    open(product, source = '') {
+    open(product, source = '', statisticsCoverage = null) {
       if (!idOf(product) || dialog.open) return;
-      selection = { product, source };
+      selection = { product, source, statisticsCoverage };
       find('model').textContent = nameOf(product);
       dialog.showModal();
       document.body.classList.add('has-price-preview');

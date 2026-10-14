@@ -1,6 +1,6 @@
 # 저장 공간과 장기 통계 운영
 
-최종 운영 결정: 2026-10-04. USED WEB만 대상으로 한다. KSTOCK 파일·Docker·로그·스케줄과 공유 서버 전체 정리는 대상이 아니다.
+최종 운영 결정: 2026-10-09. USED WEB만 대상으로 한다. KSTOCK 파일·Docker·로그·스케줄과 공유 서버 전체 정리는 대상이 아니다.
 
 ## 무엇을 오래 보관하는가
 
@@ -12,9 +12,9 @@
 | 확정된 전체 기간 통계 응답 | 최근 30일은 기존 형식, 이전 결과는 무손실 압축하여 축적 | `gzip-json-v1` + 원문 SHA-256. 현재 활성·가장 최근 게시본 보호. 조회 시 검증·복원, 재계산 없음 |
 | 원자료·관측 상세 | 현재 30일 통계 검증에 필요한 상세 보관 | 기존 최신 매물 snapshot, 분류 교정·중복 판정 근거 보호. 정상 표본 임의 삭제 금지 |
 | 수집 실행 로그 | 기존 35일 | 정기 통계 게시 후 기존 원장 정리 |
-| 일일 DB 백업 | 7일 안의 최근 3개 날짜 | 24시간 지난 백업 무손실 gzip. 유효한 마지막 복구본은 오래되었다는 이유만으로 삭제하지 않음 |
+| 일일 DB 백업 | 7일 안의 최근 3개 날짜 | 완료 후 1시간 지난 백업 무손실 gzip. 같은 날짜 재시도는 압축본도 재사용. 유효한 마지막 복구본은 오래되었다는 이유만으로 삭제하지 않음 |
 | 수동 SQLite 복구 백업 | 최대 7일 | 더 최신인 7일 이내 일일 백업의 복구 검증이 성공한 경우에만 만료. `.keep` 및 활성 참조 보호 |
-| 완료된 게시 staging | 완료 후 최소 7일 | `publication-status=complete`, AWS 검증 영수증, 원장 게시 ID·행 수 일치가 모두 필요. 현재·최신 게시 작업 보존 |
+| 완료된 게시 staging | 완료 후 7일 경과 시 정리 | `publication-status=complete`, AWS 검증 영수증, 원장 게시 ID·행 수 일치가 모두 필요. 현재·최신 게시 작업 보존 |
 | 미완료·실패·증거 없는 staging | 자동 삭제 제외 | 완료 또는 포기 근거를 먼저 확인. 날짜나 폴더 이름만으로 완료로 간주하지 않음 |
 | 코드·환경·교정 근거 파일 | SQLite 자동 만료 대상 아님 | 코드 백업에 DB 전체 복사를 섞지 않는다. 비밀 환경 파일은 출력·Git 저장 금지 |
 
@@ -26,7 +26,9 @@
 - `used-market-backup-storage.timer`가 매일 **06:30 KST**에 별도 정리를 실행한다. Runner와 Tunnel 재시작 없이 동작한다.
 - 백업 삭제 전에 가장 최신 생존 복구본을 SQLite `quick_check`로 검증한다. gzip은 압축 해제 CRC와 원문 체크섬도 확인한다. 검증 실패·사용 중·공간 부족이면 해당 삭제를 진행하지 않는다.
 - 압축은 1MiB 버퍼를 사용하며 압축 해제 결과와 원문 SHA-256이 같아야 원본을 교체한다. 중단 후 원본과 `.gz`가 함께 남으면 내용이 동일할 때만 중복을 해소한다.
-- 정리 서비스는 낮은 CPU/I/O 우선순위, 메모리 최대 128MiB, 단일 실행 잠금을 사용한다. 실제 서비스의 수집 메모리와 별도다.
+- 압축·복원 검사 중 dirty 파일 캐시는 16MiB 단위로 디스크 반영 후 해제해 메모리 제한으로 인한 중단을 방지한다. 하루 이상 지난 미사용 `.restore-check-*.sqlite` 임시파일은 단일 실행 잠금 안에서 정리한다.
+- 데이터 폴더 바로 아래의 구형 `search-index.sqlite.pre-local-reconcile-<날짜>`는 명시적 `--legacy-reconcile` 운영 명령에서만 동일한 7일 정책으로 정리한다. 정기 서비스의 운영 DB 쓰기 차단은 유지한다. 새 복구본은 `backups/` 아래에 저장한다.
+- 정리 서비스는 낮은 CPU/I/O 우선순위, 메모리 최대 512MiB, 단일 실행 잠금을 사용한다. SQLite 복구 검사와 파일 캐시를 포함한 한도이며 실제 서비스의 수집 메모리와 별도다.
 
 상태와 실제 실행 결과:
 
@@ -64,9 +66,13 @@ sudo systemctl start used-market-backup-storage.service
 
 ## 하네스와 배포
 
-- `npm run test:storage`: 백업 공간 계산, 같은 날짜 백업 재사용, 복구 백업 보호, 설치 연결 검증. Linux에서는 아래 Python 계약도 실행한다.
-- `sudo python3 harness/backup-storage-contract.py`: 실제 임시 SQLite 파일로 압축 왕복, 손상된 복구본, 잘못된 날짜, 경로·sidecar·pin 보호, 7일 수동 백업 및 성공 staging 정리를 검사한다. Windows에서는 `/proc`·`fcntl`이 없어 이 부분을 Linux에서 별도로 실행한다.
-- `harness/pc-stored-price-publication-contract.mjs`: 2년 이상 지난 자료 정리 후 날짜별·출처별·기간 통계 수치 보존, 압축 복원 및 재실행 안전성을 검사한다.
+- `npm run test:storage`를 저장 공간·기능 데이터 보존의 통합 진입점으로 사용한다. 기존 세 계약을 실행하며 전체 `npm test`에서도 중복 실행하지 않는다.
+  - `backup-storage-policy-contract.mjs`: 공간 검사, 같은 날짜 원본·압축 백업 재사용, 재시도 시 새 파일·내용 변경 없음, 정기 서비스의 운영 DB 쓰기 차단.
+  - `pc-local-projection-contract.mjs`: 복구본의 관리 폴더 위치, 실제 SQLite 무결성, 변경 전 매물 상태 보존, 미완성 파일 잔류 없음.
+  - `pc-stored-price-publication-contract.mjs`: 오래된 자료 압축·정리 이후에도 날짜별·출처별·기간 가격, 판매완료 평균, 컴퓨터 맞추기 합계 및 과거 조회 보존. 손상된 압축본은 가격으로 제공하지 않음.
+- Linux에서는 `backup-storage-contract.py`도 자동 실행한다. 모든 프로세스 참조를 확인하는 `/proc` 검사 때문에 root 권한이 필요하다. Windows 실행에서는 이 부분을 **SKIPPED**로 표시하므로 로컬 Linux/WSL에서 `sudo python3 -B harness/backup-storage-contract.py`를 별도로 실행한다. 운영 서버 접속·인증 정보는 필요 없다.
+- Python 계약은 임시 SQLite만 생성하고 종료 시 제거한다. 압축 왕복·불일치 원본 보호, 3개 날짜/7일 만료와 마지막 복구본 예외, pin·사용 중 파일·중복 실행 잠금, CLI 기본 dry-run·명시적 옛 복구본 정리, 반복 실행 시 파일 증가 없음, 운영 DB 바이트 불변을 검증한다. 게시 staging은 성공 영수증이 검증된 경우에만 정리한다.
+- 이 하네스의 통과는 저장 공간 정리와 데이터 보존 계약의 확인이다. 실시간 수집 성공률, 전체 검색 누락 해소, 모든 화면의 정상 동작까지 대신 보증하지 않는다.
 - 전체 `scripts/verify.ps1` 또는 `scripts/verify.sh`에 연결되어 있다.
 - 정상 Runner 설치는 `install-backup-storage.sh`를 함께 실행해 타이머를 설치한다. 현재 저장소의 기본 운영 경로 `/opt/used-market-runner`만 지원한다.
 

@@ -1,5 +1,6 @@
 import { getStatsJson } from './pc-stats-publication-client.mjs';
 import { verifyProductStatsReadback } from '../cloudflare/public-product-stats.mjs';
+import { streamStatsChecksum } from './stream-stats-checksum.mjs';
 
 // Called only by the authenticated runner route. Fetch targets come from the
 // protected server configuration, never from the activation request.
@@ -73,7 +74,7 @@ export async function verifyStoredStatsOnAws({ importUrl, token, publication, ex
     throw new Error('PUBLICATION_READBACK_IDENTITIES_INVALID');
   const rows = await readAll('rows', publication.expected_row_count, 4);
   const chunks = await readAll('chunks', publication.expected_chunk_count, 40);
-  const proof = await verifyProductStatsReadback(publication, rows, chunks);
+  const proof = await verifyProductStatsReadback(publication, rows, chunks, streamStatsChecksum);
   const cpu = process.cpuUsage(cpuStarted);
   return { ...proof, pages, d1_usage: d1Usage, elapsed_ms: Math.round(performance.now() - started),
     process_cpu_ms: Math.round((cpu.user + cpu.system) / 1000), ...(includeRows ? { rows } : {}) };

@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
-import { writeFile } from 'node:fs/promises';
+import { open } from 'node:fs/promises';
 
-import { compactStatsForPublication, statsChecksum, statsPublicationKey } from "../cloudflare/public-product-stats.mjs";
+import { compactStatsForPublication, statsPublicationKey } from "../cloudflare/public-product-stats.mjs";
+import { streamStatsChecksum } from './stream-stats-checksum.mjs';
+import { maintainPublishedStats } from './pc-publication-maintenance.mjs';
 import { PC_DIRECTORY_PUBLICATION_SOURCE_KEYS } from "../collector/logic/pc-source-registry.mjs";
 import { PcPartsLedger } from "./pc-parts-ledger.mjs";
 import { evaluatePipelineQualityReports, loadPipelineQualityReports } from "./pc-pipeline-governance.mjs";
@@ -61,11 +63,18 @@ const publicationStarted = performance.now();
 const publicationCpuStarted = process.cpuUsage();
 
 try {
+  const phase = (name, detail = {}) => { const memory = process.memoryUsage();
+    console.error(JSON.stringify({ phase: name, at: new Date().toISOString(), rss_bytes: memory.rss,
+      heap_used_bytes: memory.heapUsed, external_bytes: memory.external, ...detail })); };
+  phase('schema_migration');
   ledger.migrate();
   const asOf = new Date().toISOString();
+  phase('integrity_audit');
   const integrityAudit = ledger.runIntegrityAudit(asOf);
   if (integrityAudit.ok !== true) throw new Error('PC_STATS_LEDGER_INTEGRITY_FAILED');
+  phase('alias_evaluation');
   const aliasEvaluations = ledger.evaluateDueAliasShadows(asOf, aliasPromotionEvidence);
+  phase('pipeline_evaluation');
   const pipelineDecisions = evaluatePipelineQualityReports({
     ledger,
     reports: loadPipelineQualityReports(pipelineQualityReportsPath),
@@ -79,6 +88,7 @@ try {
     ruleVersion: activePipelineVersion.rule_version,
     filterVersion: activePipelineVersion.filter_version
   } : {};
+  phase('available_scope_read');
   const availableScopes = ledger.db.prepare(`SELECT DISTINCT n.canonical_product_id, n.market_pool,
       n.condition_code, s.currency
     FROM normalized_listings n
@@ -94,10 +104,13 @@ try {
       versionOptions.filterVersion || "pc-filter-v1",
       ...PC_DIRECTORY_PUBLICATION_SOURCE_KEYS
     );
+  phase('active_scope_read');
   const externalActive = await readActiveStatsScopes({ importUrl, token: importToken });
   const scopes = fullPublicationScopes(ledger.db, availableScopes, { externalActive });
   const rows = [];
+  let nonEmptyScopeCount = 0;
   for (const scope of scopes) {
+    phase('scope_calculation', { scope: scope.canonical_product_id, completed: rows.length, total: scopes.length });
     const options = {
       canonicalProductId: scope.canonical_product_id,
       days: 30,
@@ -109,6 +122,9 @@ try {
       ...versionOptions
     };
     const stats = compactStatsForPublication(ledger.rebuildAndGetPriceStats(options));
+    if (Number(stats.active?.sample_count || 0) + Number(stats.reserved?.sample_count || 0)
+      + Number(stats.sold?.sample_count || 0) + Number(stats.confirmed_transactions?.sample_count || 0) > 0) nonEmptyScopeCount++;
+    phase('scope_traceability', { scope: scope.canonical_product_id });
     const traceability = pcStatsTraceability(ledger, options);
     rows.push({
       canonical_product_id: scope.canonical_product_id,
@@ -116,19 +132,18 @@ try {
       condition_code: scope.condition_code,
       currency: scope.currency,
       days: 30,
-      stats_json: { ...stats, traceability },
+      // Retain compact strings, not every scope's expanded object graph.
+      stats_json: JSON.stringify({ ...stats, traceability }),
       as_of: asOf
     });
   }
-  const nonEmptyScopeCount = rows.filter((row) => {
-    const stats = row.stats_json || {};
-    return Number(stats.active?.sample_count || 0) + Number(stats.reserved?.sample_count || 0)
-      + Number(stats.sold?.sample_count || 0) + Number(stats.confirmed_transactions?.sample_count || 0) > 0;
-  }).length;
+  // Drop unreachable per-scope working graphs before whole-publication validation.
+  global.gc?.();
+  phase('scope_calculation_complete', { row_count: rows.length });
   if (nonEmptyScopeCount === 0) throw new Error("STATS_PUBLICATION_HAS_NO_SAMPLES");
   const publication = {
     publication_id: randomUUID(),
-    checksum: await statsChecksum(rows),
+    checksum: streamStatsChecksum(rows),
     expected_row_count: rows.length,
     merge_with_active: false,
     normalization_version: Number(activePipelineVersion?.normalization_version || 1),
@@ -142,10 +157,10 @@ try {
     rows,
     ...(sampleDropAcknowledgement ? { sample_drop_acknowledgement: sampleDropAcknowledgement } : {})
   };
-  const publicationBody = JSON.stringify(publication);
   if (JSON.stringify(ledger.getActivePipelineVersion()) !== JSON.stringify(activePipelineVersion)) {
     throw new Error('PC_STATS_PIPELINE_CHANGED_DURING_PREPARATION');
   }
+  phase('local_publication_validation');
   storeCompletedPricePublication(ledger.db, {
     publicationId: publication.publication_id, rows, expectedRowCount: rows.length,
     expectedKeys: rows.map(storedPricePublicationKey), allowedSourceIds: PC_DIRECTORY_PUBLICATION_SOURCE_KEYS,
@@ -154,16 +169,24 @@ try {
   // Operator recovery artifact: seal the fresh AWS calculation before the
   // first D1 write. Never overwrite or substitute an older prepared result.
   if (process.env.PC_STATS_PUBLICATION_OUTPUT?.trim()) {
-    await writeFile(path.resolve(process.env.PC_STATS_PUBLICATION_OUTPUT.trim()),
-      `${publicationBody}\n`, { encoding: 'utf8', flag: 'wx', mode: 0o600 });
+    const output = await open(path.resolve(process.env.PC_STATS_PUBLICATION_OUTPUT.trim()), 'wx', 0o600);
+    try {
+      const { rows: ignoredRows, ...metadata } = publication;
+      await output.writeFile(`${JSON.stringify(metadata).slice(0, -1)},"rows":[`);
+      for (let i = 0; i < rows.length; i++) await output.writeFile(`${i ? ',' : ''}${JSON.stringify(rows[i])}`);
+      await output.writeFile(']}\n');
+      await output.sync();
+    } finally { await output.close(); }
   }
+  // The independent readback child must fit beside this waiting publisher.
+  global.gc?.();
   console.error(JSON.stringify({
     phase: "prepared",
     publication_id: publication.publication_id,
     row_count: rows.length,
     non_empty_scope_count: nonEmptyScopeCount,
     product_ids: statsProductIds,
-    body_bytes: Buffer.byteLength(publicationBody),
+    rss_bytes: process.memoryUsage().rss,
     scope_d1_usage: externalActive.d1_usage
   }));
   const activated = await publishStatsInChunks({
@@ -177,6 +200,7 @@ try {
   });
   assertFullPublicationActivation(publication, activated);
   const publishedAt = new Date().toISOString();
+  phase('local_publication_store');
   const localPublication = storeCompletedPricePublication(ledger.db, {
     publicationId: activated.publication_id, rows, expectedRowCount: rows.length,
     expectedKeys: rows.map(storedPricePublicationKey), publishedAt,
@@ -188,8 +212,12 @@ try {
     rowCount: Number(activated.row_count),
     publishedAt
   });
+  // Backup and compaction also stay outside the public HTTP process.
+  phase('backup_and_compaction');
+  const storageMaintenance = maintainPublishedStats(index, ledger, activated, publishedAt);
   console.log(JSON.stringify({
     published: true,
+    ...storageMaintenance,
     elapsed_ms: Math.round(performance.now() - publicationStarted),
     cpu_time_ms: (() => { const usage = process.cpuUsage(publicationCpuStarted); return Math.round((usage.user + usage.system) / 1000); })(),
     verifier: activated.verifier,

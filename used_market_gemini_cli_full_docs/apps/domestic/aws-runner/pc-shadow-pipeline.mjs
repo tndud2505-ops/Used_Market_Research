@@ -500,7 +500,8 @@ export class PcShadowPipeline {
         ...(classified.total_capacity_gb ? { total_capacity_gb: classified.total_capacity_gb } : {}),
         listing_product_kind: publicClassified.product_kind || null,
         listing_placement: publicClassified.placement || null,
-        listing_form_factor: publicClassified.form_factor || null
+        listing_form_factor: publicClassified.form_factor || null,
+        listing_interface: publicClassified.interface || null
       }
     };
     if (["COMPONENT_BUNDLE", "FULL_SYSTEM"].includes(classified.listing_kind)) {

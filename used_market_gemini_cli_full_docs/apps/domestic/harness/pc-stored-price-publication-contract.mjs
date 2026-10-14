@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
 import { DatabaseSync } from 'node:sqlite';
 import { PcPartsLedger } from '../aws-runner/pc-parts-ledger.mjs';
 import { PcShadowPipeline } from '../aws-runner/pc-shadow-pipeline.mjs';
@@ -58,8 +60,43 @@ try {
     expectedKeys: [storedPricePublicationKey(row)], allowedSourceIds: ['bunjang', 'joonggonara'], publishedAt: asOf };
   assert.throws(() => storeCompletedPricePublication(db, { ...publication, expectedRowCount: 2 }), /INCOMPLETE/);
   assert.equal(db.prepare('SELECT count(*) AS n FROM pc_stored_price_publications').get().n, 0);
-  storeCompletedPricePublication(db, { ...publication, validateOnly: true });
+  const preflight = storeCompletedPricePublication(db, { ...publication, validateOnly: true });
+  const legacyPrepared = [{ ...row, through_date: asOf.slice(0, 10), stats_json: JSON.stringify({
+    ...exact, canonical_product_id: id, as_of: asOf,
+    published_window: { from: '2026-08-18', to: '2026-09-16', days: 30 }, publication_id: publication.publicationId
+  }) }];
+  assert.equal(preflight.checksum, createHash('sha256').update(JSON.stringify(legacyPrepared)).digest('hex'),
+    'streamed local checksum is byte-identical to the existing publication format');
+  const reversedRows = [':z', ':a'].map(suffix => ({ ...row, canonical_product_id:id+suffix,
+    stats_json:{...exact,canonical_product_id:id+suffix} }));
+  const multiple = {...publication,rows:reversedRows,expectedRowCount:2,expectedKeys:reversedRows.map(storedPricePublicationKey),validateOnly:true};
+  const legacyMultiple = reversedRows.map(r=>({...r,through_date:'2026-09-16',stats_json:JSON.stringify({
+    ...r.stats_json,as_of:asOf,published_window:{from:'2026-08-18',to:'2026-09-16',days:30},publication_id:publication.publicationId
+  })})).sort((a,b)=>storedPricePublicationKey(a).localeCompare(storedPricePublicationKey(b)));
+  assert.equal(storeCompletedPricePublication(db,multiple).checksum,
+    createHash('sha256').update(JSON.stringify(legacyMultiple)).digest('hex'),'reverse input retains sort and separators');
   assert.equal(db.prepare('SELECT count(*) AS n FROM pc_stored_price_publications').get().n, 0, 'preflight is read-only');
+  const memoryProbe = spawnSync(process.execPath, ['--max-old-space-size=96', '--input-type=module', '-e', `
+    import { storeCompletedPricePublication, storedPricePublicationKey, migrateStoredPricePublications } from ${JSON.stringify(new URL('../aws-runner/pc-stored-price-publication.mjs', import.meta.url).href)};
+    import { DatabaseSync } from 'node:sqlite';
+    import { mkdtempSync,rmSync } from 'node:fs';
+    import {tmpdir} from 'node:os'; import {join} from 'node:path';
+    const metric={sample_count:0,mean:null,median:null,min:null,max:null};
+    const rows=Array.from({length:80},(_,i)=>({canonical_product_id:'cpu:fixture:'+i,
+      market_pool:'KR_C2C_USED',condition_code:'USED_WORKING',currency:'KRW',days:30,as_of:'2026-10-11T00:00:00Z',
+      stats_json:JSON.stringify({versions:{normalization:1,parser:'p',rule:'r',filter:'f'},
+        active:metric,reserved:metric,sold:metric,confirmed_transactions:metric,padding:'x'.repeat(512*1024)})}));
+    const dir=mkdtempSync(join(tmpdir(),'used-memory-contract-'));let db;
+    try {
+      db=new DatabaseSync(join(dir,'publication.sqlite'));migrateStoredPricePublications(db);
+      const result=storeCompletedPricePublication(db,{publicationId:'memory-probe',rows,expectedRowCount:80,
+        expectedKeys:rows.map(storedPricePublicationKey),allowedSourceIds:['bunjang']});
+      if(db.prepare('SELECT count(*) n FROM pc_stored_price_publication_rows').get().n!==80)throw Error('ROW_COUNT');
+      console.log(JSON.stringify({rows:result.row_count,max_rss_kib:process.resourceUsage().maxRSS}));
+    } finally {db?.close();rmSync(dir,{recursive:true,force:true});}
+  `], { encoding:'utf8',timeout:30000,windowsHide:true,maxBuffer:16384 });
+  assert.equal(memoryProbe.status,0,`bounded-memory validation failed: ${memoryProbe.stderr.slice(-1000)}`);
+  assert.equal(JSON.parse(memoryProbe.stdout).rows,80);
   storeCompletedPricePublication(db, publication);
   assert.equal(storeCompletedPricePublication(db, publication).unchanged, true);
   const persisted = ledger.getStoredDailyPriceStats(options);

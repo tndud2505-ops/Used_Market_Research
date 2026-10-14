@@ -6,6 +6,7 @@ import { canonicalSourceListingIdentity } from "./pc-source-listing-identity.mjs
 import { reviewedPcListingExclusion } from "../market/logic/pc-reviewed-listing-exclusions.mjs";
 import { underlyingMarketPools } from '../market/logic/pc-market-pools.mjs';
 import { migrateStoredPricePublications, readCompletedPricePublication, compactCompletedPricePublications } from './pc-stored-price-publication.mjs';
+import { migrateLifecycleQueue, lifecycleQueueReady, bootstrapLifecycleQueue, deferLifecycleAttempt, recordLifecycleRun } from './lifecycle-queue.mjs';
 
 const HOUR_MS = 60 * 60 * 1000;
 const HOURLY_COLLECTION_GUARD_MS = 55 * 60 * 1000;
@@ -979,6 +980,7 @@ export class PcPartsLedger {
       this.db.prepare("INSERT OR IGNORE INTO pc_parts_schema_migrations(version, applied_at) VALUES (9, ?)").run(versionTimestamp);
       this.db.prepare("INSERT OR IGNORE INTO pc_parts_schema_migrations(version, applied_at) VALUES (10, ?)").run(versionTimestamp);
       migrateStoredPricePublications(this.db);
+      migrateLifecycleQueue(this.db);
       this.db.prepare("INSERT OR IGNORE INTO pc_parts_schema_migrations(version, applied_at) VALUES (11, ?)").run(versionTimestamp);
       this.db.exec("COMMIT");
     } catch (error) {
@@ -1372,6 +1374,20 @@ export class PcPartsLedger {
       || String(left.row.target_id).localeCompare(String(right.row.target_id))
     )).map((entry) => entry.row);
     const maximum = Number.isInteger(Number(limit)) && Number(limit) > 0 ? Number(limit) : null;
+    // Danawa has a separate hard request budget. Letting all short-cadence
+    // categories precede models starves the model queue even on successful runs.
+    // Interleave the two existing due queues; never make a not-yet-due target
+    // eligible or increase the source's request allowance.
+    if (source.toLowerCase() === 'danawa') {
+      const models = due.filter(row => row.cadence_class === 'DAILY_MASTER');
+      const categories = due.filter(row => row.cadence_class !== 'DAILY_MASTER');
+      const fair = [];
+      for (let i=0;i<Math.max(models.length,categories.length);i++) {
+        if(models[i]) fair.push(models[i]);
+        if(categories[i]) fair.push(categories[i]);
+      }
+      return maximum ? fair.slice(0,maximum) : fair;
+    }
     return maximum ? due.slice(0, maximum) : due;
   }
 
@@ -1728,12 +1744,23 @@ export class PcPartsLedger {
     const timestamp = iso(startedAt || new Date(this.now()));
     this.transaction(() => {
       const source = this.getSource(sourceId);
-      if (!source || source.policy_status !== "APPROVED" || source.runtime_status !== "ENABLED") throw new Error("source is not enabled and approved");
+      const expiry = Date.parse(source?.quarantine_until || '');
+      const expiredQuarantine = source?.runtime_status === 'QUARANTINED' && Number.isFinite(expiry)
+        && expiry <= this.now() && expiry <= Date.parse(timestamp);
+      if (!source || source.policy_status !== "APPROVED" || (source.runtime_status !== "ENABLED" && !expiredQuarantine)) throw new Error("source is not enabled and approved");
       this.db.prepare(`INSERT INTO crawl_runs(crawl_run_id, source_id, started_at, run_status, adapter_version) VALUES (?, ?, ?, 'RUNNING', ?)`)
         .run(id, sourceId, timestamp, cleanText(adapterVersion, 100) || null);
       this.db.prepare("UPDATE source_runtime SET last_started_at = ?, updated_at = ? WHERE source_id = ?").run(timestamp, timestamp, sourceId);
     });
     return id;
+  }
+
+  remainingSourceRequestBudget(sourceId, hourlyLimit, asOf = new Date(this.now()).toISOString()) {
+    const since = new Date(Date.parse(asOf) - HOUR_MS).toISOString();
+    const used = this.db.prepare(`SELECT COALESCE(SUM(CASE WHEN run_status='RUNNING' THEN ? ELSE request_count END),0) n
+      FROM crawl_runs WHERE source_id=? AND (run_status='RUNNING' OR COALESCE(finished_at,started_at)>?)`)
+      .get(hourlyLimit,sourceId,since).n;
+    return Math.max(0, hourlyLimit - Number(used));
   }
 
   finishCrawlRun({
@@ -1769,11 +1796,11 @@ export class PcPartsLedger {
     const source = requireValue(sourceId, "sourceId");
     const end = iso(asOf);
     const from = new Date(Date.parse(end) - 31 * DAY_MS).toISOString();
-    const committedRun = `(run_status = 'SUCCEEDED' OR (
+    const committedRun = `(COALESCE(adapter_version, '') <> 'operator-http-diagnostic-only-v1' AND (run_status = 'SUCCEEDED' OR (
       run_status = 'FAILED' AND collected_count > 0 AND parsed_count > 0
       AND request_count >= 10 AND request_failure_count = 1
       AND parse_failure_count = 0 AND http_blocked_count = 0 AND captcha_count = 0
-    ))`;
+    )))`;
     const row = this.db.prepare(`WITH success_days AS (
         SELECT DISTINCT date(finished_at) AS day
           FROM crawl_runs
@@ -2052,55 +2079,63 @@ export class PcPartsLedger {
     });
   }
 
-  dueRechecks({ sourceId, checkedBefore, limit = 20 }) {
+  bootstrapLifecycleQueue(limit) { return bootstrapLifecycleQueue(this.db, limit); }
+  deferLifecycleAttempt(sourceId, listingId, options) { return deferLifecycleAttempt(this.db, sourceId, listingId, options); }
+  recordLifecycleRun(sourceId, receipt, backoffUntil) { return recordLifecycleRun(this.db, sourceId, receipt, backoffUntil); }
+  getLifecycleRun(sourceId) {
+    const row = this.db.prepare('SELECT * FROM pc_lifecycle_runs WHERE source_id=?').get(sourceId);
+    return row ? { backoff_until: row.backoff_until, ...JSON.parse(row.receipt_json) } : null;
+  }
+
+  dueRechecks({ sourceId, checkedBefore, limit = 20, asOf = new Date(this.now()).toISOString() }) {
+    if (!lifecycleQueueReady(this.db)) throw new Error('LIFECYCLE_QUEUE_INITIALIZING');
     const cutoff = iso(checkedBefore || new Date(this.now() - 6 * HOUR_MS));
     const boundedLimit = Math.min(sourceId === "bunjang" ? 1500 : 600, Math.max(1, Number(limit) || 20));
     return this.db.prepare(`
       SELECT s.source_id, s.source_listing_id, s.lifecycle_status, s.price_value, s.currency,
              r.raw_json, r.title, r.description, r.seller_ref_masked, r.last_checked_at
-        FROM listing_snapshots s
+        FROM pc_lifecycle_queue q
+        JOIN listing_snapshots s ON s.id = q.snapshot_id
         JOIN raw_listings r ON r.id = s.raw_listing_id
-       WHERE s.source_id = ? AND (s.lifecycle_status IN ('ACTIVE', 'RESERVED')
-         OR (s.source_id = 'bunjang' AND s.lifecycle_status = 'UNAVAILABLE_UNKNOWN'))
-         AND r.last_checked_at <= ?
-         AND NOT EXISTS (
-           SELECT 1 FROM listing_snapshots newer
-            WHERE newer.source_id = s.source_id AND newer.source_listing_id = s.source_listing_id
-              AND (newer.observed_at > s.observed_at OR (newer.observed_at = s.observed_at AND newer.id > s.id))
-         )
-       ORDER BY CASE WHEN r.missing_check_count > 0 THEN 0 ELSE 1 END,
+       WHERE q.source_id = ? AND (q.lifecycle_status IN ('ACTIVE', 'RESERVED')
+         OR (q.source_id = 'bunjang' AND q.lifecycle_status = 'UNAVAILABLE_UNKNOWN'))
+         AND q.last_checked_at <= ? AND q.next_attempt_at <= ?
+         AND NOT EXISTS(SELECT 1 FROM pc_lifecycle_runs run WHERE run.source_id=q.source_id AND run.backoff_until > ?)
+       ORDER BY CASE WHEN q.last_checked_at <= ? THEN 0 ELSE 1 END,
+                q.next_attempt_at, CASE WHEN r.missing_check_count > 0 THEN 0 ELSE 1 END,
                 r.last_checked_at, s.source_listing_id
        LIMIT ?
-    `).all(requireValue(sourceId, "sourceId"), cutoff, boundedLimit);
+    `).all(requireValue(sourceId, "sourceId"), cutoff, iso(asOf), iso(asOf),
+      new Date(Date.parse(iso(asOf)) - 24 * HOUR_MS).toISOString(), boundedLimit);
   }
 
   lifecycleRecheckStatus({ sourceId, asOf } = {}) {
+    if (!lifecycleQueueReady(this.db)) return { source_id: sourceId, status: 'INITIALIZING', due_count: null };
     const resolvedSourceId = requireValue(sourceId, "sourceId");
     const now = asOf instanceof Date ? asOf : new Date(asOf || this.now());
     if (!Number.isFinite(now.getTime())) throw new TypeError("invalid lifecycle recheck asOf");
     const cutoff = new Date(now.getTime() - 6 * HOUR_MS).toISOString();
     const operationalCutoff = new Date(now.getTime() - 24 * HOUR_MS).toISOString();
     const row = this.db.prepare(`
-      SELECT COUNT(*) AS due_count, MIN(r.last_checked_at) AS oldest_last_checked_at,
-             SUM(CASE WHEN r.last_checked_at <= ? THEN 1 ELSE 0 END) AS operational_overdue_count,
-             MIN(CASE WHEN r.last_checked_at <= ? THEN r.last_checked_at ELSE NULL END) AS oldest_operational_overdue_at
-        FROM listing_snapshots s
-        JOIN raw_listings r ON r.id = s.raw_listing_id
+      SELECT COUNT(*) AS due_count, MIN(s.last_checked_at) AS oldest_last_checked_at,
+             SUM(CASE WHEN s.last_checked_at <= ? THEN 1 ELSE 0 END) AS operational_overdue_count,
+             MIN(CASE WHEN s.last_checked_at <= ? THEN s.last_checked_at ELSE NULL END) AS oldest_operational_overdue_at,
+             SUM(CASE WHEN s.next_attempt_at > ? THEN 1 ELSE 0 END) AS deferred_count
+        FROM pc_lifecycle_queue s
        WHERE s.source_id = ? AND (s.lifecycle_status IN ('ACTIVE', 'RESERVED')
          OR (s.source_id = 'bunjang' AND s.lifecycle_status = 'UNAVAILABLE_UNKNOWN'))
-         AND r.last_checked_at <= ?
-         AND NOT EXISTS (
-           SELECT 1 FROM listing_snapshots newer
-            WHERE newer.source_id = s.source_id AND newer.source_listing_id = s.source_listing_id
-              AND (newer.observed_at > s.observed_at OR (newer.observed_at = s.observed_at AND newer.id > s.id))
-         )
-    `).get(operationalCutoff, operationalCutoff, resolvedSourceId, cutoff) || {};
+         AND s.last_checked_at <= ?
+    `).get(operationalCutoff, operationalCutoff, now.toISOString(), resolvedSourceId, cutoff) || {};
+    const run = this.db.prepare('SELECT * FROM pc_lifecycle_runs WHERE source_id=?').get(resolvedSourceId);
     const oldest = String(row.oldest_last_checked_at || '');
     const oldestMs = Date.parse(oldest);
     return {
       source_id: resolvedSourceId,
       due_after_hours: 6,
       due_count: Number(row.due_count || 0),
+      deferred_count: Number(row.deferred_count || 0),
+      backoff_until: run?.backoff_until || null,
+      last_run: run ? JSON.parse(run.receipt_json) : null,
       oldest_last_checked_at: oldest || null,
       oldest_age_seconds: Number.isFinite(oldestMs) ? Math.max(0, Math.floor((now.getTime() - oldestMs) / 1000)) : null,
       operational_sla_hours: 24,
@@ -2387,12 +2422,15 @@ export class PcPartsLedger {
           WHERE clusters.cluster_status = 'CONFIRMED' AND clusters.cluster_key IN (${clusterIdentities.map(() => "?").join(", ")})`);
         identityBindings.push(...clusterIdentities.map((identity) => identity.slice("cluster:".length)));
       }
+      // Candidate IDs already use the canonical-identity/cluster indexes. Keep
+      // the outer lookup on rowid: SQLite otherwise prefers the source filter
+      // index and scans the entire marketplace history once per product scope.
       const stateRows = this.db.prepare(`
         SELECT s.id, s.source_id, s.source_listing_id, s.observed_at, s.lifecycle_status, s.currency,
                n.canonical_product_id, n.market_pool, n.condition_code, n.exact_product, n.price_eligible,
                n.statistics_eligible, n.statistics_exclusion_reasons_json,
                CASE WHEN dc.cluster_status = 'CONFIRMED' THEN ${clusterIdentitySql} ELSE NULL END AS cluster_identity
-          FROM listing_snapshots s
+          FROM listing_snapshots s NOT INDEXED
           LEFT JOIN normalized_listings n ON n.snapshot_id = s.id
             AND n.normalization_version = ?
             AND n.parser_version = ? AND n.rule_version = ? AND n.filter_version = ?
@@ -2704,7 +2742,7 @@ export class PcPartsLedger {
     const parserVersion = cleanText(options.parserVersion || "pc-parser-v1", 100);
     const ruleVersion = cleanText(options.ruleVersion || "pc-rules-v1", 100);
     const filterVersion = cleanText(options.filterVersion || "pc-filter-v1", 100);
-    const published = readCompletedPricePublication(this.db, {
+    const published = options.dailyOnly === true ? null : readCompletedPricePublication(this.db, {
       ...options, canonicalProductId, marketPool, condition, currency, asOf, days,
       normalizationVersion, parserVersion, ruleVersion, filterVersion
     });
@@ -3071,7 +3109,7 @@ export class PcPartsLedger {
     return this.getPriceStats(options);
   }
 
-  traceStatMembers({ canonicalProductId, marketPool, condition, currency, days = 30, asOf = new Date(this.now()), normalizationVersion = 1, parserVersion = "pc-parser-v1", ruleVersion = "pc-rules-v1", filterVersion = "pc-filter-v1" }) {
+  traceStatMembers({ canonicalProductId, marketPool, condition, currency, days = 30, asOf = new Date(this.now()), normalizationVersion = 1, parserVersion = "pc-parser-v1", ruleVersion = "pc-rules-v1", filterVersion = "pc-filter-v1" }, { iterate = false } = {}) {
     const { asOf: end, from: start } = priceStatsWindow(asOf, days);
     return this.db.prepare(`
       SELECT d.stat_date, d.metric_scope, m.price_value, m.outlier_flag, m.outlier_reason, s.id AS snapshot_id,
@@ -3086,7 +3124,7 @@ export class PcPartsLedger {
          AND d.normalization_version = ?
          AND d.parser_version = ? AND d.rule_version = ? AND d.filter_version = ?
        ORDER BY d.stat_date, d.metric_scope, r.source_id, r.source_listing_id
-    `).all(requireValue(canonicalProductId, "canonicalProductId"), requireValue(marketPool, "marketPool"), requireValue(condition, "condition"), requireValue(currency, "currency").toUpperCase(), start.slice(0, 10), end.slice(0, 10), Math.max(1, Number(normalizationVersion) || 1), cleanText(parserVersion, 100), cleanText(ruleVersion, 100), cleanText(filterVersion, 100));
+    `)[iterate ? 'iterate' : 'all'](requireValue(canonicalProductId, "canonicalProductId"), requireValue(marketPool, "marketPool"), requireValue(condition, "condition"), requireValue(currency, "currency").toUpperCase(), start.slice(0, 10), end.slice(0, 10), Math.max(1, Number(normalizationVersion) || 1), cleanText(parserVersion, 100), cleanText(ruleVersion, 100), cleanText(filterVersion, 100));
   }
 
   recordPublicationSuccess({ publicationKind = "PRODUCT_STATS", publicationId, checksum, rowCount, publishedAt = new Date(this.now()) }) {
@@ -3338,39 +3376,52 @@ export class PcPartsLedger {
     const blockers = [];
     const quickCheck = this.db.prepare("PRAGMA quick_check").get()?.quick_check;
     if (quickCheck !== "ok") blockers.push(`SQLITE_QUICK_CHECK:${quickCheck || "unknown"}`);
-    const foreignKeyViolations = this.db.prepare("PRAGMA foreign_key_check").all();
-    if (foreignKeyViolations.length > 0) blockers.push(`FOREIGN_KEY_VIOLATIONS:${foreignKeyViolations.length}`);
+    const countRows = (statement) => {
+      let count = 0;
+      for (const row of statement.iterate()) count++;
+      return count;
+    };
+    const foreignKeyViolations = countRows(this.db.prepare("PRAGMA foreign_key_check"));
+    if (foreignKeyViolations > 0) blockers.push(`FOREIGN_KEY_VIOLATIONS:${foreignKeyViolations}`);
     const immutableTriggers = Number(this.db.prepare(`SELECT COUNT(*) AS count FROM sqlite_master
       WHERE type = 'trigger' AND name IN ('raw_listings_content_immutable', 'raw_listings_delete_immutable')`).get()?.count || 0);
     if (immutableTriggers !== 2) blockers.push("RAW_IMMUTABILITY_TRIGGERS_MISSING");
 
-    const memberMismatches = this.db.prepare(`SELECT d.id
+    const memberMismatches = countRows(this.db.prepare(`SELECT d.id
       FROM daily_price_stats d
       LEFT JOIN daily_price_stat_members m ON m.daily_price_stat_id = d.id AND m.included = 1
       GROUP BY d.id HAVING (d.member_details_retained = 1 AND COUNT(m.snapshot_id) <> d.sample_count)
-        OR (d.member_details_retained = 0 AND COUNT(m.snapshot_id) <> 0)`).all();
-    if (memberMismatches.length > 0) blockers.push(`STAT_MEMBER_COUNT_MISMATCH:${memberMismatches.length}`);
+        OR (d.member_details_retained = 0 AND COUNT(m.snapshot_id) <> 0)`));
+    if (memberMismatches > 0) blockers.push(`STAT_MEMBER_COUNT_MISMATCH:${memberMismatches}`);
 
     const soldRows = this.db.prepare(`SELECT id, status_evidence_json FROM listing_snapshots
-      WHERE lifecycle_status = 'SOLD'`).all();
-    const invalidSoldEvidence = soldRows.filter((row) => !SOLD_EVIDENCE_TYPES.has(
-      cleanText(parseJson(row.status_evidence_json, {})?.type, 40).toUpperCase()
-    ));
-    if (invalidSoldEvidence.length > 0) blockers.push(`INVALID_SOLD_EVIDENCE:${invalidSoldEvidence.length}`);
+      WHERE lifecycle_status = 'SOLD'`).iterate();
+    let invalidSoldEvidence = 0;
+    for (const row of soldRows) {
+      if (!SOLD_EVIDENCE_TYPES.has(cleanText(parseJson(row.status_evidence_json, {})?.type, 40).toUpperCase())) invalidSoldEvidence++;
+    }
+    if (invalidSoldEvidence > 0) blockers.push(`INVALID_SOLD_EVIDENCE:${invalidSoldEvidence}`);
 
     const poolRows = this.db.prepare(`SELECT n.id, n.market_pool, s.allowed_market_pools_json
       FROM normalized_listings n
       JOIN listing_snapshots ls ON ls.id = n.snapshot_id
-      JOIN sources s ON s.source_id = ls.source_id`).all();
-    const marketPoolMismatches = poolRows.filter((row) => !parseJson(row.allowed_market_pools_json, []).includes(row.market_pool));
-    if (marketPoolMismatches.length > 0) blockers.push(`MARKET_POOL_MISMATCH:${marketPoolMismatches.length}`);
+      JOIN sources s ON s.source_id = ls.source_id`).iterate();
+    let marketPoolMismatches = 0;
+    const allowedPools = new Map();
+    for (const row of poolRows) {
+      if (!allowedPools.has(row.allowed_market_pools_json)) {
+        allowedPools.set(row.allowed_market_pools_json, parseJson(row.allowed_market_pools_json, []));
+      }
+      if (!allowedPools.get(row.allowed_market_pools_json).includes(row.market_pool)) marketPoolMismatches++;
+    }
+    if (marketPoolMismatches > 0) blockers.push(`MARKET_POOL_MISMATCH:${marketPoolMismatches}`);
 
-    const confirmedClusterViolations = this.db.prepare(`SELECT c.id
+    const confirmedClusterViolations = countRows(this.db.prepare(`SELECT c.id
       FROM duplicate_clusters c
       LEFT JOIN duplicate_cluster_members m ON m.cluster_id = c.id
       WHERE c.cluster_status = 'CONFIRMED'
-      GROUP BY c.id HAVING COUNT(DISTINCT m.source_id) < 2`).all();
-    if (confirmedClusterViolations.length > 0) blockers.push(`INVALID_CONFIRMED_DUPLICATE_CLUSTER:${confirmedClusterViolations.length}`);
+      GROUP BY c.id HAVING COUNT(DISTINCT m.source_id) < 2`));
+    if (confirmedClusterViolations > 0) blockers.push(`INVALID_CONFIRMED_DUPLICATE_CLUSTER:${confirmedClusterViolations}`);
     const activePipelineCount = Number(this.db.prepare(`SELECT COUNT(*) AS count FROM pc_pipeline_versions
       WHERE version_status = 'ACTIVE'`).get()?.count || 0);
     if (activePipelineCount !== 1) blockers.push(`ACTIVE_PIPELINE_VERSION_COUNT:${activePipelineCount}`);

@@ -20,6 +20,7 @@ import {
   comparePcListingRows,
   dedupePcListingRows,
   parsePcListingsRequest,
+  pcListingStatisticsCoverage,
   pcListingsIdentity
 } from "../cloudflare/pc-listings-contract.mjs";
 import { OPERATIONAL_PC_DIRECTORY_SITES, OPERATIONAL_TARGET_SITES } from "../cloudflare/target-sites.mjs";
@@ -37,6 +38,18 @@ import {
   repairAuthoritativePcProjection,
   stabilizeIncrementalPcProjections
 } from "../aws-runner/pc-projection-republish-policy.mjs";
+
+assert.deepEqual(pcListingStatisticsCoverage([
+  { statistics_eligible: true },
+  { statistics_eligible: false, statistics_exclusion_reasons: ["MODEL_AMBIGUOUS"] }
+]), {
+  listing_count: 2,
+  eligible_count: 1,
+  excluded_count: 1,
+  minimum_representative_sample_count: 3,
+  candidate_state: "INSUFFICIENT_ELIGIBLE_LISTINGS",
+  exclusion_reasons: { MODEL_AMBIGUOUS: 1 }
+});
 
 const priceStatsNow = new Date("2026-09-08T12:00:00.000Z");
 const historicalPriceRequest = parsePriceStatsRequest(new URL(
@@ -689,7 +702,8 @@ const items = [
   board_manufacturer: "ASUS",
   listing_kind: "SINGLE_COMPONENT", category_code: "GPU", quantity: 1,
   price_scope: "TOTAL", condition_code: "USED_WORKING", lifecycle_status: "ACTIVE",
-  market_pool: "KR_C2C_USED", price_eligible: true, exclusion_reasons: []
+  market_pool: "KR_C2C_USED", price_eligible: true, statistics_eligible: true,
+  statistics_exclusion_reasons: [], exclusion_reasons: []
 }));
 
 let index = new SearchIndex({ filePath: indexPath, backupDir, now: () => now });
@@ -742,6 +756,8 @@ assert.equal(browsedProjection.items[0].image_url, "https://images.example.test/
 assert.equal(browsedProjection.items.length, 1,
   "zero-price, option advertisements, and non-USED_WORKING rows stay out of the public PC directory");
 assert.equal(browsedProjection.items.every((item) => item.canonical_product_id === "gpu:nvidia:rtx-3080"), true);
+assert.equal(browsedProjection.statisticsCoverage.eligible_count, 1);
+assert.equal(browsedProjection.statisticsCoverage.candidate_state, "INSUFFICIENT_ELIGIBLE_LISTINGS");
 index.upsertPublicProjections([{
   ...items[0], id: "danawa:https://dmall.danawa.com/v3/?controller=sale&methods=blog&seq=998877",
   item_id: "danawa:https://dmall.danawa.com/v3/?controller=sale&methods=blog&seq=998877", site: "danawa",
@@ -765,6 +781,25 @@ assert.equal(dedupedProjection.total, 1,
   "browse total must count reconciled source identities instead of stored duplicate rows");
 assert.equal(dedupedProjection.sourceTotals.danawa, 1,
   "site totals must match the same reconciled identities shown in search results");
+// Index selection is a performance-only change: retain totals, dedupe, ordering,
+// facet/currency scope and cursor semantics from the former planner-selected read.
+const prepareBeforeModelSeek = index.db.prepare.bind(index.db);
+for (const modelScope of [
+  { canonicalProductId: 'gpu:nvidia:rtx-3080' },
+  { canonicalProductIds: ['gpu:nvidia:rtx-3080', 'ssd:samsung:capacity-bucket:513-gb-1-tb'] },
+  { canonicalProductIds: [] }
+]) for (const sort of ['recent', 'price_asc', 'price_desc']) {
+  const options = { ...modelScope, sites: ['danawa'], currency: 'KRW', sort, limit: 1, asOf: '2026-08-29T00:00:01.000Z' };
+  const optimized = index.browsePcListings(options);
+  index.db.prepare = sql => prepareBeforeModelSeek(sql.replace(' INDEXED BY idx_listings_pc_product_recent', ''));
+  try { assert.deepEqual(index.browsePcListings(options), optimized); }
+  finally { index.db.prepare = prepareBeforeModelSeek; }
+  if (optimized.nextAfter) {
+    const next = index.browsePcListings({ ...options, after: optimized.nextAfter });
+    assert.equal(next.cursorFound, true);
+    assert.notEqual(next.items[0]?.item_id, optimized.items[0]?.item_id);
+  }
+}
 assert.deepEqual(Object.keys(dedupedProjection.sourceTotals), ["danawa"],
   "site totals must not include sources excluded by the listing site filter");
 assert.equal(dedupedProjection.items[0].canonical_manufacturer, null);
@@ -953,7 +988,14 @@ child.stderr.on("data", (chunk) => { stderr += chunk; });
 try {
   const baseUrl = `http://127.0.0.1:${port}`;
   await waitForHealth(baseUrl, child);
-  const runnerHealth = await (await fetch(`${baseUrl}/health`)).json();
+  let runnerHealth = await (await fetch(`${baseUrl}/health`)).json();
+  // Lifecycle diagnostics are intentionally off the HTTP thread; an initial
+  // PENDING response is not an empty queue. Await the actual fixture result.
+  const lifecycleDeadline = Date.now() + 25_000; // worker timeout plus readiness-cache refresh
+  while (runnerHealth.pc_parts.bunjang_lifecycle_recheck.status === 'PENDING' && Date.now() < lifecycleDeadline) {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    runnerHealth = await (await fetch(`${baseUrl}/health`)).json();
+  }
   assert.equal(runnerHealth.search_index.max_active_listings, 100_000);
   assert.equal(typeof runnerHealth.search_index.database_soft_usage_ratio, "number");
   assert.equal(typeof runnerHealth.search_index.active_listing_usage_ratio, "number");
@@ -1494,9 +1536,14 @@ assert.deepEqual(repairedStats.integrity_repaired_source_ids, ["bunjang", "joong
 const joongOnlyListings = await worker.fetch(new Request(
   "https://used-pick.test/api/pc/listings?canonical_product_id=gpu%3Anvidia%3Artx-3060&sites=joonggonara&currency=KRW"
 ), { ...importEnv, SEARCH_CURSOR_SECRET: "fixture-cursor-secret-that-is-long-enough" });
-const joongOnlyItems = (await joongOnlyListings.json()).data.items;
+const joongOnlyPayload = (await joongOnlyListings.json()).data;
+const joongOnlyItems = joongOnlyPayload.items;
 assert.equal(joongOnlyItems.length, 3);
 assert.equal(joongOnlyItems.every((item) => item.site === "joonggonara"), true);
+assert.equal(joongOnlyItems.every((item) => item.statistics_eligible === true), true,
+  "D1 listing reads must preserve per-item statistics eligibility");
+assert.equal(joongOnlyPayload.statistics_coverage.eligible_count, 3);
+assert.equal(joongOnlyPayload.statistics_coverage.candidate_state, "ELIGIBLE_LISTINGS_PRESENT");
 const bunjangOnlyListings = await worker.fetch(new Request(
   "https://used-pick.test/api/pc/listings?canonical_product_id=gpu%3Anvidia%3Artx-3060&sites=bunjang&currency=KRW"
 ), { ...importEnv, SEARCH_CURSOR_SECRET: "fixture-cursor-secret-that-is-long-enough" });

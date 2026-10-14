@@ -32,6 +32,12 @@ export function metricValue(metric) {
 export function metricPresentation(metric, seriesKey = 'active', currency = 'KRW') {
   const count = Number(metric?.sample_count || 0);
   if (metric?.aggregate_incomplete === true) return { text: '집계 준비 중', label: '정확 집계·게시 미완료', empty: true, state: 'incomplete' };
+  if (seriesKey === 'sold') {
+    const soldMean = soldMeanValue(metric);
+    if (soldMean != null) return { text: money(soldMean, currency),
+      label: count < 3 ? '판매완료 표시가 평균 · 소표본 참고' : '판매완료 표시가 평균',
+      empty: false, state: 'ready' };
+  }
   const value = metricValue(metric);
   if (value != null) return {
     text: money(value, currency),
@@ -93,6 +99,9 @@ export function priceRecordIssue(record, data = record?.data) {
     return '공개 통계 미제공 · 표본 부족 여부를 확인할 수 없습니다.';
   }
   if (!data) return '선택한 사이트·제조사의 통계가 제공되지 않았습니다.';
+  if (data.availability?.stale === true && data.availability?.status === 'LAST_PUBLISHED') {
+    return `${String(data.published_window?.to || data.as_of || '').slice(0, 10).replaceAll('-', '.')} 기준 가격 · 최신 집계 지연`;
+  }
   if (['active', 'sold'].some(key => metricPresentation(data[key]).state === 'incomplete')) {
     return '정확 집계·게시 준비 중입니다. 현재 숫자는 완성된 고유 매물 표본 수가 아니므로 대표가격과 구분합니다.';
   }
@@ -372,15 +381,16 @@ export function dailySeries(data, key, days = 30, { listedMinimum = false, inclu
   const map = new Map(rows.map(row => [String(row.date || row.stat_date).slice(0, 10), row[key]]));
   return Array.from({ length: days }, (_, i) => {
     const day = new Date(start + i * 86400000).toISOString().slice(0, 10);
-    const metric = map.get(day);
+    const metric = map.get(day), soldMean = key === 'sold' ? soldMeanValue(metric) : null;
+    const presentation = metricPresentation(metric, key);
     const point = { date: day, value: listedMinimum ? listedPriceRange(metric)?.minimum ?? null
-      : key === 'sold' ? soldMeanValue(metric) ?? metricValue(metric) : metricValue(metric),
+      : key === 'sold' ? soldMean ?? metricValue(metric) : metricValue(metric),
       sampleCount: Number.isInteger(metric?.sample_count) && metric.sample_count >= 0 && metric.aggregate_incomplete !== true ? metric.sample_count : null };
+    point.priceLabel = listedMinimum ? '중고 최저 표시가' : key === 'sold'
+      ? soldMean != null ? presentation.label : presentation.label === '중앙값' ? '판매완료 표시가 중앙값' : presentation.label
+      : presentation.label;
     if (includeSparse) {
       const range = listedPriceRange(metric);
-      point.priceLabel = listedMinimum ? '중고 최저 표시가' : key === 'sold'
-        ? soldMeanValue(metric) != null ? '판매완료 표시가 평균' : '판매완료 표시가 중앙값'
-        : metricPresentation(metric).label;
       if (!listedMinimum && key === 'active' && point.value == null && range && range.count < 3) {
         point.priceLabel = range.count === 1 ? '등록가 1건' : '등록가 범위';
         if (range.minimum === range.maximum) point.value = range.minimum;

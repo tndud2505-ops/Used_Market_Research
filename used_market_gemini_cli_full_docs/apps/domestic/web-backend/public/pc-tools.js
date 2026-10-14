@@ -1,14 +1,12 @@
-import { SERIES, idOf, nameOf, naturalCompare, money, metricValue, soldMeanValue, metricPresentation, listedPriceRange, statsUnavailable, priceRecordIssue, analysisSelectionUrl, groupProducts, scopedStats, sourceStats, priceDateRange, shiftDate, modelPageItems, buildTotals, compactBuild, compatibility, validateBuild, dailySeries, percentChange, buildAnalysisSeries } from './pc-tools-core.mjs?v=readable-chart-v2';
-import { readJson, createPriceStore } from './pc-tools-data.mjs?v=readable-chart-v2';
-import { drawMarketChart as drawChart } from './pc-market-chart.mjs?v=readable-chart-v2';
-import { createAdfitSlot } from './adfit.js?v=adfit-rail-v1';
-import { createContextualAffiliate } from './affiliate.js?v=ad-connection-help-v1';
+import { SERIES, idOf, nameOf, naturalCompare, money, metricValue, soldMeanValue, metricPresentation, listedPriceRange, statsUnavailable, priceRecordIssue, analysisSelectionUrl, groupProducts, scopedStats, sourceStats, priceDateRange, shiftDate, modelPageItems, buildTotals, compactBuild, compatibility, validateBuild, dailySeries, percentChange, buildAnalysisSeries } from './pc-tools-core.mjs?v=shared-price-v2';
+import { readJson, createPriceStore } from './pc-tools-data.mjs?v=picker-fast-v3';
+import { drawMarketChart as drawChart } from './pc-market-chart.mjs?v=chart-corners-v8';
+import { createAdfitSlots } from './adfit.js?v=adfit-all-v3';
 import { toolBrand, toolFilterSchema, toolFacetValues, toolFacetLabel, filterToolProducts, visibleSelection, toolScopeNote } from './pc-tools-catalog.mjs?v=parts-ux-v4';
 
 const builder = document.body.dataset.page === 'builder';
 const $ = selector => document.querySelector(selector);
-const adfit = createAdfitSlot($('#adfit-banner'));
-const affiliate = builder ? createContextualAffiliate($('#contextual-offer')) : null;
+const adfit = createAdfitSlots(document.querySelectorAll('.adfit-banner'));
 const STORAGE_KEY = 'used-pick:pc-build:v1';
 const PAGE_SIZE = 12;
 const state = {
@@ -19,6 +17,7 @@ const state = {
   historyPending: false,
   priceKind: 'active',
   priceKindExplicit: false,
+  priceSources: new Set(['joonggonara','bunjang','danawa','ebay']),
 };
 let repaintTimer, statusTimer, pickerRepaintTimer;
 const displayPrice = (value, currency = 'KRW') => value == null ? '—' : money(value, currency);
@@ -39,10 +38,6 @@ function pricePresentation(metric, seriesKey = 'active', currency = 'KRW', recor
   if (!record || record.state === 'loading') return { text: '확인 중', label: '자료 요청 중', empty: true, state: 'loading' };
   if (statsUnavailable(record?.data)) return { text: '통계 미제공', label: '표본 부족 여부 미확인', empty: true, state: 'unavailable' };
   if (!metric) return { text: '통계 미제공', label: '선택 범위의 통계가 제공되지 않았습니다.', empty: true, state: 'unavailable' };
-  if (builder && seriesKey === 'sold') {
-    const value = soldMeanValue(metric);
-    if (value != null) return { text: money(value, currency), label: '판매완료 표시가 평균', empty: false, state: 'ready' };
-  }
   return metricPresentation(metric, seriesKey, currency);
 }
 const scheduleRepaint = id => {
@@ -91,12 +86,15 @@ function analysisData(id) {
   const record = analysisRecord(id);
   return record?.state === 'ready' && !statsUnavailable(record.data) ? sourceStats(record.data, state.source) : null;
 }
-function syncAnalysisUrl(range = state.range) {
+let analysisUrlTimer;
+function syncAnalysisUrl(range = state.range, deferred = false) {
   if (builder) return;
+  clearTimeout(analysisUrlTimer);
+  if(deferred){analysisUrlTimer=setTimeout(()=>syncAnalysisUrl(range),180);return;}
   const url = new URL(analysisSelectionUrl(location.href, state.selectedId, state.selectedManufacturer));
   if (state.source) url.searchParams.set('source', state.source); else url.searchParams.delete('source');
   url.searchParams.set('from', range.from); url.searchParams.set('to', range.to);
-  history.replaceState(null, '', url.href);
+  if(url.href!==location.href)history.replaceState(null, '', url.href);
 }
 function buildEntryData(entry) {
   const record = chartRecord(entry.id);
@@ -221,21 +219,51 @@ function renderDanawaPrice(node, data, record, id, manufacturer = '') {
   node.title = `최근 30일 다나와 중고 등록가 · ${range.count}건 · 국내 통합 시세 합계와 별도 비교`;
 }
 function chosen(id, manufacturer = '') { return state.entries.some(e => e.id === id && e.manufacturer === manufacturer); }
+const pickerSummaries=new WeakMap();
 function pickerPrice(id) {
   const store=state.source==='ebay'?overseasPrices:prices;
   const record=store.get(id,60)||((id===state.selectedId)?analysisRecord(id):null);
   if(!record||record.state==='loading')return {state:'loading',text:'기록 확인 중'};
-  if(record.state==='error'||statsUnavailable(record.data))return {state:'unknown',text:'조회 실패'};
+  if(record.state==='error')return {state:'unknown',text:'조회 실패',coverage:'기록 확인 불가'};
+  if(statsUnavailable(record.data))return {state:'unknown',text:'공개 통계 없음',coverage:'표본 부족 여부 미확인'};
+  const cacheKey=`${state.source}:${state.priceKindExplicit?state.priceKind:'auto'}`;
+  const memo=pickerSummaries.get(record.data);
+  if(memo?.key===cacheKey)return memo.value;
+  const remember=value=>{pickerSummaries.set(record.data,{key:cacheKey,value});return value;};
   const data=sourceStats(record.data,state.source),days=data?.methodology?.days||60;
-  const lines=buildAnalysisSeries(data,{source:state.source||'overall',allowedSourceIds:[state.source||'overall'],days,includeSparse:true});
-  const points=lines.flatMap(line=>line.points.map(point=>({...point,metricKey:line.metricKey}))).filter(point=>point.value!=null||point.lower!=null).sort((a,b)=>b.date.localeCompare(a.date)||a.metricKey.localeCompare(b.metricKey));
-  const point=points[0],currency=record.data?.methodology?.currency||'KRW';
-  return point?{state:'ready',text:point.value!=null?money(point.value,currency):`${money(point.lower,currency)}~${money(point.upper,currency)}`,detail:`${point.priceLabel} · ${point.date}`,date:point.date}:{state:'empty',text:'최근 60일 기록 없음'};
+  if(!data)return {state:'unknown',text:'선택 사이트 통계 없음',coverage:'표본·기록 미확인'};
+  // Match the source lines the selected chart can actually display. An overall
+  // aggregate alone must not promise a chart when no source history exists.
+  const scopes=state.source?[{id:state.source,data}]:
+    (data.by_source||[]).filter(row=>row.source_id!=='ebay').map(row=>({id:row.source_id,data:{...data,...row,by_source:undefined}}));
+  const lines=scopes.flatMap(scope=>buildAnalysisSeries(scope.data,{source:scope.id,allowedSourceIds:[scope.id],days,includeSparse:false}));
+  const key=state.priceKindExplicit?state.priceKind:lines.some(line=>line.metricKey==='active')?'active':lines.some(line=>line.metricKey==='sold')?'sold':'active';
+  const points=lines.filter(line=>line.metricKey===key).flatMap(line=>line.points.map(point=>({...point,sourceId:line.id.split(':')[0]})))
+    .filter(point=>point.value!=null).sort((a,b)=>b.date.localeCompare(a.date));
+  const combined=dailySeries(data,key,days,{listedMinimum:state.source==='danawa'&&key==='active'}).filter(point=>point.value!=null).at(-1);
+  const point=combined?{...combined,sourceId:state.source||'overall'}:points[0],currency=record.data?.methodology?.currency||'KRW';
+  const formatDate=date=>date.replaceAll('-','.');
+  // Daily snapshots are not added together: the same listing can appear on
+  // several dates. Show both lifecycle counts from one latest observed date.
+  const observed=(data.daily||[]).filter(day=>['active','sold'].some(kind=>Number(day[kind]?.sample_count)>0)).sort((a,b)=>a.date.localeCompare(b.date));
+  const recent=observed.at(-1);
+  const countLabel=kind=>Number.isInteger(recent?.[kind]?.sample_count)?`${recent[kind].sample_count.toLocaleString('ko-KR')}건`:'미확인';
+  const metadata=recent?{
+    coverage:`판매중 ${countLabel('active')} · 판매완료 ${countLabel('sold')}`,
+    period:`${formatDate(observed[0].date)} ~ ${formatDate(recent.date)}`,
+    sample:`${formatDate(recent.date)} 기준`,
+  }:{};
+  if(points.length&&point)return remember({state:'ready',text:money(point.value,currency),
+    ...metadata,date:point.date,priceTitle:`${point.priceLabel} · ${formatDate(point.date)}`});
+  const observations=observed.filter(day=>Number(day[key]?.sample_count)>0);
+  const latest=observations.at(-1),count=latest?.[key]?.sample_count;
+  if(recent)return remember({state:'sparse',text:'—',...metadata,priceTitle:count<3?'대표가격 표본 부족':'가격선 없음'});
+  return remember({state:'empty',text:'—',coverage:`최근 ${days}일 기록 없음`});
 }
 function loadPickerPrices() {
   if(builder||!$('#analysis-model-dialog')?.open)return;
   const store=state.source==='ebay'?overseasPrices:prices;
-  void store.load(pageGroups().flatMap(group=>group.products),60,'',{background:true});
+  void store.load(pageGroups().flatMap(group=>group.products),60,'',{background:true,backgroundKey:'picker'});
 }
 function renderModelTable() {
   const container = $('#model-table');
@@ -250,13 +278,18 @@ function renderModelTable() {
       const retry = action('가격 다시 조회', 'retry');
       priceStatus.append(retry);
       if (hadFocus) retry.focus({ preventScroll: true });
+    } else if (builder) {
+      const delayed = [...new Set(pageGroups().map(group => chartRecord(idOf(group.products[0])))
+        .filter(record => record?.state === 'ready' && record.data?.availability?.stale === true)
+        .map(record => priceRecordIssue(record)).filter(Boolean))];
+      if (delayed.length) { priceStatus.hidden = false; priceStatus.append(el('span', '', delayed.join(' · '))); }
     }
   }
   // Price completion must not interrupt a focused row action.
   const focus = document.activeElement;
   const focusKey = container.contains(focus) ? { ...focus.dataset } : null;
   const visibleSeries = builder ? SERIES.filter(s => s.key !== 'confirmed_transactions') : [];
-  const { table, body } = makeTable(['모델', ...visibleSeries.map(s => s.label), ...(builder ? ['다나와 중고 표시가'] : ['최근 확인 가격']), builder ? '조합' : '보기']);
+  const { table, body } = makeTable(['모델', ...visibleSeries.map(s => s.label), ...(builder ? ['다나와 중고 표시가'] : ['가격','가격 기록 · 최근 표본']), builder ? '조합' : '']);
   for (const group of pageGroups()) {
     const product = group.products[0], id = idOf(product), record = chartRecord(id), data = record?.data;
     const row = el('tr', state.selectedId === id ? 'is-selected' : '');
@@ -276,22 +309,24 @@ function renderModelTable() {
       const cell = el('td', 'price danawa-price'); renderDanawaPrice(cell, data, record, id); row.append(cell);
     }
     const priceInfo=builder?null:pickerPrice(id);
-    if(!builder&&priceInfo.state==='ready'){link.href=analysisSelectionUrl(new URL('/price-analysis.html',location.href).href,id);link.dataset.action='analyze';link.dataset.id=id;}
-    else if(!builder)name.replaceChildren(el('span','model-name-link',nameOf(product)));
-    if(!builder){const cell=el('td','analysis-model-price',priceInfo.text);if(priceInfo.detail)cell.append(el('small','',priceInfo.detail));cell.dataset.priceState=priceInfo.state;row.append(cell);}
+    // Model navigation is independent of statistics availability. A sparse or
+    // unpublished price must never make a real model inaccessible.
+    if(!builder){link.href=analysisSelectionUrl(new URL('/price-analysis.html',location.href).href,id);link.dataset.action='analyze';link.dataset.id=id;}
+    if(!builder){const cell=el('td','analysis-model-price',priceInfo.text);if(priceInfo.priceTitle)cell.title=priceInfo.priceTitle;cell.dataset.priceState=priceInfo.state;row.append(cell);}
+    if(!builder){const cell=el('td','analysis-model-coverage');cell.append(el('span','',priceInfo.coverage||'기록 확인 중'));if(priceInfo.sample)cell.append(el('small','analysis-sample-date',priceInfo.sample));if(priceInfo.period){const period=el('small','analysis-record-period',priceInfo.period);period.title='가격 기록 기간';cell.append(period);}cell.dataset.priceState=priceInfo.state;row.append(cell);}
     const control = el('td');
     const currentAnalysisModel = !builder && state.selectedId === id;
     const button = action(builder ? chosen(id) ? '선택됨' : '선택' : currentAnalysisModel ? '현재 모델' : '보기', builder ? 'choose' : 'analyze', { id });
+    if(!builder&&!currentAnalysisModel&&priceInfo.state==='ready')button.textContent='차트 보기';
     if (builder && chosen(id)) button.classList.add('primary');
     if (currentAnalysisModel) { button.disabled = true; button.setAttribute('aria-current', 'true'); }
-    if(!builder&&priceInfo.state==='loading'){button.textContent='확인 중';button.disabled=true;}
-    if(!builder&&priceInfo.state==='empty'&&!currentAnalysisModel){
-      const listings=el('a','model-name-link','매물 보기');listings.href=link.href;control.append(listings);
+    control.append(button);
+    if(!builder&&['empty','sparse'].includes(priceInfo.state)&&!currentAnalysisModel){
+      const listings=el('a','model-name-link','매물 보기');listings.href=searchReturnPath(product);control.append(listings);
     }else if(!builder&&priceInfo.state==='unknown'&&!currentAnalysisModel){control.append(action('재조회','picker-retry'));}
-    else control.append(button);
     row.append(control); body.append(row);
   }
-  if (!body.children.length) { const tr = el('tr'), td = el('td', 'tools-empty', '해당 조건의 모델이 없습니다.'); td.colSpan = visibleSeries.length + 3; tr.append(td); body.append(tr); }
+  if (!body.children.length) { const tr = el('tr'), td = el('td', 'tools-empty', '해당 조건의 모델이 없습니다.'); td.colSpan = builder?visibleSeries.length+3:4; tr.append(td); body.append(tr); }
   container.replaceChildren(table);
   if (focusKey) {
     const replacement = [...container.querySelectorAll('button')].find(b => Object.entries(focusKey).every(([k, v]) => b.dataset[k] === v));
@@ -519,28 +554,60 @@ function loadEarlierPrices({retry=false} = {}) {
     state.historyPending=false;syncAnalysisUrl();scheduleRepaint();
   });
 }
-function analysisSources() {
+function analysisSources({ latest = false } = {}) {
   const allowedSources = new Set(state.sources.map(source => String(source.source_id || source.id || source.key || '')));
-  return (state.source ? [state.source] : [...allowedSources].filter(id => id !== 'ebay')).filter(id => allowedSources.has(id)).map(id => {
-    const record = id === 'ebay' ? overseasPrices?.getAvailable(state.selectedId, state.days, requestedPriceAsOf()) : chartRecord(state.selectedId);
+  const ids = latest ? ['joonggonara','bunjang','danawa','ebay'] : state.source ? [state.source] : [...allowedSources].filter(id => id !== 'ebay');
+  return ids.filter(id => allowedSources.has(id) && (latest || state.priceSources.has(id))).map(id => {
+    const store = id === 'ebay' ? overseasPrices : prices;
+    const record = latest ? store?.getAvailable(state.selectedId,60,'') : id === 'ebay' ? overseasPrices?.getAvailable(state.selectedId, state.days, requestedPriceAsOf()) : chartRecord(state.selectedId);
     const data = record?.state === 'ready' && !statsUnavailable(record.data)
       ? sourceStats(scopedStats(record.data, state.selectedManufacturer), id) : null;
     return { id, record, data, currency: id === 'ebay' ? 'USD' : 'KRW' };
   });
 }
-function renderLatestPrices(series,record) {
+function renderLatestPrices(series,record,sources = null) {
   const container=$('#analysis-prices');if(!container)return;
   container.replaceChildren();
-  const {table,body}=makeTable(['사이트','최근 확인 가격','기준 · 날짜']);table.className='market-latest-table';
+  const list=el('ul','market-snapshot-list');
   const order=['joonggonara','bunjang','danawa','ebay'];
-  for(const line of [...series].sort((a,b)=>order.indexOf(a.id.split(':')[0])-order.indexOf(b.id.split(':')[0]))){
+  const rank=line=>{const index=order.indexOf(line.id.split(':')[0]);return index<0?order.length:index;};
+  for(const line of [...series].sort((a,b)=>rank(a)-rank(b))){
     const point=line.points.filter(point=>point.value!=null||point.lower!=null).at(-1);if(!point)continue;
-    const row=el('tr'),price=point.value!=null?money(point.value,line.currency):`${money(point.lower,line.currency)}~${money(point.upper,line.currency)}`;
-    const basis=point.priceLabel||'등록 가격',count=basis.includes('1건')?'':` · ${point.sampleCount??'—'}건`;
-    row.append(el('th','',line.label.split(' · ')[0]),el('td','market-latest-amount',price),el('td','market-latest-detail',`${basis}${count} · ${point.date}`));body.append(row);
+    const sourceId=line.id.split(':')[0],item=el('li','market-snapshot-item');item.dataset.source=sourceId;
+    const price=point.value!=null?money(point.value,line.currency):`${money(point.lower,line.currency)}~${money(point.upper,line.currency)}`;
+    const basis=line.priceBasis==='listed-minimum'?'최저 표시가 참고':point.priceLabel?.startsWith('등록가')?'등록가 참고 · 대표가격 아님':point.priceLabel||'대표가격';
+    const count=Number.isInteger(point.sampleCount)?`${point.sampleCount.toLocaleString('ko-KR')}건`:'표본 미확인';
+    const marker=el('i','market-snapshot-marker');marker.setAttribute('aria-hidden','true');
+    item.append(marker,el('strong','market-snapshot-source',line.label.split(' · ')[0]),el('span','market-snapshot-basis',basis),
+      el('b','market-snapshot-amount',price),el('span','market-snapshot-meta',`· ${count} · ${point.date.slice(5).replace('-', '.')}`));
+    list.append(item);
   }
-  if(body.children.length){container.append(table);return;}
-  const message=!record||record.state==='loading'?'가격 기록을 확인하고 있습니다.':record.state==='error'||statsUnavailable(record.data)?'가격 기록을 불러오지 못했습니다.':'이 기간에 확인된 가격 기록이 없습니다.';
+  if(sources){
+    for(const source of sources){
+      if([...list.children].some(item=>item.dataset.source===source.id))continue;
+      const item=el('li','market-snapshot-item');item.dataset.source=source.id;
+      const pending=!source.record||source.record.state==='loading';
+      const failed=source.record?.state==='error'||statsUnavailable(source.record?.data);
+      item.append(el('i','market-snapshot-marker'),el('strong','market-snapshot-source',SOURCE_LABELS[source.id]||source.id),
+        el('b','market-snapshot-amount',pending?'확인 중':failed?'조회 실패':'자료 없음'));
+      if(failed)item.append(action('다시 조회','retry',{},'market-snapshot-retry'));
+      list.append(item);
+    }
+    const items=[...list.children].sort((a,b)=>order.indexOf(a.dataset.source)-order.indexOf(b.dataset.source));
+    list.replaceChildren(...items);
+    for(const item of items){
+      const checkbox=el('input','market-source-check');checkbox.type='checkbox';checkbox.dataset.priceSource=item.dataset.source;
+      checkbox.checked=state.priceSources?.has(item.dataset.source)??true;
+      checkbox.setAttribute('aria-label',`${SOURCE_LABELS[item.dataset.source]||item.dataset.source} 가격선 표시`);
+      item.dataset.visible=String(checkbox.checked);item.prepend(checkbox);
+      if(item.dataset.source==='ebay')item.append(action('USD 차트 ↗','source-chart',{source:'ebay'},'market-source-link'));
+    }
+    container.append(list);
+    if(!items.length)container.append(el('p','market-price-empty','+에서 사이트를 선택하세요.'));
+    return;
+  }
+  if(list.children.length){container.append(list);return;}
+  const message=!record||record.state==='loading'?'가격 기록을 확인하고 있습니다.':record.state==='error'||statsUnavailable(record.data)?'가격 기록을 불러오지 못했습니다.':'이 기간에 표시할 대표가격이 없습니다.';
   const empty=el('div','market-price-empty');empty.append(el('p','',message),action('다른 모델 찾기','open-analysis-picker'));
   if(record?.state==='error'||statsUnavailable(record?.data))empty.append(action('다시 조회','retry'));
   const product=state.byId.get(state.selectedId);if(product){const link=el('a','','이 모델 매물 보기');link.href=searchReturnPath(product);empty.append(link);}
@@ -563,19 +630,26 @@ function renderAnalysis() {
   const coverage = $('#chart-coverage'); coverage.replaceChildren(); coverage.hidden = true;
   const sources = analysisSources();
   const availableSeries = sources.flatMap(item => buildAnalysisSeries(statsUnavailable(item.data) ? null : item.data, {
-    source: item.id, allowedSourceIds: [item.id], days: item.data?.methodology?.days || state.days, sourceLabels: SOURCE_LABELS,includeSparse:true,
+    source: item.id, allowedSourceIds: [item.id], days: item.data?.methodology?.days || state.days, sourceLabels: SOURCE_LABELS,includeSparse:false,
   }).map(line => ({ ...line,
     label: `${SOURCE_LABELS[item.id] || item.id} · ${line.priceBasis === 'listed-minimum' ? '중고 최저 표시가' : line.metricKey === 'sold' ? '판매완료 표시가' : '판매중'}`, currency: item.currency })));
-  if(!state.priceKindExplicit)state.priceKind=availableSeries.some(line=>line.metricKey==='active')?'active':availableSeries.some(line=>line.metricKey==='sold')?'sold':'active';
+  // Sparse asks remain useful reference evidence, but never become representative chart lines.
+  const referenceSeries = sources.flatMap(item => buildAnalysisSeries(statsUnavailable(item.data) ? null : item.data, {
+    source: item.id, allowedSourceIds: [item.id], days: item.data?.methodology?.days || state.days, sourceLabels: SOURCE_LABELS, includeSparse:true,
+  }).map(line => ({ ...line, currency:item.currency })));
+  if(!state.priceKindExplicit)state.priceKind=referenceSeries.some(line=>line.metricKey==='active')?'active':availableSeries.some(line=>line.metricKey==='sold')?'sold':'active';
   const series=availableSeries.filter(line=>line.metricKey===state.priceKind);
-  const dates = [...new Set(series.flatMap(item => item.points.map(point => point.date)))].sort();
-  renderLatestPrices(series,record);
+  const chartSeries=series;
+  const dates = [...new Set(chartSeries.flatMap(item => item.points.map(point => point.date)))].sort();
+  const latestSources=analysisSources({latest:true});
+  const latestSeries=latestSources.flatMap(item=>buildAnalysisSeries(statsUnavailable(item.data)?null:item.data,{
+    source:item.id,allowedSourceIds:[item.id],days:item.data?.methodology?.days||60,sourceLabels:SOURCE_LABELS,includeSparse:true,
+  }).map(line=>({...line,currency:item.currency})));
+  renderLatestPrices(latestSeries.filter(line=>line.metricKey===state.priceKind),record,latestSources);
   $('#chart-price-kind').value=state.priceKind;
   const totalDates = dates.length;
   const workspace = $('#analysis-workspace');
   if (workspace) workspace.dataset.chartPointCount = String(totalDates);
-  const windowStatus = $('#chart-window-status');
-  if (windowStatus) windowStatus.textContent = `${window.from.slice(5).replace('-', '/')}–${window.to.slice(5).replace('-', '/')} · ${currency === 'USD' ? '달러' : '원'}`;
   const product = state.byId.get(state.selectedId), modelName = product ? nameOf(product) : '선택 모델 없음';
   $('#analysis-title').textContent = '가격 분석';
   $('#analysis-model-select').textContent = `${modelName} ▾`;
@@ -585,8 +659,8 @@ function renderAnalysis() {
   $('#price-chart').setAttribute('aria-busy', String(Boolean(state.selectedId) && pending));
   $('#price-chart').dataset.modelId = state.selectedId;
   $('#price-chart').dataset.priceState = !state.selectedId ? 'empty' : pending ? 'loading'
-    : series.length ? 'ready' : failedSource ? 'error' : sparsePrices ? 'insufficient' : 'unavailable';
-  $('#price-chart').hidden=!series.length;
+    : chartSeries.length ? 'ready' : failedSource ? 'error' : sparsePrices ? 'insufficient' : 'unavailable';
+  $('#price-chart').hidden=false;
   const issue = !state.selectedId ? '선택 조건에 맞는 모델이 없습니다.'
     : failedSource ? `${SOURCE_LABELS[failedSource.id] || failedSource.id} · ${priceRecordIssue(failedSource.record, failedSource.data)}`
     : priceRecordIssue(record, data);
@@ -597,22 +671,19 @@ function renderAnalysis() {
   } else {
     const excluded = Number(base?.integrity_filtered_source_count || base?.integrity_repaired_source_ids?.length || 0);
     if (excluded) { coverage.textContent = `집계값이 불일치하는 출처 ${excluded}곳 제외`; coverage.hidden = false; }
-    else if (base?.coverage?.status === 'PARTIAL') {
-      coverage.textContent = `보존 기록 ${base.coverage.from} ~ ${base.coverage.to}`; coverage.hidden = false;
-    }
-    else if (base?.coverage?.status === 'EMPTY') { coverage.textContent = '선택 기간의 보존 기록이 없습니다.'; coverage.hidden = false; }
-    else if (!series.length && sparsePrices) {
-      coverage.textContent = '등록 가격은 있지만 표본이 부족해 대표가격을 표시하지 않습니다.'; coverage.hidden = false;
-    }
   }
   if(record?.historyError){coverage.textContent='이전 기록을 불러오지 못했습니다. 현재 기록은 유지됩니다.';coverage.append(action('다시 시도','history-retry'));coverage.hidden=false;}
   const historyStatus=$('#chart-history-status');
   if(historyStatus)historyStatus.textContent=state.historyPending?'이전 기록 불러오는 중':'';
   renderAnalysisContext(record, data, currency);
-  drawChart($('#price-chart'), series, { label: `${modelName} 가격 추이`, currency, identity: `${state.selectedId}:${state.selectedManufacturer}:${state.source}:${state.priceKind}:${window.to}`,
+  drawChart($('#price-chart'), chartSeries, { label: `${modelName} 가격 추이`, currency, identity: `${state.selectedId}:${state.selectedManufacturer}:${state.source}:${state.priceKind}:${window.to}`,
+    showLegend:false,showNote:false,cornerReadout:true,axisLeft:true,
+    readoutInput:sources.map(item=>referenceSeries.find(line=>line.id===`${item.id}:${state.priceKind}`)||{
+      id:`${item.id}:${state.priceKind}`,label:SOURCE_LABELS[item.id]||item.id,currency:item.currency,metricKey:state.priceKind,points:[],
+    }),
     onLoadEarlier:loadEarlierPrices,loadingEarlier:state.historyPending,
     canLoadEarlier:state.days<priceDateRange(window.earliest,window.to).days&&!record?.historyError,
-    onViewChange:range=>{if(windowStatus)windowStatus.textContent=`${range.from} ~ ${range.to}`;syncAnalysisUrl(range);}
+    onViewChange:range=>syncAnalysisUrl(range,true)
   });
 }
 
@@ -645,15 +716,17 @@ function render() { renderControls(); renderSummary(); renderModelTable(); if (b
 function refreshPrices() {
   const targets = builder&&state.sort === 'price' ? currentProducts() : builder && $('#builder-model-dialog')?.open ? pageGroups().flatMap(g => g.products) : [];
   const selected = state.byId.get(state.selectedId);
-  const contextProduct = selected?.category_code === state.category ? selected : null;
-  void affiliate?.update({ hasResults: state.ready && currentProducts().length > 0,
-    canonical_product_id: contextProduct ? idOf(contextProduct) : '', category_code: state.category });
   if (selected) targets.push(selected);
   if (builder) targets.push(...state.entries.map(e => state.byId.get(e.id)).filter(Boolean));
   const overseas = !builder && state.source === 'ebay';
   const asOf = requestedPriceAsOf();
   void prices.load(overseas ? [] : targets, builder ? 30 : state.days, asOf);
   if (!builder) void overseasPrices.load(overseas ? targets : [], state.days, asOf);
+  if(!builder&&selected){
+    // The price rail is always current, independent of a historical chart window.
+    void prices.load([selected],60,'',{background:true});
+    void overseasPrices.load([selected],60,'',{background:true});
+  }
   if(!builder)loadPickerPrices();
 }
 function selectCategory(category) {
@@ -678,6 +751,19 @@ document.addEventListener('click', event => {
   const button = event.target.closest('[data-action]'); if (!button || !state.ready) return;
   if(button.tagName==='A'&&(event.ctrlKey||event.metaKey||event.shiftKey||event.altKey))return;
   const { action: type, id, manufacturer = '', key, category } = button.dataset;
+  if(type==='toggle-latest-prices'){
+    const rail=$('#analysis-price-rail'),toggle=$('#chart-latest-toggle'),open=rail.hidden;
+    rail.hidden=!open;$('#analysis-workspace').dataset.pricesOpen=String(open);
+    toggle.setAttribute('aria-expanded',String(open));toggle.setAttribute('aria-label',open?'최근 가격 접기':'최근 가격 펼치기');
+    toggle.textContent=open?'−':'+';
+    if(!open&&button!==toggle)toggle.focus({preventScroll:true});
+    return;
+  }
+  if(type==='source-chart'){
+    state.source=button.dataset.source;state.priceSources.add(state.source);state.page=1;
+    const checkbox=document.querySelector(`[data-price-source="${state.source}"]`);if(checkbox)checkbox.checked=true;
+    resetHistoryWindow();resetChartView();syncAnalysisUrl();renderAnalysis();refreshPrices();return;
+  }
   if(type==='analyze')event.preventDefault();
   if (type === 'open-picker') { openModelPicker(); refreshPrices(); return; }
   if (type === 'open-analysis-picker') {
@@ -745,6 +831,10 @@ document.addEventListener('click', event => {
 });
 document.addEventListener('change', event => {
   const target = event.target;
+  if(target.dataset.priceSource){
+    if(target.checked)state.priceSources.add(target.dataset.priceSource);else state.priceSources.delete(target.dataset.priceSource);
+    renderAnalysis();document.querySelector(`[data-price-source="${target.dataset.priceSource}"]`)?.focus({preventScroll:true});return;
+  }
   if (target.id === 'chart-sources') { state.source = target.value; state.page = 1; resetHistoryWindow();resetChartView(); syncAnalysisUrl(); renderControls(); renderModelTable(); renderAnalysis(); refreshPrices(); return; }
   if(target.id==='chart-price-kind'){state.priceKind=target.value==='sold'?'sold':'active';state.priceKindExplicit=true;renderAnalysis();return;}
   if (target.dataset.quantity) {
@@ -846,7 +936,10 @@ if (builder) {
     target?.focus({ preventScroll: true });
   });
 }
-if (!builder) $('#analysis-model-dialog')?.addEventListener('close', () => $('#analysis-model-select')?.focus({ preventScroll: true }));
+if (!builder) $('#analysis-model-dialog')?.addEventListener('close', () => {
+  prices.cancelBackground('picker');overseasPrices.cancelBackground('picker');
+  clearTimeout(pickerRepaintTimer);$('#analysis-model-select')?.focus({ preventScroll: true });
+});
 for (const dialog of document.querySelectorAll('#builder-model-dialog, #analysis-model-dialog')) {
   // Chromium search inputs consume Escape to clear text. A model picker must
   // still close in one keystroke; IME composition retains its own cancel key.

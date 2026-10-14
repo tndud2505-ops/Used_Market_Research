@@ -5,6 +5,8 @@ import { DatabaseSync } from 'node:sqlite';
 import { classifyPcPartListingPublic } from '../market/logic/pc-parts-classifier.mjs';
 import { PC_PRODUCT_MASTER_V2 } from '../market/data/pc-product-master-v2.mjs';
 import { PcPartsLedger } from './pc-parts-ledger.mjs';
+import { PcShadowPipeline } from './pc-shadow-pipeline.mjs';
+import { reconcileExactModelStatistics } from './pc-classification-consistency.mjs';
 import { toPcProjectionImportItem } from './republish-pc-projections.mjs';
 
 const products = new Map(PC_PRODUCT_MASTER_V2.map(p => [p.id, p]));
@@ -18,8 +20,8 @@ const unknown = id => /^(?:ssd|hdd):other-unclassified:capacity-bucket:/.test(id
   || /^motherboard:platform:/.test(id || '');
 
 // Only promote an unknown identity when all sale/price semantics are unchanged.
-// Historical eligibility and exclusions are deliberately retained: this is an
-// identity repair, not permission to reinstate reviewed or anomalous samples.
+// Independent exclusions remain intact. Only a disproved exact-model reason
+// can be reconciled from the full pipeline below, never from an ID alone.
 export function identityPromotion(previous, item) {
   if (!unknown(previous.canonical_product_id)) return null;
   const next = classifyPcPartListingPublic(item);
@@ -37,9 +39,11 @@ export function identityPromotion(previous, item) {
   return { product, next };
 }
 
-function metadataPromotion(old, promotion) {
+function metadataPromotion(old, promotion, statistics = null) {
   const { product, next } = promotion;
-  return { ...old, canonical_product_id: product.id, canonical_display_name: product.name,
+  return { ...old, ...(statistics?{statistics_eligible:Boolean(statistics.statistics_eligible),
+    statistics_exclusion_reasons:json(statistics.statistics_exclusion_reasons_json)}:{}),
+    canonical_product_id: product.id, canonical_display_name: product.name,
     canonical_manufacturer: product.manufacturer, spec_group_id: next.spec_group_id,
     model_confidence: next.model_confidence,
     // A price reference belongs to the old identity and must never follow it.
@@ -53,6 +57,13 @@ export function buildUnknownIdentityRepair(db, { asOf = new Date().toISOString()
   const ledger = new PcPartsLedger({ db });
   const active = ledger.getActivePipelineVersion();
   if (!active) throw new Error('ACTIVE_PIPELINE_REQUIRED');
+  const pipeline=new PcShadowPipeline({ledger});
+  const reconcile=(previous,item,observedAt,promotion)=>{
+    if(promotion.product.category!=='MOTHERBOARD')return null;
+    const normalized=pipeline.normalizeItem({...item,observed_at:observedAt,
+      seller_type:previous.market_pool==='KR_DEALER_USED'?'DEALER':undefined},observedAt,null,{reclassification:true}).normalized;
+    return normalized.canonicalProductId===promotion.product.id?reconcileExactModelStatistics(previous,normalized,item.currency):null;
+  };
   // Include the active publication's entire observation window as well as newer
   // observations; its as-of can precede the time this repair is performed.
   const cutoff = new Date(Math.min(Date.parse(asOf), Date.parse(cohortAsOf)) - 30 * 86400000).toISOString();
@@ -77,7 +88,8 @@ export function buildUnknownIdentityRepair(db, { asOf = new Date().toISOString()
     const children = db.prepare('SELECT * FROM listing_items WHERE normalized_listing_id=? ORDER BY item_index').all(row.id);
     if (children.length !== 1 || children[0].canonical_product_id !== before.canonical_product_id) continue;
     const { product, next } = promotion;
-    const after = { ...before, canonical_product_id: product.id, canonical_display_name: product.name,
+    const statistics=reconcile(before,{...item,status:row.lifecycle_status},row.observed_at,promotion);
+    const after = { ...before, ...statistics, canonical_product_id: product.id, canonical_display_name: product.name,
       spec_group_id: next.spec_group_id, model_confidence: next.model_confidence,
       evidence_json: JSON.stringify(metadataPromotion({ canonical_product_id: before.canonical_product_id,
         evidence: json(before.evidence_json) }, promotion).evidence) };
@@ -106,9 +118,14 @@ export function buildUnknownIdentityRepair(db, { asOf = new Date().toISOString()
     if (!promotion) continue;
     if (!promotedProjections.has(projectionKey(before.site, before.url, before.title,
       before.price_value, before.currency, before.pc_canonical_product_id, promotion.product.id))) continue;
+    const statistics=reconcile({...old,category_code:before.pc_category_code,listing_kind:before.pc_listing_kind,
+      condition_code:before.pc_condition_code,quantity:before.pc_quantity,price_scope:before.pc_price_scope,
+      market_pool:before.pc_market_pool,price_eligible:before.pc_price_eligible,statistics_eligible:old.statistics_eligible?1:0,
+      exclusion_reasons_json:JSON.stringify(old.exclusion_reasons||[]),statistics_exclusion_reasons_json:JSON.stringify(old.statistics_exclusion_reasons||[])},
+      {...before,price:before.price_value,status:before.pc_lifecycle_status},before.last_checked_at,promotion);
     const after = { ...before, pc_canonical_product_id: promotion.product.id,
       pc_canonical_manufacturer: promotion.product.manufacturer,
-      pc_metadata_json: JSON.stringify(metadataPromotion(old, promotion)) };
+      pc_metadata_json: JSON.stringify(metadataPromotion(old, promotion,statistics)) };
     listings.push({ before, after });
   }
   const plan = { format: 1, as_of: asOf, cutoff, active, normalizations, listings, scopes: [...scopes.values()] };

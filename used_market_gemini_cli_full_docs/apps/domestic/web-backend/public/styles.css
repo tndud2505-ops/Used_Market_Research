@@ -3111,7 +3111,8 @@ body {
   scrollbar-width: thin;
 }
 
-.adfit-banner[hidden] {
+.adfit-banner[hidden],
+.adsterra-banner[hidden] {
   display: none;
 }
 

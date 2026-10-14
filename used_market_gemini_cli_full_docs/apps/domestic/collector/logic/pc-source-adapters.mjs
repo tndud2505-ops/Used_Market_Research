@@ -367,6 +367,8 @@ export function parseDanawaListingsHtml(html) {
 }
 
 export async function collectDanawaCategoryListings({ categoryCode, page = 1, maxPages = 5, fetchImpl = fetch, userAgent = "USED-PICK-PC-Collector/2.0" }) {
+  // Retired dmall diagnostics must not bypass the paced search scheduler.
+  if (fetchImpl === globalThis.fetch) throw new Error('DANAWA_LEGACY_LIVE_DISABLED_USE_SCHEDULED_SEARCH');
   const targets = danawaTargetsForCategory(categoryCode);
   if (targets.length === 0) throw new Error(`DANAWA_CATEGORY_NOT_MAPPED:${categoryCode}`);
   const items = [];
@@ -401,6 +403,7 @@ export async function collectDanawaCategoryListings({ categoryCode, page = 1, ma
         const body = await response.text();
         if (!response.ok) {
           lastFailure = `DANAWA_HTTP_${response.status}:${categoryCode}`;
+          if (response.status === 403 || response.status === 429) throw new Error(lastFailure);
           continue;
         }
         try {

@@ -139,6 +139,7 @@ try {
 } finally { db.close(); }
 const targetSet = pcCollectionTargetSetV2();
 const capacity = pcCollectionCapacityPlan();
-assert.equal(capacity.all_sources_sufficient, true, 'collection changes must fit the configured default target budget');
+assert.ok(capacity.sources.filter(source=>source.source_key!=='danawa').every(source=>source.capacity_sufficient), 'normal sources retain full default coverage');
+assert.equal(capacity.sources.find(source=>source.source_key==='danawa').configured_targets_per_run,20,'Danawa uses its protective cap even when coverage takes longer');
 console.log(JSON.stringify({ status: 'passed', contract: 'pc-light-user', public_models: publicIds.size, reachable_tool_models: searchableTools.length,
   pipeline_categories: fixtures.length, target_set: targetSet.targetSetVersion || targetSet.target_set_version }, null, 2));

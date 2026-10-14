@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, existsSync, rmSync } from 'node:fs';
+import { mkdtempSync, existsSync, readdirSync, rmSync } from 'node:fs';
+import { DatabaseSync } from 'node:sqlite';
 import { spawnSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
@@ -37,6 +38,18 @@ try {
   const applied = spawnSync(process.execPath, args, { encoding: 'utf8' });
   assert.equal(applied.status, 0, applied.stderr);
   const result = JSON.parse(applied.stdout); assert.ok(existsSync(result.backup));
+  assert.equal(path.dirname(result.backup), path.join(directory, 'backups'), 'recovery copies must enter managed retention');
+  assert.match(path.basename(result.backup), /^search-index-pre-local-reconcile-.*\.sqlite$/u);
+  assert.ok(readdirSync(path.dirname(result.backup)).every(name => !name.endsWith('.partial')));
+  const recoveryDb = new DatabaseSync(result.backup, { readOnly: true });
+  try {
+    new PcPartsLedger({ db: recoveryDb });
+    assert.equal(recoveryDb.prepare('PRAGMA quick_check').get().quick_check, 'ok');
+  } finally { recoveryDb.close(); }
+  const recoverySummary = localProjectionPlan(result.backup).summary;
+  assert.equal(recoverySummary.checksum, first.checksum, 'recovery copy matches the exact pre-apply plan');
+  assert.equal(recoverySummary.current_count, first.current_count, 'recovery copy preserves pre-apply listings');
+  assert.equal(recoverySummary.stale_count, first.stale_count, 'recovery copy is from before reconciliation');
   const after = localProjectionPlan(file);
   assert.equal(after.summary.current_count, 1); assert.equal(after.summary.stale_count, 0);
   assert.equal(after.state.localPublic[0].canonical_product_id, 'ram:g-skill:ddr5:16gb');

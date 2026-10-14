@@ -654,7 +654,7 @@ async function collectBunjangCategory(sourceCategoryId, categoryId, limit, sortM
   url.searchParams.set("categoryId", sourceCategoryId);
   url.searchParams.set("policyKey", "pw.product.category");
   url.searchParams.set("size", String(Math.min(Math.max(limit * 2, 12), 60)));
-  url.searchParams.set("order", sortMode === "price_asc" ? "price_asc" : "date");
+  url.searchParams.set("sort", sortMode === "price_asc" ? "price_asc" : "latest");
   const context = Buffer.from(JSON.stringify({
     device: { is_bunjang_webview: false, os: "Windows" }
   }), "utf8").toString("base64");
@@ -667,13 +667,11 @@ async function collectBunjangCategory(sourceCategoryId, categoryId, limit, sortM
   });
   if (!response.ok) throw new Error(`HTTP_${response.status}`);
   const payload = await response.json();
-  const rows = Array.isArray(payload?.data?.responses?.mainGrid?.searchResponse?.data)
-    ? payload.data.responses.mainGrid.searchResponse.data
-    : [];
+  const rows = bunjangSearchPage(payload).data;
   return rows.map((row) => sourceItem({
     site: "bunjang",
     categoryId,
-    sourceListingId: row?.pid,
+    sourceListingId: row?.pid == null ? "" : String(row.pid),
     title: row?.name,
     price: row?.price,
     url: row?.pid ? `https://m.bunjang.co.kr/products/${row.pid}` : "",
@@ -687,16 +685,35 @@ async function collectBunjangCategory(sourceCategoryId, categoryId, limit, sortM
 
 export function bunjangKeywordPagePlan(limit, priceRange = { min: null, max: null }) {
   const safeLimit = Math.max(1, Math.min(Number(limit) || 1, SOURCE_CANDIDATE_MAX_ITEMS));
-  const hasPriceRange = priceRange.min !== null || priceRange.max !== null;
   const needsLowerBoundScan = priceRange.min !== null;
-  const pageSize = hasPriceRange
-    ? Math.min(Math.max(safeLimit * 3, 20), 60)
-    : 20;
+  const pageSize = 60;
   const targetPages = Math.ceil(safeLimit / pageSize);
   return {
     pageSize,
     maxPages: Math.min(Math.max(targetPages, needsLowerBoundScan ? 3 : 1), 32)
   };
+}
+
+function bunjangSearchPage(payload) {
+  const page = payload?.data?.responses?.mainGrid?.searchResponse;
+  if (!Array.isArray(page?.data)) throw new Error("UNVERIFIED_BUNJANG_SEARCH_RESPONSE");
+  // External ads have no product id. Changed product fields must not be
+  // mistaken for a successful search with zero listings.
+  if (page.data.some(row => row?.type !== "EXT_AD" &&
+    (!/^\d+$/.test(String(row?.pid ?? "")) || !clean(row?.name)))) {
+    throw new Error("UNVERIFIED_BUNJANG_SEARCH_PRODUCT");
+  }
+  return page;
+}
+
+function bunjangKeywordUrl(keyword, sortMode, pageSize, cursor = null) {
+  const url = new URL("https://api.bunjang.co.kr/api/search/v8/web/search");
+  url.searchParams.set("q", keyword);
+  url.searchParams.set("policyKey", "pw.product.keyword");
+  url.searchParams.set("size", String(pageSize));
+  url.searchParams.set("sort", sortMode === "price_asc" ? "price_asc" : "latest");
+  if (cursor) url.searchParams.set("cursor", cursor);
+  return url;
 }
 
 async function collectBunjangKeyword(keyword, categoryId, limit, queryKeyword = keyword, sortMode = "price_asc", priceRange = { min: null, max: null }, requestImpl = fetchWithRetry) {
@@ -705,61 +722,54 @@ async function collectBunjangKeyword(keyword, categoryId, limit, queryKeyword = 
   const items = [];
   const fallbackItems = [];
   let receivedCount = 0;
+  let cursor = null;
+  const visitedCursors = new Set();
   for (let page = 0; page < maxPages; page += 1) {
-    const url = new URL("https://api.bunjang.co.kr/api/1/find_v2.json");
-    url.searchParams.set("q", keyword);
-    url.searchParams.set("n", String(pageSize));
-    url.searchParams.set("page", String(page));
-    url.searchParams.set("order", sortMode === "price_asc" ? "price_asc" : "date");
-    url.searchParams.set("stat_device", "w");
-    url.searchParams.set("version", "4");
+    const url = bunjangKeywordUrl(keyword, sortMode, pageSize, cursor);
     const response = await requestImpl(url, { headers: requestHeaders("application/json, text/plain, */*") });
     if (!response.ok) throw new Error(`HTTP_${response.status}`);
     const payload = await response.json();
-    const rows = Array.isArray(payload?.list) ? payload.list : [];
+    const searchPage = bunjangSearchPage(payload);
+    const rows = searchPage.data;
     receivedCount += rows.length;
     const pageItems = rows.map((row) => sourceItem({
       site: "bunjang",
       categoryId,
-      sourceListingId: row?.pid,
+      sourceListingId: row?.pid == null ? "" : String(row.pid),
       title: row?.name,
       price: row?.price,
       url: row?.pid ? `https://m.bunjang.co.kr/products/${row.pid}` : "",
-      imageUrl: typeof row?.product_image === "string" ? row.product_image.replace("{res}", "640") : "",
-      seller: row?.uid ? `user:${row.uid}` : "",
-      postedAt: row?.update_time,
+      imageUrl: typeof row?.productImage === "string" ? row.productImage.replace("{res}", "640") : "",
+      seller: row?.shop?.uid ? `user:${row.shop.uid}` : "",
+      postedAt: row?.updatedAt,
       searchText: `${row?.name || ""} ${row?.tag || ""}`,
       lifecycleStatus: bunjangLifecycleStatus(row?.status)
     })).filter(Boolean).filter((item) => matchesRequestedKeyword(item, queryKeyword || keyword))
       .filter((item) => !isObviousKeywordNoise(categoryId, item, queryKeyword || keyword));
     items.push(...pageItems);
-    const usableCount = hasPriceRange ? filterItemsByPriceRange(items, priceRange).length : items.length;
+    const usableCount = dedupeItems(hasPriceRange ? filterItemsByPriceRange(items, priceRange) : items, limit).length;
     if (usableCount >= limit) break;
-    if (rows.length < pageSize) break;
+    cursor = searchPage.cursor;
+    if (typeof cursor !== "string" || !cursor || visitedCursors.has(cursor)) break;
+    visitedCursors.add(cursor);
   }
   if (sortMode === "price_asc") {
-    const recentUrl = new URL("https://api.bunjang.co.kr/api/1/find_v2.json");
-    recentUrl.searchParams.set("q", keyword);
-    recentUrl.searchParams.set("n", String(pageSize));
-    recentUrl.searchParams.set("page", "0");
-    recentUrl.searchParams.set("order", "date");
-    recentUrl.searchParams.set("stat_device", "w");
-    recentUrl.searchParams.set("version", "4");
+    const recentUrl = bunjangKeywordUrl(keyword, "recent", pageSize);
     const recentResponse = await requestImpl(recentUrl, { headers: requestHeaders("application/json, text/plain, */*") });
     if (recentResponse.ok) {
       const recentPayload = await recentResponse.json();
-      const recentRows = Array.isArray(recentPayload?.list) ? recentPayload.list : [];
+      const recentRows = bunjangSearchPage(recentPayload).data;
       receivedCount += recentRows.length;
       const recentItems = recentRows.map((row) => sourceItem({
         site: "bunjang",
         categoryId,
-        sourceListingId: row?.pid,
+        sourceListingId: row?.pid == null ? "" : String(row.pid),
         title: row?.name,
         price: row?.price,
         url: row?.pid ? `https://m.bunjang.co.kr/products/${row.pid}` : "",
-        imageUrl: typeof row?.product_image === "string" ? row.product_image.replace("{res}", "640") : "",
-        seller: row?.uid ? `user:${row.uid}` : "",
-        postedAt: row?.update_time,
+        imageUrl: typeof row?.productImage === "string" ? row.productImage.replace("{res}", "640") : "",
+        seller: row?.shop?.uid ? `user:${row.shop.uid}` : "",
+        postedAt: row?.updatedAt,
         searchText: `${row?.name || ""} ${row?.tag || ""}`,
         lifecycleStatus: bunjangLifecycleStatus(row?.status)
       })).filter(Boolean).filter((item) => matchesRequestedKeyword(item, queryKeyword || keyword))
@@ -1533,7 +1543,7 @@ export async function collectApprovedDomesticQueryOnce(site, keyword, limit = 20
     if (!response.ok) throw new Error(`HTTP_${response.status}`);
     if (site === 'bunjang') {
       const body = await response.clone().json();
-      if (!Array.isArray(body?.list)) throw new Error('UNVERIFIED_BUNJANG_SEARCH_RESPONSE');
+      bunjangSearchPage(body);
     } else {
       const html = await response.clone().text();
       if (/cf-chl-|<title>\s*(?:Just a moment|Attention Required)|verify (?:that )?you are human|captcha challenge/iu.test(html)) {

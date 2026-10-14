@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { SERIES, money, metricValue, soldMeanValue, metricIsConsistent, listedPriceRange, buildTotals, compactBuild, compatibility, groupProducts, validateBuild, dailySeries, percentChange, overviewIndex, priceDateRange, shiftDate, sourceStats, coherentStats, modelPageItems, buildAnalysisSeries } from '../web-backend/public/pc-tools-core.mjs';
 import { movingAverage, marketLinePath, marketGapPath, responsiveDateCount, buildMarketView, drawMarketChart } from '../web-backend/public/pc-market-chart.mjs';
 import { createPriceStore } from '../web-backend/public/pc-tools-data.mjs';
+import { metricPresentation } from '../web-backend/public/pc-tools-core.mjs';
 import { pcCatalogResponse } from '../cloudflare/pc-directory-http.mjs';
 const p = (id, category, name, specs = {}) => ({ canonical_product_id: id, category_code: category, canonical_display_name: name, key_specs: specs });
 const cpu = p('cpu', 'CPU', 'CPU 5600', { socket: 'AM4' });
@@ -31,6 +32,8 @@ assert.equal(totals.sold.total, 3);
 assert.equal(totals.sold.complete, false);
 assert.equal(totals.confirmed_transactions.amount, null);
 assert.equal(soldMeanValue({sample_count:1,min:15000,max:15000,mean:null}),15000);
+assert.deepEqual(metricPresentation({sample_count:1,min:15000,max:15000,mean:null},'sold'),
+  {text:'15,000원',label:'판매완료 표시가 평균 · 소표본 참고',empty:false,state:'ready'}, 'all price surfaces use the same explicitly qualified sold mean');
 assert.equal(soldMeanValue({sample_count:2,min:15000,max:17000,mean:null}),16000);
 assert.equal(soldMeanValue({sample_count:3,min:100,max:900,median:100,arithmetic_mean:366.67}),366.67);
 assert.equal(soldMeanValue({sample_count:3,min:100,max:900,median:100}),null,'never use the midpoint or median for three sold samples');
@@ -71,6 +74,8 @@ assert.equal(sparsePoints[0].value,40000);assert.equal(sparsePoints[0].priceLabe
 assert.equal(sparsePoints[1].value,null,'two observed registration prices must not become a fabricated mean');
 assert.equal(sparsePoints[1].lower,40000);assert.equal(sparsePoints[1].upper,60000);
 assert.ok(buildMarketView([{points:sparsePoints}],sparsePoints.map(point=>point.date),2,0,900,400));
+const representativeOnly=dailySeries(sparseDaily,'active',2);
+assert.ok(representativeOnly.every(point=>point.value==null&&point.lower==null&&point.upper==null),'price analysis must leave sub-three-sample active dates as gaps');
 const medianOnly=dailySeries({window:{to:'2026-10-07'},daily:[{date:'2026-10-07',active:{sample_count:6,min:40000,max:60000,mean:null,median:50000}}]},'active',1,{includeSparse:true})[0];
 assert.equal(medianOnly.value,50000);assert.equal(medianOnly.priceLabel,'중앙값','a median fallback must not be presented as an average');
 assert.ok(Math.abs(percentChange(points) - 10) < 0.00001);
@@ -279,6 +284,15 @@ try {
   pending.get('ram:30').resolve(response('ram',30));pending.get('cpu:60').resolve(response('cpu',60));
   await Promise.all([main,history]);
   assert.equal(store.get('ram',30).state,'ready');assert.equal(store.get('cpu',60).state,'ready');
+  const oldPage=store.load([{canonical_product_id:'old-page'}],60,'',{background:true,backgroundKey:'picker'});
+  const newPage=store.load([{canonical_product_id:'new-page'}],60,'',{background:true,backgroundKey:'picker'});
+  await oldPage;
+  assert.equal(pending.get('old-page:60').signal.aborted,true,'changing picker results cancels obsolete requests');
+  assert.equal(store.get('old-page',60),undefined);
+  assert.equal(store.get('new-page',60).state,'loading','old cancellation cannot erase a new request');
+  store.cancelBackground('picker');await newPage;
+  assert.equal(pending.get('new-page:60').signal.aborted,true,'closing picker cancels only its remaining work');
+  assert.equal(store.get('ram',30).state,'ready','picker cancellation preserves selected-price cache');
   const obsolete=store.load([cpu],120,'',{background:true});
   store.clear();await obsolete;
   assert.equal(pending.get('cpu:120').signal.aborted,true,'clearing a selection cancels background history');
@@ -343,6 +357,25 @@ try{
   assert.equal(plot.replaceCount,before,'drag input does not synchronously rebuild SVG nodes');
   [...frames.values()][0]();frames.clear();assert.equal(plot.replaceCount,before+1);
   longSvg.emit('pointerup',{clientX:687});
+  const hoverStage=longChart.children[1],readout=hoverStage.children[1],tooltipHeading=readout.children[0];
+  for(let i=0;i<60;i++)longSvg.emit('pointermove',{pointerType:'mouse',clientX:100+i*8});
+  assert.equal(frames.size,1,'mouse moves coalesce into one hover frame');
+  [...frames.values()][0]();frames.clear();
+  assert.equal(readout.hidden,false);
+  assert.equal(readout.children[0],tooltipHeading,'hover reuses tooltip structure');
+  assert.equal(plot.replaceCount,before+1,'hover never rebuilds price plot');
+  longSvg.emit('pointermove',{pointerType:'mouse',clientX:200});hoverStage.emit('pointerleave');
+  assert.equal(frames.size,0,'leave cancels pending hover');assert.equal(readout.hidden,true);
+  longSvg.emit('pointermove',{pointerType:'mouse',clientX:200});longSvg.emit('pointerdown',{clientX:500});
+  assert.equal(frames.size,0,'pointer down cancels pending hover');longSvg.emit('pointerup',{clientX:500});
+  assert.equal(readout.dataset.pinned,'true','click pins synchronously');
+  longSvg.emit('keydown',{key:'Escape'});
+  const beforeWheel=Number(longSvg.dataset.visibleCount);let prevented=false;
+  longSvg.emit('wheel',{deltaX:0,deltaY:120,preventDefault(){prevented=true;}});
+  assert.equal(prevented,false,'ordinary vertical wheel remains available for page scrolling');
+  assert.equal(Number(longSvg.dataset.visibleCount),beforeWheel,'ordinary vertical wheel preserves the chart period');
+  longSvg.emit('wheel',{deltaX:0,deltaY:-120,ctrlKey:true});
+  [...frames.values()].forEach(fn=>fn());frames.clear();assert.ok(Number(longSvg.dataset.visibleCount)<beforeWheel,'Ctrl+wheel still zooms the chart');
   const rangeChart=new ChartNode('div'),rangeTimeline=longTimeline.map(point=>({...point,value:null,lower:point.value,upper:point.value+50,sampleCount:2}));
   drawMarketChart(rangeChart,Array.from({length:6},(_,i)=>({...line,id:`range-${i}`,points:rangeTimeline})),{identity:'dense-ranges'});
   const rangeSvg=rangeChart.children[1].children[0];
@@ -356,5 +389,37 @@ try{
     assert.equal((paths[0].attributes.d.match(/M/g)||[]).length,730,'dense rendering preserves every observed range');
     assert.equal(group.children.filter(node=>node.tag==='line').length,0);
   }
+  const docked=new ChartNode('div');
+  drawMarketChart(docked,[line,{...line,id:'ebay:active',currency:'USD',points:timeline.map(point=>({...point,value:99999}))}],{
+    identity:'docked',showLegend:false,showNote:false,dockedReadout:true,axisLeft:true,
+    readoutInput:[line,{...line,id:'danawa:active',label:'다나와',points:[]}],
+  });
+  assert.equal(docked.children.length,2,'only fixed readout and chart, no explanatory footer');
+  const dockedReadout=docked.children[0],dockedStage=docked.children[1],dockedSvg=dockedStage.children[0];
+  assert.equal(dockedReadout.attributes.role,'region');assert.equal(dockedStage.children.length,1,'no floating tooltip on the plot');
+  assert.equal(dockedReadout.hidden,false);
+  assert.equal(dockedReadout.children[1].children[1].children[1].hidden,false,'missing source keeps its readout slot');
+  assert.equal(dockedSvg.children[0].children.some(node=>node.attributes['data-series']==='ebay:active'),false,'USD must never share the KRW axis');
+  dockedSvg.emit('pointermove',{pointerType:'mouse',clientX:500,clientY:180});
+  [...frames.values()].forEach(fn=>fn());frames.clear();
+  const cursor=dockedSvg.children[1],horizontal=cursor.children[1],badge=cursor.children[2].children[1];
+  const priorPrice=badge.textContent;
+  assert.match(horizontal.attributes.d,/M90,180H/);
+  dockedSvg.emit('pointermove',{pointerType:'mouse',clientX:500,clientY:250});
+  [...frames.values()].forEach(fn=>fn());frames.clear();
+  assert.notEqual(badge.textContent,priorPrice,'vertical motion within one date updates cursor price');
+  dockedStage.emit('pointerleave');assert.equal(dockedReadout.hidden,false,'fixed readout does not collapse on leave');
+  const corner=new ChartNode('div');
+  drawMarketChart(corner,[line],{identity:'corner',showLegend:false,showNote:false,axisLeft:true,cornerReadout:true});
+  const cornerStage=corner.children[0],cornerSvg=cornerStage.children[0],popup=cornerStage.children[1];
+  assert.equal(popup.hidden,true,'no permanent readout strip');
+  const move=x=>{cornerSvg.emit('pointermove',{pointerType:'mouse',clientX:x});[...frames.values()].forEach(fn=>fn());frames.clear();};
+  move(200);assert.equal(popup.dataset.side,'right');move(750);assert.equal(popup.dataset.side,'left');
+  cornerSvg.emit('pointerdown',{clientX:750});cornerSvg.emit('pointerup',{clientX:750});
+  assert.equal(popup.dataset.pinned,'true');const pinnedDate=popup.children[0].children[0].textContent;
+  move(200);assert.equal(popup.children[0].children[0].textContent,pinnedDate,'pinned date does not follow mouse');
+  cornerSvg.emit('pointerdown',{clientX:750});cornerSvg.emit('pointerup',{clientX:750});
+  assert.equal(popup.hidden,true,'second click releases the pinned popup');
+  move(200);cornerSvg.emit('keydown',{key:'Escape'});assert.equal(popup.hidden,true);
 }finally{for(const [key,value] of Object.entries(savedDom))if(value===undefined)delete globalThis[key];else globalThis[key]=value;}
 console.log('PC tools: grouping, independent prices, partial sums, quantity, compatibility, storage validation and chart gaps passed');

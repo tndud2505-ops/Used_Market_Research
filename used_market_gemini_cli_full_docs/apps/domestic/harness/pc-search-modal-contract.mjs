@@ -107,6 +107,13 @@ test('missing source or publication never falls back to aggregate or zero price'
     assert.ok(t.nodes.get('status').textContent.length>0);assert.doesNotMatch(t.nodes.get('status').textContent,/0원/);
   }
 });
+test('enough current statistics candidates make a missing publication explicit',()=>{
+  const t=setup();
+  t.preview.open(product,'bunjang',{eligible_count:5,minimum_representative_sample_count:3});
+  t.stores[0].respond({state:'ready',data:{...priceData(),availability:{status:'UNAVAILABLE'}}});t.flush();
+  assert.equal(t.nodes.get('chart').dataset.priceState,'unavailable');
+  assert.match(t.nodes.get('status').textContent,/통계 후보 5건.*공개 대표가격/);
+});
 test('an empty daily window displays an honest message, not a flat zero line',()=>{
   const t=setup();t.preview.open(product);t.stores[0].respond({state:'ready',data:{...priceData(),daily:[]}});t.flush();
   assert.equal(t.nodes.get('chart').dataset.priceState,'empty');assert.equal(t.nodes.get('chart').children.length,0);

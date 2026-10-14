@@ -3,7 +3,7 @@ import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { PcPartsLedger } from './pc-parts-ledger.mjs';
 import { readVerifiedRepairBase } from './pc-stats-repair-base.mjs';
-import { calculateScopedReplacements, planScopedStatsRepair } from './pc-stats-repair-plan.mjs';
+import { calculateScopedReplacements, planScopedStatsRepair, repairScopedDailyResults } from './pc-stats-repair-plan.mjs';
 import { statsPublicationKey } from '../cloudflare/public-product-stats.mjs';
 import { PC_DIRECTORY_PUBLICATION_SOURCE_KEYS } from '../collector/logic/pc-source-registry.mjs';
 import { readActiveStatsScopes, publishStatsInChunks } from './pc-stats-publication-client.mjs';
@@ -74,14 +74,6 @@ try {
     assertFullPublicationActivation(publication,activated);
     const publishedAt = new Date().toISOString();
     storeCompletedPricePublication(db,{...localOptions,publishedAt});
-    for (const decision of plan.decisions.filter(row=>row.action==='REPAIR_SCOPE')) {
-      const current = db.prepare(`SELECT MAX(as_of) AS as_of FROM daily_price_stat_windows
-        WHERE canonical_product_id=? AND market_pool=? AND condition_code=? AND currency=?`).get(
-        decision.canonical_product_id,decision.market_pool,decision.condition_code,decision.currency);
-      // Preserve newer daily coverage while repairing this product's history.
-      const asOf = current?.as_of > base.created_at ? current.as_of : base.created_at;
-      ledger.rebuildDailyPriceStats({...optionsFor(decision),asOf});
-    }
     ledger.recordPublicationSuccess({publicationId:publication.publication_id,checksum:publication.checksum,
       rowCount:publication.rows.length,publishedAt});
     console.log(JSON.stringify({phase:'scoped_repair_complete',publication_id:publication.publication_id,
@@ -89,5 +81,10 @@ try {
       repaired_scope_count:plan.decisions.filter(row=>row.action==='REPAIR_SCOPE').length,
       preserved_scope_count:plan.preserved_scope_count,verifier:activated.verifier,
       row_checksum_verified:activated.row_checksum_verified,recovery_file:path.resolve(outputPath)}));
+  }
+  if (apply) {
+    await requireIdlePublisher();
+    const repaired = repairScopedDailyResults(ledger,plan.decisions,optionsFor,process.env.PC_STATS_REPAIR_REASON||'PRICE_CHANGE');
+    console.log(JSON.stringify({phase:'scoped_daily_repair_complete',repaired_scope_count:repaired}));
   }
 } finally { db.close(); }

@@ -55,5 +55,9 @@ export function pcProductMatchesQuery(product, query) {
     tokens.slice(start).some((_, offset) => tokens.slice(start, start + offset + 1).join('') === key)))) return true;
   const tokens = requested.split(/[^\p{L}\p{N}]+/gu).filter(Boolean);
   const allTokens = new Set(searchable.flatMap(value => value.tokens));
-  return tokens.length > 0 && tokens.every(token => allTokens.has(token));
+  // Search-only family lookup: 9600 finds 9600K/KF, never 19600 or 96000.
+  // Letter-bearing queries remain exact so selecting K cannot silently select KF.
+  return tokens.length > 0 && tokens.every(token => allTokens.has(token)
+    || (/^\d{3,}$/.test(token) && [...allTokens].some(value =>
+      new RegExp(`^[a-z]*${token}[a-z]*$`).test(value))));
 }

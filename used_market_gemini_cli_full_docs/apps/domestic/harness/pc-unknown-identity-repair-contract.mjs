@@ -23,6 +23,11 @@ for (const [i, title, unknown] of [
     db.prepare('UPDATE listing_items SET canonical_product_id=? WHERE normalized_listing_id=?').run(unknown, n.id);
     const row = db.prepare('SELECT * FROM listings WHERE item_id=?').get(`bunjang:${i}`);
     const metadata = { ...JSON.parse(row.pc_metadata_json), canonical_product_id: unknown };
+    if (i === 2) {
+      db.prepare("UPDATE normalized_listings SET exact_product=0, statistics_eligible=0, statistics_exclusion_reasons_json='[\"EXACT_MODEL_REQUIRED\"]' WHERE id=?").run(n.id);
+      metadata.statistics_eligible = false;
+      metadata.statistics_exclusion_reasons = ['EXACT_MODEL_REQUIRED'];
+    }
     db.prepare('UPDATE listings SET pc_canonical_product_id=?, pc_metadata_json=? WHERE item_id=?').run(unknown, JSON.stringify(metadata), row.item_id);
   }
 }
@@ -39,6 +44,10 @@ assert.equal(db.prepare('SELECT canonical_product_id FROM normalized_listings WH
   plan.normalizations[0].before.canonical_product_id, 'stale evidence rolls back every preceding update');
 db.prepare('UPDATE listings SET last_checked_at=? WHERE item_id=?').run(plan.listings[1].before.last_checked_at, plan.listings[1].before.item_id);
 applyUnknownIdentityRepair(db, plan);
+const exact = JSON.parse(db.prepare("SELECT pc_metadata_json FROM listings WHERE item_id='bunjang:2'").get().pc_metadata_json);
+assert.equal(exact.statistics_eligible, true, 'confirmed exact identity clears its obsolete exclusion');
+assert.deepEqual(exact.statistics_exclusion_reasons, []);
+assert.equal(plan.normalizations.find(entry=>entry.after.category_code==='MOTHERBOARD').after.exact_product, 1);
 assert.equal(dump('raw_listings'), raw); assert.equal(dump('listing_snapshots'), snapshots); assert.equal(dump('listing_fts'), fts);
 for (const { before: old, after } of plan.listings) {
   assert.deepEqual({ ...db.prepare('SELECT * FROM listings WHERE item_id=?').get(old.item_id) }, after);

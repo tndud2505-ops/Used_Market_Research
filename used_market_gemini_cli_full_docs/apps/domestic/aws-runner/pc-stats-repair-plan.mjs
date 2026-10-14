@@ -9,6 +9,22 @@ const METRICS = ['active', 'reserved', 'sold', 'confirmed_transactions'];
 const PRICES = ['mean', 'median', 'average', 'trimmed_mean', 'arithmetic_mean'];
 const parse = row => typeof row.stats_json === 'string' ? JSON.parse(row.stats_json) : row.stats_json;
 
+// Daily history can be newer than the last complete period publication. A
+// confirmed identity correction must reach those dates even if the old period
+// summary did not yet contain the bad observation and needs no replacement.
+export function repairScopedDailyResults(ledger, decisions, optionsFor, reason) {
+  const scopes=decisions.filter(row=>row.action==='REPAIR_SCOPE'||IMMEDIATE_REASONS.has(reason));
+  for (const scope of scopes) {
+    const options=optionsFor(scope);
+    const current=ledger.db.prepare(`SELECT MAX(as_of) AS as_of FROM daily_price_stat_windows
+      WHERE canonical_product_id=? AND market_pool=? AND condition_code=? AND currency=?`).get(
+      scope.canonical_product_id,scope.market_pool,scope.condition_code,scope.currency);
+    const asOf=current?.as_of>options.asOf?current.as_of:options.asOf;
+    ledger.rebuildDailyPriceStats({...options,asOf});
+  }
+  return scopes.length;
+}
+
 export function assertScopedRepairMembers(ledger, o) {
   const members = ledger.db.prepare(`SELECT d.metric_scope, d.canonical_product_id, d.market_pool, d.condition_code, d.currency,
     n.canonical_product_id AS model, n.market_pool AS pool, n.condition_code AS condition,

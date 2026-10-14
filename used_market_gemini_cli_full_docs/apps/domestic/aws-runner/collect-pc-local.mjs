@@ -9,9 +9,11 @@ const requestedSources = String(process.env.PC_LOCAL_SOURCES || "").split(",")
   .map((value) => value.trim().toLowerCase()).filter(Boolean);
 const defaultSources = PC_SOURCE_REGISTRY
   .filter((source) => source.directory_source === true
-    && source.policy_status === "APPROVED" && source.runtime_status === "ENABLED")
+    && source.policy_status === "APPROVED" && source.runtime_status === "ENABLED" && source.key !== 'danawa')
   .map((source) => source.key);
 const sources = [...new Set(requestedSources.length > 0 ? requestedSources : defaultSources)];
+// Fresh local ledgers do not contain the production access quarantine.
+if (sources.includes('danawa')) throw new Error('DANAWA_LOCAL_LIVE_DISABLED_USE_PRODUCTION_SCHEDULER');
 const limit = Math.min(80, Math.max(1, Number(process.env.PC_COLLECT_LIMIT || 20) || 20));
 const cadence = String(process.env.PC_COLLECT_CADENCE_CLASS || "HOURLY_CATEGORY").trim().toUpperCase();
 if (!["HOURLY_CATEGORY", "DAILY_MASTER", "ALL"].includes(cadence)) {

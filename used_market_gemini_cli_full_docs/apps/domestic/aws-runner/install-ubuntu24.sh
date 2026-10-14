@@ -310,6 +310,15 @@ sed \
 install -o root -g root -m 0644 "$service_tmp" /etc/systemd/system/used-market-runner.service
 rm -f -- "$service_tmp"
 
+stats_tmp="$(mktemp)"
+sed -e "s|__APP_ROOT__|${APP_ROOT//|/\\|}|g" \
+  -e "s|__RUNNER_USER__|${RUNNER_USER}|g" \
+  -e "s|__RUNNER_ENV_FILE__|${RUNNER_ENV_FILE//|/\\|}|g" \
+  "$APP_ROOT/aws-runner/used-market-stats.service" > "$stats_tmp"
+install -o root -g root -m 0644 "$stats_tmp" /etc/systemd/system/used-market-stats.service
+rm -f -- "$stats_tmp"
+bash "$APP_ROOT/aws-runner/install-memory-budget.sh"
+
 tunnel_tmp="$(mktemp)"
 sed \
   -e "s|__TUNNEL_USER__|${TUNNEL_USER}|g" \
@@ -319,7 +328,15 @@ install -o root -g root -m 0644 "$tunnel_tmp" /etc/systemd/system/used-market-tu
 rm -f -- "$tunnel_tmp"
 
 node --check "$APP_ROOT/aws-runner/runner.mjs"
+node --check "$APP_ROOT/aws-runner/lifecycle-status-cache.mjs"
+node --check "$APP_ROOT/aws-runner/lifecycle-queue.mjs"
 node --check "$APP_ROOT/aws-runner/publish-pc-stats-runner.mjs"
+node --check "$APP_ROOT/aws-runner/isolated-stats-publisher.mjs"
+node --check "$APP_ROOT/aws-runner/stats-service.mjs"
+node --check "$APP_ROOT/aws-runner/verify-pc-stats-runner.mjs"
+node --check "$APP_ROOT/aws-runner/publication-job-state.mjs"
+node --check "$APP_ROOT/aws-runner/pc-publication-maintenance.mjs"
+node --check "$APP_ROOT/aws-runner/stream-stats-checksum.mjs"
 node --check "$APP_ROOT/aws-runner/pc-stats-publication-client.mjs"
 node --check "$APP_ROOT/aws-runner/search-index.mjs"
 node --check "$APP_ROOT/aws-runner/backup-storage-policy.mjs"
@@ -357,7 +374,19 @@ node --check "$APP_ROOT/cloudflare/category-source-map.mjs"
 node --check "$APP_ROOT/cloudflare/target-sites.mjs"
 
 systemctl daemon-reload
+if [[ -S /run/used-market-stats/publisher.sock ]]; then
+  curl --fail --silent --max-time 5 --unix-socket /run/used-market-stats/publisher.sock http://localhost/status \
+    | jq -e '.active != true and .verification_active != true' >/dev/null \
+    || fail 'Statistics or verification is active; defer deployment instead of cancelling accepted publication.'
+fi
+if systemctl is-active --quiet used-market-runner.service; then
+  curl --fail --silent --max-time 10 http://127.0.0.1:8787/health \
+    | jq -e '.pc_parts.publication_active != true and (.pc_parts.publication_job.status != "queued") and (.pc_parts.publication_job.status != "running")' >/dev/null \
+    || fail 'Publication is pending or running; defer restart and inspect its receipt.'
+fi
 systemctl enable used-market-runner.service
+systemctl enable used-market-stats.service
+systemctl restart used-market-stats.service
 bash "$APP_ROOT/aws-runner/install-backup-storage.sh" "$APP_ROOT"
 
 if [[ -s "$TUNNEL_TOKEN_FILE" ]]; then

@@ -1,11 +1,11 @@
 import http from "node:http";
 import { AsyncLocalStorage } from "node:async_hooks";
-import { spawn } from "node:child_process";
+import { requestIsolatedPublication, requestIsolatedVerification, statsWorkerStatus } from './isolated-stats-publisher.mjs';
+import { PublicationJobState } from './publication-job-state.mjs';
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { statfsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import {
   buildCollectionRequest,
   buildLivePayload,
@@ -26,10 +26,10 @@ import { PcPartsLedger } from "./pc-parts-ledger.mjs";
 import { stabilizeIncrementalPcProjections } from "./pc-projection-republish-policy.mjs";
 import { parsePriceStatsRequest, priceStatsResponse, priceHistoryResponse } from "./pc-price-stats-http.mjs";
 import { pcPriceReadinessProblem } from '../market/logic/pc-price-readiness.mjs';
+import { createLifecycleStatusCache, createLifecycleQueueBootstrap } from './lifecycle-status-cache.mjs';
 import { schedulerReadDeferral } from "./pc-scheduler-admission.mjs";
-import { verifyStoredStatsOnAws } from './pc-stats-readback.mjs';
 import { PcShadowPipeline } from "./pc-shadow-pipeline.mjs";
-import { explicitSoldText, structuredSoldEvidenceFromHtml } from "../market/logic/listing-lifecycle.mjs";
+import { explicitSoldText, structuredSoldEvidenceFromHtml, joongnaListingUrl } from "../market/logic/listing-lifecycle.mjs";
 import { bunjangProductIdFromListing, parseBunjangDetailLifecycle, bunjangDetailObservationItem } from "../market/logic/bunjang-lifecycle.mjs";
 import {
   pcCatalogResponse,
@@ -47,6 +47,7 @@ import {
 } from "../cloudflare/pc-listings-contract.mjs";
 import {
   PC_SOURCE_REGISTRY,
+  DANAWA_COLLECTION_LIMITS,
   getSourceRuntimeDefaults,
   operatorAttestedSourceGovernance,
   runDueSourceCollections,
@@ -106,6 +107,7 @@ const INDEX_ROOT = process.env.RUNNER_INDEX_DIR || (process.platform === "linux"
   ? "/var/lib/used-market-runner"
   : path.join(os.tmpdir(), "used-market-runner"));
 const INDEX_PATH = process.env.RUNNER_INDEX_PATH || path.join(INDEX_ROOT, "search-index.sqlite");
+const lifecycleStatusCache = createLifecycleStatusCache(INDEX_PATH);
 const INDEX_SOFT_LIMIT_BYTES = Math.min(8 * 1024 * 1024 * 1024, Math.max(1024 * 1024 * 1024,
   Number.parseInt(process.env.RUNNER_INDEX_SOFT_LIMIT_BYTES || String(3 * 1024 * 1024 * 1024), 10)
     || 3 * 1024 * 1024 * 1024));
@@ -257,6 +259,11 @@ let pcSchedulerAfter = new Date(Date.now() - PC_SCHEDULER_CATCHUP_MS).toISOStrin
 let pcSchedulerRuntime = Object.fromEntries(PC_SOURCE_REGISTRY.map((source) => [source.key, getSourceRuntimeDefaults(source.key)]));
 let pcSchedulerActive = false;
 let pcPublicationActive = false;
+let pcPublicationWritesPaused = false;
+let activePersistenceJobs = 0;
+const publicationJobs = new PublicationJobState(path.join(path.dirname(INDEX_PATH), 'publication-job-state.json'));
+let pcPublicationJob = publicationJobs.current;
+let publicationDispatchActive = false;
 let pcSchedulerLastTickAt = null;
 let pcSchedulerLastSucceededAt = null;
 let pcSchedulerLastError = null;
@@ -362,6 +369,16 @@ if (INDEX_ENABLED) {
   }
 }
 let activeSearchSourceJobs = 0;
+// Additive/rebuildable index pages yield between short transactions; never race publication maintenance.
+const lifecycleQueueBootstrap = createLifecycleQueueBootstrap(INDEX_PATH, () => {
+  clearInterval(lifecycleBootstrapTimer);
+  console.log(JSON.stringify({ event: 'lifecycle_queue_ready' }));
+});
+const lifecycleBootstrapTimer = setInterval(() => {
+  if (!pcLedger || pcPublicationActive || pcStatsVerificationActive || pcPublicationWritesPaused) return;
+  lifecycleQueueBootstrap.step();
+}, 500);
+lifecycleBootstrapTimer.unref();
 const waitingSearchSourceJobs = [];
 
 class SearchBusyError extends Error {
@@ -651,48 +668,8 @@ async function mirrorPcListingCollectionManifest({ sourceId, asOf, successfulTar
 }
 
 function runPcStatsPublisher() {
-  const scriptPath = fileURLToPath(new URL("./publish-pc-stats-runner.mjs", import.meta.url));
-  return new Promise((resolve, reject) => {
-    const childCommand = process.platform === "linux" ? "/usr/bin/ionice" : process.execPath;
-    const childArgs = process.platform === "linux"
-      ? ["-c", "3", "/usr/bin/nice", "-n", "10", process.execPath, scriptPath]
-      : [scriptPath];
-    const child = spawn(childCommand, childArgs, {
-      cwd: path.dirname(scriptPath),
-      env: process.env,
-      stdio: ["ignore", "pipe", "pipe"],
-      windowsHide: true
-    });
-    let stdout = "";
-    let stderr = "";
-    const append = (current, chunk) => {
-      const next = current + String(chunk);
-      if (Buffer.byteLength(next) > 1_048_576) {
-        child.kill();
-        throw new Error("PC_STATS_PUBLISHER_OUTPUT_TOO_LARGE");
-      }
-      return next;
-    };
-    child.stdout.on("data", (chunk) => {
-      try { stdout = append(stdout, chunk); } catch (error) { reject(error); }
-    });
-    child.stderr.on("data", (chunk) => {
-      try { stderr = append(stderr, chunk); } catch (error) { reject(error); }
-    });
-    child.once("error", reject);
-    child.once("exit", (code, signal) => {
-      if (code !== 0) {
-        reject(new Error(`PC_STATS_PUBLISHER_FAILED:${signal || code || 1}:${stderr.trim().slice(-2_000)}`));
-        return;
-      }
-      try {
-        const lines = stdout.trim().split(/\r?\n/u).filter(Boolean);
-        resolve(JSON.parse(lines.at(-1) || "{}"));
-      } catch (error) {
-        reject(new Error(`PC_STATS_PUBLISHER_INVALID_OUTPUT:${error instanceof Error ? error.message : String(error)}`));
-      }
-    });
-  });
+  // No in-process fallback: a missing isolated worker must not take down public reads.
+  return requestIsolatedPublication();
 }
 
 async function publishPcProductStats() {
@@ -703,26 +680,18 @@ async function publishPcProductStats() {
   pcPublicationActive = true;
   try {
   const drainDeadline = Date.now() + PC_SCHEDULER_WATCHDOG_MS + 5000;
-  while (pcSchedulerActive) {
+  while (pcSchedulerActive || activeSearchJobs > 0 || activePersistenceJobs > 0 || backgroundRefreshActive) {
     if (Date.now() >= drainDeadline) throw new Error('PC_STATS_SCHEDULER_DRAIN_TIMEOUT');
     await new Promise(resolve => setTimeout(resolve, 1000));
   }
+  pcPublicationWritesPaused = true;
   const publication = await runPcStatsPublisher();
   if (publication?.published !== true || !publication?.publication_id || !publication?.published_at) {
     throw new Error("PC_STATS_PUBLISHER_RESULT_INVALID");
   }
-  const storageCompactionBackup = searchIndex?.createBackup();
-  if (!storageCompactionBackup) throw new Error("PC_STORAGE_COMPACTION_BACKUP_REQUIRED");
-  const storageCompaction = pcLedger.compactStorage({
-    asOf: new Date(publication.published_at),
-    // The active publication is a full 30-day cohort. Archiving details after
-    // one day would immediately invalidate its saved member checksum.
-    observationRetentionDays: 30,
-    pruneObservationDetails: true
-  });
   pcPublicationLastSucceededAt = publication.published_at;
-  return { ...publication, storage_compaction_backup: storageCompactionBackup, storage_compaction: storageCompaction };
-  } finally { pcPublicationActive = false; }
+  return publication;
+  } finally { pcPublicationWritesPaused = false; pcPublicationActive = false; }
 }
 
 async function collectJob(jobName) {
@@ -736,12 +705,14 @@ async function collectJob(jobName) {
     pcSchedulerActive = true;
     try {
       const items = await recheckKnownListings("bunjang", new Date().toISOString(), AbortSignal.timeout(9 * 60 * 1000));
-      return { status: "completed", job_name: jobName, changed: items.length };
+      const lifecycle = pcLedger.getLifecycleRun('bunjang');
+      return { status: lifecycle?.status === 'COMPLETED_BATCH' ? 'completed' : 'partial_success',
+        job_name: jobName, changed: items.length, lifecycle };
     } finally { pcSchedulerActive = false; }
   }
   if (jobName === "daily-price-refresh") {
     const publication = await publishPcProductStats();
-    return { status: "completed", job_name: jobName, mode: "pc-parts-ledger", items: publication.row_count || 0, publication };
+    return { status: publication.storage_maintenance_ok === false ? 'partial_success' : 'completed', job_name: jobName, mode: "pc-parts-ledger", items: publication.row_count || 0, publication };
   }
   const plan = JOB_PLANS[jobName];
   if (!plan) throw new Error(`Unknown job: ${jobName}`);
@@ -967,32 +938,22 @@ function computePcOperationalReadiness() {
   const shadowElapsedDays = Number((shadowElapsedMs / (24 * 60 * 60 * 1000)).toFixed(2));
   const allSourcesReady = sourceReadiness.length === requiredSources.length
     && sourceReadiness.every((source) => source.ready);
-  const indexStatus = searchIndex?.status();
+  const indexStatus = indexRuntimeStatus();
   const legacyProjection = searchIndex?.db.prepare(`
-    SELECT COUNT(DISTINCT q.query_key) AS query_count
+    SELECT 1 AS present
       FROM query_index q
       JOIN query_listings ql USING(query_key)
       JOIN listings l ON l.item_id = ql.item_id
      WHERE q.collection_namespace = 'legacy_general'
        AND ql.missing_count < 2
        AND l.active = 1
+     LIMIT 1
   `).get();
   const rollbackProjectionReady = Boolean(indexStatus?.enabled
     && Number(indexStatus.active_listings || 0) > 0
-    && Number(legacyProjection?.query_count || 0) > 0);
+    && legacyProjection?.present === 1);
   const publicationRecent = recentTimestamp(pcPublicationLastSucceededAt, PC_PUBLICATION_RECENT_MS, now);
-  let bunjangLifecycleRecheck = null;
-  let joonggonaraLifecycleRecheck = null;
-  try {
-    bunjangLifecycleRecheck = pcLedger?.lifecycleRecheckStatus({ sourceId: "bunjang", asOf: new Date(now) }) || null;
-  } catch (error) {
-    bunjangLifecycleRecheck = { source_id: "bunjang", error: error instanceof Error ? error.message : String(error) };
-  }
-  try {
-    joonggonaraLifecycleRecheck = pcLedger?.lifecycleRecheckStatus({ sourceId: "joonggonara", asOf: new Date(now) }) || null;
-  } catch (error) {
-    joonggonaraLifecycleRecheck = { source_id: "joonggonara", error: error instanceof Error ? error.message : String(error) };
-  }
+  const lifecycleStatus = lifecycleStatusCache.get({ enabled: Boolean(pcLedger) && !pcPublicationActive });
 
   return {
     collection_targets: pcLedger?.getActiveCollectionTargetSummary() || null,
@@ -1008,8 +969,8 @@ function computePcOperationalReadiness() {
       && allSourcesReady
       && reviewRequiredActiveSources.length === 0),
     rollback_projection_ready: rollbackProjectionReady,
-    bunjang_lifecycle_recheck: bunjangLifecycleRecheck,
-    joonggonara_lifecycle_recheck: joonggonaraLifecycleRecheck,
+    bunjang_lifecycle_recheck: lifecycleStatus.bunjang,
+    joonggonara_lifecycle_recheck: lifecycleStatus.joonggonara,
     publication_last_success_at: pcPublicationLastSucceededAt,
     publication_recent: publicationRecent
   };
@@ -1043,6 +1004,7 @@ function runnerStatus() {
       scheduler_enabled: PC_PARTS_SCHEDULER_ENABLED,
       scheduler_active: pcSchedulerActive,
       publication_active: pcPublicationActive,
+      publication_job: pcPublicationJob,
       d1_background_mirror_enabled: D1_BACKGROUND_MIRROR_ENABLED,
       d1_background_mirror_configured: Boolean(IMPORT_URL && IMPORT_TOKEN),
       publication_configured: Boolean(STATS_IMPORT_URL && IMPORT_TOKEN),
@@ -1191,6 +1153,7 @@ async function collectSearchData(body, { incremental = false } = {}) {
   if (!sites.length) throw new Error("at least one target site is required");
   const candidateLimit = incremental ? 40 : sourceCandidateLimit(collectionBody);
   return withSearchJobSlot(async () => {
+    if (pcPublicationActive) throw new SearchBusyError();
     incrementExecutionMetric("live_collection_runs");
     incrementExecutionMetric("source_collection_attempts", sites.length);
     const results = await Promise.all(sites.map(async (site) => {
@@ -1298,6 +1261,11 @@ async function persistCollectedSearch(body, collected, { deep = false, complete 
   if (!searchIndex) return null;
   if (!collected.successfulSites.length) return { skipped: true, reason: "all_sources_failed" };
   const observedAt = new Date().toISOString();
+  // A pre-existing fetch can finish after publication reserves the writer.
+  // Keep its samples and original observation time; persist after the writer is released.
+  while (pcPublicationWritesPaused) await new Promise(resolve => setTimeout(resolve, 1000));
+  activePersistenceJobs += 1;
+  try {
   const shadowCandidates = collected.results
     .filter((result) => !result.error && !result.stale_cache)
     .flatMap((result) => result.items || []);
@@ -1356,6 +1324,7 @@ async function persistCollectedSearch(body, collected, { deep = false, complete 
     }
   }
   return ingest;
+  } finally { activePersistenceJobs -= 1; }
 }
 
 function dedupeCollectedItems(items) {
@@ -1414,29 +1383,50 @@ function listingIdentityIsPresent(html, listing) {
 
 async function recheckKnownListings(sourceKey, checkedAt, parentSignal) {
   if (sourceKey === "ebay" || sourceKey === "danawa") return [];
+  if (Date.parse(pcLedger.getLifecycleRun(sourceKey)?.backoff_until || '') > Date.now()) return [];
   const changedProjections = [];
+  const receipt = { started_at: new Date().toISOString(), selected: 0, attempted: 0, verified: 0,
+    sold: 0, deferred: 0, stop_reason: null };
+  let backoffUntil = null;
+  let recheckError = null;
   const captureProjection = (sourceListingId, result) => {
+    receipt.verified += 1;
+    if (result?.status === 'SOLD' && result?.snapshotCreated) receipt.sold += 1;
     if (result?.snapshotCreated !== true) return;
     const projection = pcLedger.getPublicProjection(sourceKey, sourceListingId);
     if (!projection) return;
     changedProjections.push(projection);
   };
-  const due = pcLedger.dueRechecks({
+  let due;
+  try { due = pcLedger.dueRechecks({
     sourceId: sourceKey,
     checkedBefore: new Date(Date.parse(checkedAt) - 6 * 60 * 60 * 1000).toISOString(),
     limit: sourceKey === "bunjang" ? 1500 : PC_RECHECK_LIMIT_PER_RUN
-  });
+  }); } catch (error) {
+    if (error.message !== 'LIFECYCLE_QUEUE_INITIALIZING') throw error;
+    pcLedger.recordLifecycleRun(sourceKey, { ...receipt, finished_at: new Date().toISOString(), stop_reason: error.message });
+    return [];
+  }
+  receipt.selected = due.length;
   const recheckDeadline = Date.now() + 8 * 60 * 1000;
+  try {
   for (const listing of due) {
-    if (Date.now() >= recheckDeadline) break;
+    if (Date.now() >= recheckDeadline) { receipt.stop_reason = 'TIME_BUDGET'; break; }
     throwIfAborted(parentSignal);
+    receipt.attempted += 1;
+    const verifiedBefore = receipt.verified;
+    let outcome = 'UNVERIFIED', retryMs = 60 * 60 * 1000;
+    // Lease before I/O: a process interruption cannot strand the same oldest row at the head.
+    pcLedger.deferLifecycleAttempt(sourceKey, listing.source_listing_id, { outcome: 'ATTEMPTING' });
+    try {
     let raw;
     try { raw = JSON.parse(listing.raw_json); } catch { raw = {}; }
-    const url = String(raw.url || raw.item_url || "").trim();
-    if (!/^https?:\/\//iu.test(url)) continue;
+    const rawUrl = String(raw.url || raw.item_url || "").trim();
+    const url = sourceKey === 'joonggonara'
+      ? joongnaListingUrl({url:rawUrl,sourceListingId:listing.source_listing_id}) || '' : rawUrl;
     if (sourceKey === "bunjang") {
       const pid = bunjangProductIdFromListing({ url, sourceListingId: listing.source_listing_id });
-      if (!pid) continue;
+      if (!pid) { outcome = 'INVALID_IDENTITY'; retryMs = 24 * 60 * 60 * 1000; continue; }
       const canonicalUrl = `https://m.bunjang.co.kr/products/${pid}`;
       await new Promise((resolve) => setTimeout(resolve, 200));
       let response;
@@ -1446,9 +1436,10 @@ async function recheckKnownListings(sourceKey, checkedAt, parentSignal) {
         });
       } catch {
         throwIfAborted(parentSignal);
+        outcome = 'NETWORK_ERROR'; receipt.stop_reason = outcome;
         break;
       }
-      const payload = await response.json().catch(() => null);
+      const payload = await response.json().catch(() => { throwIfAborted(parentSignal); return null; });
       const unavailableStatus = ({
         ERR_NOT_HIDDEN_PRODUCT_OWNER: "BLOCKED_OR_PRIVATE",
         ERR_DELETED_PRODUCT: "DELETED",
@@ -1465,27 +1456,32 @@ async function recheckKnownListings(sourceKey, checkedAt, parentSignal) {
         }));
         continue;
       }
-      if ([401, 403, 429].includes(response.status)) break;
+      if ([401, 403, 429].includes(response.status)) {
+        outcome = `HTTP_${response.status}`; receipt.stop_reason = outcome;
+        retryMs = 6 * 60 * 60 * 1000; backoffUntil = new Date(Date.now() + retryMs).toISOString(); break;
+      }
       if (response.status === 404 || response.status === 410) {
         captureProjection(listing.source_listing_id, pcLedger.recordMissingCheck({
           sourceId: sourceKey, sourceListingId: listing.source_listing_id, checkedAt
         }));
         continue;
       }
-      if (!response.ok) continue;
+      if (!response.ok) { outcome = `HTTP_${response.status}`; continue; }
       let detail;
       try { detail = parseBunjangDetailLifecycle(payload, pid); }
       catch (error) {
         console.warn("Bunjang detail recheck stopped", error.message);
+        outcome = 'INVALID_DETAIL'; receipt.stop_reason = outcome;
         break;
       }
-      if (detail.status === "UNAVAILABLE_UNKNOWN") continue;
+      if (detail.status === "UNAVAILABLE_UNKNOWN") { outcome = 'UNKNOWN_STATUS'; continue; }
       const projection = pcPipeline.recordItem(
         bunjangDetailObservationItem(listing, raw, detail, canonicalUrl), checkedAt
       );
-      captureProjection(listing.source_listing_id, { snapshotCreated: projection._pc_snapshot_created });
+      captureProjection(listing.source_listing_id, { snapshotCreated: projection._pc_snapshot_created, status: detail.status });
       continue;
     }
+    if (!/^https?:\/\//iu.test(url)) { outcome = 'INVALID_URL'; retryMs = 24 * 60 * 60 * 1000; continue; }
     let response;
     try {
       response = await fetch(url, {
@@ -1494,6 +1490,7 @@ async function recheckKnownListings(sourceKey, checkedAt, parentSignal) {
       });
     } catch (error) {
       throwIfAborted(parentSignal);
+      outcome = 'NETWORK_ERROR';
       continue;
     }
     if (response.status === 404 || response.status === 410) {
@@ -1501,21 +1498,14 @@ async function recheckKnownListings(sourceKey, checkedAt, parentSignal) {
       captureProjection(listing.source_listing_id, result);
       continue;
     }
-    if (response.status === 401 || response.status === 403) {
-      const result = pcLedger.recordObservation({
-        sourceId: sourceKey, sourceListingId: listing.source_listing_id, observedAt: checkedAt,
-        title: listing.title, description: listing.description, rawPayload: raw,
-        price: listing.price_value, currency: listing.currency, status: "BLOCKED_OR_PRIVATE",
-        statusEvidence: { type: "HTTP_STATUS", value: String(response.status) }, availability: "BLOCKED_OR_PRIVATE"
-      });
-      captureProjection(listing.source_listing_id, result);
-      continue;
+    if ([401, 403, 429].includes(response.status)) {
+      outcome = `HTTP_${response.status}`; receipt.stop_reason = outcome;
+      retryMs = 6 * 60 * 60 * 1000; backoffUntil = new Date(Date.now() + retryMs).toISOString(); break;
     }
-    if (!response.ok) continue;
+    if (!response.ok) { outcome = `HTTP_${response.status}`; continue; }
     const body = (await response.text()).slice(0, 1_000_000);
     if (!listingIdentityIsPresent(body, listing)) {
-      const result = pcLedger.recordMissingCheck({ sourceId: sourceKey, sourceListingId: listing.source_listing_id, checkedAt });
-      captureProjection(listing.source_listing_id, result);
+      outcome = 'IDENTITY_UNVERIFIED';
       continue;
     }
     const soldEvidence = structuredSoldEvidenceFromHtml(body, { ...listing, url });
@@ -1530,10 +1520,31 @@ async function recheckKnownListings(sourceKey, checkedAt, parentSignal) {
       availability: soldEvidence ? "SOLD_TERMINAL" : "AVAILABLE"
     });
     captureProjection(listing.source_listing_id, result);
+    } finally {
+      const verified = receipt.verified > verifiedBefore;
+      if (!verified) receipt.deferred += 1;
+      pcLedger.deferLifecycleAttempt(sourceKey, listing.source_listing_id, {
+        outcome: verified ? 'VERIFIED' : outcome, delayMs: verified ? 6 * 60 * 60 * 1000 : retryMs
+      });
+      await yieldToEventLoop();
+    }
+  }
+  } catch (error) { receipt.stop_reason = parentSignal?.aborted ? 'ABORTED' : 'ERROR'; recheckError = error; }
+  finally {
+    receipt.finished_at = new Date().toISOString();
+    receipt.status = receipt.stop_reason || receipt.deferred ? 'PARTIAL' : 'COMPLETED_BATCH';
+    pcLedger.recordLifecycleRun(sourceKey, receipt, backoffUntil);
+    console.log(JSON.stringify({ event: 'pc_lifecycle_recheck_finished', source_id: sourceKey, ...receipt }));
   }
   const publicProjections = stabilizeIncrementalPcProjections(changedProjections);
-  for (const projection of publicProjections) searchIndex?.applyLifecycleProjection(projection);
-  if (publicProjections.length > 0) await importToD1BestEffort(publicProjections, parentSignal);
+  for (const projection of publicProjections) {
+    searchIndex?.applyLifecycleProjection(projection);
+    // Updating a completed batch must not block HTTP reads for the whole batch.
+    await yieldToEventLoop();
+  }
+  if (publicProjections.length > 0) await importToD1BestEffort(publicProjections,
+    parentSignal?.aborted ? AbortSignal.timeout(15000) : parentSignal);
+  if (recheckError) throw recheckError;
   return publicProjections;
 }
 
@@ -1541,9 +1552,11 @@ function pcSourceAdapter(sourceKey) {
   return createSourceAdapter({
     sourceKey,
     async collectIncremental(input) {
-      const dueTargets = pcLedger.listDueCollectionTargets(
+      let dueTargets = pcLedger.listDueCollectionTargets(
         sourceKey, input.now, undefined, PC_SOURCE_TARGETS_PER_RUN
       );
+      if (sourceKey === 'danawa') dueTargets = dueTargets.slice(0,
+        pcLedger.remainingSourceRequestBudget(sourceKey, DANAWA_COLLECTION_LIMITS.requestsPerHour));
       if (dueTargets.length === 0) return {
         source_key: sourceKey,
         mode: "incremental",
@@ -1555,6 +1568,10 @@ function pcSourceAdapter(sourceKey) {
         metrics: { request_count: 0, request_failure_count: 0, parsed_count: 0, parse_failure_count: 0,
           http_blocked_count: 0, captcha_count: 0, failure_messages: [] }
       };
+      // Reserve before network I/O. A crash leaves this RUNNING row consuming the hourly cap.
+      const reservedRunId = sourceKey === 'danawa' ? pcLedger.startCrawlRun({
+        sourceId: sourceKey, startedAt: input.now, adapterVersion: 'existing-site-wrapper-v1'
+      }) : null;
       const collectTarget = async (target) => {
         throwIfAborted(input.signal);
         const collectionQuery = sourceKey === "ebay" && !target.canonical_product_id
@@ -1599,10 +1616,11 @@ function pcSourceAdapter(sourceKey) {
       const failed = settled.filter((result) => result.status === "rejected");
       const failureMessages = failed.map((result) => result.reason instanceof Error ? result.reason.message : String(result.reason));
       const collectionMetrics = {
+        crawl_run_id: reservedRunId,
         request_count: successful.reduce((sum, result) => sum + result.value.request_count, 0) + failed.length,
         request_failure_count: failed.length,
         parsed_count: 0,
-        parse_failure_count: failureMessages.filter((message) => /(?:parse|parser|selector|invalid[_ ]listing|html)/iu.test(message)).length,
+        parse_failure_count: failureMessages.filter((message) => /(?:parse|parser|selector|invalid[_ ]listing|html|MARKUP_UNRECOGNIZED|NO_CARDS_UNVERIFIED)/iu.test(message.split(':',1)[0])).length,
         http_blocked_count: failureMessages.filter((message) => /(?:HTTP[_ ]?(?:403|429)|\b403\b|\b429\b|blocked)/iu.test(message)).length,
         captcha_count: failureMessages.filter((message) => /captcha/iu.test(message)).length,
         failure_messages: failureMessages.slice(0, 12)
@@ -1764,7 +1782,7 @@ async function runPcSourceSchedulerTick() {
           });
         }
         try {
-          const failedRunId = pcLedger.startCrawlRun({
+          const failedRunId = failureMetrics.crawl_run_id || pcLedger.startCrawlRun({
             sourceId: result.source_key,
             startedAt: result.run_at,
             adapterVersion: "existing-site-wrapper-v1"
@@ -1791,7 +1809,7 @@ async function runPcSourceSchedulerTick() {
       }
       let runId = null;
       try {
-        runId = pcLedger.startCrawlRun({
+        runId = result.result.metrics?.crawl_run_id || pcLedger.startCrawlRun({
           sourceId: result.source_key,
           startedAt: result.run_at,
           adapterVersion: "existing-site-wrapper-v1"
@@ -2146,6 +2164,7 @@ function requestForIndexedQuery(query) {
 }
 
 async function runBackgroundRefreshTick() {
+  if (pcPublicationActive) return;
   if (!BACKGROUND_REFRESH_ENABLED) return;
   if (!searchIndex || backgroundRefreshActive || !refreshBudgetAvailable()) return;
   if (activeSearchJobs >= Math.max(1, SEARCH_MAX_CONCURRENT - 1) || waitingSearchJobs.length > 0) return;
@@ -2223,6 +2242,25 @@ async function runJobs(jobNames, idempotencyKey) {
   }
 }
 
+async function dispatchQueuedPublication() {
+  if (publicationDispatchActive || pcPublicationJob?.status !== 'queued' || activeRun || pcPublicationActive) return;
+  publicationDispatchActive = true;
+  try {
+    // Service startup/restart is not a failed publication. Keep durable intent.
+    let worker;
+    try { worker = await statsWorkerStatus(); } catch { return; }
+    if (worker.active || worker.verification_active || activeRun || pcPublicationActive) return;
+    pcPublicationJob = publicationJobs.update({ status: 'running', started_at: new Date().toISOString() });
+    const result = await runJobs(['daily-price-refresh'], pcPublicationJob.key);
+    pcPublicationJob = publicationJobs.update({ status: result.status, finished_at: new Date().toISOString() });
+    console.log(JSON.stringify({ event: 'pc_publication_job_finished', ...pcPublicationJob, result }));
+  } catch (error) {
+    try { pcPublicationJob = publicationJobs.update({ status: 'failed', finished_at: new Date().toISOString() }); }
+    catch { pcPublicationJob = { status: 'blocked', error: 'PC_PUBLICATION_JOB_STATE_UNAVAILABLE' }; }
+    console.error(JSON.stringify({ event: 'pc_publication_job_finished', ...pcPublicationJob, error: error.message }));
+  } finally { publicationDispatchActive = false; }
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
   if (req.method === "GET" && url.pathname === "/health") {
@@ -2246,6 +2284,7 @@ const server = http.createServer(async (req, res) => {
         scheduler_enabled: PC_PARTS_SCHEDULER_ENABLED,
         scheduler_active: pcSchedulerActive,
         publication_active: pcPublicationActive,
+        publication_job: pcPublicationJob,
         source_targets_per_run: PC_SOURCE_TARGETS_PER_RUN,
         source_target_concurrency: PC_SOURCE_TARGET_CONCURRENCY,
         d1_background_mirror_enabled: D1_BACKGROUND_MIRROR_ENABLED,
@@ -2327,6 +2366,7 @@ const server = http.createServer(async (req, res) => {
           total: result.total,
           source_counts: result.sourceTotals || {},
           model_counts: result.modelCounts || {},
+          statistics_coverage: result.statisticsCoverage,
           pagination: { has_more: Boolean(nextCursor), next_cursor: nextCursor },
           as_of: asOf,
           freshness: pcListingsFreshness(asOf, result.latestObservedAt),
@@ -2513,7 +2553,7 @@ const server = http.createServer(async (req, res) => {
     pcStatsVerificationActive = true;
     try {
       const publication = await readJson(req);
-      const verification = await verifyStoredStatsOnAws({ importUrl: STATS_IMPORT_URL, token: IMPORT_TOKEN, publication });
+      const verification = await requestIsolatedVerification(publication);
       console.log(JSON.stringify({ event: 'pc_stats_readback_verified', ...verification }));
       return json(res, 200, { ok: true, verification });
     } catch (error) {
@@ -2549,6 +2589,19 @@ const server = http.createServer(async (req, res) => {
     const body = await readJson(req);
     const jobNames = jobNamesFrom(body);
     if (!jobNames.length) return json(res, 400, { ok: false, error: "job_name or job_names is required" });
+    if (jobNames.length === 1 && jobNames[0] === 'daily-price-refresh') {
+      try {
+        const key = req.headers['idempotency-key'] || body.idempotency_key || `manual:${randomUUID()}`;
+        const job = publicationJobs.admit(key);
+        pcPublicationJob = publicationJobs.current;
+        const pending = ['queued', 'running'].includes(job.status);
+        const ok = pending || ['completed', 'partial_success'].includes(job.status);
+        if (pending) void dispatchQueuedPublication();
+        return json(res, ok ? (pending ? 202 : 200) : 503, { ok, trigger: job });
+      } catch (error) {
+        return json(res, 503, { ok: false, error: error.message });
+      }
+    }
     const result = await runJobs(jobNames, req.headers["idempotency-key"] || body.idempotency_key || "");
     return json(res, result.status === "failed" ? 502 : 200, { ok: result.status !== "failed", trigger: result });
   } catch (error) {
@@ -2564,13 +2617,16 @@ const backgroundTimer = BACKGROUND_REFRESH_ENABLED
   ? setInterval(() => { void runBackgroundRefreshTick(); }, BACKGROUND_TICK_MS)
   : null;
 backgroundTimer?.unref();
-const pcSchedulerTimer = setInterval(() => { void runPcSourceSchedulerTick(); }, PC_SCHEDULER_TICK_MS);
+const pcSchedulerTimer = setInterval(() => { void dispatchQueuedPublication(); void runPcSourceSchedulerTick(); }, PC_SCHEDULER_TICK_MS);
 pcSchedulerTimer.unref();
 
 for (const signal of ["SIGTERM", "SIGINT"]) {
   process.once(signal, () => {
     if (backgroundTimer) clearInterval(backgroundTimer);
     clearInterval(pcSchedulerTimer);
+    clearInterval(lifecycleBootstrapTimer);
+    void lifecycleQueueBootstrap.close();
+    void lifecycleStatusCache.close();
     try { searchIndex?.close(); } catch {}
     server.close(() => process.exit(0));
   });

@@ -5,6 +5,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { PcPartsLedger } from './pc-parts-ledger.mjs';
 import { PcShadowPipeline } from './pc-shadow-pipeline.mjs';
 import { toPcProjectionImportItem } from './republish-pc-projections.mjs';
+import { reconcileExactModelStatistics } from './pc-classification-consistency.mjs';
 
 const digest = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const json = value => JSON.parse(value || '{}');
@@ -12,26 +13,33 @@ const merge = (old, next) => [...new Set([...old, ...next])];
 const fields = {
   canonical_product_id: 'canonicalProductId', canonical_display_name: 'canonicalDisplayName',
   listing_kind: 'listingKind', listing_type: 'listingType', spec_group_id: 'specGroupId',
-  model_confidence: 'modelConfidence'
+  model_confidence: 'modelConfidence', category_code: 'categoryCode', market_segment: 'marketSegment'
 };
 
 function correction(previous, item, pipeline) {
   const next = pipeline.normalizeItem(item, item.observed_at, null, { reclassification: true }).normalized;
-  if (previous.canonical_product_id === next.canonicalProductId && previous.listing_kind === next.listingKind) return null;
-  // This tool only repairs an explicit identity or purchase intent. It cannot
-  // turn a bundle/unknown into a valid price sample or change sale units.
+  const statistics=reconcileExactModelStatistics(previous,next,item.currency);
+  if (previous.canonical_product_id === next.canonicalProductId && previous.listing_kind === next.listingKind
+    && previous.statistics_eligible===statistics.statistics_eligible
+    && previous.exact_product===statistics.exact_product
+    && previous.statistics_exclusion_reasons_json===statistics.statistics_exclusion_reasons_json) return null;
+  // A positively identified complete PC may lose its false component identity,
+  // never the reverse. Raw observations and sale units remain untouched.
+  const fullSystemCorrection = next.listingKind === 'FULL_SYSTEM' && next.categoryCode === 'SYSTEM'
+    && !next.canonicalProductId && !next.priceEligible && !next.statisticsEligible
+    && next.exclusionReasons.includes('FULL_SYSTEM');
   if (!['SINGLE_COMPONENT', 'SAME_PRODUCT_LOT'].includes(previous.listing_kind)
-    || !['SINGLE_COMPONENT', 'SAME_PRODUCT_LOT', 'WANTED'].includes(next.listingKind)
-    || !next.canonicalProductId || previous.category_code !== next.categoryCode
+    || (!fullSystemCorrection && (!['SINGLE_COMPONENT', 'SAME_PRODUCT_LOT', 'WANTED'].includes(next.listingKind)
+      || !next.canonicalProductId || previous.category_code !== next.categoryCode))
     || previous.quantity !== next.quantity || previous.price_scope !== next.priceScope
     || previous.condition_code !== next.conditionCode || previous.market_pool !== next.marketPool)
     throw new Error('CLASSIFICATION_REPAIR_SEMANTICS_CHANGED');
   const after = { ...previous };
   for (const [column, key] of Object.entries(fields)) after[column] = next[key];
   after.price_eligible = previous.price_eligible && next.priceEligible ? 1 : 0;
-  after.statistics_eligible = previous.statistics_eligible && next.statisticsEligible ? 1 : 0;
+  Object.assign(after,statistics);
+  if (fullSystemCorrection && Object.hasOwn(after,'exact_product')) after.exact_product=0;
   after.exclusion_reasons_json = JSON.stringify(merge(json(previous.exclusion_reasons_json || '[]'), next.exclusionReasons));
-  after.statistics_exclusion_reasons_json = JSON.stringify(merge(json(previous.statistics_exclusion_reasons_json || '[]'), next.statisticsExclusionReasons));
   after.evidence_json = JSON.stringify([...json(previous.evidence_json || '[]'),
     { field: 'classification', source: 'SCOPED_CLASSIFICATION_REPAIR',
       previous_product_id: previous.canonical_product_id, value: next.canonicalProductId,
@@ -52,6 +60,7 @@ export function buildListingClassificationRepair(db, itemIds, { asOf = new Date(
   const normalizations = [], listings = [], scopes = new Map();
   const addScopes = (before, after, currency) => {
     for (const canonical_product_id of new Set([before.canonical_product_id, after.canonical_product_id])) {
+      if (!canonical_product_id) continue;
       const pools = currency === 'KRW' && ['KR_C2C_USED', 'KR_DEALER_USED'].includes(before.market_pool)
         ? [before.market_pool, 'KR_DOMESTIC_USED'] : [before.market_pool];
       for (const market_pool of pools) {
@@ -76,7 +85,7 @@ export function buildListingClassificationRepair(db, itemIds, { asOf = new Date(
       evidence_json: JSON.stringify(metadata.evidence || []) };
     const changed = correction(current, { ...before, price: before.price_value,
       status: before.pc_lifecycle_status, seller_type: before.pc_market_pool === 'KR_DEALER_USED' ? 'DEALER' : undefined }, pipeline);
-    if (!changed) continue;
+    if (changed) {
     const updated = { ...metadata };
     for (const column of Object.keys(fields)) updated[column] = changed.after[column];
     updated.canonical_manufacturer = changed.next.canonicalManufacturer;
@@ -91,20 +100,22 @@ export function buildListingClassificationRepair(db, itemIds, { asOf = new Date(
     updated.reference_price = null;
     const after = { ...before, pc_metadata_json: JSON.stringify(updated),
       pc_canonical_product_id: updated.canonical_product_id,
+      pc_category_code: updated.category_code,
       pc_canonical_manufacturer: updated.canonical_manufacturer,
       pc_board_manufacturer: updated.board_manufacturer,
       pc_listing_kind: updated.listing_kind, pc_price_eligible: updated.price_eligible ? 1 : 0 };
     listings.push({ before, after });
     addScopes(current, changed.after, before.currency);
+    }
 
     const sourceListingId = itemId.slice(before.site.length + 1);
     const rows = db.prepare(`SELECT n.*, s.source_id, s.source_listing_id, s.price_value, s.currency,
         s.observed_at, s.lifecycle_status, r.raw_json, r.title, r.description
       FROM listing_snapshots s JOIN raw_listings r ON r.id=s.raw_listing_id
       JOIN normalized_listings n ON n.snapshot_id=s.id
-      WHERE s.source_id=? AND s.source_listing_id IN (?,?) AND s.observed_at>=?
+      WHERE s.source_id=? AND s.source_listing_id IN (?,?,?,?) AND s.observed_at>=?
         AND n.normalization_version=? AND n.parser_version=? AND n.rule_version=? AND n.filter_version=?
-      ORDER BY n.id`).all(before.site, sourceListingId, before.url, cutoff, active.normalization_version,
+      ORDER BY n.id`).all(before.site, sourceListingId, before.url, itemId, `${before.site}:${before.url}`, cutoff, active.normalization_version,
         active.parser_version, active.rule_version, active.filter_version);
     for (const row of rows) {
       const original = db.prepare('SELECT * FROM normalized_listings WHERE id=?').get(row.id);
@@ -149,9 +160,9 @@ export function applyListingClassificationRepair(db, plan) {
     for (const entry of plan.listings) {
       // Only classification columns change; source text, prices and observation
       // dates are retained, including last_checked_at (no live check occurred).
-      db.prepare(`UPDATE listings SET pc_metadata_json=?, pc_canonical_product_id=?,
+      db.prepare(`UPDATE listings SET pc_metadata_json=?, pc_canonical_product_id=?, pc_category_code=?,
         pc_canonical_manufacturer=?, pc_board_manufacturer=?, pc_listing_kind=?, pc_price_eligible=? WHERE item_id=?`)
-        .run(entry.after.pc_metadata_json, entry.after.pc_canonical_product_id,
+        .run(entry.after.pc_metadata_json, entry.after.pc_canonical_product_id, entry.after.pc_category_code,
           entry.after.pc_canonical_manufacturer, entry.after.pc_board_manufacturer, entry.after.pc_listing_kind,
           entry.after.pc_price_eligible, entry.after.item_id);
     }

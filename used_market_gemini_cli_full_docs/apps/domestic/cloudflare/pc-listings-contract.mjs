@@ -340,3 +340,54 @@ export function pcListingsFreshness(asOf, latestObservedAt) {
     state: ageSeconds === null ? "EMPTY" : ageSeconds <= 2 * 60 * 60 ? "FRESH" : "STALE"
   };
 }
+
+function statisticsExclusionReasons(row) {
+  const value = row?.statistics_exclusion_reasons ?? row?.statistics_exclusion_reasons_json ?? [];
+  if (Array.isArray(value)) return value.map(String).filter(Boolean);
+  try {
+    const parsed = JSON.parse(String(value || "[]"));
+    return Array.isArray(parsed) ? parsed.map(String).filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+}
+
+// Search visibility and statistics eligibility are intentionally separate.
+// This summary exposes the difference without claiming that a price publication
+// exists or that candidates from different models form one representative sample.
+export function pcListingStatisticsCoverage(rows, listingCount = null) {
+  const entries = Array.isArray(rows) ? rows : [];
+  let observedCount = 0;
+  let eligibleCount = 0;
+  const reasons = {};
+  for (const row of entries) {
+    const weight = Number.isSafeInteger(Number(row?.count)) && Number(row.count) > 0 ? Number(row.count) : 1;
+    observedCount += weight;
+    const eligible = row?.statistics_eligible === true || Number(row?.statistics_eligible) === 1;
+    if (eligible) {
+      eligibleCount += weight;
+      continue;
+    }
+    for (const reason of statisticsExclusionReasons(row)) {
+      reasons[reason] = Number(reasons[reason] || 0) + weight;
+    }
+  }
+  const requestedCount = Number(listingCount);
+  const total = Number.isSafeInteger(requestedCount) && requestedCount >= observedCount ? requestedCount : observedCount;
+  const excludedCount = Math.max(0, total - eligibleCount);
+  const candidateState = total === 0
+    ? "NO_LISTINGS"
+    : eligibleCount === 0
+      ? "NO_ELIGIBLE_LISTINGS"
+      : eligibleCount < 3
+        ? "INSUFFICIENT_ELIGIBLE_LISTINGS"
+        : "ELIGIBLE_LISTINGS_PRESENT";
+  return {
+    listing_count: total,
+    eligible_count: eligibleCount,
+    excluded_count: excludedCount,
+    minimum_representative_sample_count: 3,
+    candidate_state: candidateState,
+    exclusion_reasons: reasons
+  };
+}

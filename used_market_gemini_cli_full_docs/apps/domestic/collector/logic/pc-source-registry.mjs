@@ -11,6 +11,7 @@ const MAX_JITTER_SECONDS = 120;
 const LIVE_CANARY_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 const FAILURE_BACKOFF_MS = Object.freeze([5 * 60 * 1000, 15 * 60 * 1000]);
 const QUARANTINE_MS = 6 * 60 * 60 * 1000;
+export const DANAWA_COLLECTION_LIMITS = Object.freeze({ requestIntervalMs: 10_000, targetsPerRun: 20, requestsPerHour: 20, accessCooldownMs: QUARANTINE_MS });
 
 function source(config) {
   return Object.freeze({
@@ -425,10 +426,15 @@ function authorizationReason(registered, governance) {
 function skipReason(registered, runtime, now, governance) {
   const authorizationBlocked = authorizationReason(registered, governance);
   if (authorizationBlocked) return authorizationBlocked;
+  return sourceRuntimePauseReason(runtime, now);
+}
+
+export function sourceRuntimePauseReason(runtime, now = new Date()) {
+  now = toDate(now, 'now');
   if (runtime.runtime_status === "DISABLED") return "SOURCE_DISABLED";
   if (runtime.runtime_status === "ADAPTER_READY") return "OPERATOR_ENABLE_REQUIRED";
   if (runtime.runtime_status === "QUARANTINED") {
-    if (!runtime.quarantine_until || now < new Date(runtime.quarantine_until)) return "SOURCE_QUARANTINED";
+    if (!Number.isFinite(Date.parse(runtime.quarantine_until || '')) || now < new Date(runtime.quarantine_until)) return "SOURCE_QUARANTINED";
   }
   if (runtime.backoff_until && now < new Date(runtime.backoff_until)) return "SOURCE_BACKOFF";
   return null;
@@ -436,7 +442,11 @@ function skipReason(registered, runtime, now, governance) {
 
 function failureRuntime(runtime, now, error) {
   const consecutiveFailures = Number(runtime.consecutive_failures || 0) + 1;
-  if (consecutiveFailures >= 3) {
+  const accessBlocked = runtime.source_key === 'danawa' && (
+    /DANAWA_SEARCH_(?:HTTP_(?:403|429)|BLOCKED)|SOURCE_ACCESS_BLOCKED/iu.test(String(error?.message || error))
+    || Number(error?.collection_metrics?.http_blocked_count || 0) > 0
+    || Number(error?.collection_metrics?.captcha_count || 0) > 0);
+  if (accessBlocked || consecutiveFailures >= 3) {
     return {
       ...runtime,
       runtime_status: "QUARANTINED",
@@ -505,10 +515,11 @@ export async function runSourceCollection({ sourceKey, adapter, runtime, governa
     const accessFailure = Number(result.metrics?.http_blocked_count || 0) > 0
       || Number(result.metrics?.captcha_count || 0) > 0;
     const danawaAccessBlocked = sourceKey === "danawa" && accessFailure;
-    if (danawaAccessBlocked || (requestCount > 0 && successRate < 0.95 && !singleTargetTolerance)) {
-      const partialReason = danawaAccessBlocked ? "SOURCE_ACCESS_BLOCKED" : "SOURCE_SUCCESS_RATE_BELOW_THRESHOLD";
+    const danawaParseFailure = sourceKey === 'danawa' && Number(result.metrics?.parse_failure_count || 0) > 0;
+    if (danawaAccessBlocked || danawaParseFailure || (requestCount > 0 && successRate < 0.95 && !singleTargetTolerance)) {
+      const partialReason = danawaAccessBlocked ? "SOURCE_ACCESS_BLOCKED" : danawaParseFailure ? 'SOURCE_RESPONSE_UNRECOGNIZED' : "SOURCE_SUCCESS_RATE_BELOW_THRESHOLD";
       const partialError = new Error(`${partialReason}:${sourceKey}:${successRate.toFixed(4)}`);
-      const partialRuntime = accessFailure ? failureRuntime(currentRuntime, runAt, partialError) : {
+      const partialRuntime = accessFailure || danawaParseFailure ? failureRuntime(currentRuntime, runAt, partialError) : {
         ...currentRuntime,
         runtime_status: "ENABLED",
         consecutive_failures: 0,

@@ -696,17 +696,22 @@ const previousClientId = process.env.EBAY_CLIENT_ID;
 const previousClientSecret = process.env.EBAY_CLIENT_SECRET;
 const previousToken = process.env.EBAY_BROWSE_API_TOKEN;
 try {
-  globalThis.fetch = async () => new Response(JSON.stringify({
-    list: [{
+  globalThis.fetch = async (url) => {
+    assert.equal(new URL(url).pathname, "/api/search/v8/web/search");
+    assert.equal(new URL(url).searchParams.get("policyKey"), "pw.product.keyword");
+    assert.equal(new URL(url).searchParams.get("sort"), "latest");
+    return new Response(JSON.stringify({ data: { responses: { mainGrid: { searchResponse: {
+    data: [{
       pid: "402071229",
       name: "AMD 라이젠3 3100 CPU 중고 판매",
       price: "50000",
-      product_image: "https://media.example.test/402071229.jpg",
-      uid: "fixture-user",
-      update_time: "2026-09-08T00:00:00.000Z",
-      status: "0",
+      productImage: "https://media.example.test/402071229.jpg",
+      shop: { uid: "fixture-user" },
+      updatedAt: "2026-09-08T00:00:00.000Z",
+      status: "SELLING",
     }],
-  }), { status: 200 });
+  } } } } }), { status: 200 });
+  };
   const bunjangItems = await collectOne("bunjang", "라이젠 3 3100", "pc", 20,
     "라이젠 3 3100", "recent", { min: null, max: null });
   assert.equal(bunjangItems.length, 1);
@@ -714,17 +719,77 @@ try {
     "Bunjang keyword rows must retain the stable source product id");
   assert.equal(bunjangItems[0].item_id, "bunjang:402071229",
     "Bunjang item identity must not depend on its full product URL");
+  assert.equal(bunjangItems[0].posted_at, "2026-09-08T00:00:00.000Z");
+  assert.equal(bunjangItems[0].lifecycle_status, "ACTIVE");
 
   const bunjangVariantRequests = [];
   globalThis.fetch = async (url) => {
     bunjangVariantRequests.push(String(url));
-    return new Response(JSON.stringify({ list: [] }), { status: 200 });
+    return new Response(JSON.stringify({ data: { responses: { mainGrid: { searchResponse: { data: [] } } } } }), { status: 200 });
   };
   await collectOne("bunjang", "Intel i5-7400", "pc", 20,
     "Intel i5-7400", "recent", { min: null, max: null });
   assert.deepEqual(new Set(bunjangVariantRequests.map((url) => new URL(url).searchParams.get("q"))),
     new Set(["Intel i5-7400", "Intel i5 7400", "i5-7400"]),
     "Bunjang must send each generated query variant to the upstream request");
+
+  const cursorRequests = [];
+  globalThis.fetch = async (url) => {
+    const parsed = new URL(url);
+    cursorRequests.push(parsed.searchParams.get("cursor"));
+    const offset = parsed.searchParams.has("cursor") ? 60 : 0;
+    return new Response(JSON.stringify({ data: { responses: { mainGrid: { searchResponse: {
+      data: Array.from({ length: 60 }, (_, i) => ({
+        pid: 900000000 + offset + i, name: "RTX 3060 그래픽카드", price: 150000,
+        status: "SELLING", updatedAt: "2026-10-09T00:00:00Z"
+      })), cursor: offset ? null : "opaque-next-page", nextCursor: "not-the-web-page-cursor"
+    } } } } }), { status: 200 });
+  };
+  const paged = await collectOne("bunjang", "RTX 3060", "pc", 80,
+    "RTX 3060", "recent", { min: null, max: null });
+  assert.equal(paged.length, 80);
+  assert.equal(new Set(paged.map(item => item.source_listing_id)).size, 80);
+  assert.equal(paged[0].source_listing_id, "900000000");
+  assert.equal(paged[0].item_id, "bunjang:900000000");
+  assert.deepEqual(cursorRequests, [null, "opaque-next-page"]);
+
+  // The CLI/browser extractor must also retain the remainder of a 60-row
+  // upstream page when the consumer displays only 20 listings at a time.
+  const { tryExtractPublicSearchResult } = await import("../dist/collector/logic/publicSearchExtractors.js");
+  const { bunjangAdapter } = await import("../dist/collector/logic/sites/bunjang.js");
+  const extractorRequests = [];
+  globalThis.fetch = async (url) => {
+    const parsed = new URL(url);
+    assert.equal(parsed.pathname, "/api/search/v8/web/search");
+    assert.equal(parsed.searchParams.get("sort"), "latest");
+    const cursor = parsed.searchParams.get("cursor");
+    extractorRequests.push(cursor);
+    const offset = cursor ? 60 : 0;
+    return new Response(JSON.stringify({ data: { responses: { mainGrid: { searchResponse: {
+      data: Array.from({ length: cursor ? 5 : 60 }, (_, i) => ({
+        pid: 910000000 + offset + i, name: "RTX 4060 그래픽카드", price: 250000,
+        status: i === 0 ? "SOLD_OUT" : "SELLING", updatedAt: "2026-10-09T00:00:00Z"
+      })), cursor: cursor ? null : "extractor-next-page"
+    } } } } }), { status: 200 });
+  };
+  let extractorCursor = null;
+  const extractedUrls = [];
+  for (let i = 0; i < 4; i += 1) {
+    const page = await tryExtractPublicSearchResult(bunjangAdapter,
+      { keyword: "RTX 4060", limit: 20, cursor: extractorCursor }, "");
+    assert.equal(page.errors.length, 0);
+    if (i === 0) {
+      assert.equal(page.items[0].status, "sold");
+      assert.equal(page.items[1].status, "active");
+      assert.equal(page.items[0].url, "https://m.bunjang.co.kr/products/910000000");
+    }
+    extractedUrls.push(...page.items.map(item => item.url));
+    extractorCursor = page.pagination.next_cursor;
+  }
+  assert.equal(extractedUrls.length, 65);
+  assert.equal(new Set(extractedUrls).size, 65);
+  assert.equal(extractorCursor, null);
+  assert.deepEqual(extractorRequests, [null, null, null, "extractor-next-page"]);
 
   process.env.EBAY_CLIENT_ID = "fixture-client-id";
   process.env.EBAY_CLIENT_SECRET = "fixture-client-secret";

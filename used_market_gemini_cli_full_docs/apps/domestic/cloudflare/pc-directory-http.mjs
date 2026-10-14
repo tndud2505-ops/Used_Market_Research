@@ -14,7 +14,7 @@ import {
   publicPcModelsForApi,
   publicPcProducts
 } from "../market/logic/pc-public-catalog.mjs";
-import { PC_SOURCE_REGISTRY } from "../collector/logic/pc-source-registry.mjs";
+import { PC_SOURCE_REGISTRY, DANAWA_COLLECTION_LIMITS } from "../collector/logic/pc-source-registry.mjs";
 import { pcBrowseFlowForApiV1 } from "../market/data/browse-flows/index.mjs";
 
 function values(params, name) {
@@ -343,17 +343,22 @@ export function pcCollectionCapacityPlan(targetsPerRun = 100) {
       const hourlyTargetCount = assigned.filter((target) => target.cadenceClass === "HOURLY_CATEGORY").length;
       const dailyTargetCount = assigned.filter((target) => target.cadenceClass === "DAILY_MASTER").length;
       const runsPerDay = source.cadence.kst_minutes.length * 24;
-      const dailyCapacityPerDay = Math.max(0, configuredTargetsPerRun - hourlyTargetCount) * runsPerDay;
+      const sourceTargetsPerRun = source.key === 'danawa' ? Math.min(configuredTargetsPerRun, DANAWA_COLLECTION_LIMITS.targetsPerRun) : configuredTargetsPerRun;
+      const categorySlots = source.key === 'danawa' && dailyTargetCount > 0
+        ? Math.min(hourlyTargetCount, Math.floor(sourceTargetsPerRun / 2)) : hourlyTargetCount;
+      const dailyCapacityPerDay = Math.max(0, sourceTargetsPerRun - categorySlots) * runsPerDay;
       const minimumTargetsPerRun = hourlyTargetCount + Math.ceil(dailyTargetCount / Math.max(1, runsPerDay));
-      const hourlyCapacitySufficient = configuredTargetsPerRun >= hourlyTargetCount;
+      const hourlyCapacitySufficient = source.key === 'danawa'
+        ? categorySlots >= hourlyTargetCount : sourceTargetsPerRun >= hourlyTargetCount;
       return {
         source_key: source.key,
         runs_per_day: runsPerDay,
         hourly_target_count: hourlyTargetCount,
         daily_target_count: dailyTargetCount,
         daily_capacity_per_day: dailyCapacityPerDay,
+        capacity_basis: 'MAXIMUM_BEFORE_FAILURES_AND_ROLLING_BUDGET',
         minimum_targets_per_run: minimumTargetsPerRun,
-        configured_targets_per_run: configuredTargetsPerRun,
+        configured_targets_per_run: sourceTargetsPerRun,
         hourly_capacity_sufficient: hourlyCapacitySufficient,
         capacity_sufficient: hourlyCapacitySufficient && dailyCapacityPerDay >= dailyTargetCount
       };

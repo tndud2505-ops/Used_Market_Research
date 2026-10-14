@@ -39,8 +39,9 @@ function stats(url) {
   const daily = amount => Array.from({length:30},(_,i) => ({ date:new Date(Date.parse(from)+i*86400000).toISOString().slice(0,10),
     active:metric(amount+i,fixture.mode==='empty'||i<26?0:5), sold:metric(amount-10+i,fixture.mode==='empty'||i<26?0:5) }));
   const value = usd?120:120000;
-  const data = { canonical_product_id:decodeURIComponent(url.pathname.split('/')[3]), publication_id:'synthetic-preview',
-    methodology:{currency,market_pool:usd?'OVERSEAS_USED':'KR_C2C_USED',condition:'USED_WORKING',days:30},
+  const data = { canonical_product_id:decodeURIComponent(url.pathname.split('/')[3]), publication_id:'synthetic-preview', view:'daily',
+    availability:{status:'EXACT_PUBLISHED'},
+    methodology:{currency,market_pool:url.searchParams.get('market_pool'),condition:url.searchParams.get('condition'),days:Number(url.searchParams.get('days'))},
     window:{from,to,days:30},published_window:{from,to,days:30},
     active:metric(value),sold:metric(value-10),daily:daily(value),
     by_source:(usd?['ebay']:['joonggonara','bunjang']).map((source_id,i)=>({source_id,active:metric(value+i*1000),sold:metric(value-10+i*1000),daily:daily(value+i*1000)})) };
@@ -70,11 +71,13 @@ try {
       if (url.pathname==='/api/pc/listings') {
         const source = url.searchParams.get('sites'), selected = ['ebay','joonggonara','bunjang'].includes(source) ? source : 'bunjang';
         const usd = selected==='ebay', second = url.searchParams.get('cursor')==='page2';
-        return send({total:26,next_cursor:second?'':'page2',source_counts:{[selected]:26},items:Array.from({length:10},(_,i)=>({
+        return send({total:26,next_cursor:second?'':'page2',source_counts:{[selected]:26},model_counts:{[id]:26},
+          statistics_coverage:{listing_count:26,eligible_count:26,excluded_count:0,minimum_representative_sample_count:3,candidate_state:'ELIGIBLE_LISTINGS_PRESENT',exclusion_reasons:{}},
+          items:Array.from({length:10},(_,i)=>({
           source_id:selected,source_listing_id:`qa-${second?10+i:i}`,canonical_product_id:url.searchParams.get('canonical_product_id')||id,
           canonical_display_name:'Intel Core i7-10700',category_code:'CPU',title:`Synthetic QA listing ${second?10+i:i}`,
           url:`https://example.test/listing/${i}`,price:usd?120+i:120000+i*1000,currency:usd?'USD':'KRW',market_pool:usd?'OVERSEAS_USED':'KR_C2C_USED',
-          condition:'USED_WORKING',price_scope:'TOTAL',quantity:1,price_eligible:true,lifecycle_status:'ACTIVE',observed_at:new Date().toISOString(),
+          condition:'USED_WORKING',price_scope:'TOTAL',quantity:1,price_eligible:true,statistics_eligible:true,lifecycle_status:'ACTIVE',observed_at:new Date().toISOString(),
         }))});
       }
       if (url.pathname.endsWith('/price-stats')) {
@@ -126,19 +129,29 @@ try {
   assert.equal(await page.locator('#catalog-query,#up-catalog-search,#price-min,#price-max,#price-reset').count(),0);
   assert.equal(await page.locator('#model-detail-open:not([hidden])').count(),0);
   assert.equal(requests.filter(u=>u.pathname.endsWith('/price-stats')).length,0,'no price requests on initial search');
+  if(!live)assert.equal(requests.filter(u=>u.pathname==='/api/pc/listings').length,1,'broad browse reuses listing model counts without a duplicate availability query');
   assert.ok(requests.filter(u=>u.pathname==='/api/pc/listings').every(u=>!u.searchParams.has('price_min')&&!u.searchParams.has('price_max')));
   assert.equal(new URL(page.url()).searchParams.has('price_min'),false);
-  assert.deepEqual(await page.locator('#source-filters input').evaluateAll(nodes=>nodes.map(n=>n.dataset.value)),['','joonggonara','bunjang','ebay']);
+  assert.deepEqual(await page.locator('#source-filters input').evaluateAll(nodes=>nodes.map(n=>n.dataset.value)),['','joonggonara','bunjang','danawa','ebay']);
   report.checks.push('removed controls and legacy invisible price filters; exact site-toggle order; no eager price queries');
   await page.selectOption('#model-select',id); await ready();
+  assert.match(await page.locator('#listing-count').innerText(),/26건 · 통계 후보 26건/);
   for(const sort of ['price_asc','price_desc','recent']){
     await page.locator(`.listing-sort-tab[data-sort="${sort}"]`).click(); await ready();
     assert.equal(await page.locator('.listing-sort-tab[aria-pressed="true"]').getAttribute('data-sort'),sort);
   }
   const before = {url:page.url(),rows:await page.locator('.listing-title').allTextContents(),sort:await page.locator('#listing-sort').inputValue(),pages:context.pages().length};
+  const priceStoreProbe = await page.evaluate(async productId => {
+    const { createPriceStore } = await import('/pc-tools-data.mjs?browser-probe-v1');
+    const store = createPriceStore(() => {}, { dailyOnly:true });
+    await store.load([{ canonical_product_id:productId }], 30);
+    const record = store.get(productId, 30);
+    return { state:record?.state, error:record?.error, status:record?.httpStatus };
+  }, id);
+  assert.equal(priceStoreProbe.state,'ready',`daily price store probe failed: ${JSON.stringify(priceStoreProbe)}`);
   await page.locator('#model-detail-open').click(); await readyChart();
   assert.equal(await page.locator('#listing-price-chart').getAttribute('data-model-id'),id);
-  assert.match(await page.locator('#listing-price-scope').innerText(),/국내 개인 중고 · KRW/);
+  assert.match(await page.locator('#listing-price-scope').innerText(),/국내 중고 · KRW/);
   assert.equal(context.pages().length,before.pages);
   await shot('modal-desktop');
   await close('X');

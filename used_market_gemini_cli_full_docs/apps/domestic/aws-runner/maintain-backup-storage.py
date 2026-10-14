@@ -118,7 +118,17 @@ def verify_recovery(p):
             fd, name = tempfile.mkstemp(prefix='.restore-check-', suffix='.sqlite', dir=p.parent)
             restored = Path(name)
             with os.fdopen(fd, 'wb') as out, gzip.open(p, 'rb') as src:
-                shutil.copyfileobj(src, out, CHUNK)
+                copied = 0
+                while chunk := src.read(CHUNK):
+                    out.write(chunk)
+                    copied += len(chunk)
+                    if copied >= 16 * CHUNK:
+                        # Dirty file-cache pages count against systemd MemoryMax.
+                        # Flush and discard completed pages before they accumulate.
+                        out.flush()
+                        os.fdatasync(out.fileno())
+                        os.posix_fadvise(out.fileno(), 0, 0, os.POSIX_FADV_DONTNEED)
+                        copied = 0
             source = restored
         db = sqlite3.connect(source.as_uri() + '?mode=ro&immutable=1', uri=True)
         try:
@@ -137,8 +147,8 @@ def verify_recovery(p):
             restored.unlink(missing_ok=True)
 
 
-def compress(root, p, apply):
-    p = safe_file(root, p)
+def compress(root, p, apply, min_age=86400):
+    p = safe_file(root, p, min_age=min_age)
     if p.suffix == '.gz':
         raise ValueError(f"Already compressed: {p}")
     dest = Path(str(p) + '.gz')
@@ -152,7 +162,7 @@ def compress(root, p, apply):
             original = digest(source)
         if validate_archive(dest) != original:
             raise ValueError(f"Existing archive differs from source: {dest}")
-        safe_file(root, p)
+        safe_file(root, p, min_age=min_age)
         if identity(p) != before or identity(dest) != archive_before:
             raise ValueError(f"Archive pair changed during verification: {p}")
         if apply:
@@ -179,16 +189,23 @@ def compress(root, p, apply):
                     if source.read(16) != b'SQLite format 3\x00':
                         raise ValueError(f"Not a SQLite backup: {p}")
                     source.seek(0)
+                    copied = 0
                     while chunk := source.read(CHUNK):
                         original.update(chunk)
                         gz.write(chunk)
+                        copied += len(chunk)
+                        if copied >= 16 * CHUNK:
+                            output.flush()
+                            os.fdatasync(output.fileno())
+                            os.posix_fadvise(output.fileno(), 0, 0, os.POSIX_FADV_DONTNEED)
+                            copied = 0
             output.flush()
             os.fsync(output.fileno())
         with gzip.open(temp, 'rb') as check:
             checksum, restored_size = digest(check)
         if checksum != original.hexdigest() or restored_size != before[2]:
             raise ValueError(f"Archive roundtrip mismatch: {p}")
-        safe_file(root, p)
+        safe_file(root, p, min_age=min_age)
         if identity(p) != before:
             raise ValueError(f"Source changed during compression: {p}")
         os.utime(temp, ns=(s.st_atime_ns, s.st_mtime_ns))
@@ -249,15 +266,20 @@ def maintain_daily(root, apply, emit):
                 p.unlink()
             emit({'action': 'expired' if apply else 'expire', 'path': str(p),
                   'reclaimed_bytes': size if apply else 0, 'bytes': size})
+    # Verify the newest raw backup before compression, avoiding a full temporary
+    # restore later in this same run. Completed daily backups are atomic files.
+    if retained and retained[0].suffix != '.gz':
+        safe_file(root, retained[0], min_age=0)
+        verify_recovery(retained[0])
     for p in retained:
-        if p.suffix == '.gz' or time.time() - p.stat().st_mtime < 86400:
+        if p.suffix == '.gz' or time.time() - p.stat().st_mtime < 3600:
             continue
-        emit(compress(root, p, apply))
+        emit(compress(root, p, apply, min_age=3600))
     emit({'action': 'retention', 'daily_dates': sorted(keep), 'keep_dates': 3,
           'max_age_days': 7, 'last_recovery_exception': bool(keep and min(keep) < cutoff)})
 
 
-def expire_manual_backups(root, apply, emit):
+def expire_manual_backups(root, apply, emit, legacy_parent=False):
     """Seven-day rollback policy, independent of long-lived price aggregates.
 
     Only SQLite backup files expire here; code, credentials, repair evidence and
@@ -276,28 +298,32 @@ def expire_manual_backups(root, apply, emit):
     recovery_identity = identity(recovery)
     pattern = re.compile(r'^search-index(?:[-.].*)?\.sqlite(?:\.pre)?(?:\.gz)?$')
     # The common subdirectory form has exactly the basename search-index.sqlite.
-    for directory, dirs, names in os.walk(root, followlinks=False):
+    scan_root = root.parent if legacy_parent else root
+    for directory, dirs, names in os.walk(scan_root, followlinks=False):
         parent = Path(directory)
         if (parent / '.keep').exists():
             dirs[:] = []
             continue
         dirs[:] = [d for d in dirs if not (parent / d).is_symlink()]
+        if legacy_parent:
+            dirs[:] = []
         for name in names:
             p = parent / name
             if DAILY.fullmatch(p.name) and parent == root:
                 continue
-            if not (pattern.fullmatch(name) or name in ('search-index.sqlite', 'search-index.sqlite.gz',
-                                                       'search-index.sqlite.pre', 'search-index.sqlite.pre.gz')):
+            matches = (re.fullmatch(r'search-index\.sqlite\.pre-local-reconcile-\d{4}-\d{2}-\d{2}T[\d-]+Z', name)
+                       if legacy_parent else pattern.fullmatch(name))
+            if not matches:
                 continue
             if time.time() - p.lstat().st_mtime < 7 * 86400 or Path(str(p) + '.keep').exists():
                 continue
             try:
-                safe_file(root, p, min_age=7 * 86400)
+                safe_file(scan_root, p, min_age=7 * 86400)
                 if p.stat().st_mtime >= recovery.stat().st_mtime:
                     raise ValueError('Recovery does not supersede this backup')
                 if identity(recovery) != recovery_identity:
                     raise ValueError('Validated daily recovery changed')
-                if any((parent / '.keep').exists() for parent in [p.parent, *p.parents] if parent.is_relative_to(root)) or Path(str(p) + '.keep').exists():
+                if (root / '.keep').exists() or any((parent / '.keep').exists() for parent in [p.parent, *p.parents] if parent.is_relative_to(scan_root)) or Path(str(p) + '.keep').exists():
                     raise ValueError('Recovery backup was pinned')
                 size = p.stat().st_size
                 if apply:
@@ -307,6 +333,29 @@ def expire_manual_backups(root, apply, emit):
                       'reclaimed_bytes': size if apply else 0})
             except ValueError as error:
                 emit({'action': 'manual_expiry_skipped', 'path': str(p), 'reason': str(error)})
+
+
+def expire_abandoned_checks(root, apply, emit):
+    """Only our abandoned restore scratch files, never recovery archives."""
+    if (root / '.keep').exists():
+        return
+    for p in root.iterdir():
+        if not re.fullmatch(r'\.restore-check-[a-z0-9_]+\.sqlite', p.name):
+            continue
+        if time.time() - p.lstat().st_mtime < 86400 or Path(str(p) + '.keep').exists():
+            continue
+        try:
+            safe_file(root, p)
+            before = identity(p)
+            if apply:
+                safe_file(root, p)
+                if identity(p) != before or (root / '.keep').exists() or Path(str(p) + '.keep').exists():
+                    raise ValueError('Restore scratch file changed or was pinned')
+                p.unlink()
+            emit({'action': 'expired_scratch' if apply else 'expire_scratch',
+                  'path': str(p), 'reclaimed_bytes': before[2] if apply else 0})
+        except ValueError as error:
+            emit({'action': 'scratch_kept', 'path': str(p), 'reason': str(error)})
 
 
 def expire_completed_staging(root, database, apply, emit):
@@ -389,13 +438,15 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--backup-root', default='/var/lib/used-market-runner/backups')
     parser.add_argument('--daily', action='store_true')
+    parser.add_argument('--legacy-reconcile', action='store_true',
+                        help='Operator-only expiry of legacy sibling reconcile backups')
     parser.add_argument('--archive', action='append', default=[])
     parser.add_argument('--apply', action='store_true')
     args = parser.parse_args()
     root = Path(args.backup_root).absolute()
     if root.resolve() != root or not root.is_dir():
         raise ValueError('Backup root must be a real directory without symlinks')
-    if not args.daily and not args.archive:
+    if not args.daily and not args.archive and not args.legacy_reconcile:
         parser.error('Specify --daily and/or explicit --archive paths')
     def emit(value):
         print(json.dumps(value), flush=True)
@@ -408,9 +459,12 @@ def main():
         for p in args.archive:
             emit(compress(root, Path(p), args.apply))
         if args.daily:
+            expire_abandoned_checks(root, args.apply, emit)
             maintain_daily(root, args.apply, emit)
             expire_manual_backups(root, args.apply, emit)
             expire_completed_staging(root.parent / 'staging', root.parent / 'search-index.sqlite', args.apply, emit)
+        if args.legacy_reconcile:
+            expire_manual_backups(root, args.apply, emit, legacy_parent=True)
         emit({'action': 'complete', 'apply': args.apply,
               'free_bytes': shutil.disk_usage(root).free})
 

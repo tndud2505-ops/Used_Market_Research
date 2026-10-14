@@ -34,15 +34,16 @@ assert.match(statsRunnerSource, /assertFullPublicationActivation\(publication, a
   "publication child must verify the complete input manifest before recording success");
 assert.match(statsRunnerSource, /pcStatsTraceability\(ledger, options\)/u,
   "scheduled publication must retain member counts AND member checksums");
-assert.match(runnerSource, /pcPublicationActive = true;[\s\S]{0,100}const drainDeadline[\s\S]{0,100}while \(pcSchedulerActive\)[\s\S]{0,300}const publication = await runPcStatsPublisher/u,
+assert.match(runnerSource, /pcPublicationActive = true;[\s\S]{0,100}const drainDeadline[\s\S]{0,100}while \(pcSchedulerActive \|\| activeSearchJobs > 0 \|\| activePersistenceJobs > 0 \|\| backgroundRefreshActive\)[\s\S]{0,360}const publication = await runPcStatsPublisher/u,
   'publication must reserve the writer before waiting for the current collection to finish');
-assert.match(runnerSource, /finally \{ pcPublicationActive = false; \}/u,
+assert.match(runnerSource, /finally \{ pcPublicationWritesPaused = false; pcPublicationActive = false; \}/u,
   'failed publication must always release the scheduler gate');
 assert.match(runnerSource, /traceability: stats\.traceability \|\| \{ member_count: null \}/u,
   'public reads must preserve sealed member counts and checksums instead of replacing them with null');
-assert.match(runnerSource, /observationRetentionDays: 30/u,
+const publicationMaintenanceSource = await readFile(new URL('../aws-runner/pc-publication-maintenance.mjs', import.meta.url), 'utf8');
+assert.match(publicationMaintenanceSource, /observationRetentionDays: 30/u,
   'post-publication compaction must retain the entire active 30-day member window');
-assert.doesNotMatch(runnerSource, /observationRetentionDays: 1[,\s]/u,
+assert.doesNotMatch(publicationMaintenanceSource, /observationRetentionDays: 1[,\s]/u,
   'one-day pruning would break the just-published complete member trace');
 assert.match(runnerSource, /async function runPcSourceSchedulerTick\(\) \{[\s\S]{0,160}pcSchedulerActive \|\| pcPublicationActive(?: \|\| pcStatsVerificationActive)?\) return/u,
   'a scheduled collection must not start while full statistics are being published');

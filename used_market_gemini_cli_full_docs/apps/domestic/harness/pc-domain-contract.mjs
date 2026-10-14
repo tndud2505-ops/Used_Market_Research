@@ -21,8 +21,12 @@ import {
   parseArguments as parsePublicReclassificationArguments
 } from "../aws-runner/reclassify-public-pc-listings.mjs";
 import { classifyPcPartListing, classifyPcPartListingPublic } from "../market/logic/pc-parts-classifier.mjs";
-import { explicitSoldText, isPartialSaleText, structuredSoldEvidenceFromHtml } from "../market/logic/listing-lifecycle.mjs";
+import { explicitSoldText, isPartialSaleText, structuredSoldEvidenceFromHtml, joongnaListingUrl } from "../market/logic/listing-lifecycle.mjs";
 import { reviewedPcListingExclusion } from "../market/logic/pc-reviewed-listing-exclusions.mjs";
+
+assert.equal(joongnaListingUrl({url:'https://web.joongna.com/product/[PHONE]',sourceListingId:'joonggonara:https://web.joongna.com/product/171021101'}),'https://web.joongna.com/product/171021101');
+assert.equal(joongnaListingUrl({url:'https://web.joongna.com/product/1234',sourceListingId:'5678'}),null,'conflicting stable identity cannot recheck another listing');
+assert.equal(joongnaListingUrl({url:'https://evil.test/product/1234',sourceListingId:'unknown'}),null);
 
 const reviewedCandidateFixture = reviewedPublicCandidates([
   {
@@ -633,6 +637,11 @@ assert.deepEqual(
   ["fair:hourly", "fair:daily-never-a", "fair:daily-never-b"],
   "short-cadence targets must keep their slots while never-run daily targets advance fairly"
 );
+fairTargetLedger.activateCollectionTargets({targetSetVersion:'fixture-danawa-fair-v1',directoryVersion:'fixture-master-v1',targets:
+  ['hour-a','hour-b','model-a','model-b'].map((id,i)=>({targetId:id,categoryCode:'CPU',queryText:id,sourceKeys:['danawa'],
+    targetOrder:i,cadenceClass:i<2?'HOURLY_CATEGORY':'DAILY_MASTER',minimumIntervalMinutes:i<2?55:1440}))});
+assert.deepEqual(fairTargetLedger.listDueCollectionTargets('danawa','2026-09-10T12:00:00.000Z',undefined,3).map(t=>t.target_id),
+  ['model-a','hour-a','model-b'],'constrained Danawa budget must serve both queues, without exceeding the limit');
 fairTargetDb.close();
 const coverageAsOf = new Date("2026-08-29T12:00:00.000Z");
 for (let offset = 0; offset <= 30; offset += 1) {
@@ -1586,6 +1595,24 @@ const duplicateReactivatedA = ledger.recordObservation({
 for (const snapshotId of [duplicateSoldA.snapshotId, duplicateReactivatedA.snapshotId]) {
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM duplicate_cluster_members WHERE snapshot_id = ?").get(snapshotId).count, 1,
     "duplicate identity must follow lifecycle snapshots");
+}
+// Candidate-ID lookup must preserve cross-source clusters, source restrictions,
+// historical as-of and explicit reactivation, independent of SQLite's planner.
+const identityFixtureRows = [{ source_id: 'joonggonara', source_listing_id: 'duplicate-reactivation-a',
+  duplicate_cluster_status: 'CONFIRMED', duplicate_cluster_key: 'fixture-cross-source' }];
+const originalPrepare = db.prepare.bind(db);
+for (const sourceIds of [[], ['joonggonara'], ['ebay'], ['joonggonara', 'ebay']]) {
+  for (const offset of [5_500, 6_500]) {
+    const identityOptions = { asOf: new Date(now + offset).toISOString(), normalizationVersion: 1,
+      parserVersion: 'pc-parser-v1', ruleVersion: 'pc-rules-v1', filterVersion: 'pc-filter-v1', sourceIds };
+    const optimized = ledger.latestIdentityStates(identityFixtureRows, identityOptions);
+    try {
+      db.prepare = (sql) => originalPrepare(sql.replace('FROM listing_snapshots s NOT INDEXED', 'FROM listing_snapshots s'));
+      assert.deepEqual(optimized, ledger.latestIdentityStates(identityFixtureRows, identityOptions));
+    } finally { db.prepare = originalPrepare; }
+    assert.equal(optimized.get('cluster:fixture-cross-source').lifecycle_status,
+      sourceIds.length === 1 && sourceIds[0] === 'ebay' ? 'ACTIVE' : offset < 6_000 ? 'SOLD' : 'ACTIVE');
+  }
 }
 pipeline.recordItem({
   item_id: "danawa:legacy-structured-case", source_listing_id: "legacy-structured-case", site: "danawa",

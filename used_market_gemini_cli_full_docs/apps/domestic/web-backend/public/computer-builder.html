@@ -9,7 +9,7 @@
   <link rel="stylesheet" href="/styles.css?v=pc-tools-v1"><link rel="stylesheet" href="/pc-tools.css?v=parts-ux-v6"><link rel="stylesheet" href="/ui-concept-a.css?v=aligned-shell-v1">
   <link rel="stylesheet" href="/builder-toolbar.css?v=price-clarity-v1">
   <link rel="stylesheet" href="/pc-workspace.css?v=danawa-display-v2">
-  <link rel="stylesheet" href="/adfit-layout.css?v=adfit-rail-v2">
+  <link rel="stylesheet" href="/adfit-layout.css?v=adfit-all-v3">
   <link rel="stylesheet" href="/site-header-links.css?v=1">
 </head>
 <body class="pc-tools ui-a" data-page="builder" data-ui-release="search-first-v2">
@@ -22,7 +22,7 @@
   <div class="adfit-layout">
     <main id="main" class="tools-main">
     <header class="sf-page-bar sf-builder-bar">
-      <div class="build-heading"><h1>컴퓨터 맞추기</h1><section class="contextual-offer tools-affiliate" id="contextual-offer" aria-label="쿠팡 파트너스 광고" hidden></section></div>
+      <div class="build-heading"><h1>컴퓨터 맞추기</h1></div>
       <div class="sf-page-actions">
       <button class="up-button" type="button" data-action="save-build">구성 저장</button>
       <button class="up-button" type="button" data-action="print-build">인쇄</button>
@@ -42,11 +42,13 @@
       <div id="model-controls"></div><div id="model-price-status" class="tools-model-price-status" role="status" aria-live="polite" hidden></div><div id="model-table" class="tools-table-scroll" tabindex="0" aria-label="부품 모델 목록"></div><nav id="model-pages" class="tools-pages" aria-label="모델 페이지"></nav>
     </dialog>
   </main>
-    <aside class="adfit-banner" id="adfit-banner" aria-label="카카오 AdFit 광고" hidden>
+    <aside class="adfit-banner" id="adfit-rail" data-placement="rail" aria-label="카카오 AdFit 광고" hidden>
       <template data-format="desktop"><ins class="kakao_ad_area" style="display:none;" data-ad-unit="DAN-gG0WEoycq7Nup5kT" data-ad-width="160" data-ad-height="600"></ins></template>
+    </aside>
+    <aside class="adfit-banner" id="adfit-banner" data-placement="bottom" aria-label="카카오 AdFit 광고" hidden>
       <template data-format="mobile"><ins class="kakao_ad_area" style="display:none;" data-ad-unit="DAN-gvTVDnxVn9S3leR5" data-ad-width="320" data-ad-height="100"></ins></template>
     </aside>
   </div>
-  <script type="module" src="/pc-tools.js?v=ad-connection-help-v1"></script>
+  <script type="module" src="/pc-tools.js?v=adfit-all-v3"></script>
 </body>
 </html>

@@ -1,6 +1,9 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
+// Shared ESM contract has no TypeScript declaration file.
+// @ts-ignore
+import { pcListingStatisticsCoverage } from '../../../cloudflare/pc-listings-contract.mjs';
 
 type JsonRecord = Record<string, any>;
 
@@ -167,6 +170,7 @@ function emptyListings(asOf: string, reason: string) {
   return {
     items: [],
     total: 0,
+    statistics_coverage: pcListingStatisticsCoverage([], 0),
     pagination: { has_more: false, next_cursor: null },
     next_cursor: null,
     as_of: asOf,
@@ -216,6 +220,7 @@ export function createLocalPcPublicationReader() {
     return {
       items: page,
       total,
+      statistics_coverage: pcListingStatisticsCoverage(items, total),
       model_counts: modelCounts,
       pagination: { has_more: nextOffset < total, next_cursor: nextOffset < total ? `offset:${nextOffset}` : null },
       next_cursor: nextOffset < total ? `offset:${nextOffset}` : null,

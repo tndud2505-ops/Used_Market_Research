@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync, existsSync, unlinkSync } from 'node:fs';
+import { gzipSync } from 'node:zlib';
 import os from 'node:os';
 import path from 'node:path';
 import { SearchIndex } from '../aws-runner/search-index.mjs';
@@ -15,6 +16,16 @@ try {
   const first = index.createBackup();
   assert.ok(existsSync(first));
   assert.equal(index.createBackup(), first, 'same-day requests reuse one completed recovery point');
+  writeFileSync(`${first}.gz`, gzipSync(readFileSync(first)));
+  unlinkSync(first);
+  const archivedBytes = readFileSync(`${first}.gz`);
+  const backupNames = readdirSync(path.dirname(first)).sort();
+  for (let retry = 0; retry < 3; retry += 1) {
+    assert.equal(index.createBackup(), `${first}.gz`, 'reuse the verified compressed daily backup');
+  }
+  assert.deepEqual(readdirSync(path.dirname(first)).sort(), backupNames, 'retries leave no new full copies or partial files');
+  assert.deepEqual(readFileSync(`${first}.gz`), archivedBytes, 'retries preserve the existing recovery content');
+  assert.ok(!existsSync(first), 'do not regenerate a compressed full DB backup');
   const recovery = path.join(dir, 'backups', 'search-index-pre-migration-v9.sqlite');
   writeFileSync(recovery, 'retained recovery evidence');
   assert.deepEqual(index.pruneBackups(), [], 'only validated offline maintenance may expire backups');
@@ -32,15 +43,20 @@ try {
   assert.doesNotMatch(maintenance, /shutil\.rmtree|VACUUM|DELETE FROM|systemctl.*stop/);
   const service = readFileSync(new URL('../aws-runner/used-market-backup-storage.service', import.meta.url), 'utf8');
   assert.match(service, /--daily --apply/);
-  assert.match(service, /MemoryMax=128M/);
+  assert.match(service, /MemoryMax=512M/);
+  const writableRoots = service.match(/^ReadWritePaths=(.+)$/mu)?.[1].trim().split(/\s+/u).sort();
+  assert.deepEqual(writableRoots, ['/var/lib/used-market-runner/backups', '/var/lib/used-market-runner/staging'],
+    'the recurring cleaner must not gain write access to the operating database');
+  assert.match(service, /^ProtectSystem=strict$/mu);
+  assert.doesNotMatch(service, /--legacy-reconcile/, 'legacy sibling cleanup remains an explicit operator action');
   console.log('backup storage policy contract passed');
 } finally {
   index?.close();
   rmSync(dir, { recursive: true, force: true });
 }
 if (process.platform === 'linux') {
-  const result = spawnSync('python3', [fileURLToPath(new URL('./backup-storage-contract.py', import.meta.url))], { stdio: 'inherit' });
+  const result = spawnSync('python3', ['-B', fileURLToPath(new URL('./backup-storage-contract.py', import.meta.url))], { stdio: 'inherit' });
   assert.equal(result.status, 0, 'Linux compression/expiry safety contract');
 } else {
-  console.log('Linux archive contract must also run on the deployment host (fcntl and /proc).');
+  console.log('SKIPPED: Linux archive contract on this platform; also run python3 -B harness/backup-storage-contract.py as root in Linux/WSL (synthetic data only, no production access).');
 }

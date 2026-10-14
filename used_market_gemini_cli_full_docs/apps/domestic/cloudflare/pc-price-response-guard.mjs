@@ -12,6 +12,7 @@ export async function guardPriceStatsResponse(request, response) {
   const problem = pcPriceReadinessProblem(query, data);
   if (!problem) {
     if (!latestCompletedDailyPublication) return response;
+    const ageDays = Math.round((Date.parse(query.asOfDate) - Date.parse(data.published_window.to)) / 86_400_000);
     const updatedData = {
       ...data,
       // A completed daily publication is not today's still-open window.
@@ -24,7 +25,9 @@ export async function guardPriceStatsResponse(request, response) {
       availability: {
         ...(data?.availability || {}),
         status: 'LAST_PUBLISHED',
-        reason: 'LATEST_COMPLETE_DAILY_PUBLICATION',
+        reason: ageDays > 1 ? 'PUBLICATION_DELAYED' : 'LATEST_COMPLETE_DAILY_PUBLICATION',
+        stale: ageDays > 1,
+        age_days: ageDays,
         counts_are_unique_period_listings: true
       }
     };

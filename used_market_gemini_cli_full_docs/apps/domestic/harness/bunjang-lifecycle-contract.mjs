@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from 'node:fs';
 import { DatabaseSync } from "node:sqlite";
 import { PcPartsLedger } from "../aws-runner/pc-parts-ledger.mjs";
 import { bunjangLifecycleStatus, bunjangProductIdFromListing, parseBunjangDetailLifecycle, bunjangDetailObservationItem } from "../market/logic/bunjang-lifecycle.mjs";
@@ -20,7 +21,36 @@ assert.equal(bunjangProductIdFromListing({
   url: "https://m.bunjang.co.kr/products/[PHONE]",
   sourceListingId: "bunjang:https://m.bunjang.co.kr/products/162044325"
 }), "162044325", "legacy redaction must not strand a recoverable Bunjang listing");
+assert.equal(bunjangProductIdFromListing({
+  url: "https://m.bunjang.co.kr/products/[PHONE]", sourceListingId: "173480704"
+}), "173480704", "a masked URL must use the stable numeric ledger ID without unmasking personal data");
+assert.equal(bunjangProductIdFromListing({
+  url: "https://m.bunjang.co.kr/products/[PHONE]", sourceListingId: "[PHONE]"
+}), null, "masked or arbitrary text is not product identity");
 assert.equal(bunjangProductIdFromListing({ url: "https://example.test/products/invalid" }), null);
+assert.equal(bunjangProductIdFromListing({ url: '', sourceListingId: '173480704' }), '173480704');
+const runnerSource = readFileSync(new URL('../aws-runner/runner.mjs', import.meta.url), 'utf8');
+const recheckSource = runnerSource.slice(runnerSource.indexOf('async function recheckKnownListings('));
+assert.match(recheckSource,/applyLifecycleProjection\(projection\);\s*\/\/[^\n]*\n\s*await yieldToEventLoop\(\)/u,
+  'Completed lifecycle projection batches must yield to HTTP requests');
+assert.ok(recheckSource.indexOf('const pid = bunjangProductIdFromListing') < recheckSource.indexOf('if (!/^https?:'),
+  'numeric Bunjang identity recovery must run before the generic HTML URL gate');
+// Execute the real loop with isolated I/O: a later abort must not lose an already verified SOLD projection.
+const aborter = new AbortController(), applied = [], mirrored = [], receipts = [];
+let detailCalls=0;
+const isolatedLoop = new Function('pcLedger','pcPipeline','searchIndex','fetch','throwIfAborted','boundedFetchSignal',
+  'bunjangProductIdFromListing','parseBunjangDetailLifecycle','bunjangDetailObservationItem','yieldToEventLoop',
+  'stabilizeIncrementalPcProjections','importToD1BestEffort',
+  `return (${recheckSource.slice(0,recheckSource.indexOf('function pcSourceAdapter(')).trim()})`)(
+  {getLifecycleRun:()=>null,dueRechecks:()=>[1,2].map(id=>({source_listing_id:String(id),raw_json:JSON.stringify({url:`https://m.bunjang.co.kr/products/${id}`}),title:'CPU',price_value:10000,currency:'KRW'})),
+    deferLifecycleAttempt:()=>{},getPublicProjection:()=>({status:'SOLD'}),recordLifecycleRun:(_source,receipt)=>receipts.push(receipt)},
+  {recordItem:()=>({_pc_snapshot_created:true})},{applyLifecycleProjection:p=>applied.push(p)},
+  async()=>{if(++detailCalls===1)return new Response(JSON.stringify({data:{product:{pid:1,saleStatus:'SOLD_OUT',price:10000}}}));aborter.abort(new Error('fixture abort'));throw aborter.signal.reason;},
+  signal=>signal?.throwIfAborted(), signal=>signal,
+  bunjangProductIdFromListing,parseBunjangDetailLifecycle,bunjangDetailObservationItem,async()=>{},rows=>rows,async rows=>mirrored.push(...rows));
+await assert.rejects(isolatedLoop('bunjang',new Date().toISOString(),aborter.signal),/fixture abort/);
+assert.equal(applied.length,1);assert.equal(mirrored.length,1);
+assert.equal(receipts[0].stop_reason,'ABORTED');assert.equal(receipts[0].sold,1);
 const db = new DatabaseSync(":memory:");
 for (const [description,condition] of [
   ['정상 작동. 택배 거래시 파손면책 동의 간주. 채굴 이력 없어요.','USED_WORKING'],
@@ -58,6 +88,54 @@ assert.equal(ledger.lifecycleRecheckStatus({ sourceId: "bunjang", asOf: "2026-09
   "terminal sold listings must leave the lifecycle recheck backlog");
 assert.equal(ledger.recordObservation({ ...observation, status: sold.status, statusEvidence: sold.evidence,
   observedAt: "2026-09-14T02:00:00Z" }).snapshotCreated, false, "repeat sale observations are not counted twice");
+for (const [id, finalStatus] of [['2', 'ACTIVE'], ['3', 'RESERVED'], ['4', 'DELETED'], ['5', 'UNAVAILABLE_UNKNOWN']]) {
+  ledger.recordObservation({ ...observation, sourceListingId: id, observedAt: '2026-09-14T00:00:00Z' });
+  ledger.recordObservation({ ...observation, sourceListingId: id, price: 31000, status: finalStatus,
+    statusEvidence: { type: 'STRUCTURED_STATUS', value: finalStatus }, observedAt: '2026-09-14T00:00:00Z' });
+}
+const oldDueIds = db.prepare(`SELECT s.source_listing_id FROM listing_snapshots s
+  JOIN raw_listings r ON r.id=s.raw_listing_id WHERE s.source_id='bunjang'
+  AND s.lifecycle_status IN ('ACTIVE','RESERVED','UNAVAILABLE_UNKNOWN')
+  AND r.last_checked_at <= '2026-09-15T00:00:00.000Z'
+  AND NOT EXISTS (SELECT 1 FROM listing_snapshots newer WHERE newer.source_id=s.source_id
+    AND newer.source_listing_id=s.source_listing_id AND (newer.observed_at>s.observed_at
+      OR (newer.observed_at=s.observed_at AND newer.id>s.id)))
+  ORDER BY CASE WHEN r.missing_check_count>0 THEN 0 ELSE 1 END,r.last_checked_at,s.source_listing_id`).all().map(row=>row.source_listing_id);
+assert.deepEqual(ledger.dueRechecks({sourceId:'bunjang',checkedBefore:'2026-09-15T00:00:00Z',limit:1500})
+  .map(row=>row.source_listing_id),oldDueIds,'index-first query preserves latest snapshot and equal-time tie-break membership');
+assert.equal(ledger.lifecycleRecheckStatus({sourceId:'bunjang',asOf:'2026-09-16T00:00:00Z'}).due_count,oldDueIds.length);
+ledger.deferLifecycleAttempt('bunjang','2',{at:'2026-09-16T00:00:00.000Z',delayMs:86400000,outcome:'NETWORK_ERROR'});
+assert.ok(!ledger.dueRechecks({sourceId:'bunjang',checkedBefore:'2026-09-16',asOf:'2026-09-16T01:00:00Z'}).some(r=>r.source_listing_id==='2'));
+assert.equal(ledger.lifecycleRecheckStatus({sourceId:'bunjang',asOf:'2026-09-16T01:00:00Z'}).deferred_count,1);
+ledger.recordObservation({...observation,sourceListingId:'2',price:31000,observedAt:'2026-09-16T02:00:00Z'});
+db.prepare("UPDATE pc_lifecycle_queue SET next_attempt_at='2026-09-16T08:00:00.000Z' WHERE source_listing_id='3'").run();
+assert.equal(ledger.dueRechecks({sourceId:'bunjang',checkedBefore:'2026-09-16T03:00:00Z',asOf:'2026-09-16T09:00:00Z'})
+  .map(r=>r.source_listing_id).indexOf('3') < ledger.dueRechecks({sourceId:'bunjang',checkedBefore:'2026-09-16T03:00:00Z',asOf:'2026-09-16T09:00:00Z'})
+  .map(r=>r.source_listing_id).indexOf('2'),true,'eligible 24h-overdue checks precede ordinary refresh even after an error retry');
+assert.ok(ledger.dueRechecks({sourceId:'bunjang',checkedBefore:'2026-09-16T03:00:00Z',asOf:'2026-09-16T09:00:00Z'}).some(r=>r.source_listing_id==='2'), 'verified observation releases old error backoff');
+ledger.recordLifecycleRun('bunjang',{status:'PARTIAL',stop_reason:'HTTP_429'},'2026-09-17T00:00:00.000Z');
+assert.equal(ledger.dueRechecks({sourceId:'bunjang',checkedBefore:'2026-09-16',asOf:'2026-09-16T09:00:00Z'}).length,0);
+assert.equal(ledger.getLifecycleRun('bunjang').stop_reason,'HTTP_429');
+// Simulate an old DB upgrade; new observations during bounded bootstrap must win.
+const beforeHistory = db.prepare('SELECT count(*) n FROM listing_snapshots').get().n;
+db.exec(`DROP TRIGGER pc_lifecycle_snapshot_insert; DROP TRIGGER pc_lifecycle_raw_check; DROP TRIGGER pc_lifecycle_snapshot_delete;
+  DROP TABLE pc_lifecycle_queue; DROP TABLE pc_lifecycle_bootstrap; DROP TABLE pc_lifecycle_runs;`);
+ledger.migrate();
+assert.equal(ledger.lifecycleRecheckStatus({sourceId:'bunjang'}).status,'INITIALIZING');
+assert.throws(()=>ledger.dueRechecks({sourceId:'bunjang'}),/INITIALIZING/);
+ledger.bootstrapLifecycleQueue(1);
+ledger.recordObservation({...observation,sourceListingId:'2',price:32000,observedAt:'2026-09-17T00:00:00Z'});
+ledger.recordObservation({...observation,sourceListingId:'z-new-after-fence',observedAt:'2026-09-17T00:00:00Z'});
+let pages=0;
+while (!ledger.bootstrapLifecycleQueue(1).ready) assert.ok(++pages<20);
+assert.equal(db.prepare('SELECT snapshot_id FROM pc_lifecycle_queue WHERE source_listing_id=?').get('2').snapshot_id,ledger.latestSnapshot('bunjang','2').id);
+assert.ok(db.prepare("SELECT 1 FROM pc_lifecycle_queue WHERE source_listing_id='z-new-after-fence'").get());
+assert.equal(db.prepare('SELECT count(*) n FROM listing_snapshots').get().n,beforeHistory+2,'bootstrap preserves history');
+assert.equal(db.prepare('SELECT count(*) n FROM pc_lifecycle_queue').get().n,6);
+const latestTwo=ledger.latestSnapshot('bunjang','2').id;
+db.prepare('DELETE FROM listing_snapshots WHERE id=?').run(latestTwo);
+assert.equal(db.prepare("SELECT snapshot_id FROM pc_lifecycle_queue WHERE source_id='bunjang' AND source_listing_id='2'").get().snapshot_id,
+  ledger.latestSnapshot('bunjang','2').id,'removing current snapshot safely falls back instead of losing the identity');
 db.close();
 
 const bodyDb = new DatabaseSync(':memory:');

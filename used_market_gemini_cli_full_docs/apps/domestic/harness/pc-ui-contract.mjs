@@ -59,8 +59,8 @@ assert.equal(toolsScript.includes("state.expanded"), false, "flat model rows mus
 assert.equal(toolsScript.includes("동일 모델 묶기"), false, "flat model rows must not expose a grouping toggle");
 requireText(toolsScript, "makeTable(['부품', '선택 모델', '수량', '판매중', '판매완료 표시가', '다나와 중고 표시가', ''])",
   'the builder includes a separate Danawa displayed-price column');
-assert.match(builderHtml, /id="contextual-offer" aria-label="쿠팡 파트너스 광고" hidden/,
-  'the contextual ad retains its explicit advertising identity');
+assert.match(builderHtml, /id="adfit-banner" data-placement="bottom" aria-label="카카오 AdFit 광고" hidden/,
+  'the builder has an explicitly identified bottom AdFit placement');
 assert.equal(toolsScript.includes("el('tfoot')"), true, 'totals share the component table footer');
 assert.equal(toolsScript.includes("'원문 검색'"), false,
   "the model name link must not repeat a separate original-search label");
@@ -83,8 +83,17 @@ requireText(toolsScript, "state.sources = (catalog.sources || [])",
   "analysis source tabs must follow the operational catalog instead of per-model evidence");
 requireText(toolsScript, "sources.flatMap(item => buildAnalysisSeries",
   "the chart must build each source from its own published currency scope");
-requireText(toolsScript, ".filter(id => allowedSources.has(id))",
-  "the source table must not revive a disabled source from stale projection rows");
+const analysisSourcesSource = toolsScript.slice(toolsScript.indexOf('function analysisSources('), toolsScript.indexOf('function renderLatestPrices('));
+const sourceContext = vm.createContext({
+  state: { sources: [{ source_id: 'joonggonara' }, { source_id: 'ebay' }], priceSources: new Set(['joonggonara']), selectedId: 'cpu:test' },
+  prices: { getAvailable: () => null }, overseasPrices: { getAvailable: () => null },
+  chartRecord: () => null,
+});
+vm.runInContext(analysisSourcesSource, sourceContext);
+assert.deepEqual(Array.from(vm.runInContext('analysisSources({ latest: true }).map(item => item.id)', sourceContext)), ['joonggonara', 'ebay'],
+  'latest prices must hide disabled sources while remaining independent of chart selection');
+assert.deepEqual(Array.from(vm.runInContext('analysisSources().map(item => item.id)', sourceContext)), ['joonggonara'],
+  'chart sources must respect public availability and the current selection');
 requireText(toolsChart, "item.label || metric?.label",
   "site-specific chart descriptors must provide stable legend and tooltip labels");
 requireText(toolsChart, "filter(item => item.points.some(point => point.value != null))",
@@ -114,11 +123,16 @@ for (const id of [
   "active-filter-chips", "reset-filters", "show-matched-models",
   "filter-column-resizer", "listing-section", "listing-rows",
   "listing-pagination", "listing-page-numbers", "listing-page-prev", "listing-page-next",
-  "model-detail-open", "listing-count", "adfit-banner",
+  "model-detail-open", "listing-count",
 ]) {
   requireText(html, `id="${id}"`, `missing required UI region #${id}`);
   requireText(script, `querySelector("#${id}")`, `app.js must bind #${id}`);
 }
+for (const id of ['adfit-rail', 'adfit-banner']) {
+  requireText(html, `id="${id}"`, `missing required AdFit placement #${id}`);
+}
+requireText(script, 'createAdfitSlots(document.querySelectorAll(".adfit-banner"))',
+  'the listing app must bind every AdFit placement');
 
 assert.equal(html.includes('id="model-directory"'), false, "the old persistent model table must be removed");
 assert.equal(html.includes('class="overview-panels"'), false, "the old two-panel model/price overview must be removed");
@@ -133,7 +147,7 @@ assert.match(html, /<button class="model-detail-open"[^>]*aria-haspopup="dialog"
 assert.equal([...html.matchAll(/>가격 그래프 보기</g)].length, 1, 'one graph action in the result toolbar');
 assert.match(html, /<dialog id="listing-price-dialog"/);
 assert.doesNotMatch(script, /modelDetailOpen\.href|window\.open\(/);
-requireText(script, 'pricePreview.open(product, [...state.selectedSites][0] || "")', 'graph preview keeps the selected model and source without navigation');
+requireText(script, 'pricePreview.open(product, [...state.selectedSites][0] || "", state.listingStatisticsCoverage)', 'graph preview keeps the selected model, source, and listing coverage without navigation');
 requireText(script, 'dom.modelSelect.addEventListener("change"', "the compact model selector must drive exact-model selection");
 requireText(script, 'createElement("option"', "matching models must populate native selector options");
 requireText(script, "productSpecText(product)", "model choices must retain useful distinguishing specifications");
@@ -222,11 +236,8 @@ assert.doesNotMatch(script, /setListingOptionsCollapsed|dom\.price(?:Min|Max|Res
 
 assert.equal(html.includes('class="category-button"'), false, "all components must not return as a crowded tab rail");
 assert.equal(html.includes('id="product-count"'), false, "duplicate model-count copy must stay removed");
-requireText(html, 'id="contextual-offer"', "approved PC affiliate offers need one isolated slot");
-assert.ok(html.indexOf('id="contextual-offer"') > html.indexOf('class="listing-heading"')
-  && html.indexOf('id="contextual-offer"') < html.indexOf('id="listing-message"'),
-  "the affiliate slot must stay compact at the top of loaded listing results");
-requireText(script, "hasResults: visibleListings.length > 0", "ads must never replace empty search results");
+assert.doesNotMatch(html, /id="contextual-offer"/u, "affiliate ads are replaced by AdFit");
+assert.ok(html.indexOf('id="adfit-banner"') > html.indexOf('id="listing-pagination"'), "AdFit follows organic results");
 requireText(script, "adfit.setEligible(visibleListings.length > 0)", "AdFit must follow the same organic-result visibility boundary");
 assert.equal(/['"`]\/api\/search(?:-only)?(?:[?'"`])/u.test(script), false, "the public UI must not call generic used-market search APIs");
 assert.equal(html.includes("�") || script.includes("�") || styles.includes("�"), false, "public UI files contain replacement characters");
@@ -267,11 +278,12 @@ const node = () => ({ hidden: false, value: "", textContent: "", attributes: {},
   replaceChildren() {}, append() {}, focus() {},
 });
 context.state = {
+  facets: {}, sources: [], selectedSites: new Set(), products: [],
   listings: [], listingPage: 1, listingCursor: "", listingPages: new Map(), listingPageCursors: new Map([[1, ""]]),
   listingNextCursors: new Map(), availableSourceCounts: null, listingTotal: null, detailStats: [],
 };
 context.dom = { listingCount: node() };
-Object.assign(context, { renderSourceFilters() {}, renderListings() {}, renderStats() {} });
+Object.assign(context, { renderSourceFilters() {}, renderListings() {}, renderStats() {}, renderProducts() {} });
 context.applyListingPayload({ items: [{ id: "page-item" }], total: 42, source_counts: { a: 20, b: 22 } }, 1);
 assert.equal(context.state.listingTotal, 42,
   "the displayed listing total must come from the API rather than the current page length");
@@ -366,7 +378,7 @@ Object.assign(requestContext, {
   dom: { listingSection: node(), listingEmpty: node() },
   buildListingQuery: () => new URLSearchParams({ canonical_product_id: "cpu:intel:i5-7400" }),
   fetchJson: () => new Promise((resolve, reject) => pending.push({ resolve, reject })),
-  renderListings() {}, renderListingPagination() {}, showListingMessage() {},
+  renderListings() {}, renderListingPagination() {}, showListingMessage() {}, renderProducts() {}, refreshModelAvailability() {},
   applyListingPayload: (payload) => applied.push(payload.id),
 });
 const oldRequest = requestContext.requestListingPage(1);

@@ -5,9 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="description" content="중고 PC와 컴퓨터 부품을 모델별로 검색하세요. 중고 그래픽카드, CPU, RAM, SSD, 메인보드, 파워서플라이 매물과 일별 중고 시세를 비교합니다." />
     <meta name="robots" content="index, follow, max-image-preview:large" />
-    <meta name="google-site-verification" content="3DaGcd7QWP0wz8ZE1kklG8d728HZDpGBb_g4pU-gh7M" />
-    <meta name="google-adsense-account" content="ca-pub-3069551914203809" />
-    <link rel="canonical" href="https://used-pick.com/" />
+    <meta name="google-site-verification" content="3DaGcd7QWP0wz8ZE1kklG8d728HZDpGBb_g4pU-gh7M" />    <link rel="canonical" href="https://used-pick.com/" />
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="USED PICK" />
     <meta property="og:locale" content="ko_KR" />
@@ -31,11 +29,11 @@
       }
     </script>
     <link rel="icon" href="/assets/mark.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css?v=adfit-v1" />
+    <link rel="stylesheet" href="/styles.css?v=adfit-all-v3" />
     <link rel="stylesheet" href="/pc-tools.css?v=6" />
-    <link rel="stylesheet" href="/ui-concept-a.css?v=model-availability-v2" />
+    <link rel="stylesheet" href="/ui-concept-a.css?v=adfit-all-v3" />
     <link rel="stylesheet" href="/search-controls.css?v=search-modal-v4" />
-    <link rel="stylesheet" href="/adfit-layout.css?v=adfit-rail-v2">
+    <link rel="stylesheet" href="/adfit-layout.css?v=adfit-all-v3">
     <link rel="stylesheet" href="/site-header-links.css?v=1">
 </head>
   <body class="ui-a" data-ui-release="search-modal-v4">
@@ -138,7 +136,7 @@
                 <span id="listing-count" aria-live="polite"></span>
               </div>
             </div>
-            <section class="contextual-offer" id="contextual-offer" aria-label="쿠팡 파트너스 광고" hidden></section>
+
             <button class="model-detail-open" id="model-detail-open" type="button" aria-haspopup="dialog" aria-controls="listing-price-dialog" hidden>가격 그래프 보기</button>
           </div>
           <div class="listing-message" id="listing-message" role="status" aria-live="polite" hidden></div>
@@ -166,8 +164,10 @@
         </div>
       </section>
     </main>
-    <aside class="adfit-banner" id="adfit-banner" aria-label="카카오 AdFit 광고" hidden>
+    <aside class="adfit-banner" id="adfit-rail" data-placement="rail" aria-label="카카오 AdFit 광고" hidden>
       <template data-format="desktop"><ins class="kakao_ad_area" style="display:none;" data-ad-unit="DAN-gG0WEoycq7Nup5kT" data-ad-width="160" data-ad-height="600"></ins></template>
+    </aside>
+    <aside class="adfit-banner" id="adfit-banner" data-placement="bottom" aria-label="카카오 AdFit 광고" hidden>
       <template data-format="mobile"><ins class="kakao_ad_area" style="display:none;" data-ad-unit="DAN-gvTVDnxVn9S3leR5" data-ad-width="320" data-ad-height="100"></ins></template>
     </aside>
   </div>
@@ -195,9 +195,10 @@
       <p>USED PICK은 중고 PC와 컴퓨터 부품의 공개 표시가격을 비교하며 거래를 중개하지 않습니다.</p>
       <nav aria-label="관련 문서">
         <a href="/categories">중고 PC 부품 카테고리</a>
+        <a href="/privacy.html#advertising">광고·쿠키 안내</a>
       </nav>
     </footer>
 
-    <script type="module" src="/app.js?v=ad-connection-help-v1"></script>
+    <script type="module" src="/app.js?v=adfit-all-v3"></script>
   </body>
 </html>

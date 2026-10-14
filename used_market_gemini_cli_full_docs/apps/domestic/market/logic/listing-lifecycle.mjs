@@ -1,3 +1,12 @@
+export function joongnaListingUrl({url,sourceListingId} = {}) {
+  const stable = String(sourceListingId || '').replace(/^joonggonara:/u,'');
+  const stableId = stable.match(/^(?:https:\/\/web\.joongna\.com\/product\/)?(\d+)\/?(?:[?#].*)?$/u)?.[1];
+  const urlId = String(url || '').match(/^https:\/\/(?:web\.)?joongna\.com\/product\/(\d+)\/?(?:[?#].*)?$/u)?.[1];
+  if (stableId && urlId && stableId !== urlId) return null;
+  const id = stableId || urlId;
+  return id ? `https://web.joongna.com/product/${id}` : null;
+}
+
 export function isPartialSaleText(value) {
   const text = String(value || "").normalize("NFKC");
   return /(?:(?:\d+|한|하나|두|둘|세|셋|네|넷)\s*(?:개|장|매)\s*중\s*(?:\d+|한|하나|두|둘|세|셋|네|넷)\s*(?:개|장|매)?\s*(?:만\s*)?판매\s*완료|남은\s*(?:\d+|한|하나|두|둘|세|셋|네|넷)\s*(?:개|장|매)\s*판매|일부\s*판매\s*완료)/iu.test(text);

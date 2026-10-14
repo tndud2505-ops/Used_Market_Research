@@ -187,7 +187,7 @@ body.ui-a.has-category-tabs .workspace-heading { grid-template-columns:minmax(20
 .up-save-status:empty { display:none; }
 .ui-a .tools-affiliate:not([hidden]) { padding:14px 0 0; border:0; margin:0; background:transparent; }
 .ui-a .affiliate-copy { min-width:0; }
-.ui-a .adfit-banner:not([hidden]) { max-width:100%; margin:18px auto 0; }
+.ui-a :is(.adfit-banner,.adsterra-banner):not([hidden]) { max-width:100%; margin:18px auto 0; }
 .ui-a .analysis-filter-bar { display:flex; flex-direction:column; align-items:stretch; gap:0; margin:0 0 22px; padding:0; border:0; }
 .ui-a .analysis-filter-bar > .tools-tabs { flex:none; }
 .ui-a .analysis-filter-bar #model-controls { padding:16px 18px 4px; border:1px solid var(--line); border-radius:12px; background:white; }
@@ -399,7 +399,7 @@ body.ui-a.has-category-tabs .workspace-heading { grid-template-columns:minmax(20
   .ui-a .listing-page-direction { flex-shrink:0; }
 }
 @media print {
-  .ui-a :is(.site-header,.tools-header,.tools-footer,.site-footer,.up-dialog,.adfit-banner,.contextual-offer), .ui-a button { display:none !important; }
+  .ui-a :is(.site-header,.tools-header,.tools-footer,.site-footer,.up-dialog,.adfit-banner,.adsterra-banner,.contextual-offer), .ui-a button { display:none !important; }
   .ui-a, .ui-a .tools-main { background:white; }
   .ui-a .tools-builder-layout, .ui-a.pc-tools[data-page=builder] .tools-builder-layout { display:block; }
   .ui-a .build-result { position:static; margin-top:20px; break-inside:avoid; }

@@ -25,8 +25,13 @@ const operationalSites = new Set(OPERATIONAL_PC_DIRECTORY_SITES);
 const publicProducts = publicPcProducts();
 
 const defaultCapacity = pcCollectionCapacityPlan();
-assert.equal(defaultCapacity.all_sources_sufficient, true,
-  "the default per-run budget must cover hourly searches and the full daily model sweep");
+assert.equal(defaultCapacity.all_sources_sufficient, false,
+  "Danawa's protective cap must report daily coverage shortfall honestly");
+assert.equal(defaultCapacity.sources.find(source=>source.source_key==='danawa').configured_targets_per_run,20);
+assert.equal(defaultCapacity.sources.find(source=>source.source_key==='danawa').daily_capacity_per_day,240);
+assert.equal(defaultCapacity.sources.find(source=>source.source_key==='danawa').hourly_capacity_sufficient,false,
+  'fair rotation does not promise all categories every hour under the protective cap');
+assert.ok(defaultCapacity.sources.filter(source=>source.source_key!=='danawa').every(source=>source.capacity_sufficient));
 assert.equal(defaultCapacity.configured_targets_per_run, 100);
 assert.ok(defaultCapacity.sources.every((source) => source.minimum_targets_per_run <= defaultCapacity.configured_targets_per_run));
 const legacyLowCapacity = pcCollectionCapacityPlan(12);
@@ -136,10 +141,10 @@ try {
   globalThis.fetch = async (url) => {
     const query = new URL(url).searchParams.get("q");
     kingstonQueries.push(query);
-    return new Response(JSON.stringify({ list: query === "Kingston DDR3 4GB RAM" ? [{
+    return new Response(JSON.stringify({ data: { responses: { mainGrid: { searchResponse: { data: query === "Kingston DDR3 4GB RAM" ? [{
       pid: "422738661", name: "Kingston DDR3 PC3-10600U 4GB RAM 6개 개당 판매",
-      price: "10000", status: "0", update_time: "2026-09-29T00:00:00.000Z"
-    }] : [] }), { status: 200 });
+      price: "10000", status: "SELLING", updatedAt: "2026-09-29T00:00:00.000Z"
+    }] : [] } } } } }), { status: 200 });
   };
   const items = await collectOne("bunjang", kingstonTarget.queryText, "pc", 20,
     kingstonTarget.queryText, "recent", { min: null, max: null });

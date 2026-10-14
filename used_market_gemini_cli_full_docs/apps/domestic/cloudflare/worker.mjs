@@ -1,4 +1,5 @@
 import { withHtmlAnalytics } from './html-analytics.mjs';
+import { probeRunnerReadiness } from './runner-readiness.mjs';
 import {
   fetchThroughFreeCache,
   fetchThroughPcReadCache,
@@ -374,6 +375,9 @@ async function serveProductPriceStats(request, env) {
       const lookupQuery = { ...query, canonicalProductId };
       stats = await readPublishedProductStats(env.DB, lookupQuery);
       publicationAsOf = stats ? await publishedStatsAsOf(env.DB, lookupQuery) : null;
+      // A dated last-publication reference must remain that exact publication;
+      // do not overlay newer listing prices underneath its older as-of date.
+      if (stats && query.allowLastPublished) break;
       projectionRows = await currentProjectionRows(env.DB, lookupQuery);
       if (stats || projectionRows.length > 0) break;
     }
@@ -391,7 +395,8 @@ async function serveProductPriceStats(request, env) {
       traceability: { member_count: 0 },
       as_of: projectionRows.map((row) => String(row.updated_at || "")).sort().at(-1) || new Date().toISOString()
     };
-    return json(200, { status: "success", data: priceStatsResponse(query, overlayCurrentProjection(baseStats, projectionRows, query.days)) });
+    return json(200, { status: "success", data: priceStatsResponse(query,
+      stats && query.allowLastPublished ? baseStats : overlayCurrentProjection(baseStats, projectionRows, query.days)) });
   } catch (error) {
     console.error("Public price statistics failed", error);
     return json(503, { status: "error", error: "Public price statistics are unavailable" });
@@ -787,7 +792,7 @@ async function proxyToOrigin(request, env) {
 function getIdempotencyKey(request, payload, trigger, jobNames, scheduledTime) {
   const headerKey = request.headers.get("idempotency-key")?.trim();
   if (headerKey) return headerKey;
-  if (trigger === "cloudflare-cron" && scheduledTime) {
+  if (["cloudflare-cron", "cloudflare-publication-cron"].includes(trigger) && scheduledTime) {
     return `cloudflare:${payload.cron}:${new Date(scheduledTime).toISOString()}`;
   }
   return `manual:${jobNames.join(",")}:${crypto.randomUUID()}`;
@@ -1395,8 +1400,10 @@ async function fetchResponse(request, env) {
 
     if (request.method === "GET" && url.pathname === "/health") {
       const freeTier = freeTierConfig(env);
-      return json(200, {
-        ok: true,
+      const runnerReadiness = isFreeTierEnabled(env) ? { ok: true, mode: 'free_tier' } : await probeRunnerReadiness(env);
+      return json(runnerReadiness.ok ? 200 : 503, {
+        ok: runnerReadiness.ok,
+        runner_readiness: runnerReadiness,
         service: "used-market-cloudflare-runner",
         configured: nodeRunnerIsConfigured(env),
         free_tier: {
@@ -1908,6 +1915,11 @@ export default {
       const watchdog = await proxyToRunnerStatus(new Request("https://worker.internal/api/runner/status"), env);
       if (!watchdog.ok) throw new Error(`AWS PC scheduler watchdog failed with HTTP ${watchdog.status}`);
       const watchdogPayload = await watchdog.clone().json().catch(() => null);
+      const publicationJob = watchdogPayload?.data?.pc_parts?.publication_job;
+      if (['failed', 'interrupted', 'blocked', 'partial_success'].includes(publicationJob?.status)
+        || (publicationJob?.status === 'queued' && Date.now() - Date.parse(publicationJob.accepted_at) > 30 * 60 * 1000)) {
+        throw new Error('AWS publication or post-publication maintenance needs attention');
+      }
       if (watchdogPayload?.data?.pc_parts?.ledger_ready !== true
         || watchdogPayload?.data?.pc_parts?.scheduler_enabled !== true
         || watchdogPayload?.data?.pc_parts?.publication_configured !== true

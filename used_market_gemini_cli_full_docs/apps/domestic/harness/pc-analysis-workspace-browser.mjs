@@ -163,7 +163,10 @@ try {
 
   const chart = page.locator('#price-chart .market-chart-stage > svg');
   const fullCount = Number(await chart.getAttribute('data-visible-count'));
-  await chart.hover(); await page.mouse.wheel(0, -120);
+  await chart.hover(); await page.mouse.wheel(0, 120);
+  await page.waitForTimeout(150);
+  assert.equal(Number(await chart.getAttribute('data-visible-count')), fullCount, 'ordinary wheel must not change the chart period');
+  await chart.hover(); await page.keyboard.down('Control'); await page.mouse.wheel(0, -120); await page.keyboard.up('Control');
   await page.waitForFunction(count => Number(document.querySelector('.market-chart-stage > svg').dataset.visibleCount) < count, fullCount);
   const bounds = await chart.boundingBox();
   await page.mouse.move(bounds.x + bounds.width * .5, bounds.y + bounds.height * .5);

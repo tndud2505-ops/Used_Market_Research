@@ -1,11 +1,12 @@
 import { createHash } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync, renameSync, unlinkSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { readLocalState } from './republish-pc-projections.mjs';
 import { SearchIndex } from './search-index.mjs';
 import { PcPartsLedger } from './pc-parts-ledger.mjs';
+import { assertBackupSpace } from './backup-storage-policy.mjs';
 import { buildPcProjectionReconciliation, DEFAULT_PC_REPUBLISH_SOURCES, pcProjectionTombstone } from './pc-projection-republish-policy.mjs';
 
 export function localProjectionPlan(indexPath) {
@@ -44,12 +45,20 @@ async function main(argv) {
     const expected = value(`--expect-${name.replaceAll('_', '-')}`);
     if (expected == null || Number(expected) !== summary[name]) throw new Error(`LOCAL_RECONCILIATION_COUNT_MISMATCH:${name}`);
   }
-  const backup = `${path.resolve(file)}.pre-local-reconcile-${new Date().toISOString().replace(/[:.]/g, '-')}`;
+  const backupRoot = path.join(path.dirname(path.resolve(file)), 'backups');
+  mkdirSync(backupRoot, { recursive: true });
+  assertBackupSpace(file, backupRoot);
+  const backup = path.join(backupRoot, `search-index-pre-local-reconcile-${new Date().toISOString().replace(/[:.]/g, '-')}.sqlite`);
+  const temporary = `${backup}.partial`;
   const db = new DatabaseSync(file);
   try {
     new PcPartsLedger({ db }); // register expression-index SQL functions before backup
-    db.exec(`VACUUM INTO '${backup.replaceAll("'", "''")}'`);
-  } finally { db.close(); }
+    db.exec(`VACUUM INTO '${temporary.replaceAll("'", "''")}'`);
+    renameSync(temporary, backup);
+  } finally {
+    db.close();
+    if (existsSync(temporary)) unlinkSync(temporary);
+  }
   if (!existsSync(backup)) throw new Error('LOCAL_RECONCILIATION_BACKUP_MISSING');
   const index = new SearchIndex({ filePath: file, backupDir: path.join(path.dirname(file), 'backups') });
   try {

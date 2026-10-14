@@ -48,7 +48,10 @@ export function toolQueryMatches(product, query) {
     tokens.slice(start).some((_, offset) => tokens.slice(start, start + offset + 1).join('') === key)))) return true;
   const tokens = requested.split(/[^\p{L}\p{N}]+/gu).filter(Boolean);
   const allTokens = new Set(searchable.flatMap(v => v.tokens));
-  return tokens.length > 0 && tokens.every(token => allTokens.has(token));
+  // Match a complete model number with optional letters, not part of another number.
+  return tokens.length > 0 && tokens.every(token => allTokens.has(token)
+    || (/^\d{3,}$/.test(token) && [...allTokens].some(value =>
+      new RegExp(`^[a-z]*${token}[a-z]*$`).test(value))));
 }
 export function filterToolProducts(products, { category = '', manufacturer = '', query = '', facets = {} } = {}) {
   return products.filter(p => (!category || p.category_code === category)

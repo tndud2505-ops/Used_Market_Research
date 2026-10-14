@@ -27,10 +27,17 @@ try {
     }
   }
   let calls=0;
-  globalThis.fetch=async()=>{calls++;return new Response(JSON.stringify({list:[]}),{status:200});};
+  globalThis.fetch=async()=>{calls++;return new Response(JSON.stringify({data:{responses:{mainGrid:{searchResponse:{data:[]}}}}}),{status:200});};
   const first=await collectApprovedDomesticQueryOnce('bunjang','지스킬 DDR4 16GB');
   const second=await collectApprovedDomesticQueryOnce('bunjang','지스킬 DDR4 16GB');
   assert.equal(first.verified_request_count,1);assert.equal(second.verified_request_count,1);assert.equal(calls,2,'repeated verification must make fresh requests');
+  globalThis.fetch=async()=>new Response(JSON.stringify({list:[]}),{status:200});
+  await assert.rejects(collectApprovedDomesticQueryOnce('bunjang','지스킬 DDR4 16GB'),/UNVERIFIED_BUNJANG_SEARCH_RESPONSE/);
+  const grid = rows => ({data:{responses:{mainGrid:{searchResponse:{data:rows}}}}});
+  globalThis.fetch=async()=>new Response(JSON.stringify(grid([{type:'PRODUCT', productId:123, title:'changed fields'}])));
+  await assert.rejects(collectApprovedDomesticQueryOnce('bunjang','지스킬 DDR4 16GB'),/UNVERIFIED_BUNJANG_SEARCH_PRODUCT/);
+  globalThis.fetch=async()=>new Response(JSON.stringify(grid([{type:'EXT_AD',name:'external ad'}])));
+  assert.equal((await collectApprovedDomesticQueryOnce('bunjang','지스킬 DDR4 16GB')).length,0);
   globalThis.fetch=async()=>new Response('<title>Just a moment</title>');
   await assert.rejects(collectApprovedDomesticQueryOnce('joonggonara','지스킬 DDR4 16GB'),/CAPTCHA_OR_ACCESS_CHALLENGE/);
   globalThis.fetch=async()=>new Response('<html>unexpected response</html>');

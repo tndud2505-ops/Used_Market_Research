@@ -50,6 +50,7 @@ export function parsePriceStatsRequest(url, now = Date.now()) {
     asOf: `${requestedAsOf}T23:59:59.999Z`,
     asOfDate: requestedAsOf,
     asOfExplicit: url.searchParams.has("as_of"),
+    allowLastPublished: url.searchParams.get("freshness") === "last_published" && !url.searchParams.has("as_of"),
     isHistorical: requestedAsOf !== today,
     window: {
       days,
@@ -172,6 +173,7 @@ export function priceHistoryResponse(request, stats) {
     methodology:{...(stats?.methodology || {}),days:request.days,market_pool:request.marketPool,condition:request.condition,currency:request.currency,
       sample_counting:'DAILY_OBSERVATIONS',period_totals_available:false},
     versions:stats?.versions || {}, as_of:stats?.as_of || null,
+    ...(stats?.availability ? {availability:stats.availability} : {}),
     ...(stats?.publication_id ? {publication_id:stats.publication_id} : {})
   };
 }

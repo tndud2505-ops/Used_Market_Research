@@ -1,0 +1,32 @@
+[Unit]
+Description=USED PICK isolated price statistics worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__RUNNER_USER__
+Group=__RUNNER_USER__
+WorkingDirectory=__APP_ROOT__
+EnvironmentFile=-__RUNNER_ENV_FILE__
+ExecStart=/usr/bin/node --max-old-space-size=128 __APP_ROOT__/aws-runner/stats-service.mjs
+RuntimeDirectory=used-market-stats
+RuntimeDirectoryMode=0750
+Restart=on-failure
+RestartSec=5
+MemoryHigh=infinity
+MemoryMax=2304M
+OOMPolicy=stop
+KillMode=control-group
+TimeoutStopSec=10
+Nice=10
+IOSchedulingClass=idle
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/used-market-runner /run/used-market-stats
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target

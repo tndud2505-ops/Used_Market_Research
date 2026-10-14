@@ -1,8 +1,9 @@
 import { createHash } from 'node:crypto';
 import { classifyPcPartListingPublic } from '../../market/logic/pc-parts-classifier.mjs';
+import { DANAWA_COLLECTION_LIMITS } from './pc-source-registry.mjs';
 
 const BASE = 'https://prod.danawa.com';
-export const DANAWA_REQUEST_MIN_INTERVAL_MS = 5_000;
+export const DANAWA_REQUEST_MIN_INTERVAL_MS = DANAWA_COLLECTION_LIMITS.requestIntervalMs;
 
 export function createDanawaPacedFetch({ fetchImpl = fetch, now = Date.now,
   wait = (ms) => new Promise(resolve => setTimeout(resolve, ms)) } = {}) {
@@ -24,15 +25,18 @@ export function createDanawaPacedFetch({ fetchImpl = fetch, now = Date.now,
 
 export async function collectDanawaSearchTargetBatch({ targets, collectTarget, signal } = {}) {
   const settled = [];
-  for (const target of targets) {
+  let structuralFailures = 0;
+  for (const target of targets.slice(0, DANAWA_COLLECTION_LIMITS.targetsPerRun)) {
     signal?.throwIfAborted();
     try {
       settled.push({ status: 'fulfilled', value: await collectTarget(target) });
+      structuralFailures = 0;
     } catch (reason) {
       signal?.throwIfAborted();
       settled.push({ status: 'rejected', reason });
       const message = reason instanceof Error ? reason.message : String(reason);
       if (/DANAWA_SEARCH_(?:HTTP_(?:403|429)|BLOCKED)\b/iu.test(message)) break;
+      if (/DANAWA_SEARCH_(?:MARKUP_UNRECOGNIZED|NO_CARDS_UNVERIFIED)/u.test(message) && ++structuralFailures >= 2) break;
     }
   }
   return settled;
@@ -172,10 +176,38 @@ export async function collectDanawaSearchListings({ query, categoryCode, page = 
   url.searchParams.set('query', search);
   url.searchParams.set('page', String(Math.max(1, Math.min(3, Number(page) || 1))));
   const response = await fetchImpl(url, { headers: { accept: 'text/html', 'user-agent': 'USED-PICK-PC-Collector/2.0 (+https://used-pick.com/)' }, signal: signal || AbortSignal.timeout(20000) });
-  if (!response.ok) throw new Error(`DANAWA_SEARCH_HTTP_${response.status}`);
+  // Diagnostics contain no body, cookies or query text; retain only response shape/fingerprint.
+  const diagnostic = { status: response.status, content_type: response.headers.get('content-type')?.split(';')[0] || null };
+  const reject = kind => { throw new Error(`${kind}:${JSON.stringify(diagnostic)}`); };
+  if (!response.ok) {
+    // Allowlisted, bounded non-secret diagnostics: no cookies, body or arbitrary headers.
+    diagnostic.server = response.headers.get('server')?.replace(/[^a-z0-9 ._\/-]/giu,'').slice(0,80) || null;
+    diagnostic.challenge_header = response.headers.get('cf-mitigated') === 'challenge';
+    const retryAfter = response.headers.get('retry-after');
+    diagnostic.retry_after_seconds = /^\d{1,6}$/.test(retryAfter || '') ? Number(retryAfter) : null;
+    const reader = response.body?.getReader();
+    const chunks = []; let bytes = 0;
+    if (reader) try {
+      while (bytes < 32768) {
+        const next = await reader.read(); if (next.done) break;
+        const part = next.value.slice(0,32768-bytes); chunks.push(part); bytes += part.length;
+      }
+    } finally { await reader.cancel().catch(() => {}); }
+    const prefix = Buffer.concat(chunks);
+    diagnostic.prefix_sha256 = createHash('sha256').update(prefix).digest('hex');
+    diagnostic.challenge_marker = /captcha|access denied|자동입력\s*방지/iu.test(prefix.toString('utf8'));
+    reject(`DANAWA_SEARCH_HTTP_${response.status}`);
+  }
   const html = await response.text();
-  if (/captcha|access denied|자동입력\s*방지/iu.test(text(html).slice(0, 2000))) throw new Error('DANAWA_SEARCH_BLOCKED');
-  if (!html.includes('productListArea')) throw new Error('DANAWA_SEARCH_MARKUP_UNRECOGNIZED');
+  diagnostic.body_sha256 = createHash('sha256').update(html).digest('hex');
+  diagnostic.bytes = Buffer.byteLength(html);
+  if (/captcha|access denied|자동입력\s*방지/iu.test(text(html).slice(0, 2000))) reject('DANAWA_SEARCH_BLOCKED');
+  // No authoritative empty-result fixture exists yet. Do not silently equate an unknown page to zero listings.
+  // The outer wrapper is not product evidence; valid cards can arrive under a different wrapper.
+  const cardCount = elements(html, 'li', 'prod_item').length;
+  diagnostic.product_card_count = cardCount;
+  if (!cardCount) reject(html.includes('productListArea')
+    ? 'DANAWA_SEARCH_NO_CARDS_UNVERIFIED' : 'DANAWA_SEARCH_MARKUP_UNRECOGNIZED');
   return { items: parseDanawaSearchHtml(html, { categoryCode, query: search }),
     diagnostics: [{ page, url: url.toString(), status: response.status }] };
 }

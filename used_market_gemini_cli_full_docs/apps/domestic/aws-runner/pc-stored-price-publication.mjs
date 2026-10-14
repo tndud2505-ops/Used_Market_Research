@@ -59,7 +59,9 @@ export function storeCompletedPricePublication(db, { publicationId, rows, expect
   if (!Array.isArray(allowedSourceIds) || !allowedSourceIds.length) throw new Error('LOCAL_PUBLICATION_SOURCE_SCOPE_REQUIRED');
   const allowed = new Set(allowedSourceIds);
   let versions, asOf;
-  const prepared = rows.map(row => {
+  // Only one expanded row at a time. Retaining a second publication and then
+  // stringifying the entire array risks OOM after the last scope calculation.
+  const prepareRow = row => {
     if (!row.canonical_product_id || !row.market_pool || !row.condition_code || !row.currency
       || !Number.isInteger(row.days) || row.days < 1 || row.days > 730) throw new Error('LOCAL_PUBLICATION_ROW_INVALID');
     const stats = typeof row.stats_json === 'string' ? JSON.parse(row.stats_json) : structuredClone(row.stats_json);
@@ -95,8 +97,14 @@ export function storeCompletedPricePublication(db, { publicationId, rows, expect
     stats.published_window = { from, to: through, days: row.days };
     stats.publication_id = publicationId;
     return { ...row, through_date: through, stats_json: JSON.stringify(stats) };
-  });
-  const checksum = createHash('sha256').update(JSON.stringify([...prepared].sort((a, b) => keyOf(a).localeCompare(keyOf(b))))).digest('hex');
+  };
+  const sorted = [...rows].sort((a, b) => keyOf(a).localeCompare(keyOf(b)));
+  const hash = createHash('sha256').update('[');
+  for (let i = 0; i < sorted.length; i++) {
+    if (i) hash.update(',');
+    hash.update(JSON.stringify(prepareRow(sorted[i])));
+  }
+  const checksum = hash.update(']').digest('hex');
   const timestamp = new Date(publishedAt || asOf).toISOString();
   if (validateOnly) return { checksum, row_count: rows.length };
   db.exec('BEGIN IMMEDIATE');
@@ -110,8 +118,15 @@ export function storeCompletedPricePublication(db, { publicationId, rows, expect
     db.prepare(`INSERT INTO pc_stored_price_publications VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(publicationId, checksum, rows.length, versions.normalization, versions.parser, versions.rule, versions.filter, asOf, timestamp);
     const insert = db.prepare(`INSERT INTO pc_stored_price_publication_rows VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
-    for (const row of prepared) insert.run(publicationId, row.canonical_product_id, row.market_pool, row.condition_code,
-      row.currency, row.days, row.through_date, row.stats_json);
+    const insertedHash = createHash('sha256').update('[');
+    for (let i = 0; i < sorted.length; i++) {
+      const row = prepareRow(sorted[i]);
+      if (i) insertedHash.update(',');
+      insertedHash.update(JSON.stringify(row));
+      insert.run(publicationId, row.canonical_product_id, row.market_pool, row.condition_code,
+        row.currency, row.days, row.through_date, row.stats_json);
+    }
+    if (insertedHash.update(']').digest('hex') !== checksum) throw new Error('LOCAL_PUBLICATION_INPUT_CHANGED');
     const actual = db.prepare('SELECT COUNT(*) AS n FROM pc_stored_price_publication_rows WHERE publication_id = ?').get(publicationId).n;
     if (actual !== rows.length) throw new Error('LOCAL_PUBLICATION_ROW_COUNT_MISMATCH');
     db.exec('COMMIT');

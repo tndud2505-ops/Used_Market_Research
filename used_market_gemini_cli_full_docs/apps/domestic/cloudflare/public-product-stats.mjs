@@ -176,7 +176,7 @@ export async function readStagedProductStatsPage(db, publicationId, kind, offset
 
 // Runs on AWS, after reading back D1. Never trust hashes of chunk descriptors
 // alone: compare both every chunk and the canonical complete row byte stream.
-export async function verifyProductStatsReadback(input, inputRows, inputChunks) {
+export async function verifyProductStatsReadback(input, inputRows, inputChunks, checksumRows = statsChecksum) {
   const metadata = assertPublicationMetadata(input, null);
   const rows = canonicalRows(inputRows);
   const keys = rows.map(statsPublicationKey);
@@ -184,7 +184,7 @@ export async function verifyProductStatsReadback(input, inputRows, inputChunks) 
     throw new Error('staged publication scope count mismatch');
   const sampled = validateChunkRowContract(rows, input, metadata);
   if (sampled !== metadata.expectedNonEmptyScopeCount) throw new Error('staged publication sample count mismatch');
-  if (await statsChecksum(rows) !== metadata.checksum) throw new Error('staged publication full row checksum mismatch');
+  if (await checksumRows(rows) !== metadata.checksum) throw new Error('staged publication full row checksum mismatch');
   const chunks = canonicalChunkManifest(inputChunks);
   if (chunks.length !== Number(input.expected_chunk_count)
     || await statsChunkManifestChecksum(chunks) !== input.chunk_manifest_checksum)
@@ -195,7 +195,7 @@ export async function verifyProductStatsReadback(input, inputRows, inputChunks) 
       || !Number.isSafeInteger(chunk.row_count) || chunk.row_count < 1 || chunk.row_count > 40)
       throw new Error('staged publication chunk count mismatch');
     const part = rows.slice(offset, offset + chunk.row_count);
-    if (part.length !== chunk.row_count || await statsChecksum(part) !== chunk.chunk_checksum
+    if (part.length !== chunk.row_count || await checksumRows(part) !== chunk.chunk_checksum
       || nonEmptyScopeCount(part) !== chunk.non_empty_scope_count
       || statsPublicationBoundaryKey(part[0]) !== chunk.first_scope_key
       || statsPublicationBoundaryKey(part.at(-1)) !== chunk.last_scope_key)

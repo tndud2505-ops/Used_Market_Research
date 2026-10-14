@@ -1,7 +1,7 @@
 [Unit]
 Description=Used Market AWS Node Runner
-Wants=network-online.target used-market-tunnel.service
-After=network-online.target
+Wants=network-online.target used-market-tunnel.service used-market-stats.service
+After=network-online.target used-market-stats.service
 Before=used-market-tunnel.service
 
 [Service]
@@ -12,11 +12,11 @@ StateDirectory=used-market-runner
 StateDirectoryMode=0750
 WorkingDirectory=__APP_ROOT__
 EnvironmentFile=-__RUNNER_ENV_FILE__
-ExecStart=/usr/bin/node __APP_ROOT__/aws-runner/runner.mjs
+ExecStart=/usr/bin/node --max-old-space-size=640 __APP_ROOT__/aws-runner/runner.mjs
 Restart=on-failure
 RestartSec=5
-MemoryHigh=2560M
-MemoryMax=3072M
+MemoryHigh=infinity
+MemoryMax=1024M
 TimeoutStopSec=20
 KillSignal=SIGTERM
 NoNewPrivileges=true

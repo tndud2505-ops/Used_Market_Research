@@ -38,12 +38,15 @@ test('analysis shows recent prices and separates the two price kinds in one char
   const html=read('price-analysis.html');
   assert.match(html,/id="analysis-chart-pane"/);
   assert.doesNotMatch(html,/id="analysis-table-pane"|data-action="analysis-pane"|id="chart-metric"/);
-  assert.ok(html.includes('data-action="chart-recent"'));
-  assert.ok(html.includes('id="chart-window-status"'));
+  assert.doesNotMatch(html,/market-navigation|id="chart-window-status"|data-action="chart-(recent|pan|zoom)"/);
   assert.doesNotMatch(html,/id="chart-(indicators|average-enabled|average-period|samples-enabled)"/);
   assert.doesNotMatch(html,/data-action="chart-period"|id="chart-custom-range"|data-days=/);
   assert.ok(html.includes('id="analysis-prices"'));assert.ok(html.includes('id="chart-price-kind"'));
   assert.match(script,/line\.metricKey===state\.priceKind/);
+  assert.match(script,/sourceLabels: SOURCE_LABELS,includeSparse:false/);
+  assert.doesNotMatch(script,/line\.priceBasis!=='listed-minimum'\|\|state\.source==='danawa'/);
+  assert.match(read('pc-market-chart.mjs'),/'data-price-basis','listed-minimum'/);
+  assert.match(script,/showLegend:false/);
 });
 
 test('analysis uses KSTOCK window geometry without scrollable plot or separate sliders', () => {
@@ -52,13 +55,13 @@ test('analysis uses KSTOCK window geometry without scrollable plot or separate s
   assert.match(read('pc-market-chart.mjs'), /buildMarketView/);
   assert.match(read('pc-market-chart.mjs'), /setPointerCapture/);
 });
-test('builder toolbar keeps actions and disclosure while totals belong to the table footer', () => {
+test('builder toolbar keeps actions while advertising follows the content', () => {
   const html = read('computer-builder.html');
   const toolbar = html.match(/<header class="sf-page-bar sf-builder-bar">([\s\S]*?)<\/header>/)?.[1];
   assert.ok(toolbar);
-  assert.equal([...html.matchAll(/id="contextual-offer"/g)].length, 1);
+  assert.equal([...html.matchAll(/id="adfit-banner"/g)].length, 1);
   for (const name of ['save-build', 'print-build']) assert.ok(toolbar.includes(`data-action="${name}"`));
-  assert.match(html, /aria-label="쿠팡 파트너스 광고" hidden/);
+  assert.match(html, /data-placement="bottom" aria-label="카카오 AdFit 광고" hidden/);
   assert.doesNotMatch(script, /cell\.append\(summary\)|const summary = \$\('#build-summary'\)/);
   assert.doesNotMatch(toolbar, /id="(?:build-summary|tools-summary)"/);
   assert.match(script, /const footer = el\('tfoot'\); footer.id = 'tools-summary'/);
@@ -68,7 +71,6 @@ test('builder toolbar keeps actions and disclosure while totals belong to the ta
   assert.match(toolbarCss, /@media \(max-width:760px\)/);
   assert.match(toolbarCss, /@media print/);
   assert.doesNotMatch(toolbarCss, /(?:html|body)[^{]*\{[^}]*overflow-x\s*:\s*(?:hidden|clip)/);
-  assert.match(read('affiliate.js'), /details\.append\(summary, disclosure\)/, 'moving the ad retains its commission disclosure');
 });
 test('native dialogs are wired without destructive hash navigation or inline handlers', () => {
   assert.match(read('computer-builder.html'), /<dialog id="builder-model-dialog"/);
@@ -136,6 +138,30 @@ function setup({ builder = false, source = '', manufacturer = '', storageFails =
   vm.runInContext(`${factories}\n${declarations}`, context);
   return { context, nodes, state, record: selectedRecord, stored, historyCalls };
 }
+test('analysis retains sparse asks with their real dates without inventing a representative mean', () => {
+  const t=setup(), container=new Node();t.nodes.set('#analysis-prices',container);
+  const data={window:{to:'2026-10-09'},daily:[{date:'2026-10-04',active:{sample_count:1,min:25000,max:25000}}]};
+  const options={source:'bunjang',allowedSourceIds:['bunjang'],sourceLabels:{bunjang:'번개장터'},days:120};
+  assert.equal(core.buildAnalysisSeries(data,options).length,0);
+  const refs=core.buildAnalysisSeries(data,{...options,includeSparse:true}).map(line=>({...line,currency:'KRW'}));
+  t.context.renderLatestPrices(refs,t.record);
+  assert.match(container.textContent,/25,000원/);assert.match(container.textContent,/등록가 참고 · 대표가격 아님/);
+  assert.match(container.textContent,/1건 · 10\.04/);assert.doesNotMatch(container.textContent,/10\.09|평균/);
+  data.daily[0].active={sample_count:2,min:25000,max:30000};
+  t.context.renderLatestPrices(core.buildAnalysisSeries(data,{...options,includeSparse:true}).map(line=>({...line,currency:'KRW'})),t.record);
+  assert.match(container.textContent,/25,000원~30,000원/);assert.doesNotMatch(container.textContent,/27,500/);
+});
+
+test('latest source rail retains missing and failed sources without mixing USD values',()=>{
+  const t=setup(),container=new Node();t.nodes.set('#analysis-prices',container);
+  const sources=[{id:'joonggonara',record:t.record},{id:'bunjang',record:{state:'error'}},{id:'danawa',record:{state:'loading'}},{id:'ebay',record:t.record}];
+  t.context.renderLatestPrices([{id:'ebay:active',label:'eBay',currency:'USD',points:[{date:'2026-10-08',value:25.5,sampleCount:4,priceLabel:'평균'}]}],t.record,sources);
+  const items=container.children[0].children;
+  assert.deepEqual(items.map(item=>item.dataset.source),['joonggonara','bunjang','danawa','ebay']);
+  assert.match(items[0].textContent,/자료 없음/);assert.match(items[1].textContent,/조회 실패/);assert.match(items[2].textContent,/확인 중/);
+  assert.match(items[3].textContent,/\$25\.50/);assert.match(items[3].textContent,/USD/);assert.doesNotMatch(items[3].textContent,/25.50원/);
+});
+
 test('explicit save keeps canonical validated entries, quantity and original storage key', () => {
   const t = setup({ builder: true }); assert.equal(t.context.persistBuild(), true);
   assert.deepEqual(JSON.parse(t.stored.get('used-pick:pc-build:v1')), [{ id: product.canonical_product_id, quantity: 2 }]);
@@ -185,7 +211,15 @@ test('analysis browsing and category filters do not change the chosen chart or s
 test('picker reports genuine sparse history and keeps empty history distinct from a failed lookup',()=>{
   const root={canonical_product_id:product.canonical_product_id,methodology:{days:60,currency:'KRW'},window:{to:'2026-10-07'},daily:[{date:'2026-10-06',active:{sample_count:1,min:45000,max:45000,mean:null,median:null}}]};
   const t=setup({record:{state:'ready',data:root}}),info=t.context.pickerPrice(product.canonical_product_id);
-  assert.equal(info.state,'ready');assert.equal(info.text,'45,000원');assert.match(info.detail,/등록가 1건.*2026-10-06/);
+  assert.equal(info.state,'sparse');assert.equal(info.text,'—');assert.equal(info.coverage,'판매중 1건 · 판매완료 미확인');
+  const daily=[{date:'2026-10-06',active:metric(45000),sold:{sample_count:7}},{date:'2026-10-07',active:metric(46000),sold:{sample_count:2}}];
+  const ready=setup({record:{state:'ready',data:{...root,daily,by_source:[{source_id:'bunjang',daily},{source_id:'joonggonara',daily}]}}});
+  const available=ready.context.pickerPrice(product.canonical_product_id);
+  assert.equal(available.state,'ready');assert.equal(available.coverage,'판매중 5건 · 판매완료 2건');assert.equal(available.sample,'2026.10.07 기준');
+  assert.equal(available.period,'2026.10.06 ~ 2026.10.07');assert.equal(available.detail,undefined);
+  assert.equal(ready.context.pickerPrice(product.canonical_product_id),available,'unchanged row summaries are reused');
+  const unavailable=setup({record:{state:'ready',data:{...root,availability:{status:'NO_EXACT_PUBLICATION'}}}});
+  assert.equal(unavailable.context.pickerPrice(product.canonical_product_id).text,'공개 통계 없음');
   const empty=setup({record:{state:'ready',data:{...root,daily:[]}}});assert.equal(empty.context.pickerPrice(product.canonical_product_id).state,'empty');
   const failed=setup({record:{state:'error',error:'HTTP503'}});assert.equal(failed.context.pickerPrice(product.canonical_product_id).state,'unknown');
 });

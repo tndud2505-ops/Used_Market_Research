@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { parsePriceStatsRequest, priceStatsResponse } from '../aws-runner/pc-price-stats-http.mjs';
+import { parsePriceStatsRequest, priceHistoryResponse, priceStatsResponse } from '../aws-runner/pc-price-stats-http.mjs';
 const now = Date.parse('2026-09-17T06:00:00.000Z');
 const request = parsePriceStatsRequest(new URL('https://test.invalid/api/products/ram%3Ag-skill%3Addr4%3A16gb/price-stats?days=30'), now);
 const incomplete = { active: { sample_count: 37, mean: null, median: null, aggregate_incomplete: true },
@@ -21,5 +21,11 @@ assert.throws(() => priceStatsResponse(historical, exact), error => error.code =
 const low = priceStatsResponse(request, { publication_id: 'synthetic-only', sold: { sample_count: 2, median: null, mean: null } });
 assert.equal(low.confidence.level, '자료 부족', 'genuine low sample size remains distinct');
 assert.equal(low.reference_price.amount, null);
+const dailyUnavailable = priceHistoryResponse(request, {
+  availability: { status: 'UNAVAILABLE', code: 'EXACT_STATS_NOT_READY', reason: 'AGGREGATE_INCOMPLETE' },
+  daily: [], by_source: []
+});
+assert.equal(dailyUnavailable.availability.code, 'EXACT_STATS_NOT_READY',
+  'daily chart responses must preserve the same publication readiness reason as summary responses');
 console.log(JSON.stringify({ status: 'passed', contract: 'agent3-stats-readiness', synthetic_only: true,
   incomplete_not_market_scarcity: true, historical_latest_substitution_rejected: true }));

@@ -7,8 +7,8 @@
   <link rel="canonical" href="https://used-pick.com/price-analysis.html">
   <link rel="icon" href="/assets/mark.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/styles.css?v=pc-tools-v1"><link rel="stylesheet" href="/pc-tools.css?v=price-clarity-v1"><link rel="stylesheet" href="/ui-concept-a.css?v=aligned-shell-v1">
-  <link rel="stylesheet" href="/pc-workspace.css?v=readable-chart-v2">
-  <link rel="stylesheet" href="/adfit-layout.css?v=adfit-rail-v2">
+  <link rel="stylesheet" href="/pc-workspace.css?v=chart-corners-v8">
+  <link rel="stylesheet" href="/adfit-layout.css?v=adfit-all-v3">
   <link rel="stylesheet" href="/site-header-links.css?v=1">
 </head>
 <body class="pc-tools ui-a" data-page="analysis" data-ui-release="search-first-v2">
@@ -22,20 +22,17 @@
     <main id="main" class="tools-main">
     <header class="market-page-heading"><div><h1 id="analysis-title">가격 분석</h1><button id="analysis-model-select" type="button" data-action="open-analysis-picker" aria-haspopup="dialog" aria-controls="analysis-model-dialog">모델 선택</button></div><a id="analysis-listing-link" href="/">매물 보기 ↗</a></header>
     <div id="tools-status" role="status" aria-live="polite">불러오는 중</div>
-    <div id="analysis-prices" class="market-latest-prices" aria-label="최근 확인 가격"></div>
     <div class="market-toolbar">
       <select id="chart-sources" aria-label="차트 사이트"></select>
       <select id="chart-price-kind" aria-label="가격 종류"><option value="active">판매중 가격</option><option value="sold">판매완료 표시가</option></select>
-      <span id="chart-window-status" class="market-window-status"></span>
       <span id="chart-history-status" role="status" aria-live="polite"></span>
-      <div class="market-navigation" role="group" aria-label="차트 이동과 확대">
-        <button type="button" data-action="chart-pan" data-direction="older" aria-label="이전 날짜">←</button><button type="button" data-action="chart-pan" data-direction="newer" aria-label="다음 날짜">→</button>
-        <button type="button" data-action="chart-zoom" data-direction="in" aria-label="차트 확대">+</button><button type="button" data-action="chart-zoom" data-direction="out" aria-label="차트 축소">−</button>
-        <button type="button" data-action="chart-recent">최근으로</button>
-      </div>
     </div>
-    <section id="analysis-workspace" aria-label="가격 분석">
-      <div id="analysis-chart-pane"><div id="price-chart" class="market-chart"></div><p id="chart-coverage" class="tools-caption" hidden></p></div>
+    <section id="analysis-workspace" aria-label="가격 분석" data-prices-open="false">
+      <div id="analysis-chart-pane"><button id="chart-latest-toggle" type="button" data-action="toggle-latest-prices" aria-label="최근 가격 펼치기" aria-expanded="false" aria-controls="analysis-price-rail" title="최근 가격">+</button><div id="price-chart" class="market-chart"></div><p id="chart-coverage" class="tools-caption" hidden></p></div>
+      <aside id="analysis-price-rail" class="market-price-rail" aria-label="사이트별 최신 가격" hidden>
+        <header><h2>최근 가격</h2><button type="button" data-action="toggle-latest-prices" aria-label="최근 가격 닫기">×</button></header>
+        <div id="analysis-prices" class="market-latest-prices" aria-label="최근 대표가격과 참고값"></div>
+      </aside>
     </section>
     <dialog id="analysis-model-dialog" class="up-dialog up-picker-dialog" aria-labelledby="analysis-picker-title">
       <div class="up-dialog-heading"><h2 id="analysis-picker-title" tabindex="-1">분석 모델 선택</h2><button class="up-button" type="button" data-action="close-analysis-picker">닫기</button></div>
@@ -45,11 +42,13 @@
     </dialog>
 
   </main>
-    <aside class="adfit-banner" id="adfit-banner" aria-label="카카오 AdFit 광고" hidden>
+    <aside class="adfit-banner" id="adfit-rail" data-placement="rail" aria-label="카카오 AdFit 광고" hidden>
       <template data-format="desktop"><ins class="kakao_ad_area" style="display:none;" data-ad-unit="DAN-gG0WEoycq7Nup5kT" data-ad-width="160" data-ad-height="600"></ins></template>
+    </aside>
+    <aside class="adfit-banner" id="adfit-banner" data-placement="bottom" aria-label="카카오 AdFit 광고" hidden>
       <template data-format="mobile"><ins class="kakao_ad_area" style="display:none;" data-ad-unit="DAN-gvTVDnxVn9S3leR5" data-ad-width="320" data-ad-height="100"></ins></template>
     </aside>
   </div>
-  <script type="module" src="/pc-tools.js?v=readable-chart-v2"></script>
+  <script type="module" src="/pc-tools.js?v=adfit-all-v3"></script>
 </body>
 </html>

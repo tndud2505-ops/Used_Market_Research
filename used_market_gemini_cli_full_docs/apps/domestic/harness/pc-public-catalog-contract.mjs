@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { toolQueryMatches } from '../web-backend/public/pc-tools-catalog.mjs';
+import { pcProductMatchesQuery } from '../market/logic/pc-product-search.mjs';
 import { once } from "node:events";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
@@ -22,6 +24,22 @@ import {
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const catalog = publicPcCatalogForApi();
+const cpuFamily = publicPcModelsForApi({ category: 'CPU', q: '9600' }).models;
+for (const suffix of ['k', 'kf']) {
+  assert.ok(cpuFamily.some(p => p.canonical_product_id === `cpu:intel:i5-9600${suffix}`));
+  assert.deepEqual(publicPcModelsForApi({ q: `i5-9600${suffix}` }).models.map(p => p.canonical_product_id),
+    [`cpu:intel:i5-9600${suffix}`]);
+}
+for (const p of publicPcModelsForApi({ category: 'CPU' }).models) {
+  for (const q of ['9600', 'i5 9600', '9600K', '9600KF']) {
+    assert.equal(toolQueryMatches(p, q), pcProductMatchesQuery(p, q), `browser/API parity: ${q} ${p.canonical_product_id}`);
+  }
+}
+for (const name of ['i5-19600K', 'i5-96000KF']) {
+  const p = { canonical_display_name: name };
+  assert.equal(pcProductMatchesQuery(p, '9600'), false);
+  assert.equal(toolQueryMatches(p, '9600'), false);
+}
 assert.equal(PC_PRODUCT_MASTER_V2_VERSION, 5);
 assert.equal(catalog.master_version, "public-pc-5");
 const categoryCodes = catalog.categories.map((category) => category.code);
@@ -606,5 +624,25 @@ try {
   server.close();
   if (server.listening) await once(server, "close");
 }
+
+for (const [title, eligible] of [
+  ['HGST 2TB 기업용 SATA HDD HUS724020ALA640', true],
+  ['HGST 2TB 기업용 SAS HDD HUS724020ALS640', false],
+  ['HGST 기업용 HDD 2TB', false],
+  ['HGST 기업용 SATA HDD 2TB 외장하드', false]
+]) {
+  const result=classifyPcPartListingPublic({title,price:40000,currency:'KRW'});
+  assert.equal(result.statistics_eligible,eligible,title);
+  assert.equal(result.market_segment,'SERVER_ENTERPRISE','retain enterprise identity');
+}
+for (const title of [
+  '[중고] [리퍼] 삼성전자 DB400S7B 슬림PC i3-6100 듀얼스토리지 Win11',
+  'LG 미니PC i3-6100 Windows 10'
+]) assert.equal(classifyPcPartListingPublic({title,price:231830,currency:'KRW'}).listing_kind,'FULL_SYSTEM',title);
+for (const title of [
+  '삼성 DB400S7B 슬림PC에서 탈거한 i3-6100 CPU 단품',
+  'i3-6100 CPU 단품 슬림 PC 호환 Windows 11 테스트',
+  '인텔 i3-6100 CPU'
+]) assert.equal(classifyPcPartListingPublic({title,price:7000,currency:'KRW'}).statistics_eligible,true,title);
 
 console.log("PC public catalog contract passed");

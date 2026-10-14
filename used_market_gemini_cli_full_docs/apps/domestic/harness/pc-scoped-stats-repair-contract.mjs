@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
-import { calculateScopedReplacements, planScopedStatsRepair } from '../aws-runner/pc-stats-repair-plan.mjs';
+import { calculateScopedReplacements, planScopedStatsRepair, repairScopedDailyResults } from '../aws-runner/pc-stats-repair-plan.mjs';
 import { statsChecksum } from '../cloudflare/public-product-stats.mjs';
 import { PcPartsLedger } from '../aws-runner/pc-parts-ledger.mjs';
 import { PcShadowPipeline } from '../aws-runner/pc-shadow-pipeline.mjs';
@@ -60,4 +60,11 @@ ledger.rebuildAndGetPriceStats=function(options){rebuild.call(this,options);thro
 assert.throws(()=>calculateScopedReplacements(ledger,[scope(base.rows[0])],optionsFor),/fixture failure/);
 assert.equal(snapshot(),before,'failed preview also restores all tables');
 db.close();
+const dailyCalls=[];
+const dailyLedger={db:{prepare:()=>({get:()=>({as_of:'2026-10-11T18:00:00.000Z'})})},
+  rebuildDailyPriceStats:options=>dailyCalls.push(options)};
+const deferred=[{...scope(base.rows[0]),action:'DEFER_TO_SCHEDULED_REFRESH'}];
+assert.equal(repairScopedDailyResults(dailyLedger,deferred,()=>({asOf}), 'PRICE_CHANGE'),0);
+assert.equal(repairScopedDailyResults(dailyLedger,deferred,()=>({asOf}), 'PRODUCT_IDENTITY'),1);
+assert.equal(dailyCalls[0].asOf,'2026-10-11T18:00:00.000Z','newer affected daily window is repaired even when old period needs no replacement');
 console.log(JSON.stringify({status:'passed',contract:'pc-scoped-stats-repair',threshold_krw:3000,untouched_models_preserved:true,preview_rollback_verified:true}));

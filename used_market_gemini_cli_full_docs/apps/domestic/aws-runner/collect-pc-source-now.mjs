@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { spawnSync } from 'node:child_process';
 import { writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -6,10 +7,12 @@ import { collectOne, enrichHelloMarketDetails } from "../cloudflare/live-search.
 import { pcCollectionTargetSetV2 } from "../cloudflare/pc-directory-http.mjs";
 import {
   PC_SOURCE_REGISTRY,
+  DANAWA_COLLECTION_LIMITS,
   getPcSource,
   operatorAttestedSourceGovernance,
   sourceRuntimeForScheduler,
-  sourceRuntimeAfterFailure
+  sourceRuntimeAfterFailure,
+  sourceRuntimePauseReason
 } from "../collector/logic/pc-source-registry.mjs";
 import {
   SPECIALIST_FIXTURE_PARSERS
@@ -207,6 +210,11 @@ function d1ProjectionSql(items, generatedAt) {
   };
 }
 
+// Refuse overlapping production operators before opening or migrating the DB.
+if (sourceKey === 'danawa' && process.platform === 'linux' && path.resolve(indexPath) === '/var/lib/used-market-runner/search-index.sqlite') {
+  const service = spawnSync('systemctl', ['is-active', 'used-market-runner.service'], {encoding:'utf8'});
+  if (service.status !== 3 || service.stdout.trim() !== 'inactive') throw new Error('DANAWA_MANUAL_REQUIRES_STOPPED_RUNNER');
+}
 const index = new SearchIndex({ filePath: indexPath, backupDir: path.join(indexRoot, "backups") });
 const ledger = new PcPartsLedger({ db: index.db });
 const startedAt = new Date().toISOString();
@@ -234,7 +242,7 @@ try {
   ledger.activateCollectionTargets(pcCollectionTargetSetV2());
   const pipeline = new PcShadowPipeline({ ledger });
   await pipeline.initialize();
-  const targets = filterCollectionTargets(ledger.listActiveCollectionTargets(sourceKey), {
+  let targets = filterCollectionTargets(ledger.listActiveCollectionTargets(sourceKey), {
     cadenceClass: collectCadenceClass,
     productIds: collectProductIds,
     targetIds: collectTargetIds,
@@ -243,6 +251,13 @@ try {
   });
   if (targets.length === 0) throw new Error(`NO_COLLECTION_TARGETS:${sourceKey}:${collectCadenceClass}`);
   runtimeBeforeRun = sourceRuntimeForScheduler(sourceKey, {persisted:ledger.getSource(sourceKey)});
+  const pauseReason = sourceRuntimePauseReason(runtimeBeforeRun, startedAt);
+  if (pauseReason) throw new Error(`${pauseReason}:${sourceKey}`);
+  if (sourceKey === 'danawa') {
+    const remaining = ledger.remainingSourceRequestBudget(sourceKey, DANAWA_COLLECTION_LIMITS.requestsPerHour);
+    if (!remaining) throw new Error('DANAWA_REQUEST_BUDGET_EXHAUSTED');
+    targets = targets.slice(0, remaining);
+  }
   crawlRunId = ledger.startCrawlRun({ sourceId: sourceKey, startedAt, adapterVersion: "operator-source-refresh-v1" });
   const collectTarget = async (target) => ({ target, items: await collectTargetItems(target) });
   const settled = [];
@@ -263,7 +278,7 @@ try {
   const blockedFailure = failureMessages.some((message) => /(?:HTTP[_ ]?(?:403|429)|\b403\b|\b429\b|blocked|captcha)/iu.test(message));
   collectionMetrics = {request_count:settled.length,request_failure_count:failed.length,
     http_blocked_count:failureMessages.filter(message => /HTTP_(?:403|429)|BLOCKED/iu.test(message)).length};
-  if (sourceKey === "danawa" && blockedFailure) {
+  if (sourceKey === "danawa" && (blockedFailure || failureMessages.some(message => /MARKUP_UNRECOGNIZED|NO_CARDS_UNVERIFIED/u.test(message)))) {
     danawaFailureRuntime = sourceRuntimeAfterFailure(sourceKey, runtimeBeforeRun,
       new Error(failureMessages.join("; ")), new Date(startedAt));
   }

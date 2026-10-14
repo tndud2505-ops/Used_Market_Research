@@ -1,16 +1,17 @@
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
-import { mkdtempSync, writeFileSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, rmSync, existsSync, readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseDanawaSearchHtml, collectDanawaSearchListings, collectDanawaSearchTargetBatch, createDanawaPacedFetch } from '../collector/logic/danawa-search.mjs';
-import { getSourceRuntimeDefaults, operatorAttestedSourceGovernance, runSourceCollection } from '../collector/logic/pc-source-registry.mjs';
+import { DANAWA_COLLECTION_LIMITS, getSourceRuntimeDefaults, operatorAttestedSourceGovernance, runSourceCollection } from '../collector/logic/pc-source-registry.mjs';
 import { PcPartsLedger } from '../aws-runner/pc-parts-ledger.mjs';
 import { PcShadowPipeline } from '../aws-runner/pc-shadow-pipeline.mjs';
 import { withDomesticStatsScopes } from '../market/logic/pc-market-pools.mjs';
 import { canonicalSourceListingToken } from '../aws-runner/pc-source-listing-identity.mjs';
+import { collectDanawaCategoryListings } from '../collector/logic/pc-source-adapters.mjs';
 import { pcCollectionTargetSetV2 } from '../cloudflare/pc-directory-http.mjs';
 
 const card = (title, price, code, specs = '', category = 'RAM', catalogue = true, variant = '16GB') => `<li class="prod_item" id="productItem${code}">
@@ -64,9 +65,21 @@ const collected = await collectDanawaSearchListings({ query: 'DDR5 16GB', catego
   return new Response(html);
 } });
 assert.equal(collected.items.length, 2);
+const differentWrapper = await collectDanawaSearchListings({ query:'DDR5 16GB',categoryCode:'RAM',
+  fetchImpl:async()=>new Response(html.replace('productListArea','searchResults')) });
+assert.deepEqual(differentWrapper.items,collected.items,'recognized product cards do not depend on an outer wrapper name');
 await assert.rejects(collectDanawaSearchListings({ query: 'RAM', fetchImpl: async () => new Response('', {status: 403}) }), /HTTP_403/u);
+await assert.rejects(collectDanawaCategoryListings({categoryCode:'RAM'}),/DANAWA_LEGACY_LIVE_DISABLED/);
+let legacyCalls=0;
+await assert.rejects(collectDanawaCategoryListings({categoryCode:'RAM',fetchImpl:async()=>{legacyCalls++;return new Response('',{status:403});}}),/DANAWA_HTTP_403/);
+assert.equal(legacyCalls,1,'retired diagnostic adapter must not retry access denial');
 
 let fakeNow = 0;
+const manualSource=readFileSync(new URL('../aws-runner/collect-pc-source-now.mjs',import.meta.url),'utf8');
+assert.ok(manualSource.indexOf('DANAWA_MANUAL_REQUIRES_STOPPED_RUNNER')<manualSource.indexOf('new SearchIndex('),'operator service guard runs before any DB open or migration');
+const localDenied=spawnSync(process.execPath,[fileURLToPath(new URL('../aws-runner/collect-pc-local.mjs',import.meta.url))],{
+  env:{...process.env,PC_LOCAL_SOURCES:'danawa'},encoding:'utf8',timeout:10_000});
+assert.equal(localDenied.status,1);assert.match(localDenied.stderr,/DANAWA_LOCAL_LIVE_DISABLED_USE_PRODUCTION_SCHEDULER/);
 const requestedAt = [];
 const pacedFetch = createDanawaPacedFetch({ now: () => fakeNow,
   wait: async ms => { fakeNow += ms; },
@@ -74,8 +87,16 @@ const pacedFetch = createDanawaPacedFetch({ now: () => fakeNow,
 });
 await Promise.all([pacedFetch('first'), pacedFetch('second'), pacedFetch('third')]);
 assert.equal(requestedAt.length, 3);
-assert.ok(requestedAt.slice(1).every((time, index) => time - requestedAt[index] >= 5_000),
-  'even concurrent callers must leave five seconds between Danawa requests');
+assert.ok(requestedAt.slice(1).every((time, index) => time - requestedAt[index] >= 10_000),
+  'even concurrent callers must leave ten seconds between Danawa requests');
+let cappedCalls=0;
+await collectDanawaSearchTargetBatch({targets:Array.from({length:200},(_,i)=>i),collectTarget:async()=>{cappedCalls++;}});
+assert.equal(cappedCalls,20,'scheduled and manual callers share the same conservative batch ceiling');
+let unknownCalls=0;
+await collectDanawaSearchTargetBatch({targets:[1,2,3,4],collectTarget:async()=>{unknownCalls++;throw new Error('DANAWA_SEARCH_MARKUP_UNRECOGNIZED');}});
+assert.equal(unknownCalls,2,'repeated structural failure stops the batch');
+await assert.rejects(collectDanawaSearchListings({query:'RAM',fetchImpl:async()=>new Response('<div id="productListArea"></div>')}),/NO_CARDS_UNVERIFIED.*body_sha256/);
+await assert.rejects(collectDanawaSearchListings({query:'RAM',fetchImpl:async()=>new Response('<html>new layout</html>')}),/MARKUP_UNRECOGNIZED.*body_sha256/);
 
 const batchTargets = Array.from({length:85}, (_, index) => ({target_id:String(index)}));
 for (const message of ['DANAWA_SEARCH_HTTP_403', 'DANAWA_SEARCH_HTTP_429', 'DANAWA_SEARCH_BLOCKED']) {
@@ -109,7 +130,20 @@ assert.equal(lateBlocked.status, 'partial_success', 'a late block cannot be hidd
 assert.equal(lateBlocked.reason, 'SOURCE_ACCESS_BLOCKED');
 assert.deepEqual(lateBlocked.result.items, parsed);
 assert.equal(lateBlocked.next_runtime.last_succeeded_at, previousSuccess);
-assert.ok(Date.parse(lateBlocked.next_runtime.backoff_until) > Date.parse(blockedNow));
+assert.equal(lateBlocked.next_runtime.runtime_status,'QUARANTINED');
+assert.ok(Date.parse(lateBlocked.next_runtime.quarantine_until)-Date.parse(blockedNow)>=DANAWA_COLLECTION_LIMITS.accessCooldownMs);
+const duringCooldown=await runSourceCollection({sourceKey:'danawa',now:'2026-10-03T01:19:00.000Z',
+  governance:operatorAttestedSourceGovernance('danawa',{now:'2026-10-03T01:19:00.000Z'}),runtime:lateBlocked.next_runtime,
+  adapter:{sourceKey:'danawa',collectIncremental:async()=>assert.fail('quarantine must not make a request')}});
+assert.equal(duringCooldown.reason,'SOURCE_QUARANTINED');
+const structuralPartial = await runSourceCollection({sourceKey:'danawa',now:blockedNow,
+  governance:operatorAttestedSourceGovernance('danawa',{now:blockedNow}),
+  runtime:{...getSourceRuntimeDefaults('danawa'),last_succeeded_at:previousSuccess},
+  adapter:{sourceKey:'danawa',collectIncremental:async()=>({items:parsed,metrics:{request_count:20,request_failure_count:1,parse_failure_count:1}})}});
+assert.equal(structuralPartial.status,'partial_success','even one structural error is not a clean success');
+assert.equal(structuralPartial.next_runtime.last_succeeded_at,previousSuccess);
+assert.ok(Date.parse(structuralPartial.next_runtime.backoff_until)>Date.parse(blockedNow));
+assert.deepEqual(structuralPartial.result.items,parsed,'valid samples survive partial parse failure');
 
 const directTargets = pcCollectionTargetSetV2().targets.filter(target => target.categoryCode === 'RAM'
   && target.cadenceClass === 'HOURLY_CATEGORY' && target.sourceKeys.includes('danawa')).slice(0, 3);
@@ -145,13 +179,20 @@ for (const partial of [false, true]) {
         partial ? 2 : 1, 'unattempted targets retain their previous runtime');
       assert.equal(fixtureDb.prepare("SELECT COUNT(*) AS n FROM pc_source_target_runtime WHERE source_id='danawa' AND last_succeeded_at IS NOT NULL").get().n,
         0, 'failed persistence must not mark fetched targets as successfully stored');
-      const runtime = fixtureDb.prepare("SELECT failure_count,backoff_until,last_succeeded_at FROM source_runtime WHERE source_id='danawa'").get();
+      const runtime = fixtureDb.prepare("SELECT failure_count,quarantine_until,last_succeeded_at FROM source_runtime WHERE source_id='danawa'").get();
       assert.equal(runtime.failure_count, 1);
-      assert.ok(runtime.backoff_until, 'persist Danawa backoff even if partial SQL export subsequently fails');
+      assert.ok(runtime.quarantine_until, 'persist immediate Danawa cooldown even if partial SQL export subsequently fails');
       assert.equal(runtime.last_succeeded_at, null);
       if (partial) assert.ok(fixtureDb.prepare("SELECT COUNT(*) AS n FROM raw_listings WHERE source_id='danawa'").get().n > 0,
         'preserve the valid partial collection when export fails');
     } finally { fixtureDb.close(); }
+    const retry=spawnSync(process.execPath,['--import',pathToFileURL(preload).href,
+      fileURLToPath(new URL('../aws-runner/collect-pc-source-now.mjs',import.meta.url))],{
+      env:{...process.env,PC_COLLECT_SOURCE:'danawa',PC_COLLECT_TARGET_LIMIT:'1',RUNNER_INDEX_DIR:fixtureRoot,
+        RUNNER_INDEX_PATH:path.join(fixtureRoot,'index.sqlite'),D1_IMPORT_URL:'',CLOUDFLARE_MANUAL_RUN_TOKEN:'',IMPORT_TOKEN:'',PC_D1_SQL_OUTPUT:output},encoding:'utf8',timeout:10_000});
+    assert.equal(retry.status,1);assert.match(retry.stderr,/SOURCE_QUARANTINED:danawa/);
+    const retryDb=new DatabaseSync(path.join(fixtureRoot,'index.sqlite'),{readOnly:true});
+    try{assert.equal(retryDb.prepare('SELECT COUNT(*) AS n FROM crawl_runs').get().n,1,'manual retry cannot open another crawl during cooldown');}finally{retryDb.close();}
   } finally {
     assert.equal(path.dirname(path.resolve(fixtureRoot)), path.resolve(os.tmpdir()));
     assert.ok(path.basename(fixtureRoot).startsWith('used-pick-danawa-'));
@@ -161,7 +202,32 @@ for (const partial of [false, true]) {
 
 const db = new DatabaseSync(':memory:');
 const ledger = new PcPartsLedger({ db }); ledger.migrate();
+ledger.upsertSource({sourceId:'danawa',displayName:'Danawa',marketPool:'KR_DEALER_USED',policyStatus:'APPROVED',runtimeStatus:'ENABLED'});
+const actualNow = new Date().toISOString();
+db.prepare("UPDATE source_runtime SET runtime_status='QUARANTINED',quarantine_until=? WHERE source_id='danawa'").run(new Date(Date.now()+3600000).toISOString());
+assert.throws(()=>ledger.startCrawlRun({sourceId:'danawa',startedAt:'2099-01-01'}),/not enabled/,'future supplied run time cannot bypass quarantine');
+db.prepare("UPDATE source_runtime SET quarantine_until=? WHERE source_id='danawa'").run(new Date(Date.now()-3600000).toISOString());
+const retried = ledger.startCrawlRun({sourceId:'danawa',startedAt:actualNow});
+ledger.finishCrawlRun({crawlRunId:retried,status:'QUARANTINED',requestCount:1,requestFailureCount:1,httpBlockedCount:1,error:'DANAWA_SEARCH_HTTP_403'});
+assert.equal(ledger.getSource('danawa').runtime_status,'QUARANTINED','failure audit does not enable access');
+assert.equal(ledger.remainingSourceRequestBudget('danawa',20),19);
+db.prepare("UPDATE source_runtime SET runtime_status='ENABLED',quarantine_until=NULL WHERE source_id='danawa'").run();
+const reserved = ledger.startCrawlRun({sourceId:'danawa',startedAt:actualNow});
+assert.equal(ledger.remainingSourceRequestBudget('danawa',20),0,'running work reserves budget');
+ledger.finishCrawlRun({crawlRunId:reserved,status:'FAILED',requestCount:0});
+db.prepare("UPDATE crawl_runs SET started_at=?,finished_at=? WHERE crawl_run_id=?")
+  .run(new Date(Date.now()-61*60000).toISOString(),new Date(Date.now()-54*60000).toISOString(),retried);
+assert.equal(ledger.remainingSourceRequestBudget('danawa',20),19,'later requests stay reserved until a full hour after batch end');
+assert.equal(ledger.remainingSourceRequestBudget('danawa',20,new Date(Date.now()+7*60000).toISOString()),20,'expired finished batch releases budget');
+db.prepare("UPDATE crawl_runs SET run_status='RUNNING',started_at=? WHERE crawl_run_id=?")
+  .run(new Date(Date.now()-2*3600000).toISOString(),reserved);
+assert.equal(ledger.remainingSourceRequestBudget('danawa',20),0,'unfinished run cannot age out of reservation');
+ledger.finishCrawlRun({crawlRunId:reserved,status:'FAILED',requestCount:0});
 const pipeline = new PcShadowPipeline({ ledger }); await pipeline.initialize();
+const diagnostic = ledger.startCrawlRun({sourceId:'danawa',startedAt:actualNow,adapterVersion:'operator-http-diagnostic-only-v1'});
+ledger.finishCrawlRun({crawlRunId:diagnostic,status:'SUCCEEDED',requestCount:1,parsedCount:8,collectedCount:0});
+assert.equal(ledger.getSourceCollectionCoverage('danawa').last_committed_crawl_at,null,'HTTP-only diagnostic is not a committed collection');
+assert.equal(ledger.remainingSourceRequestBudget('danawa',20),18,'HTTP diagnostic still consumes request budget');
 assert.equal(pipeline.normalizeItem(brands.find(item => item.title.includes('마이크론'))).normalized.canonicalProductId, 'ram:micron:ddr5:16gb');
 const observedAt = '2026-09-30T03:00:00.000Z';
 const projections = parsed.map(item => pipeline.recordItem(item, observedAt));

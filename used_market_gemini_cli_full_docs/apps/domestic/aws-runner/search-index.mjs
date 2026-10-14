@@ -2,7 +2,11 @@ import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, renameSync, statSync, unlinkSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { comparePcListingRows, dedupePcListingRows } from "../cloudflare/pc-listings-contract.mjs";
+import {
+  comparePcListingRows,
+  dedupePcListingRows,
+  pcListingStatisticsCoverage
+} from "../cloudflare/pc-listings-contract.mjs";
 import { assertBackupSpace } from './backup-storage-policy.mjs';
 
 const HOUR_MS = 60 * 60 * 1000;
@@ -1142,10 +1146,13 @@ export class SearchIndex {
       where.push(`site IN (${sqlPlaceholders(sites)})`);
       params.push(...sites);
     }
-    const sourceCountWhere = [...where];
-    const sourceCountParams = [...params];
     const after = options.after && typeof options.after === "object" ? options.after : null;
-    const candidateRows = this.db.prepare(`SELECT * FROM listings
+    // With a model constraint SQLite can otherwise choose a broad non-null
+    // product scan. Pin the existing product index so equality/IN seeks stay
+    // bounded to the requested models; predicates and dedupe are unchanged.
+    const modelIndex = canonicalProductId || canonicalProductIds
+      ? ' INDEXED BY idx_listings_pc_product_recent' : '';
+    const candidateRows = this.db.prepare(`SELECT * FROM listings${modelIndex}
       WHERE ${where.join(" AND ")}`).all(...params);
     const rows = dedupePcListingRows(candidateRows)
       .sort((left, right) => comparePcListingRows(left, right, sort));
@@ -1158,13 +1165,10 @@ export class SearchIndex {
     const hasMore = cursorFound && pageStart + page.length < rows.length;
     const last = page.at(-1);
     const latestObservedAt = candidateRows.reduce((latest, row) => String(row.last_checked_at) > latest ? String(row.last_checked_at) : latest, "");
-    const sourceIdentityRows = !after?.item_id
-      ? this.db.prepare(`SELECT item_id, site, url, last_checked_at
-        FROM listings WHERE ${sourceCountWhere.join(" AND ")}`).all(...sourceCountParams)
-      : [];
-    const dedupedSourceRows = dedupePcListingRows(sourceIdentityRows);
     const sourceTotals = {};
-    for (const row of dedupedSourceRows) {
+    // These are the same scope and identities already read and deduplicated
+    // above. Reuse them instead of scanning the scope again just for counts.
+    for (const row of !after?.item_id ? rows : []) {
       sourceTotals[row.site] = Number(sourceTotals[row.site] || 0) + 1;
     }
     const modelCounts = {};
@@ -1174,6 +1178,13 @@ export class SearchIndex {
         if (id) modelCounts[id] = (modelCounts[id] || 0) + 1;
       }
     }
+    const statisticsCoverage = pcListingStatisticsCoverage(rows.map((row) => {
+      const metadata = jsonObject(row.pc_metadata_json);
+      return {
+        statistics_eligible: metadata.statistics_eligible === true,
+        statistics_exclusion_reasons: metadata.statistics_exclusion_reasons
+      };
+    }), rows.length);
     return {
       items: page.map(publicItem),
       total: rows.length,
@@ -1181,6 +1192,7 @@ export class SearchIndex {
       latestObservedAt: latestObservedAt || null,
       sourceTotals,
       modelCounts,
+      statisticsCoverage,
       cursorFound,
       nextAfter: hasMore && last ? { item_id: last.item_id } : null
     };
@@ -1393,7 +1405,7 @@ export class SearchIndex {
         this.db.prepare(`
           DELETE FROM listings WHERE item_id IN (
             SELECT l.item_id FROM listings l
-             WHERE l.active = 1
+             WHERE l.active = 1 AND l.pc_category_code IS NULL AND l.pc_canonical_product_id IS NULL
                AND NOT EXISTS (
                  SELECT 1
                    FROM query_listings ql
@@ -1894,7 +1906,7 @@ export class SearchIndex {
         this.db.prepare(`
           DELETE FROM listings WHERE item_id IN (
             SELECT l.item_id FROM listings l
-             WHERE l.active = 1
+             WHERE l.active = 1 AND l.pc_category_code IS NULL AND l.pc_canonical_product_id IS NULL
                AND NOT EXISTS (
                  SELECT 1
                    FROM query_listings ql
@@ -1918,7 +1930,8 @@ export class SearchIndex {
       }
     });
     this.db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
-    if (options.pressure === true) this.db.exec("VACUUM");
+    // The same database also owns durable PC observations and price history.
+    // Compaction is an explicit storage operation, never a cache-request side effect.
     return this.status();
   }
 
@@ -1926,6 +1939,9 @@ export class SearchIndex {
     if (!this.backupDir || this.filePath === ":memory:") return null;
     mkdirSync(this.backupDir, { recursive: true });
     const destination = path.join(this.backupDir, `search-index-${iso(this.now()).slice(0, 10)}.sqlite`);
+    // Offline maintenance has already verified this lossless replacement.
+    // Do not recreate another full-size copy on same-day retries.
+    if (existsSync(`${destination}.gz`)) return `${destination}.gz`;
     if (!existsSync(destination)) {
       assertBackupSpace(this.filePath, this.backupDir);
       const temporary = `${destination}.${randomUUID()}.partial`;

@@ -10,8 +10,15 @@ function shiftUtcDate(date, days) {
 export function isLatestCompletedDailyPublication(query, stats) {
   if (query?.isHistorical || query?.asOfExplicit || !stats?.publication_id) return false;
   const published = stats?.published_window;
-  const expectedTo = shiftUtcDate(query.asOfDate, -1);
+  const previousDay = shiftUtcDate(query.asOfDate, -1);
+  // An explicit latest-published read is a dated reference, not a promise that
+  // today's scheduled calculation finished. Exact/date-specific reads retain
+  // the strict adjacent-day rule. Never accept a future or malformed window.
+  const expectedTo = query.allowLastPublished ? published?.to : previousDay;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(expectedTo || '') || expectedTo > previousDay
+    || expectedTo < query.window.history_from) return false;
   const expectedFrom = shiftUtcDate(expectedTo, -(Number(query.days) - 1));
+  if (expectedFrom < query.window.history_from) return false;
   return published?.from === expectedFrom
     && published?.to === expectedTo
     && Number(published?.days) === Number(query.days)

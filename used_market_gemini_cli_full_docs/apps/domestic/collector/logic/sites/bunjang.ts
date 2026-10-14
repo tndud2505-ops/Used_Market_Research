@@ -23,7 +23,7 @@ export const bunjangAdapter = createBrowserSiteAdapter({
     urlOnItem: true
   },
   debugNotes: [
-    "the visible search page is now treated as a shell while collection pulls actual listings from the public find_v2 API",
+    "the visible search page is treated as a shell while collection uses the public v8 web search API and its opaque cursor",
     "API search is requested with recent ordering so market windows receive usable posted_at timestamps"
   ],
   categoryRendering: "dynamic",

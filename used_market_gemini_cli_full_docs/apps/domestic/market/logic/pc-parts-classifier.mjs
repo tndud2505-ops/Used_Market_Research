@@ -246,12 +246,16 @@ function detectSpecialKind(text, evidence, title = text) {
   const cpuComponentWording = /컴퓨터.{0,20}\bCPU\b.{0,20}(?:RYZEN|라이젠|I[3579][ -]?\d{3,5}|\d{4,5}X(?:3D)?)/iu.test(title);
   const componentRemovalWording = componentGroups.size === 1
     && /(?:분리|탈거|적출|장착\s*테스트|테스트\s*후|컴퓨터\s*부품|데스크탑\s*부품)/iu.test(title);
+  const compactPcConfiguration = componentGroups.has('CPU')
+    && /(?:슬림|미니)\s*PC/iu.test(title)
+    && /듀얼\s*스토리지|\b(?:WIN(?:DOWS)?\s*(?:10|11))\b|(?:삼성(?:전자)?|LG)\s+[A-Z]{2,}\d{3,}/iu.test(title)
+    && !componentRemovalWording && !/단품|CPU\s*만|호환|지원|PC\s*용|에서\s*사용/iu.test(title);
   const clearDesktopSystem = !cpuComponentWording && !componentRemovalWording
     && /(?:^|[^A-Z])PC\s*(?:팝니다|판매(?:합니다)?|팔아요|급처)|(?:데스크탑|데스크톱)\s*(?:본체\s*)?(?:팝니다|판매(?:합니다)?|팔아요|급처)|(?:중고|게임용|사무용|업무용|브랜드)\s*컴퓨터|(?:게임용|사무용|업무용)\s*(?:PC|데스크탑)|미니\s*컴퓨터|HP\s*(?:PRODESK|프로\s*데스크|ELITEDESK|엘리트\s*데스크|PAVILION|파빌리온|일체형)|컴퓨터.{0,30}(?:RYZEN|라이젠|\d{4,5}X(?:3D)?|울트라\s*[3579]?[- ]?\d{3}[A-Z]*|I[3579][ -]?\d{4,5}[A-Z]*)|(?:RYZEN|라이젠|\d{4,5}X(?:3D)?|울트라\s*[3579]?[- ]?\d{3}[A-Z]*|I[3579][ -]?\d{4,5}[A-Z]*).{0,30}(?:데스크탑(?:\s*PC)?|컴퓨터\s*(?:팝니다|판매|급처)?)/iu.test(title);
   const namedGpuPortable = hasGpuModel && PORTABLE_GPU_SYSTEM_PATTERN.test(title)
     && !/(?:탈거|분리|적출|부품|쿨러|팬|키보드|배터리|어댑터|호환|장착\s*테스트|에서\s*사용)/iu.test(title);
   const fullSystem = explicitSystem || describedSystem || describedPortableSystem || namedPortableSystem || namedGpuPortable
-    || workstationSystem || describedCompactSystem || componentRichSystem || clearDesktopSystem;
+    || workstationSystem || describedCompactSystem || compactPcConfiguration || componentRichSystem || clearDesktopSystem;
   if (fullSystem) {
     addEvidence(evidence, 'listing_kind', fullSystem.matchedText || [...componentGroups].join('+'), 'FULL_SYSTEM');
     return 'FULL_SYSTEM';
@@ -1201,11 +1205,16 @@ export function classifyPcPartListingPublic(input, options = {}) {
   const fields = publicSpecificFields(category, model, text, base, exactMotherboardProduct, normalizedTitle(input));
   const canonicalProductId = publicCanonicalProductId(category, model, text, marketSegment, base, fields, motherboardResolution);
   const saleScopeExclusion = statisticsSaleScopeExclusion(input);
+  // Enterprise branding does not make an explicitly internal SATA HDD a
+  // different electrical interface. Keep its segment, and keep SAS/unknown out.
+  const comparableSegment = marketSegment === 'CONSUMER_DESKTOP'
+    || (category === 'HDD' && marketSegment === 'SERVER_ENTERPRISE'
+      && fields.interface === 'SATA' && fields.placement === 'INTERNAL');
   const exclusionReasons = unique([
     ...(base.exclusion_reasons || []),
     ...(saleScopeExclusion ? [saleScopeExclusion] : []),
     ...(category === 'UNSUPPORTED_CATEGORY' ? ['UNSUPPORTED_CATEGORY'] : []),
-    ...(marketSegment !== 'CONSUMER_DESKTOP' ? ['MARKET_SEGMENT_OUT_OF_SCOPE'] : []),
+    ...(!comparableSegment ? ['MARKET_SEGMENT_OUT_OF_SCOPE'] : []),
     ...(!model && category !== 'UNSUPPORTED_CATEGORY' ? ['MODEL_AMBIGUOUS'] : []),
     ...((category === 'MOTHERBOARD' && ['SINGLE', 'MULTI_SAME'].includes(listingType) && !exactMotherboardProduct) ? ['EXACT_MODEL_REQUIRED'] : []),
     ...((category === 'MOTHERBOARD' && motherboardResolution?.reason === 'MANUFACTURER_CONFLICT') ? ['MANUFACTURER_CONFLICT'] : []),
@@ -1214,7 +1223,7 @@ export function classifyPcPartListingPublic(input, options = {}) {
     ...((category === 'PSU' && /(?:케이블\s*(?:없음|누락)|케이블\s*미포함)/iu.test(text)) ? ['INCOMPLETE_CABLE_SET'] : [])
   ]);
   const statisticsEligible = category !== 'UNSUPPORTED_CATEGORY'
-    && marketSegment === 'CONSUMER_DESKTOP'
+    && comparableSegment
     && conditionGroup === 'USED_WORKING'
     && ['SINGLE', 'MULTI_SAME'].includes(listingType)
     && Boolean(canonicalProductId)

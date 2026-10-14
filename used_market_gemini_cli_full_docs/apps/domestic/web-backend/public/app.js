@@ -1,6 +1,7 @@
-import { createContextualAffiliate } from "./affiliate.js?v=ad-connection-help-v1";
-import { createAdfitSlot } from "./adfit.js?v=adfit-rail-v1";
-import { createListingPricePreview } from "./listing-price-preview.mjs?v=daily-history-v1";
+import { createAdfitSlots } from "./adfit.js?v=adfit-all-v3";
+import { createListingPricePreview } from "./listing-price-preview.mjs?v=shared-price-v2";
+import { toolQueryMatches } from "./pc-tools-catalog.mjs?v=parts-ux-v4";
+import { readJsonResponse } from "./read-json.mjs?v=lookup-recovery-v1";
 
 const PRODUCT_QUERY_KEYS = new Set([
   "manufacturer", "model", "gpu_model", "board_brand", "usage", "configuration", "socket", "chipset", "form_interface", "capacity", "purpose", "rated_wattage",
@@ -88,6 +89,7 @@ const state = {
   listingNextCursors: new Map(),
   listingScopeKey: "",
   listingTotal: null,
+  listingStatisticsCoverage: null,
   listingSort: "recent",
   productRequest: null,
   modelAvailabilityRequest: null,
@@ -134,7 +136,6 @@ const dom = {
   listingPageNumbers: document.querySelector("#listing-page-numbers"),
   listingPagePrev: document.querySelector("#listing-page-prev"),
   listingPageNext: document.querySelector("#listing-page-next"),
-  adfitBanner: document.querySelector("#adfit-banner"),
 };
 
 function clampNumber(value, minimum, maximum) {
@@ -195,8 +196,7 @@ function setupColumnResizers() {
     defaultValue: FILTER_COLUMN_DEFAULT, flexibleMinimum: 500,
   });
 }
-const contextualAffiliate = createContextualAffiliate(document.querySelector("#contextual-offer"));
-const adfit = createAdfitSlot(dom.adfitBanner);
+const adfit = createAdfitSlots(document.querySelectorAll(".adfit-banner"));
 
 function createElement(tag, className, text) {
   const node = document.createElement(tag);
@@ -233,21 +233,8 @@ function unwrapPayload(payload) {
 }
 
 async function fetchJson(url, options = {}) {
-  const response = await fetch(url, {
-    method: "GET",
-    headers: { Accept: "application/json" },
-    credentials: "same-origin",
-    cache: "no-cache",
-    signal: options.signal
-      ? AbortSignal.any([options.signal, AbortSignal.timeout(20000)])
-      : AbortSignal.timeout(20000),
-  });
-  let payload;
-  try {
-    payload = await response.json();
-  } catch {
-    throw new Error("서버 응답 형식을 확인할 수 없습니다.");
-  }
+  const { response, payload } = await readJsonResponse(url, { signal: options.signal });
+  if (!payload) throw new Error("서버 응답 형식을 확인할 수 없습니다.");
   if (!response.ok) {
     throw new Error(firstDefined(payload?.error?.message, payload?.message, `요청에 실패했습니다. (${response.status})`));
   }
@@ -456,7 +443,6 @@ function setBusy(button, isBusy, busyText) {
 }
 
 function cancelListingRequest({ hidePagination = true } = {}) {
-  contextualAffiliate.clear();
   adfit.setEligible(false);
   clearTimeout(browseListingTimer);
   browseListingTimer = null;
@@ -475,6 +461,7 @@ function resetListingPagination() {
   state.listingNextCursors.clear();
   state.availableSourceCounts = null;
   state.listingTotal = null;
+  state.listingStatisticsCoverage = null;
   dom.listingCount.textContent = "";
   dom.listingPageNumbers.replaceChildren();
   dom.listingPagination.hidden = true;
@@ -1068,7 +1055,6 @@ function syncSourceFilterSummary() {
 }
 
 function reloadListingsForControls(focusSourceValue) {
-  refreshModelAvailability();
   syncCatalogUrl();
   updatePriceGraphLink();
   updateFacetSelectionUi();
@@ -1295,7 +1281,7 @@ function filterSeedProducts() {
   const query = state.query.toLocaleLowerCase("ko-KR");
   return state.seedProducts.filter((product) => {
     if (state.categoryCode && productCategory(product) !== state.categoryCode) return false;
-    if (query && !productName(product).toLocaleLowerCase("ko-KR").includes(query)) return false;
+    if (!toolQueryMatches(product, query)) return false;
     return productMatchesActiveFacets(product);
   });
 }
@@ -1427,7 +1413,7 @@ function showScopedListings(listingDelayMs = 0) {
   } else loadListings(false);
 }
 
-async function refreshBrowseScope(listingDelayMs = 0) {
+async function refreshBrowseScope(listingDelayMs = 0, requestedModel = '') {
   const generation = ++browseGeneration;
   state.modelAvailabilityRequest?.abort();
   state.modelAvailabilityScope = "";
@@ -1438,6 +1424,8 @@ async function refreshBrowseScope(listingDelayMs = 0) {
   syncCatalogUrl();
   await loadProducts();
   if (generation !== browseGeneration || state.selectedProduct) return;
+  const requested = requestedModel && state.products.find(item => productId(item) === requestedModel);
+  if (requested) { selectProduct(requested); return; }
   showScopedListings(listingDelayMs);
 }
 
@@ -1544,11 +1532,36 @@ function buildListingQuery(cursor = "", includeSelectedProduct = true) {
   return params;
 }
 
-async function refreshModelAvailability() {
+function renderListingCount() {
+  const coverage = state.listingStatisticsCoverage;
+  const coverageCount = Number(coverage?.listing_count);
+  const total = Number.isFinite(state.listingTotal)
+    ? state.listingTotal
+    : Number.isSafeInteger(coverageCount) && coverageCount >= 0 ? coverageCount : null;
+  const parts = Number.isFinite(total) ? [`${total.toLocaleString("ko-KR")}건`] : [];
+  if (coverage && pricePreviewProduct()) {
+    const eligible = Number(coverage.eligible_count);
+    if (Number.isSafeInteger(eligible) && eligible >= 0) {
+      parts.push(eligible > 0 ? `통계 후보 ${eligible.toLocaleString("ko-KR")}건` : "통계 후보 없음");
+      const minimum = Number(coverage.minimum_representative_sample_count);
+      if (eligible > 0 && Number.isSafeInteger(minimum) && eligible < minimum) parts.push(`대표가격은 ${minimum}건부터`);
+    }
+  }
+  dom.listingCount.textContent = parts.join(" · ");
+}
+
+function modelAvailabilityScope() {
   const params = buildListingQuery("", false);
   params.set("limit", "1");
   params.delete("sort");
-  const scope = params.toString();
+  return params.toString();
+}
+
+async function refreshModelAvailability() {
+  // Broad results already carry these counts. Only a selected model needs a
+  // separate broader lookup, and that lookup runs after its listings render.
+  if (!state.selectedProduct) return;
+  const scope = modelAvailabilityScope();
   if (scope === state.modelAvailabilityScope) return;
   state.modelAvailabilityRequest?.abort();
   state.modelAvailabilityScope = scope;
@@ -1588,12 +1601,21 @@ function applyListingPayload(payload, pageNumber = 1) {
   if (nextCursor) state.listingPageCursors.set(pageNumber + pageCount, nextCursor);
   else state.listingPageCursors.delete(pageNumber + pageCount);
   if (pageNumber === 1) {
+    if (!state.selectedProduct) {
+      state.modelAvailabilityRequest?.abort();
+      state.modelAvailabilityScope = modelAvailabilityScope();
+      const counts = payload?.model_counts;
+      state.modelCounts = counts && typeof counts === "object" && !Array.isArray(counts) ? counts : null;
+      renderProducts();
+    }
     const rawCounts = firstDefined(payload?.source_counts, payload?.sourceCounts, {});
     state.availableSourceCounts = rawCounts && typeof rawCounts === "object" && !Array.isArray(rawCounts) ? rawCounts : null;
     const rawTotal = firstDefined(payload?.total, payload?.total_count, payload?.totalCount);
     const explicitTotal = rawTotal == null || rawTotal === '' ? null : Number(rawTotal);
     state.listingTotal = explicitTotal != null && Number.isFinite(explicitTotal) && explicitTotal >= 0 ? explicitTotal : null;
-    dom.listingCount.textContent = Number.isFinite(state.listingTotal) ? `${state.listingTotal.toLocaleString("ko-KR")}건` : "";
+    const coverage = payload?.statistics_coverage;
+    state.listingStatisticsCoverage = coverage && typeof coverage === "object" && !Array.isArray(coverage) ? coverage : null;
+    renderListingCount();
     renderSourceFilters();
   }
   renderListings();
@@ -1799,11 +1821,6 @@ function renderListings() {
   dom.listingEmpty.hidden = visibleListings.length > 0;
   renderListingPagination();
   adfit.setEligible(visibleListings.length > 0);
-  void contextualAffiliate.update({
-    hasResults: visibleListings.length > 0,
-    canonical_product_id: state.selectedProduct ? productId(state.selectedProduct) : "",
-    category_code: state.selectedProduct ? productCategory(state.selectedProduct) || state.categoryCode : state.categoryCode,
-  });
 }
 
 function renderListingPagination() {
@@ -1878,6 +1895,11 @@ async function requestListingPage(pageNumber, cursor = "") {
   state.listingRequest?.abort();
   const controller = new AbortController();
   state.listingRequest = controller;
+  if (pageNumber === 1 && state.modelAvailabilityScope !== modelAvailabilityScope()) {
+    state.modelAvailabilityRequest?.abort();
+    state.modelCounts = null;
+    renderProducts();
+  }
   dom.listingSection.setAttribute("aria-busy", "true");
   if (pageNumber === 1) {
     state.listings = [];
@@ -1893,6 +1915,7 @@ async function requestListingPage(pageNumber, cursor = "") {
     if (controller.signal.aborted || state.listingRequest !== controller || state.listingScopeKey !== scopeKey) return;
     applyListingPayload(payload, pageNumber);
     showListingMessage("");
+    if (pageNumber === 1 && state.selectedProduct) void refreshModelAvailability();
     if (pageNumber > 1) {
       window.requestAnimationFrame(() => {
         if (document.activeElement !== document.body && !dom.listingPagination.contains(document.activeElement)) return;
@@ -1999,12 +2022,7 @@ async function loadCatalog() {
     const version = normalizeText(firstDefined(catalog?.version, catalog?.catalog_version));
     dom.catalogMeta.textContent = version ? `카탈로그 ${version}` : `${state.categories.length}개 부품군`;
     showCatalogMessage("");
-    await refreshBrowseScope();
-    const requestedModel = initialParams.get("model_id");
-    if (requestedModel) {
-      const product = state.products.find((item) => productId(item) === requestedModel);
-      if (product) selectProduct(product);
-    }
+    await refreshBrowseScope(0, initialParams.get("model_id") || '');
   } catch (error) {
     state.categories = [];
     state.products = [];
@@ -2104,7 +2122,7 @@ dom.backToModels.addEventListener("click", () => {
 const pricePreview = createListingPricePreview(document.querySelector("#listing-price-dialog"), dom.modelDetailOpen);
 dom.modelDetailOpen.addEventListener("click", () => {
   const product = pricePreviewProduct();
-  if (product) pricePreview.open(product, [...state.selectedSites][0] || "");
+  if (product) pricePreview.open(product, [...state.selectedSites][0] || "", state.listingStatisticsCoverage);
 });
 
 function setupConceptAControls() {

@@ -1,5 +1,11 @@
 const SDK_URL = "https://t1.kakaocdn.net/kas/static/ba.min.js";
 let sdkPromise;
+let slotSequence = 0;
+
+export function createAdfitSlots(roots) {
+  const slots = [...roots].map(createAdfitSlot);
+  return { setEligible(value) { slots.forEach(slot => slot.setEligible(value)); } };
+}
 
 function loadSdk() {
   if (sdkPromise) return sdkPromise;
@@ -26,9 +32,11 @@ export function createAdfitSlot(root) {
   let eligible = false;
   let started = false;
   let failed = false;
-  let collapseTimer;
   const desktop = window.matchMedia('(min-width: 1360px)');
-  const format = desktop.matches ? 'desktop' : 'mobile';
+  const format = root.dataset.placement === 'rail' ? 'desktop' : 'mobile';
+  // Select units before the SDK scans; never request an invisible rail or
+  // recreate impressions when the viewport changes.
+  if (format === 'desktop' && !desktop.matches) return { setEligible() {} };
   const template = root.querySelector(`template[data-format="${format}"]`);
   if (template) root.append(template.content.cloneNode(true));
   root.dataset.format = format;
@@ -38,8 +46,9 @@ export function createAdfitSlot(root) {
     if (!eligible || failed || !fits()) root.hidden = true;
     else if (hasCreative()) root.hidden = false;
   };
-  window.usedPickAdfitNoAd = () => { failed = true; root.hidden = true; };
-  root.querySelector('ins')?.setAttribute('data-ad-onfail', 'usedPickAdfitNoAd');
+  const callback = `usedPickAdfitNoAd${++slotSequence}`;
+  window[callback] = () => { failed = true; root.hidden = true; };
+  root.querySelector('ins')?.setAttribute('data-ad-onfail', callback);
   desktop.addEventListener('change', sync);
   const observer = new MutationObserver(sync);
   observer.observe(root, { childList: true, subtree: true });
@@ -56,7 +65,7 @@ export function createAdfitSlot(root) {
       started = true;
       root.hidden = false;
       void loadSdk().catch(() => { failed = true; root.hidden = true; });
-      collapseTimer = setTimeout(() => {
+      setTimeout(() => {
         if (eligible && !hasCreative()) root.hidden = true;
       }, 5_000);
     },
