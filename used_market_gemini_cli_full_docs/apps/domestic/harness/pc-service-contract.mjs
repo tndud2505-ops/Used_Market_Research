@@ -8,7 +8,23 @@ import { DatabaseSync } from "node:sqlite";
 import { spawn } from "node:child_process";
 
 import worker from "../cloudflare/worker.mjs";
+import { probeRunnerReadiness } from '../cloudflare/runner-readiness.mjs';
 import { buildCacheKey, fetchThroughPcReadCache, isCacheableRequest } from "../cloudflare/free-tier.mjs";
+
+const readinessEnv = { RUNNER_URL: 'https://runner.example.test', RUNNER_TOKEN: 'fixture-token' };
+const readyProbe = await probeRunnerReadiness(readinessEnv, async (url, options) => {
+  assert.equal(url.origin, readinessEnv.RUNNER_URL);
+  assert.equal(url.searchParams.get('canonical_product_id'), 'cpu:intel:i5-9600k');
+  assert.equal(url.searchParams.has('category_code'), false, 'health must not scan an entire category for totals');
+  assert.equal(options.headers.authorization, 'Bearer fixture-token');
+  assert.equal(options.redirect, 'manual');
+  return Response.json({ status: 'success', data: { items: [] } });
+});
+assert.equal(readyProbe.ok, true, 'an empty model still proves the listing read path responds');
+for (const response of [Response.json({}, { status: 401 }), Response.json({ status: 'success', data: {} })]) {
+  assert.equal((await probeRunnerReadiness(readinessEnv, async () => response)).ok, false,
+    'unavailable or invalid read responses must still fail readiness');
+}
 import {
   statsChecksum,
   statsChunkManifestChecksum,

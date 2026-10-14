@@ -4,7 +4,9 @@ export async function probeRunnerReadiness(env, fetcher = fetch) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 5000);
   try {
-    const url = new URL('/api/pc/listings?category_code=CPU&limit=1', env.RUNNER_URL);
+    // A category query computes counts across every matching listing even with
+    // limit=1. Probe the same authenticated read path using its product index.
+    const url = new URL('/api/pc/listings?canonical_product_id=cpu%3Aintel%3Ai5-9600k&limit=1', env.RUNNER_URL);
     const response = await fetcher(url, {
       headers: { authorization: `Bearer ${env.RUNNER_TOKEN}`, accept: 'application/json', 'cache-control': 'no-store' },
       signal: controller.signal, redirect: 'manual'
