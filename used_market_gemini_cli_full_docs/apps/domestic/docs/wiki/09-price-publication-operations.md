@@ -71,6 +71,9 @@ AWS readback은 통계 서비스의 별도 검증 자식에서 전체 행을 모
 확인된 특정 매물의 모델·구매 의도 오류는 `pc:repair-classification`으로 현재 매물과
 활성 게시본의 30일 관측 범위만 교정한다. 수집·게시가 idle이고 기존 스케줄러가 중지된
 상태에서 `plan /protected/새-plan.json source:item-id ...`로 정확한 대상 ID를 지정한다.
+Corsair 1200W 초과 그룹에 혼입된 AX 무선랜카드는 제목에 AX 숫자와 랜카드 명칭이
+함께 있고 파워 명칭이 없는 경우에만 확장카드로 교정할 수 있다. 잘못된 PSU 모델과
+통계 자격을 해제하며, 현재 공개 대상이 아닌 확장카드에 새 가격 통계를 만들지 않는다.
 `listings`, `snapshots`, 교정 전후 모델·글 종류와 `scopes`를 검토한 뒤 같은 파일로
 `apply /protected/새-plan.json`, `mirror /protected/새-plan.json`을 실행한다.
 원문·가격·상태·관측 날짜와 독립적인 통계 제외 사유는 보존한다. 전체 원문을 현재

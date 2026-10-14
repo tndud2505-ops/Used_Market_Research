@@ -118,3 +118,67 @@ try {
   assert.equal(dump('raw_listings'), raw, 'cache maintenance preserves raw identity evidence');
   console.log('PC scoped listing classification repair contract passed');
 } finally { index.close(); }
+
+// Wireless AX link-rate names must never contaminate Corsair PSU history.
+const networkIndex = new SearchIndex({ filePath: ':memory:' });
+try {
+  const db = networkIndex.db, ledger = new PcPartsLedger({ db }); ledger.migrate();
+  const pipeline = new PcShadowPipeline({ ledger }); await pipeline.initialize();
+  const observedAt = '2026-10-05T00:00:00.000Z';
+  const networkTitles = [
+    'NEXTU AX5400 WiFi 6E USB 무선랜카드', 'NEXTU AX5400 WiFi 6E USB 무선랜카드',
+    '티피링크 AX1800 하이 Wi-Fi6 USB 3.0 무선랜카드 판매합니다',
+    'Wi-Fi 6 무선랜카드 (TP link AX3000)', 'ax58bt ax3000 무선랜카드', 'AX1800 무선 랜카드 팝니다',
+  ];
+  const oldId = 'psu:corsair:watts-bucket:gt-1200';
+  for (const [offset, title] of networkTitles.entries()) {
+    const id = `joonggonara:network-${offset}`;
+    const item = pipeline.recordItem({ item_id: id, source_listing_id: id.split(':')[1], site: 'joonggonara', title,
+      price: 35000, currency: 'KRW', lifecycle_status: 'ACTIVE', url: `https://web.joongna.com/product/network-${offset}` }, observedAt);
+    networkIndex.upsertPublicProjections([item], { observedAt });
+    const row = db.prepare('SELECT * FROM listings WHERE item_id=?').get(id);
+    const metadata = { ...JSON.parse(row.pc_metadata_json), category_code: 'PSU', canonical_product_id: oldId,
+      canonical_manufacturer: 'Corsair', price_eligible: true, statistics_eligible: true,
+      exclusion_reasons: [], statistics_exclusion_reasons: [] };
+    db.prepare(`UPDATE listings SET pc_category_code='PSU', pc_canonical_product_id=?, pc_canonical_manufacturer='Corsair',
+      pc_price_eligible=1, pc_metadata_json=? WHERE item_id=?`).run(oldId, JSON.stringify(metadata), id);
+    const n = db.prepare('SELECT id FROM normalized_listings ORDER BY id DESC LIMIT 1').get();
+    db.prepare(`UPDATE normalized_listings SET category_code='PSU', canonical_product_id=?, exact_product=1,
+      price_eligible=1, statistics_eligible=1, exclusion_reasons_json='[]', statistics_exclusion_reasons_json='[]' WHERE id=?`).run(oldId, n.id);
+    db.prepare('UPDATE listing_items SET canonical_product_id=?, spec_json=? WHERE normalized_listing_id=?')
+      .run(oldId, JSON.stringify({ rated_watts: 5400 }), n.id);
+  }
+  for (const title of ['Corsair AX1600i', 'Corsair AX1200i 1200W PSU', 'Corsair RM850x 850W', 'Corsair HX1200',
+    'Corsair AX1600i 파워 무선랜카드 별도']) {
+    const normalized = pipeline.normalizeItem({ title, site: 'ebay', price: 150, currency: 'USD',
+      description: 'AX3000 무선랜카드와 함께 사용했습니다.' }, observedAt, null, { reclassification: true }).normalized;
+    assert.equal(normalized.categoryCode, 'PSU', title);
+    assert.ok(normalized.canonicalProductId?.startsWith('psu:corsair:'), title);
+    assert.equal(normalized.statisticsEligible, true, title);
+  }
+  const dump = table => JSON.stringify(db.prepare(`SELECT * FROM ${table}`).all());
+  const raw = dump('raw_listings'), snapshots = dump('listing_snapshots');
+  const ids = networkTitles.map((_, offset) => `joonggonara:network-${offset}`);
+  const plan = buildListingClassificationRepair(db, ids, { asOf: '2026-10-06T00:00:00.000Z' });
+  assert.equal(plan.listings.length, 6); assert.equal(plan.normalizations.length, 6);
+  assert.deepEqual(plan.scopes.map(s => [s.canonical_product_id, s.market_pool]),
+    [[oldId, 'KR_C2C_USED'], [oldId, 'KR_DOMESTIC_USED']]);
+  for (const entry of plan.normalizations) {
+    assert.equal(entry.after.category_code, 'EXPANSION_CARD');
+    assert.equal(entry.after.canonical_product_id, null);
+    assert.equal(entry.after.statistics_eligible, 0);
+    assert.equal(entry.after.exact_product, 0);
+    assert.equal(JSON.parse(entry.afterChild.spec_json).rated_watts, undefined);
+  }
+  applyListingClassificationRepair(db, plan);
+  assert.equal(dump('raw_listings'), raw); assert.equal(dump('listing_snapshots'), snapshots);
+  for (const { before, after } of plan.listings) {
+    assert.equal(after.pc_category_code, 'EXPANSION_CARD');
+    assert.equal(after.pc_canonical_product_id, null); assert.equal(after.pc_canonical_manufacturer, null);
+    for (const key of ['price_value', 'currency', 'first_seen_at', 'last_seen_at', 'last_checked_at', 'pc_quantity', 'pc_price_scope', 'pc_condition_code']) {
+      assert.equal(after[key], before[key], `${before.item_id}: preserve ${key}`);
+    }
+  }
+  assert.equal(buildListingClassificationRepair(db, ids, { asOf: plan.as_of }).normalizations.length, 0);
+  console.log('AX wireless-card scoped repair passed; genuine Corsair PSU samples preserved');
+} finally { networkIndex.close(); }

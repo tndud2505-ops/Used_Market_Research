@@ -6,6 +6,7 @@ import { PcPartsLedger } from './pc-parts-ledger.mjs';
 import { PcShadowPipeline } from './pc-shadow-pipeline.mjs';
 import { toPcProjectionImportItem } from './republish-pc-projections.mjs';
 import { reconcileExactModelStatistics } from './pc-classification-consistency.mjs';
+import { isAxNetworkCardTitle } from '../market/logic/pc-parts-classifier.mjs';
 
 const digest = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const json = value => JSON.parse(value || '{}');
@@ -28,8 +29,13 @@ function correction(previous, item, pipeline) {
   const fullSystemCorrection = next.listingKind === 'FULL_SYSTEM' && next.categoryCode === 'SYSTEM'
     && !next.canonicalProductId && !next.priceEligible && !next.statisticsEligible
     && next.exclusionReasons.includes('FULL_SYSTEM');
+  const networkCardCorrection = previous.category_code === 'PSU'
+    && previous.canonical_product_id === 'psu:corsair:watts-bucket:gt-1200'
+    && isAxNetworkCardTitle(item.title) && next.categoryCode === 'EXPANSION_CARD'
+    && next.listingKind === previous.listing_kind && !next.canonicalProductId
+    && !next.statisticsEligible;
   if (!['SINGLE_COMPONENT', 'SAME_PRODUCT_LOT'].includes(previous.listing_kind)
-    || (!fullSystemCorrection && (!['SINGLE_COMPONENT', 'SAME_PRODUCT_LOT', 'WANTED'].includes(next.listingKind)
+    || (!fullSystemCorrection && !networkCardCorrection && (!['SINGLE_COMPONENT', 'SAME_PRODUCT_LOT', 'WANTED'].includes(next.listingKind)
       || !next.canonicalProductId || previous.category_code !== next.categoryCode))
     || previous.quantity !== next.quantity || previous.price_scope !== next.priceScope
     || previous.condition_code !== next.conditionCode || previous.market_pool !== next.marketPool)
@@ -38,7 +44,7 @@ function correction(previous, item, pipeline) {
   for (const [column, key] of Object.entries(fields)) after[column] = next[key];
   after.price_eligible = previous.price_eligible && next.priceEligible ? 1 : 0;
   Object.assign(after,statistics);
-  if (fullSystemCorrection && Object.hasOwn(after,'exact_product')) after.exact_product=0;
+  if ((fullSystemCorrection || networkCardCorrection) && Object.hasOwn(after,'exact_product')) after.exact_product=0;
   after.exclusion_reasons_json = JSON.stringify(merge(json(previous.exclusion_reasons_json || '[]'), next.exclusionReasons));
   after.evidence_json = JSON.stringify([...json(previous.evidence_json || '[]'),
     { field: 'classification', source: 'SCOPED_CLASSIFICATION_REPAIR',
@@ -91,6 +97,9 @@ export function buildListingClassificationRepair(db, itemIds, { asOf = new Date(
     updated.canonical_manufacturer = changed.next.canonicalManufacturer;
     updated.chip_manufacturer = changed.next.spec?.chip_manufacturer || null;
     updated.board_manufacturer = changed.next.spec?.board_manufacturer || null;
+    updated.product_kind = changed.next.productKind;
+    updated.placement = changed.next.placement;
+    updated.form_factor = changed.next.formFactor;
     updated.statistics_eligible = Boolean(changed.after.statistics_eligible);
     updated.price_eligible = Boolean(changed.after.price_eligible);
     updated.statistics_exclusion_reasons = json(changed.after.statistics_exclusion_reasons_json);
@@ -130,7 +139,8 @@ export function buildListingClassificationRepair(db, itemIds, { asOf = new Date(
       const child = children[0];
       normalizations.push({ before: original, after: repaired.after, beforeChild: child,
         afterChild: { ...child, canonical_product_id: repaired.next.canonicalProductId,
-          spec_json: JSON.stringify({ ...json(child.spec_json), ...repaired.next.spec }) },
+          spec_json: JSON.stringify(original.category_code === repaired.next.categoryCode
+            ? { ...json(child.spec_json), ...repaired.next.spec } : repaired.next.spec) },
         evidence_hash: digest(row) });
       addScopes(original, repaired.after, row.currency);
     }

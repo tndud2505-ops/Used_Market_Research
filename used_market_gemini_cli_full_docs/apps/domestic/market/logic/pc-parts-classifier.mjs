@@ -13,6 +13,13 @@ const LEGACY_DISCRETE_GPU_PATTERN = /\b(?:RADEON\s*VII|(?:RX\s*)?VEGA\s*(?:56|64
 const CORE_ULTRA_PATTERN = /(?:\b(?:INTEL\s*)?(?:CORE\s*)?ULTRA|(?:인텔\s*)?(?:코어\s*)?울트라)\s*([579])\s*[- ]?\s*(2\d{2}[A-Z]{0,3})(?![A-Z0-9])/iu;
 const PORTABLE_GPU_SYSTEM_PATTERN = /(?:ASUS|아수스|에이수스)\s*TUF\s*(?:DASH\s*)?[AF]\d{2}\b|(?:DELL|델)\s*XPS\s*(?:13|15|16|17)\b/iu;
 
+export function isAxNetworkCardTitle(title) {
+  const text = String(title || '').normalize('NFKC');
+  return /\bAX\d{3,4}\b/iu.test(text)
+    && /랜\s*카드|\b(?:WIRELESS|WI-?FI|NETWORK|ETHERNET)\s+(?:CARD|ADAPTER)\b/iu.test(text)
+    && !/\bPSU\b|POWER\s*SUPPLY|파워|서플라이/iu.test(text);
+}
+
 const CONDITION_EXCLUSIONS = Object.freeze({
   BROKEN: 'BROKEN',
   MINED: 'MINED',
@@ -342,6 +349,12 @@ function detectCategory(text, specialKind, evidence, title = '') {
     return 'CPU';
   }
 
+  // AX1800/AX3000/AX5400 are also wireless link-rate names. A network
+  // card named in the title outranks the generic Corsair AX PSU alias.
+  if (isAxNetworkCardTitle(title)) {
+    addEvidence(evidence, 'category_code', title, 'EXPANSION_CARD');
+    return 'EXPANSION_CARD';
+  }
   const rules = [
     ['COOLING', /(?:CPU\s*(?:공랭|수랭)?\s*쿨러(?!\s*(?:별도|제외|없음|미포함))|공랭\s*쿨러|수랭\s*쿨러|케이스\s*팬|(?:120|240|280|360|420)\s*(?:MM\s*)?수랭|NH-D15)/i],
     ['GPU', LEGACY_DISCRETE_GPU_PATTERN],
