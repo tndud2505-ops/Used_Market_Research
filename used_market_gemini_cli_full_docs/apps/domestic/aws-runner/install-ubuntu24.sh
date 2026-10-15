@@ -14,6 +14,9 @@ TUNNEL_ENV_DIR="${TUNNEL_ENV_DIR:-/etc/cloudflared}"
 TUNNEL_TOKEN_FILE="${TUNNEL_TOKEN_FILE:-${TUNNEL_ENV_DIR}/used-market-runner.token}"
 PC_SOURCE_TARGETS_PER_RUN_OVERRIDE="${PC_SOURCE_TARGETS_PER_RUN_OVERRIDE:-}"
 PC_SOURCE_TARGET_CONCURRENCY_OVERRIDE="${PC_SOURCE_TARGET_CONCURRENCY_OVERRIDE:-}"
+# The first start may create a multi-GB recovery backup and migrate the ledger.
+# Healthy releases return immediately; slow first starts must not be killed at 60s.
+export RUNNER_HEALTH_WAIT_SECONDS="${RUNNER_HEALTH_WAIT_SECONDS:-7200}"
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 SOURCE_ROOT="${1:-$(cd -- "${SCRIPT_DIR}/.." && pwd)}"
