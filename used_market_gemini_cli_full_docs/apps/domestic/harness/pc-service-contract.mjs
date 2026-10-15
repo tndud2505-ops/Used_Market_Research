@@ -800,17 +800,19 @@ assert.equal(dedupedProjection.sourceTotals.danawa, 1,
   "site totals must match the same reconciled identities shown in search results");
 // Index selection is a performance-only change: retain totals, dedupe, ordering,
 // facet/currency scope and cursor semantics from the former planner-selected read.
-const prepareBeforeModelSeek = index.db.prepare.bind(index.db);
-for (const modelScope of [
+const prepareBeforeScopeSeek = index.db.prepare.bind(index.db);
+for (const browseScope of [
   { canonicalProductId: 'gpu:nvidia:rtx-3080' },
   { canonicalProductIds: ['gpu:nvidia:rtx-3080', 'ssd:samsung:capacity-bucket:513-gb-1-tb'] },
-  { canonicalProductIds: [] }
+  { canonicalProductIds: [] },
+  { categoryCode: 'GPU' },
+  { categoryCode: 'SSD' }
 ]) for (const sort of ['recent', 'price_asc', 'price_desc']) {
-  const options = { ...modelScope, sites: ['danawa'], currency: 'KRW', sort, limit: 1, asOf: '2026-08-29T00:00:01.000Z' };
+  const options = { ...browseScope, sites: ['danawa'], currency: 'KRW', sort, limit: 1, asOf: '2026-08-29T00:00:01.000Z' };
   const optimized = index.browsePcListings(options);
-  index.db.prepare = sql => prepareBeforeModelSeek(sql.replace(' INDEXED BY idx_listings_pc_product_recent', ''));
+  index.db.prepare = sql => prepareBeforeScopeSeek(sql.replace(/ INDEXED BY idx_listings_pc_(?:product|scope)_recent/gu, ''));
   try { assert.deepEqual(index.browsePcListings(options), optimized); }
-  finally { index.db.prepare = prepareBeforeModelSeek; }
+  finally { index.db.prepare = prepareBeforeScopeSeek; }
   if (optimized.nextAfter) {
     const next = index.browsePcListings({ ...options, after: optimized.nextAfter });
     assert.equal(next.cursorFound, true);

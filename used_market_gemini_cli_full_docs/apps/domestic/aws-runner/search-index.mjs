@@ -1154,15 +1154,16 @@ export class SearchIndex {
       params.push(...sites);
     }
     const after = options.after && typeof options.after === "object" ? options.after : null;
-    // With a model constraint SQLite can otherwise choose a broad non-null
-    // product scan. Pin the existing product index so equality/IN seeks stay
-    // bounded to the requested models; predicates and dedupe are unchanged.
-    const modelIndex = canonicalProductId || canonicalProductIds
-      ? ' INDEXED BY idx_listings_pc_product_recent' : '';
+    // Bound model/category reads before fetching wide listing rows. Without
+    // this, SQLite can scan every product for a site just to filter one category.
+    // Predicates, exact totals and canonical identity selection are unchanged.
+    const scopeIndex = canonicalProductId || canonicalProductIds
+      ? ' INDEXED BY idx_listings_pc_product_recent'
+      : categoryCode ? ' INDEXED BY idx_listings_pc_scope_recent' : '';
     const candidates = this.db.prepare(`SELECT item_id, site, url, price_value, posted_at, last_checked_at, pc_canonical_product_id,
       json_type(pc_metadata_json, '$.statistics_eligible') = 'true' AS statistics_eligible,
       json_extract(pc_metadata_json, '$.statistics_exclusion_reasons') AS statistics_exclusion_reasons
-      FROM listings${modelIndex}
+      FROM listings${scopeIndex}
       WHERE ${where.join(" AND ")}`).iterate(...params);
     let latestObservedAt = "";
     const rows = dedupePcListingRows((function* () {
