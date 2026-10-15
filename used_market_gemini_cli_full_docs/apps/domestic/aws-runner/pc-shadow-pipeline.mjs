@@ -179,14 +179,19 @@ export class PcShadowPipeline {
     this.priceReferenceCache = new Map();
   }
 
-  priceReference(options) {
+  priceReference(options, observe) {
     const key = [
       options.canonicalProductId, options.marketPool, options.condition, options.currency,
       options.normalizationVersion, options.parserVersion, options.ruleVersion, options.filterVersion,
     ].join("\u0000");
     const cached = this.priceReferenceCache.get(key);
-    if (cached && cached.expiresAt > Date.now()) return cached.stats;
+    if (cached && cached.expiresAt > Date.now()) {
+      try { observe?.('price_reference_cache_hit', 0); } catch {}
+      return cached.stats;
+    }
+    const started = Date.now();
     const stats = this.ledger.getPriceStats(options);
+    try { observe?.('price_reference_query', Date.now() - started); } catch {}
     if (this.priceReferenceCache.size >= 2_000) this.priceReferenceCache.clear();
     this.priceReferenceCache.set(key, { stats, expiresAt: Date.now() + 5 * 60 * 1_000 });
     return stats;
@@ -426,7 +431,7 @@ export class PcShadowPipeline {
         parserVersion: effectiveVersions.parserVersion,
         ruleVersion: effectiveVersions.ruleVersion,
         filterVersion: effectiveVersions.filterVersion
-      });
+      }, options.onReference);
     }
     const reference = Number(stats?.sold?.median);
     const anomalouslyLow = Number.isFinite(reference) && reference > 0 && Number.isFinite(prices.unitPrice) && prices.unitPrice < reference * 0.4;
@@ -529,6 +534,11 @@ export class PcShadowPipeline {
   }
 
   recordItem(item, observedAt, options = {}) {
+    let stage = 'previous_snapshot', stageStarted = Date.now();
+    const nextStage = next => {
+      try { options.onStage?.(stage, Date.now() - stageStarted, next); } catch {}
+      stage = next; stageStarted = Date.now();
+    };
     // Search responses omit the body; retain the last verified detail text.
     if (['bunjang', 'joonggonara'].includes(item.site) && item.description == null) {
       const previous = this.ledger.latestSnapshot(item.site, sourceListingId(item));
@@ -537,6 +547,7 @@ export class PcShadowPipeline {
       if (description) item = { ...item, description,
         ...(item.raw_payload ? { raw_payload: { ...item.raw_payload, description } } : {}) };
     }
+    nextStage('normalize_and_price_reference');
     const {
       source,
       classified,
@@ -552,6 +563,7 @@ export class PcShadowPipeline {
       priceEligible,
       duplicate
     } = this.normalizeItem(item, observedAt, null, options);
+    nextStage('record_observation');
     const observation = this.ledger.recordObservation({
       sourceId: source.key,
       sourceListingId: sourceListingId(item),
@@ -584,6 +596,7 @@ export class PcShadowPipeline {
       normalized,
       versions
     });
+    nextStage('secondary_writes');
     if (normalized.canonicalProductId && (state.status !== "ACTIVE"
       || (previousLifecycleStatus && previousLifecycleStatus !== state.status))) {
       this.invalidatePriceReference(normalized.canonicalProductId);
@@ -689,6 +702,7 @@ export class PcShadowPipeline {
       configurable: false,
       writable: false
     });
+    nextStage('completed');
     return projection;
   }
 

@@ -139,14 +139,14 @@ assert.match(retiredSourceMigration, /DELETE FROM public_product_stats[\s\S]*LOW
   "stale published Quasarzone statistics must not remain publicly readable");
 assert.match(retiredSourceMigration, /UPDATE public_stats_publications[\s\S]*expected_row_count[\s\S]*expected_non_empty_scope_count/u,
   "retiring published statistics must preserve the active publication manifest");
-assert.match(runnerScript, /const recorded = await recordPcItemsIncrementally\(result\.result\.items, result\.run_at\);/u,
+assert.match(runnerScript, /recordPcItemsIncrementally\(result\.result\.items, result\.run_at, progress\)/u,
   "scheduler collection must yield between ledger writes so health and search remain responsive");
-assert.match(runnerScript, /const publicProjections = stabilizeIncrementalPcProjections\(recorded\);/u,
+assert.match(runnerScript, /stabilizeIncrementalPcProjections\(recorded\)/u,
   "scheduler collection must repair stable source identities before public projection writes");
 assertOrdered(runnerScript, [
-  "const publicProjections = stabilizeIncrementalPcProjections(recorded);",
-  "await upsertPcProjectionsIncrementally(publicProjections, { observedAt: result.run_at });",
-  "await importToD1BestEffort(publicProjections, tickSignal)"
+  "stabilizeIncrementalPcProjections(recorded)",
+  "upsertPcProjectionsIncrementally(publicProjections, { observedAt: result.run_at }, progress)",
+  "importToD1BestEffort(publicProjections, tickSignal)"
 ], "incremental public projection publication");
 assert.match(runnerScript,
   /const D1_BACKGROUND_MIRROR_ENABLED = String\(process\.env\.D1_BACKGROUND_MIRROR_ENABLED \?\? "false"\)/u,
@@ -348,7 +348,7 @@ assertOrdered(schedulerSuccessBlock, [
   "pcLedger.finishCrawlRun({",
   "pcLedger.updateSourceRuntime(result.source_key, result.next_runtime);",
   "if (!partialFailure)",
-  "await mirrorPcListingCollectionManifest({"
+  "mirrorPcListingCollectionManifest({"
 ], "successful crawl manifest publication");
 assert.match(schedulerSuccessBlock,
   /\.filter\(\(target\) => target\.status === "SUCCEEDED"\s*&& PC_HOURLY_COLLECTION_TARGET_IDS\.has\(target\.target_id\)\)/u,

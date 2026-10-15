@@ -54,7 +54,7 @@ const runtimeCanary = { ...liveCanary, observed_at: new Date().toISOString() };
 
 assert.equal(new Set(PC_SOURCE_REGISTRY.map((source) => source.key)).size, PC_SOURCE_REGISTRY.length);
 assert.deepEqual(Object.fromEntries(PC_SOURCE_REGISTRY.map((source) => [source.key, source.cadence.kst_minutes])), {
-  joonggonara: [4, 34], bunjang: [11], daangn: [15], danawa: [19], hellomarket: [27],
+  joonggonara: [4], bunjang: [11], daangn: [15], danawa: [19], hellomarket: [27],
   rethinkmall: [36], ebay: [44], coolenjoy: [52]
 });
 assert.ok(PC_SOURCE_REGISTRY.every((source) => source.cadence.jitter_max_seconds === 120));
@@ -688,8 +688,10 @@ const abortedResult = await runSourceCollection({
   input: { now: "2026-08-30T00:25:00.000Z", signal: abortedController.signal },
   now: "2026-08-30T00:25:00.000Z"
 });
-assert.equal(abortedResult.status, "failed");
-assert.equal(abortedResult.error, "fixture scheduler watchdog");
+assert.equal(abortedResult.status, "skipped");
+assert.equal(abortedResult.reason, "TICK_DEADLINE");
+assert.equal(abortedResult.next_runtime.consecutive_failures, 0,
+  'an unattempted source must not enter failure backoff after another source exhausts the tick');
 
 const previousFetch = globalThis.fetch;
 const previousClientId = process.env.EBAY_CLIENT_ID;

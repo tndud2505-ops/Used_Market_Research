@@ -358,6 +358,17 @@ collection target은 `HOURLY_CATEGORY`와 `DAILY_MASTER`로 나뉜다. 전자는
 
 실패한 개별 target은 다음 소스 실행부터 지수 백오프로 재시도한다. `/health`의 `source_readiness[].target_coverage`는 성공 target 수, 실패 target 수, 2회 주기 이상 성공하지 못한 stale target 수를 공개하며, `--require-pc-continuous`는 stale target이 남아 있으면 통과하지 않는다.
 
+수집 공통 시간 예산 `PC_SCHEDULER_WATCHDOG_MS`는 기본 60분(설정 범위 5–120분)이다. 중고나라는 매시 4분, 번개장터 11분, 다나와 19분, eBay 44분에 최대 2분 jitter를 더해 실행하며, 기존 target별 간격·요청 상한·차단 후 대기를 유지한다. 이미 실행 중이면 다음 tick이 겹치지 않는다. 시간 예산은 여러 소스의 수집·저장·판매 상태 확인이 공유한다. 이미 모은 자료의 저장은 중간에 버리지 않고 완료하므로 벽시계 기준 강제 종료 시간이 아니다. 예산이 끝난 뒤 아직 시작하지 않은 소스는 `TICK_DEADLINE`으로 건너뛰며 실패 횟수를 올리지 않는다. 개별 HTTP 요청 제한은 별도로 유지한다. `/health`의 `pc_parts.scheduler_watchdog_ms`로 실제 적용값을 확인한다.
+
+수집 장애는 먼저 아래 journal의 `tick_id`로 묶어서 확인한다. `at`은 실제 실행 시각이고 `scheduled_at`은 예약 시각이다. `pc_collection_phase_started/finished/failed`는 수집 후 원장 저장(`record_items`), 공개 색인(`project_items`), D1 전송, 판매 상태 재확인(`lifecycle_recheck`)을 구분한다. 30초마다 `pc_collection_progress`에 완료 건수, 활성 target·HTTP 대기 단계, CPU·RSS·cgroup 메모리·디스크 I/O·이벤트 루프 지연을 남긴다. 동기 DB 작업이 길면 heartbeat 자체가 늦어질 수 있으므로 `heartbeat_gap_ms`와 마지막 phase를 함께 본다. `operation_ms`는 이전 자료 조회, 분류·기준가 조회, 관측 저장, 부가 저장의 누적 시간이다.
+
+```bash
+sudo journalctl -u used-market-runner.service --since '2 hours ago' -o cat | grep '"event":"pc_collection_'
+sudo journalctl -u used-market-runner.service --since '2 hours ago' -o cat | grep '"tick_id":"<확인할 ID>"'
+```
+
+`pc_collection_deadline`은 우리 공통 제한, `pc_collection_request`의 상태·대기 단계·오류 코드는 외부 요청 문제를 보여 준다. 정상 요청은 합계로 남기고 느린 요청·오류 상세는 tick당 최대 100건으로 제한한다. 다나와 응답 불인식은 본문 길이·카드 수·SHA-256으로 식별한다. URL 경로·검색어·헤더·응답 본문·매물 제목·판매자 정보는 기록하지 않으며 target ID도 해시로 남긴다. 원장 실패 기록에는 마지막 단계와 이미 저장한 건수를 남기므로 `FAILED`를 수집 0건으로 해석하지 않는다. journal의 기존 용량·보존 정책을 그대로 사용한다.
+
 가격 통계 publication은 D1에 4행씩 staging하고 AWS의 전체 readback 검증을 통과한 뒤 Worker가 활성 포인터를 교체한다. `PC_STATS_PUBLICATION_TIMEOUT_MS`는 개별 게시 HTTP 요청에 쓰는 별도 제한이며 기본 15분이다. 전체 계산·후처리가 15분 안에 끝난다는 보장은 아니다. readback의 별도 제한과 오류 판정은 위 운영 위키를 따른다.
 
 기존 다나와 장터 adapter의 실제 목록 수집 진단은 다음 명령으로만 실행한다. 이 legacy 진단은 현재 운영하는 `danawa-search.mjs` 중고 통합검색 수집과 다르며, 운영 스케줄이나 결정적 테스트에는 포함하지 않는다.

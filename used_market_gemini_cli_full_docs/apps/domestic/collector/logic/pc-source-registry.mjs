@@ -41,7 +41,7 @@ export const PC_SOURCE_REGISTRY = Object.freeze([
     approval_attested_at: "2026-08-31",
     approval_scope: "PC_PARTS_COLLECTION_AND_PUBLICATION",
     access_constraints: "PUBLIC_ROUTES_ONLY_NO_AUTH_OR_BLOCK_BYPASS",
-    cadence: { timezone: "Asia/Seoul", kst_minutes: [4, 34], jitter_max_seconds: MAX_JITTER_SECONDS },
+    cadence: { timezone: "Asia/Seoul", kst_minutes: [4], jitter_max_seconds: MAX_JITTER_SECONDS },
     access: { strategy: "html_next", adapter_kind: "existing_site_script", api_only_required: false }
   }),
   source({
@@ -480,6 +480,11 @@ export async function runSourceCollection({ sourceKey, adapter, runtime, governa
   if (blocked) {
     return { source_key: sourceKey, status: "skipped", reason: blocked, next_runtime: currentRuntime };
   }
+  // A previous source can exhaust the shared tick deadline. No request was
+  // attempted for this source, so do not increment its failure/quarantine count.
+  if (input.signal?.aborted) {
+    return { source_key: sourceKey, status: "skipped", reason: "TICK_DEADLINE", next_runtime: currentRuntime };
+  }
   if (!adapter || typeof adapter.collectIncremental !== "function") {
     return { source_key: sourceKey, status: "skipped", reason: "ADAPTER_UNAVAILABLE", next_runtime: currentRuntime };
   }
@@ -550,15 +555,19 @@ export async function runSourceCollection({ sourceKey, adapter, runtime, governa
     };
     return { source_key: sourceKey, status: "success", result, next_runtime: nextRuntime };
   } catch (error) {
+    const deadline = Boolean(input.signal?.aborted);
+    const metrics = error?.collection_metrics || input.collection_metrics;
     return {
       source_key: sourceKey,
       status: "failed",
-      reason: "COLLECTION_FAILED",
-      error: error instanceof Error ? error.message : String(error),
-      metrics: error?.collection_metrics && typeof error.collection_metrics === "object"
-        ? error.collection_metrics
+      reason: deadline ? "TICK_DEADLINE" : "COLLECTION_FAILED",
+      error: deadline ? "TICK_DEADLINE" : error instanceof Error ? error.message : String(error),
+      metrics: metrics && typeof metrics === "object"
+        ? { ...metrics, ...(Array.isArray(metrics.target_results) ? { target_results: [...metrics.target_results] } : {}) }
         : null,
-      next_runtime: failureRuntime(currentRuntime, runAt, error)
+      next_runtime: deadline
+        ? { ...currentRuntime, last_started_at: runAt.toISOString(), last_error: 'TICK_DEADLINE' }
+        : failureRuntime(currentRuntime, runAt, error)
     };
   }
 }
@@ -570,7 +579,8 @@ export async function runDueSourceCollections({
   runtimeBySource = {},
   governanceBySource = {},
   inputsBySource = {},
-  jitterBySource = {}
+  jitterBySource = {},
+  onEvent
 }) {
   const events = listSourceCadenceEvents({ after, through, jitterBySource });
   // A startup catch-up window can contain several cadence events for one
@@ -583,7 +593,9 @@ export async function runDueSourceCollections({
     .sort((left, right) => left.run_at.localeCompare(right.run_at) || left.source_key.localeCompare(right.source_key));
   const runtimeState = Object.fromEntries(Object.entries(runtimeBySource).map(([key, value]) => [key, { ...value }]));
   const results = [];
+  const notify = (event) => { try { onEvent?.(event); } catch {} };
   for (const event of dueEvents) {
+    notify({ ...event, event: 'started' });
     const result = await runSourceCollection({
       sourceKey: event.source_key,
       adapter: adapters[event.source_key],
@@ -594,6 +606,8 @@ export async function runDueSourceCollections({
     });
     runtimeState[event.source_key] = result.next_runtime;
     results.push({ ...result, scheduled_at: event.scheduled_at, run_at: event.run_at });
+    notify({ ...event, event: 'finished', status: result.status, reason: result.reason,
+      item_count: result.result?.items?.length || 0 });
   }
   return results;
 }

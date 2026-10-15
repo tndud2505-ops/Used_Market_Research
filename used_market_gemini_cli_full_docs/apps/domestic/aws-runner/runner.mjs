@@ -29,6 +29,7 @@ import { parsePriceStatsRequest, priceStatsResponse, priceHistoryResponse } from
 import { pcPriceReadinessProblem } from '../market/logic/pc-price-readiness.mjs';
 import { createLifecycleStatusCache, createLifecycleQueueBootstrap } from './lifecycle-status-cache.mjs';
 import { schedulerReadDeferral } from "./pc-scheduler-admission.mjs";
+import { createCollectionDiagnostics, collectionError, schedulerWatchdogMs } from './pc-collection-diagnostics.mjs';
 import { PcShadowPipeline } from "./pc-shadow-pipeline.mjs";
 import { explicitSoldText, structuredSoldEvidenceFromHtml, joongnaListingUrl } from "../market/logic/listing-lifecycle.mjs";
 import { bunjangProductIdFromListing, parseBunjangDetailLifecycle, bunjangDetailObservationItem } from "../market/logic/bunjang-lifecycle.mjs";
@@ -144,8 +145,7 @@ const PC_SOURCE_TARGET_CONCURRENCY = Math.min(8, Math.max(1,
 const PC_HELLOMARKET_DETAIL_LIMIT = Math.min(120, Math.max(0,
   Number.parseInt(process.env.PC_HELLOMARKET_DETAIL_LIMIT || "40", 10) || 0));
 const PC_EXTERNAL_FETCH_TIMEOUT_MS = 30_000;
-const PC_SCHEDULER_WATCHDOG_MS = Math.min(30 * 60 * 1000, Math.max(5 * 60 * 1000,
-  Number.parseInt(process.env.PC_SCHEDULER_WATCHDOG_MS || String(20 * 60 * 1000), 10) || 20 * 60 * 1000));
+const PC_SCHEDULER_WATCHDOG_MS = schedulerWatchdogMs(process.env.PC_SCHEDULER_WATCHDOG_MS);
 
 function boundedFetchSignal(parentSignal, timeoutMs = PC_EXTERNAL_FETCH_TIMEOUT_MS) {
   const timeoutSignal = AbortSignal.timeout(timeoutMs);
@@ -164,11 +164,30 @@ function yieldToEventLoop() {
   return new Promise((resolve) => setImmediate(resolve));
 }
 
-async function recordPcItemsIncrementally(items, observedAt) {
+async function recordPcItemsIncrementally(items, observedAt, progress) {
   const sourceItems = Array.isArray(items) ? items : [];
   const recorded = [];
   for (let index = 0; index < sourceItems.length; index += 1) {
-    recorded.push(pcPipeline.recordItem(sourceItems[index], observedAt));
+    const started = Date.now();
+    if (progress) progress.operation = 'previous_snapshot';
+    const item = pcPipeline.recordItem(sourceItems[index], observedAt, { onStage: (stage, elapsed, next) => {
+      if (progress) {
+        progress.operation_ms[stage] = (progress.operation_ms[stage] || 0) + elapsed;
+        progress.operation = next;
+      }
+    }, onReference: (stage, elapsed) => {
+      if (progress) {
+        progress.operation_ms[stage] = (progress.operation_ms[stage] || 0) + elapsed;
+        progress.reference_queries = (progress.reference_queries || 0) + (stage === 'price_reference_query' ? 1 : 0);
+        progress.reference_cache_hits = (progress.reference_cache_hits || 0) + (stage === 'price_reference_cache_hit' ? 1 : 0);
+      }
+    } });
+    recorded.push(item);
+    if (progress) {
+      progress.recorded += 1;
+      progress.changed += item._pc_snapshot_created === true ? 1 : 0;
+      progress.max_record_ms = Math.max(progress.max_record_ms, Date.now() - started);
+    }
     if ((index + 1) % PC_LEDGER_RECORD_YIELD_EVERY === 0 && index + 1 < sourceItems.length) {
       await yieldToEventLoop();
     }
@@ -176,11 +195,12 @@ async function recordPcItemsIncrementally(items, observedAt) {
   return recorded;
 }
 
-async function upsertPcProjectionsIncrementally(items, options) {
+async function upsertPcProjectionsIncrementally(items, options, progress) {
   const projections = Array.isArray(items) ? items : [];
   if (!searchIndex || projections.length === 0) return;
   for (let offset = 0; offset < projections.length; offset += PC_INDEX_WRITE_BATCH_SIZE) {
     searchIndex.upsertPublicProjections(projections.slice(offset, offset + PC_INDEX_WRITE_BATCH_SIZE), options);
+    if (progress) progress.projected += Math.min(PC_INDEX_WRITE_BATCH_SIZE, projections.length - offset);
     if (offset + PC_INDEX_WRITE_BATCH_SIZE < projections.length) await yieldToEventLoop();
   }
 }
@@ -1007,6 +1027,7 @@ function runnerStatus() {
       ledger_ready: Boolean(pcLedger),
       scheduler_enabled: PC_PARTS_SCHEDULER_ENABLED,
       scheduler_active: pcSchedulerActive,
+      scheduler_watchdog_ms: PC_SCHEDULER_WATCHDOG_MS,
       publication_active: pcPublicationActive,
       publication_job: pcPublicationJob,
       d1_background_mirror_enabled: D1_BACKGROUND_MIRROR_ENABLED,
@@ -1386,7 +1407,7 @@ function listingIdentityIsPresent(html, listing) {
   return titleTokens.slice(0, 5).filter((token) => haystack.includes(token)).length >= Math.min(2, titleTokens.length || 2);
 }
 
-async function recheckKnownListings(sourceKey, checkedAt, parentSignal) {
+async function recheckKnownListings(sourceKey, checkedAt, parentSignal, progress) {
   if (sourceKey === "ebay" || sourceKey === "danawa") return [];
   if (Date.parse(pcLedger.getLifecycleRun(sourceKey)?.backoff_until || '') > Date.now()) return [];
   const changedProjections = [];
@@ -1396,6 +1417,7 @@ async function recheckKnownListings(sourceKey, checkedAt, parentSignal) {
   let recheckError = null;
   const captureProjection = (sourceListingId, result) => {
     receipt.verified += 1;
+    if (progress) progress.recheck_verified = receipt.verified;
     if (result?.status === 'SOLD' && result?.snapshotCreated) receipt.sold += 1;
     if (result?.snapshotCreated !== true) return;
     const projection = pcLedger.getPublicProjection(sourceKey, sourceListingId);
@@ -1419,6 +1441,7 @@ async function recheckKnownListings(sourceKey, checkedAt, parentSignal) {
     if (Date.now() >= recheckDeadline) { receipt.stop_reason = 'TIME_BUDGET'; break; }
     throwIfAborted(parentSignal);
     receipt.attempted += 1;
+    if (progress) progress.recheck_attempted = receipt.attempted;
     const verifiedBefore = receipt.verified;
     let outcome = 'UNVERIFIED', retryMs = 60 * 60 * 1000;
     // Lease before I/O: a process interruption cannot strand the same oldest row at the head.
@@ -1553,7 +1576,7 @@ async function recheckKnownListings(sourceKey, checkedAt, parentSignal) {
   return publicProjections;
 }
 
-function pcSourceAdapter(sourceKey) {
+function pcSourceAdapter(sourceKey, diagnostic) {
   return createSourceAdapter({
     sourceKey,
     async collectIncremental(input) {
@@ -1577,7 +1600,9 @@ function pcSourceAdapter(sourceKey) {
       const reservedRunId = sourceKey === 'danawa' ? pcLedger.startCrawlRun({
         sourceId: sourceKey, startedAt: input.now, adapterVersion: 'existing-site-wrapper-v1'
       }) : null;
-      const collectTarget = async (target) => {
+      const runningMetrics = input.collection_metrics;
+      if (runningMetrics) runningMetrics.crawl_run_id = reservedRunId;
+      const collectTargetWork = async (target) => {
         throwIfAborted(input.signal);
         const collectionQuery = sourceKey === "ebay" && !target.canonical_product_id
           ? (ebayTargetForCategory(target.category_code)?.query || target.query_text)
@@ -1590,6 +1615,26 @@ function pcSourceAdapter(sourceKey) {
         const items = Array.isArray(collected) ? collected : collected.items;
         const diagnostics = Array.isArray(collected?.diagnostics) ? collected.diagnostics : [];
         return { target, items, diagnostics, request_count: Math.max(1, diagnostics.length) };
+      };
+      const collectTarget = async target => {
+        if (runningMetrics) runningMetrics.request_count += 1;
+        try {
+          const value = diagnostic
+            ? await diagnostic.target(sourceKey, target, () => collectTargetWork(target))
+            : await collectTargetWork(target);
+          if (runningMetrics && !input.signal?.aborted) {
+            runningMetrics.request_count += Math.max(0, value.request_count - 1);
+            runningMetrics.parsed_count += value.items?.length || 0;
+          }
+          return value;
+        } catch (error) {
+          if (runningMetrics && !input.signal?.aborted) {
+            runningMetrics.request_failure_count += 1;
+            runningMetrics.target_results.push({ target_id: target.target_id, status: 'FAILED',
+              cursor: target.incremental_cursor || null, error: error instanceof Error ? error.message : String(error) });
+          }
+          throw error;
+        }
       };
       const settled = [];
       if (sourceKey === "danawa") {
@@ -1738,17 +1783,23 @@ async function runPcSourceSchedulerTick() {
   pcSchedulerActive = true;
   const through = new Date().toISOString();
   const tickSignal = AbortSignal.timeout(PC_SCHEDULER_WATCHDOG_MS);
+  const diagnostic = createCollectionDiagnostics({ signal: tickSignal, budgetMs: PC_SCHEDULER_WATCHDOG_MS,
+    releaseId, processId: PROCESS_INSTANCE.id });
+  let tickStatus = 'completed';
   pcSchedulerLastTickAt = through;
   try {
     const tickErrors = [];
     let committedRuns = 0;
-    const adapters = Object.fromEntries(PC_SOURCE_REGISTRY.map((source) => [source.key, pcSourceAdapter(source.key)]));
+    const adapters = Object.fromEntries(PC_SOURCE_REGISTRY.map((source) => [source.key, pcSourceAdapter(source.key, diagnostic)]));
     const results = await runDueSourceCollections({
       after: pcSchedulerAfter,
       through,
       adapters,
       runtimeBySource: pcSchedulerRuntime,
-      inputsBySource: Object.fromEntries(PC_SOURCE_REGISTRY.map((source) => [source.key, { signal: tickSignal }])),
+      inputsBySource: Object.fromEntries(PC_SOURCE_REGISTRY.map((source) => [source.key, { signal: tickSignal,
+        collection_metrics: { request_count: 0, request_failure_count: 0, parsed_count: 0,
+          parse_failure_count: 0, target_results: [] } }])),
+      onEvent: event => diagnostic.sourceEvent(event),
       governanceBySource: Object.fromEntries(PC_SOURCE_REGISTRY.map((source) => [
         source.key,
         source.policy_status === "APPROVED" ? EFFECTIVE_PC_SOURCE_GOVERNANCE[source.key] : undefined
@@ -1799,8 +1850,8 @@ async function runPcSourceSchedulerTick() {
             finishedAt: new Date().toISOString(),
             collectedCount: 0,
             changedCount: 0,
-            requestCount: Number(failureMetrics.request_count || 1),
-            requestFailureCount: Number(failureMetrics.request_failure_count || 1),
+            requestCount: Number(failureMetrics.request_count ?? 0),
+            requestFailureCount: Number(failureMetrics.request_failure_count ?? 0),
             parsedCount: Number(failureMetrics.parsed_count || 0),
             parseFailureCount: Number(failureMetrics.parse_failure_count || 0),
             httpBlockedCount: Number(failureMetrics.http_blocked_count || 0),
@@ -1814,15 +1865,19 @@ async function runPcSourceSchedulerTick() {
         continue;
       }
       let runId = null;
+      const progress = diagnostic.source(result.source_key);
+      const phase = (name, task) => diagnostic.phase(result.source_key, name, task,
+        { crawl_run_id: runId, scheduled_at: result.run_at });
       try {
         runId = result.result.metrics?.crawl_run_id || pcLedger.startCrawlRun({
           sourceId: result.source_key,
           startedAt: result.run_at,
           adapterVersion: "existing-site-wrapper-v1"
         });
-        const recorded = await recordPcItemsIncrementally(result.result.items, result.run_at);
-        const publicProjections = stabilizeIncrementalPcProjections(recorded);
+        const recorded = await phase('record_items', () => recordPcItemsIncrementally(result.result.items, result.run_at, progress));
+        const publicProjections = await phase('prepare_projections', () => stabilizeIncrementalPcProjections(recorded));
         const changedCount = recorded.filter((item) => item._pc_snapshot_created === true).length;
+        await phase('target_runtime', () => {
         for (const target of Array.isArray(result.result.target_results) ? result.result.target_results : []) {
           pcLedger.updateSourceTargetRuntime({
             sourceId: result.source_key,
@@ -1833,14 +1888,15 @@ async function runPcSourceSchedulerTick() {
             error: target.error
           });
         }
-        await upsertPcProjectionsIncrementally(publicProjections, { observedAt: result.run_at });
+        });
+        await phase('project_items', () => upsertPcProjectionsIncrementally(publicProjections, { observedAt: result.run_at }, progress));
         const d1ImportResult = publicProjections.length > 0
-          ? await importToD1BestEffort(publicProjections, tickSignal)
+          ? await phase('d1_import', () => importToD1BestEffort(publicProjections, tickSignal))
           : null;
         if (d1ImportResult?.deferred) {
           tickErrors.push(`${result.source_key}:D1_DAILY_ROW_WRITE_LIMIT`);
         }
-        await recheckKnownListings(result.source_key, result.run_at, tickSignal);
+        await phase('lifecycle_recheck', () => recheckKnownListings(result.source_key, result.run_at, tickSignal, progress));
         const partialFailure = result.status === "partial_success";
         pcLedger.finishCrawlRun({
           crawlRunId: runId,
@@ -1866,20 +1922,25 @@ async function runPcSourceSchedulerTick() {
           committedRuns += 1;
           if (!d1ImportResult?.deferred) {
             try {
-              await mirrorPcListingCollectionManifest({
+              await phase('collection_manifest', () => mirrorPcListingCollectionManifest({
                 sourceId: result.source_key,
                 asOf: result.run_at,
                 successfulTargetIds: (Array.isArray(result.result.target_results) ? result.result.target_results : [])
                   .filter((target) => target.status === "SUCCEEDED"
                     && PC_HOURLY_COLLECTION_TARGET_IDS.has(target.target_id))
                   .map((target) => target.target_id)
-              }, tickSignal);
+              }, tickSignal));
             } catch (manifestError) {
               tickErrors.push(`${result.source_key}:collection-manifest:${manifestError instanceof Error ? manifestError.message : String(manifestError)}`);
             }
           }
         } else tickErrors.push(`${result.source_key}:${result.error}`);
+        diagnostic.emit('pc_collection_source_commit_finished', { source_id: result.source_key,
+          crawl_run_id: runId, status: partialFailure ? 'partial_failure' : 'succeeded', ...progress });
       } catch (error) {
+        tickStatus = 'partial_failure';
+        diagnostic.emit('pc_collection_source_commit_failed', { source_id: result.source_key,
+          crawl_run_id: runId, ...progress, ...collectionError(error) });
         const message = error instanceof Error ? error.message : String(error);
         if (runId) {
           try {
@@ -1887,27 +1948,38 @@ async function runPcSourceSchedulerTick() {
               crawlRunId: runId,
               status: "FAILED",
               finishedAt: new Date().toISOString(),
-              requestCount: 1,
-              requestFailureCount: 1,
-              parseFailureCount: 1,
-              error: message
+              collectedCount: progress.recorded,
+              changedCount: progress.changed,
+              requestCount: Number(result.result.metrics?.request_count || 0),
+              requestFailureCount: Number(result.result.metrics?.request_failure_count || 0),
+              parsedCount: Number(result.result.metrics?.parsed_count ?? result.result.items.length),
+              parseFailureCount: Number(result.result.metrics?.parse_failure_count || 0),
+              httpBlockedCount: Number(result.result.metrics?.http_blocked_count || 0),
+              captchaCount: Number(result.result.metrics?.captcha_count || 0),
+              error: `PC_PHASE_${progress.last_phase || 'commit'}:${message}`
             });
           } catch (auditError) {
             tickErrors.push(`${result.source_key}:crawl-audit:${auditError instanceof Error ? auditError.message : String(auditError)}`);
           }
         }
         tickErrors.push(`${result.source_key}:${message}`);
-        const failedRuntime = sourceRuntimeAfterFailure(result.source_key, runtimeBeforeCrawlAudit, error, result.run_at);
+        const failedRuntime = tickSignal.aborted
+          ? { ...runtimeBeforeCrawlAudit, last_started_at: result.run_at, last_error: `TICK_DEADLINE:${progress.last_phase}` }
+          : sourceRuntimeAfterFailure(result.source_key, runtimeBeforeCrawlAudit, error, result.run_at);
         pcSchedulerRuntime[result.source_key] = failedRuntime;
         pcLedger.updateSourceRuntime(result.source_key, failedRuntime);
       }
     }
     if (committedRuns > 0) pcSchedulerLastSucceededAt = through;
     if (results.length > 0) pcSchedulerLastError = tickErrors.length > 0 ? tickErrors.join("; ") : null;
+    if (tickErrors.length) tickStatus = 'partial_failure';
   } catch (error) {
+    tickStatus = 'failed';
+    diagnostic.emit('pc_collection_tick_failed', collectionError(error));
     pcSchedulerLastError = error instanceof Error ? error.message : String(error);
     console.warn("[aws-runner] PC source scheduler tick failed", pcSchedulerLastError);
   } finally {
+    diagnostic.finish(tickSignal.aborted ? 'deadline_exceeded' : tickStatus);
     pcSchedulerAfter = through;
     pcSchedulerActive = false;
     pcOperationalReadinessCache.expiresAt = 0;
@@ -2296,6 +2368,7 @@ const server = http.createServer(async (req, res) => {
         ledger_ready: Boolean(pcLedger),
         scheduler_enabled: PC_PARTS_SCHEDULER_ENABLED,
         scheduler_active: pcSchedulerActive,
+        scheduler_watchdog_ms: PC_SCHEDULER_WATCHDOG_MS,
         publication_active: pcPublicationActive,
         publication_job: pcPublicationJob,
         source_targets_per_run: PC_SOURCE_TARGETS_PER_RUN,

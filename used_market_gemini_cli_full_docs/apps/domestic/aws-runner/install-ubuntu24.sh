@@ -66,6 +66,7 @@ for required_file in \
 done
 
 for required_file in \
+  aws-runner/pc-collection-diagnostics.mjs \
   collector/logic/pc-source-registry.mjs \
   collector/logic/pc-source-adapters.mjs \
   collector/logic/danawa-search.mjs \
@@ -153,6 +154,7 @@ SERVICES_STOPPED=true
 
 validate_release() {
 node --check "$APP_ROOT/aws-runner/runner.mjs"
+node --check "$APP_ROOT/aws-runner/pc-collection-diagnostics.mjs"
 node --check "$APP_ROOT/aws-runner/lifecycle-status-cache.mjs"
 node --check "$APP_ROOT/aws-runner/lifecycle-queue.mjs"
 node --check "$APP_ROOT/aws-runner/publish-pc-stats-runner.mjs"
