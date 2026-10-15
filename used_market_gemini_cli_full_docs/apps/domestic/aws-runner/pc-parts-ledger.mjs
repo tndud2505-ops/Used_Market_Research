@@ -36,6 +36,7 @@ export const PC_PARTS_LEDGER_TABLES = Object.freeze([
   "crawl_runs",
   "raw_listings",
   "listing_snapshots",
+  "listing_snapshot_observation_days",
   "normalized_listings",
   "listing_items",
   "product_master",
@@ -982,6 +983,30 @@ export class PcPartsLedger {
       migrateStoredPricePublications(this.db);
       migrateLifecycleQueue(this.db);
       this.db.prepare("INSERT OR IGNORE INTO pc_parts_schema_migrations(version, applied_at) VALUES (11, ?)").run(versionTimestamp);
+      this.db.exec(`CREATE TABLE IF NOT EXISTS listing_snapshot_observation_days (
+        snapshot_id INTEGER NOT NULL REFERENCES listing_snapshots(id) ON DELETE RESTRICT,
+        observation_day TEXT NOT NULL,
+        observed_at TEXT NOT NULL,
+        PRIMARY KEY (snapshot_id, observation_day)
+      ) STRICT;
+      CREATE INDEX IF NOT EXISTS idx_snapshot_observation_day
+        ON listing_snapshot_observation_days(observation_day, snapshot_id);`);
+      if (!this.db.prepare('SELECT 1 FROM pc_parts_schema_migrations WHERE version = 12').get()) {
+        // Legacy evidence proves endpoints only. Never interpolate missing days
+        // or rewrite finalized statistics while opening an existing database.
+        this.db.exec(`INSERT OR IGNORE INTO listing_snapshot_observation_days
+          SELECT id, substr(observed_at, 1, 10), observed_at FROM listing_snapshots;
+          INSERT OR IGNORE INTO listing_snapshot_observation_days
+          SELECT s.id, substr(r.last_seen_at, 1, 10), r.last_seen_at
+          FROM raw_listings r JOIN listing_snapshots s ON s.raw_listing_id = r.id
+          WHERE s.lifecycle_status IN ('ACTIVE', 'RESERVED') AND s.observed_at <= r.last_seen_at
+            AND s.id = (SELECT latest.id FROM listing_snapshots latest
+              WHERE pc_source_listing_identity(latest.source_id, latest.source_listing_id)
+                = pc_source_listing_identity(s.source_id, s.source_listing_id)
+                AND latest.observed_at <= r.last_seen_at
+              ORDER BY latest.observed_at DESC, latest.id DESC LIMIT 1);`);
+        this.db.prepare('INSERT INTO pc_parts_schema_migrations(version, applied_at) VALUES (12, ?)').run(versionTimestamp);
+      }
       this.db.exec("COMMIT");
     } catch (error) {
       try { this.db.exec("ROLLBACK"); } catch {}
@@ -2014,6 +2039,7 @@ export class PcPartsLedger {
           && (previousText.title !== safeTitle || (previousText.description || '') !== (safeDescription || ''));
         if (!lateTransaction && !changedClassificationText) {
           ensureRequestedNormalization(previous.id);
+          this.recordSnapshotObservation(previous.id, observedAt);
           return { rawListingId: raw.id, snapshotId: previous.id, snapshotCreated: false, status: "SOLD", soldLastAskPrice: previous.sold_last_ask_price };
         }
       }
@@ -2030,6 +2056,7 @@ export class PcPartsLedger {
       const stateHash = hash({ payloadHash, status, availability, price, currency, soldLastAskPrice, transactionPrice });
       if (previous?.state_hash === stateHash) {
         ensureRequestedNormalization(previous.id);
+        this.recordSnapshotObservation(previous.id, observedAt);
         return { rawListingId: raw.id, snapshotId: previous.id, snapshotCreated: false, status, soldLastAskPrice };
       }
       const inserted = this.db.prepare(`
@@ -2041,8 +2068,16 @@ export class PcPartsLedger {
       if (input.normalized) this.insertNormalization(snapshotId, input.normalized, price, currency, input.versions || {});
       else if (previous) this.copyNormalization(previous.id, snapshotId);
       if (previous) this.copyDuplicateClusterMembership(previous.id, snapshotId);
+      this.recordSnapshotObservation(snapshotId, observedAt);
       return { rawListingId: raw.id, snapshotId, snapshotCreated: true, status, soldLastAskPrice };
     });
+  }
+
+  recordSnapshotObservation(snapshotId, observedAt) {
+    this.db.prepare(`INSERT INTO listing_snapshot_observation_days(snapshot_id, observation_day, observed_at)
+      VALUES (?, ?, ?) ON CONFLICT(snapshot_id, observation_day) DO UPDATE SET
+      observed_at = MIN(observed_at, excluded.observed_at)`)
+      .run(snapshotId, dayKey(observedAt), observedAt);
   }
 
   recordMissingCheck({ sourceId, sourceListingId, checkedAt }) {
@@ -2075,6 +2110,7 @@ export class PcPartsLedger {
       const snapshotId = Number(result.lastInsertRowid);
       if (previous) this.copyNormalization(previous.id, snapshotId);
       if (previous) this.copyDuplicateClusterMembership(previous.id, snapshotId);
+      this.recordSnapshotObservation(snapshotId, timestamp);
       return { accepted: true, missingCheckCount, status, snapshotCreated: true, snapshotId };
     });
   }
@@ -2355,7 +2391,7 @@ export class PcPartsLedger {
       .run(new Date(this.now()).toISOString(), requireValue(clusterKey, "clusterKey"));
   }
 
-  eligibleRows({ canonicalProductId, marketPool, condition, currency, from, asOf, normalizationVersion, parserVersion, ruleVersion, filterVersion, sourceIds = [] }) {
+  eligibleRows({ canonicalProductId, marketPool, condition, currency, from, asOf, normalizationVersion, parserVersion, ruleVersion, filterVersion, sourceIds = [], dailyObservations = false }) {
     const pools = underlyingMarketPools(marketPool);
     const allowedSourceIds = [...new Set((Array.isArray(sourceIds) ? sourceIds : [])
       .map((sourceId) => cleanText(sourceId, 100)).filter(Boolean))].sort();
@@ -2363,7 +2399,16 @@ export class PcPartsLedger {
       ? ` AND s.source_id IN (${allowedSourceIds.map(() => "?").join(", ")})`
       : "";
     const rows = this.db.prepare(`
-      SELECT s.*, n.id AS normalized_listing_id, n.canonical_product_id, n.market_pool, n.condition_code,
+      SELECT s.*, ${dailyObservations ? `(SELECT json_group_array(d.observation_day)
+        FROM listing_snapshot_observation_days d
+        WHERE d.snapshot_id = s.id AND d.observation_day >= ? AND d.observed_at <= ?
+          AND NOT EXISTS (SELECT 1 FROM listing_snapshots newer
+            JOIN listing_snapshot_observation_days nd ON nd.snapshot_id = newer.id
+            WHERE pc_source_listing_identity(newer.source_id, newer.source_listing_id)
+                = pc_source_listing_identity(s.source_id, s.source_listing_id)
+              AND nd.observation_day = d.observation_day AND nd.observed_at <= ?
+              AND (newer.observed_at > s.observed_at OR (newer.observed_at = s.observed_at AND newer.id > s.id)))) AS observation_days_json,` : ''}
+             n.id AS normalized_listing_id, n.canonical_product_id, n.market_pool, n.condition_code,
              n.quantity, n.price_scope, n.exact_product, n.price_eligible, n.statistics_eligible,
              n.parser_version, n.rule_version, n.filter_version,
              li.id AS listing_item_id, li.total_price, li.unit_price,
@@ -2385,7 +2430,7 @@ export class PcPartsLedger {
          AND s.observed_at <= ?
          ${sourceFilter}
        ORDER BY s.observed_at, s.id
-    `).all(canonicalProductId, ...pools, condition, currency, normalizationVersion, parserVersion, ruleVersion, filterVersion,
+    `).all(...(dailyObservations ? [from.slice(0, 10), asOf, asOf] : []), canonicalProductId, ...pools, condition, currency, normalizationVersion, parserVersion, ruleVersion, filterVersion,
       from, from, asOf, ...allowedSourceIds);
     return rows.filter((row) => !reviewedPcListingExclusion(row.source_id, row.source_listing_id));
   }
@@ -2461,7 +2506,7 @@ export class PcPartsLedger {
     const filterVersion = cleanText(options.filterVersion || "pc-filter-v1", 100);
     const allowedSourceIds = Array.isArray(options.sourceIds) ? options.sourceIds : [];
     const rows = this.eligibleRows({ canonicalProductId, marketPool, condition, currency, from, asOf,
-      normalizationVersion, parserVersion, ruleVersion, filterVersion, sourceIds: allowedSourceIds });
+      normalizationVersion, parserVersion, ruleVersion, filterVersion, sourceIds: allowedSourceIds, dailyObservations: true });
     const currentScope = { canonicalProductId, marketPool, condition, currency };
     const latestByListing = this.latestIdentityStates(rows, {
       asOf, normalizationVersion, parserVersion, ruleVersion, filterVersion, sourceIds: allowedSourceIds
@@ -2475,10 +2520,8 @@ export class PcPartsLedger {
     for (const row of rows) {
       const identity = priceStatsListingIdentity(row);
       if (row.lifecycle_status === "ACTIVE" || row.lifecycle_status === "RESERVED") {
-        const firstDay = Math.max(Date.parse(from), Date.parse(dayKey(row.observed_at)));
-        const lastDay = Math.min(Date.parse(asOf), Date.parse(dayKey(row.raw_last_seen_at || row.observed_at)));
-        for (let day = firstDay; day <= lastDay; day += DAY_MS) {
-          latestByListingDay.set(`${identity}\u0000${dayKey(new Date(day))}`, row);
+        for (const day of parseJson(row.observation_days_json, [])) {
+          latestByListingDay.set(`${identity}\u0000${day}`, row);
         }
       } else {
         latestByListingDay.set(`${identity}\u0000${dayKey(row.observed_at)}`, row);
@@ -3171,6 +3214,8 @@ export class PcPartsLedger {
       INSERT OR IGNORE INTO pc_storage_compaction_protected(snapshot_id)
         SELECT snapshot_id FROM duplicate_cluster_members;
     `);
+    this.db.prepare(`INSERT OR IGNORE INTO pc_storage_compaction_protected(snapshot_id)
+      SELECT snapshot_id FROM listing_snapshot_observation_days WHERE observation_day >= ?`).run(observationCutoffDay);
     this.db.prepare(`INSERT INTO pc_storage_compaction_snapshots(snapshot_id)
       WITH ranked AS (
         SELECT id, observed_at,
@@ -3209,6 +3254,7 @@ export class PcPartsLedger {
     return {
       observation_retention_days: observationRetentionDays,
       observation_cutoff: observationCutoff,
+      observation_days_to_remove: Number(this.db.prepare('SELECT COUNT(*) AS count FROM listing_snapshot_observation_days WHERE observation_day < ?').get(observationCutoffDay).count),
       snapshots_to_remove: scalar("SELECT COUNT(*) AS count FROM pc_storage_compaction_snapshots"),
       normalizations_to_remove: scalar(`SELECT COUNT(*) AS count FROM normalized_listings
         WHERE snapshot_id IN (SELECT snapshot_id FROM pc_storage_compaction_snapshots)`),
@@ -3289,7 +3335,10 @@ export class PcPartsLedger {
       let removedDetailNormalizations = { changes: 0 };
       let removedSnapshots = { changes: 0 };
       let removedRawListings = { changes: 0 };
+      let removedObservationDays = { changes: 0 };
       if (detailPlan) {
+        removedObservationDays = this.db.prepare('DELETE FROM listing_snapshot_observation_days WHERE observation_day < ?')
+          .run(detailPlan.observation_cutoff.slice(0, 10));
         this.db.exec(`
           UPDATE daily_price_stats SET member_details_retained = 0
           WHERE id IN (SELECT stat_id FROM pc_storage_compaction_stats);
@@ -3364,6 +3413,7 @@ export class PcPartsLedger {
         observation_listing_items_removed: Number(removedDetailItems.changes || 0),
         observation_normalizations_removed: Number(removedDetailNormalizations.changes || 0),
         observation_snapshots_removed: Number(removedSnapshots.changes || 0),
+        observation_days_removed: Number(removedObservationDays.changes || 0),
         observation_raw_listings_removed: Number(removedRawListings.changes || 0)
       };
       });

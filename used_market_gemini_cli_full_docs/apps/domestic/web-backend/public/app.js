@@ -1751,7 +1751,15 @@ function renderListings() {
     body.append(title);
     const listingProduct = state.selectedProduct
       || state.products.find((product) => productId(product) === normalizeText(listing.canonical_product_id));
-    const specText = listingProduct ? productSpecText(listingProduct) : "";
+    let specText = listingProduct ? productSpecText(listingProduct) : "";
+    if (listingProduct && productCategory(listingProduct) === "RAM") {
+      const capacity = Number(listingProduct.key_specs?.module_capacity_gb);
+      const count = Number(listing.quantity);
+      const known = Number.isSafeInteger(count) && count > 0 && Number(listing.quantity_confidence) >= 0.9;
+      const generation = normalizeText(listingProduct.key_specs?.memory_generation);
+      specText = [generation, capacity > 0 ? `${capacity}GB / 개` : "",
+        known ? `${count}개 판매${capacity > 0 ? ` · 총 ${capacity * count}GB` : ""}` : "판매 수량 확인 필요"].filter(Boolean).join(" · ");
+    }
     if (specText && specText !== "—") body.append(createElement("div", "listing-spec", specText));
     const meta = createElement("div", "listing-meta");
     const canonicalModel = normalizeText(listing.canonical_display_name);

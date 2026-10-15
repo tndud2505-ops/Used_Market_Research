@@ -57,6 +57,12 @@ if (importUrl.protocol !== "https:" || importUrl.username || importUrl.password
 }
 
 const indexPath = path.resolve(indexValue);
+let jobInput = '';
+if (!process.stdin.isTTY) for await (const chunk of process.stdin) {
+  jobInput += chunk;
+  if (Buffer.byteLength(jobInput) > 4096) throw new Error('INVALID_PUBLICATION_JOB_INPUT');
+}
+const jobKey = jobInput.trim() ? JSON.parse(jobInput).job_key : null;
 const index = new SearchIndex({ filePath: indexPath, backupDir: path.join(path.dirname(indexPath), "backups") });
 const ledger = new PcPartsLedger({ db: index.db });
 const publicationStarted = performance.now();
@@ -161,11 +167,20 @@ try {
     throw new Error('PC_STATS_PIPELINE_CHANGED_DURING_PREPARATION');
   }
   phase('local_publication_validation');
-  storeCompletedPricePublication(ledger.db, {
+  const localValidation = storeCompletedPricePublication(ledger.db, {
     publicationId: publication.publication_id, rows, expectedRowCount: rows.length,
     expectedKeys: rows.map(storedPricePublicationKey), allowedSourceIds: PC_DIRECTORY_PUBLICATION_SOURCE_KEYS,
-    validateOnly: true
+    prepared: true
   });
+  if (jobKey) {
+    const { rows: ignoredRows, expected_keys: ignoredKeys, ...intent } = publication;
+    const response = await fetch(`http://127.0.0.1:${Number(process.env.RUNNER_PORT || 8787)}/api/runner/publication-intent`, {
+      method: 'POST', redirect: 'error', signal: AbortSignal.timeout(10000),
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${process.env.CLOUDFLARE_RUNNER_TOKEN || process.env.RUNNER_TOKEN || ''}` },
+      body: JSON.stringify({ key: jobKey, intent: { ...intent, expected_chunk_count: Math.ceil(rows.length / 4), local_checksum: localValidation.checksum } })
+    });
+    if (!response.ok || (await response.json()).ok !== true) throw new Error('PUBLICATION_INTENT_NOT_PERSISTED');
+  }
   // Operator recovery artifact: seal the fresh AWS calculation before the
   // first D1 write. Never overwrite or substitute an older prepared result.
   if (process.env.PC_STATS_PUBLICATION_OUTPUT?.trim()) {

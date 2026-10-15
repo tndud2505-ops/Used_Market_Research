@@ -1,10 +1,10 @@
 import { getStatsJson } from './pc-stats-publication-client.mjs';
-import { verifyProductStatsReadback } from '../cloudflare/public-product-stats.mjs';
+import { verifyProductStatsReadback, statsChunkManifestChecksum } from '../cloudflare/public-product-stats.mjs';
 import { streamStatsChecksum } from './stream-stats-checksum.mjs';
 
 // Called only by the authenticated runner route. Fetch targets come from the
 // protected server configuration, never from the activation request.
-export async function verifyStoredStatsOnAws({ importUrl, token, publication, expectedActive = 0, includeRows = false }) {
+export async function verifyStoredStatsOnAws({ importUrl, token, publication, expectedActive = 0, includeRows = false, recoverManifest = false }) {
   if (![0, 1].includes(expectedActive)) throw new Error('INVALID_READBACK_ACTIVE_STATE');
   const started = performance.now();
   const cpuStarted = process.cpuUsage();
@@ -74,7 +74,8 @@ export async function verifyStoredStatsOnAws({ importUrl, token, publication, ex
     throw new Error('PUBLICATION_READBACK_IDENTITIES_INVALID');
   const rows = await readAll('rows', publication.expected_row_count, 4);
   const chunks = await readAll('chunks', publication.expected_chunk_count, 40);
-  const proof = await verifyProductStatsReadback(publication, rows, chunks, streamStatsChecksum);
+  const input = recoverManifest ? { ...publication, chunk_manifest_checksum: await statsChunkManifestChecksum(chunks) } : publication;
+  const proof = await verifyProductStatsReadback(input, rows, chunks, streamStatsChecksum);
   const cpu = process.cpuUsage(cpuStarted);
   return { ...proof, pages, d1_usage: d1Usage, elapsed_ms: Math.round(performance.now() - started),
     process_cpu_ms: Math.round((cpu.user + cpu.system) / 1000), ...(includeRows ? { rows } : {}) };

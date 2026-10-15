@@ -182,3 +182,83 @@ try {
   assert.equal(buildListingClassificationRepair(db, ids, { asOf: plan.as_of }).normalizations.length, 0);
   console.log('AX wireless-card scoped repair passed; genuine Corsair PSU samples preserved');
 } finally { networkIndex.close(); }
+
+// Correct only proven sale units and whole-device identities; retain evidence.
+const saleIndex = new SearchIndex({ filePath: ':memory:' });
+try {
+  const db = saleIndex.db, ledger = new PcPartsLedger({ db }); ledger.migrate();
+  const pipeline = new PcShadowPipeline({ ledger }); await pipeline.initialize();
+  const observedAt = '2026-10-14T00:00:00.000Z';
+  const ramId = 'ram:samsung:ddr3:8gb', hddId = 'hdd:other-unclassified:capacity-bucket:le-1-tb';
+  const fixtures = [
+    ['ram-set', '삼성 DDR3 8GB PC3-12800 2개1세트', 40000, ramId, 'RAM'],
+    ['camcorder', 'JVC Victor Everio HDD 빈티지 캠코더 GZ-HD30-S [HDD 80GB]', 270000, hddId, 'HDD']
+  ];
+  for (const [id,title,price,oldId,category] of fixtures) {
+    const input = {site:'bunjang',item_id:`bunjang:${id}`,source_listing_id:id,
+      title,price,currency:'KRW',lifecycle_status:'ACTIVE',url:`https://m.bunjang.co.kr/products/${id}`};
+    let item = pipeline.recordItem(input, id === 'camcorder' ? '2026-07-01T00:00:00.000Z' : observedAt);
+    if (id === 'camcorder') item = pipeline.recordItem(input, observedAt);
+    saleIndex.upsertPublicProjections([item],{observedAt});
+    const row = db.prepare('SELECT * FROM listings WHERE item_id=?').get(item.item_id);
+    const metadata = {...JSON.parse(row.pc_metadata_json), category_code:category, canonical_product_id:oldId,
+      listing_kind:'SINGLE_COMPONENT',listing_type:'SINGLE',quantity:1,price_scope:'TOTAL',
+      price_eligible:true,statistics_eligible:true,exclusion_reasons:[],statistics_exclusion_reasons:[]};
+    db.prepare(`UPDATE listings SET pc_category_code=?,pc_canonical_product_id=?,pc_quantity=1,
+      pc_listing_kind='SINGLE_COMPONENT',pc_price_scope='TOTAL',pc_price_eligible=1,pc_metadata_json=? WHERE item_id=?`)
+      .run(category,oldId,JSON.stringify(metadata),item.item_id);
+    const n = db.prepare('SELECT id FROM normalized_listings ORDER BY id DESC LIMIT 1').get();
+    db.prepare(`UPDATE normalized_listings SET category_code=?,canonical_product_id=?,quantity=1,price_scope='TOTAL',
+      listing_kind='SINGLE_COMPONENT',listing_type='SINGLE',price_eligible=1,statistics_eligible=1,exact_product=1,
+      exclusion_reasons_json='[]',statistics_exclusion_reasons_json='[]' WHERE id=?`).run(category,oldId,n.id);
+    db.prepare('UPDATE listing_items SET canonical_product_id=?,quantity=1,unit_price=?,total_price=? WHERE normalized_listing_id=?')
+      .run(oldId,price,price,n.id);
+  }
+  const dump = table => JSON.stringify(db.prepare(`SELECT * FROM ${table}`).all());
+  const raw=dump('raw_listings'), snapshots=dump('listing_snapshots'), fts=dump('listing_fts');
+  const ids=fixtures.map(f=>`bunjang:${f[0]}`);
+  const plan=buildListingClassificationRepair(db,ids,{asOf:'2026-10-15T00:00:00.000Z'});
+  assert.equal(plan.listings.length,2); assert.equal(plan.normalizations.length,2); assert.equal(plan.scopes.length,4);
+  assert.equal(db.prepare("SELECT MIN(observed_at) date FROM listing_snapshots WHERE source_listing_id='camcorder'").get().date,
+    '2026-07-01T00:00:00.000Z', 'recently seen old snapshots must participate in scoped repair');
+  const ram=plan.normalizations.find(e=>e.before.category_code==='RAM');
+  assert.equal(ram.after.quantity,2); assert.equal(ram.after.statistics_eligible,1);
+  assert.equal(ram.afterChild.quantity,2); assert.equal(ram.afterChild.unit_price,20000); assert.equal(ram.afterChild.total_price,40000);
+  const cam=plan.normalizations.find(e=>e.before.category_code==='HDD');
+  assert.equal(cam.after.canonical_product_id,null); assert.equal(cam.after.statistics_eligible,0); assert.equal(cam.after.exact_product,0);
+  applyListingClassificationRepair(db,plan);
+  assert.equal(dump('raw_listings'),raw); assert.equal(dump('listing_snapshots'),snapshots); assert.equal(dump('listing_fts'),fts);
+  for(const {before,after} of plan.listings) {
+    assert.deepEqual({...db.prepare('SELECT * FROM listings WHERE item_id=?').get(after.item_id)},after);
+    for(const key of ['price_value','currency','first_seen_at','last_seen_at','last_checked_at','active']) assert.equal(after[key],before[key]);
+  }
+  assert.equal(buildListingClassificationRepair(db,ids,{asOf:plan.as_of}).normalizations.length,0);
+  const storedRam=db.prepare("SELECT * FROM listings WHERE item_id='bunjang:ram-set'").get();
+  assert.equal(storedRam.pc_quantity,2); assert.equal(storedRam.pc_price_scope,'TOTAL');
+  assert.equal(JSON.parse(storedRam.pc_metadata_json).quantity,2);
+  assert.equal(db.prepare('SELECT quantity FROM normalized_listings WHERE id=?').get(ram.after.id).quantity,2);
+  const storedItem=db.prepare('SELECT quantity,unit_price,total_price FROM listing_items WHERE id=?').get(ram.afterChild.id);
+  assert.deepEqual({...storedItem},{quantity:2,unit_price:20000,total_price:40000});
+  for(const title of ['삼성 DDR3 8GB PC3-12800 2개1세트','삼성 DDR3 8GB 2개 1세트','삼성 DDR3 8GB 2장 한세트']) {
+    const n=pipeline.normalizeItem({site:'bunjang',title,price:40000,currency:'KRW'},observedAt,null,{reclassification:true}).normalized;
+    assert.equal(n.quantity,2,title); assert.equal(n.unitPrice,20000,title); assert.equal(n.statisticsEligible,true,title);
+  }
+  const unit=pipeline.normalizeItem({site:'bunjang',title:'삼성 DDR3 8GB 2개1세트 개당 20000원',price:20000,currency:'KRW'},observedAt,null,{reclassification:true}).normalized;
+  assert.equal(unit.priceScope,'UNIT'); assert.equal(unit.unitPrice,20000);
+  const remaining=pipeline.normalizeItem({site:'bunjang',title:'삼성 DDR3 8GB 2개1세트 중 1개 판매완료',price:20000,currency:'KRW'},observedAt,null,{reclassification:true}).normalized;
+  assert.equal(remaining.quantity,1); assert.equal(remaining.priceScope,'UNIT'); assert.equal(remaining.unitPrice,20000);
+  for(const title of ['WD Blue 1TB HDD SATA 3.5-inch','캠코더에서 분리한 HDD 80GB','캠코더용 HDD 80GB',
+    'HDD 80GB 캠코더 호환', '캠코더 호환 HDD 80GB','1TB SATA HDD for JVC GZ-HD30-S camcorder']) {
+    const n=pipeline.normalizeItem({site:'bunjang',title,price:30000,currency:'KRW'},observedAt,null,{reclassification:true}).normalized;
+    assert.equal(n.categoryCode,'HDD',title); assert.equal(n.statisticsEligible,true,title);
+  }
+  const camera=pipeline.normalizeItem({site:'danawa',title:fixtures[1][1],price:270000,currency:'KRW',
+    requested_category_code:'HDD',source_category_code:'1:5'},observedAt,null,{reclassification:true}).normalized;
+  assert.equal(camera.canonicalProductId,null); assert.equal(camera.statisticsEligible,false);
+  console.log('RAM set quantity and camcorder scoped repair passed; valid components preserved');
+  for (const suffix of ['2개1세트', '2개1세트판매', '2개1세트팝니다', '2개1세트일괄']) {
+    const n = pipeline.normalizeItem({site:'bunjang',title:`삼성 DDR3 8GB PC3-12800 ${suffix}`,price:40000,currency:'KRW'},
+      observedAt,null,{reclassification:true}).normalized;
+    assert.equal(n.quantity,2); assert.equal(n.unitPrice,20000); assert.equal(n.statisticsEligible,true);
+  }
+} finally { saleIndex.close(); }

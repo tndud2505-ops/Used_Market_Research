@@ -83,6 +83,121 @@ for required_file in \
   fi
 done
 
+# The gate is outside the release tree and survives service restarts.
+# Older runners must be stopped explicitly once; never overwrite their live code.
+exec 9>/run/used-market-runner-install.lock
+flock -n 9 || fail 'Another installer is active.'
+LIVE_APP_ROOT="$(realpath -m -- "$APP_ROOT")"
+[[ "$LIVE_APP_ROOT" != / && "$LIVE_APP_ROOT" != /opt && "$LIVE_APP_ROOT" != /var ]] || fail 'Unsafe APP_ROOT'
+[[ ! -L "$APP_ROOT" ]] || fail 'Symlink APP_ROOT requires an explicit release migration.'
+# The service sandbox and storage tools use these paths. Refuse a custom layout
+# before stopping services instead of silently selecting a different database.
+if [[ -f "$RUNNER_ENV_FILE" ]]; then
+  for setting in RUNNER_INDEX_DIR=/var/lib/used-market-runner RUNNER_INDEX_PATH=/var/lib/used-market-runner/search-index.sqlite; do
+    key="${setting%%=*}"; expected="${setting#*=}"
+    configured="$(awk -F= -v key="$key" '$1 == key { sub(/\r$/, "", $2); print $2; exit }' "$RUNNER_ENV_FILE")"
+    [[ -z "$configured" || "$configured" == "$expected" ]] || fail "Custom $key requires an explicit storage-path migration; existing data and services were not changed."
+  done
+fi
+MAINTENANCE_FILE=/var/lib/used-market-runner/deployment-maintenance
+[[ ! -e "$MAINTENANCE_FILE" ]] || fail 'A previous deployment gate is held; reconcile it before retrying.'
+mkdir -p /var/lib/used-market-runner
+install -m 0644 /dev/null "$MAINTENANCE_FILE"
+GATE_HELD=true
+RELEASE_SWITCHED=false
+SERVICES_STOPPED=false
+STAGE_ROOT=''
+PREVIOUS_ROOT=''
+finish_install() {
+  local code=$?
+  trap - EXIT
+  if (( code != 0 )); then
+    if [[ "$RELEASE_SWITCHED" == true && -n "$PREVIOUS_ROOT" ]]; then
+      systemctl stop used-market-tunnel.service used-market-runner.service used-market-stats.service || true
+      # Preserve the failed release for diagnosis; never copy the live database.
+      failed_root="${LIVE_APP_ROOT}.failed.$(date +%s)"
+      mv -- "$LIVE_APP_ROOT" "$failed_root"
+      touch "$failed_root/.keep"
+      mv -- "$PREVIOUS_ROOT" "$LIVE_APP_ROOT"
+      printf '[aws-runner] Previous code restored. Maintenance remains held; verify services/configuration before releasing it.\n' >&2
+    elif [[ "$SERVICES_STOPPED" == false && "$GATE_HELD" == true ]]; then
+      rm -f -- "$MAINTENANCE_FILE"
+    else
+      printf '[aws-runner] Services remain stopped and maintenance is held. Resolve the failure and verify the selected release before resuming.\n' >&2
+    fi
+  fi
+  if [[ -n "$STAGE_ROOT" && -d "$STAGE_ROOT" ]]; then rm -rf -- "$STAGE_ROOT"; fi
+  exit "$code"
+}
+trap finish_install EXIT
+RUNNER_WAS_ACTIVE=false
+if systemctl is-active --quiet used-market-runner.service; then
+  RUNNER_WAS_ACTIVE=true
+  curl --fail --silent --max-time 10 http://127.0.0.1:8787/health \
+    | jq -e '.maintenance == true and .draining == false and (.pc_parts.publication_job.status != "queued") and (.pc_parts.publication_job.status != "running") and (.pc_parts.publication_job.status != "interrupted")' >/dev/null \
+    || fail 'Runner is busy or predates the drain gate. Defer deployment; older runners require an explicit idle shutdown first.'
+fi
+if [[ -S /run/used-market-stats/publisher.sock ]]; then
+  curl --fail --silent --max-time 5 --unix-socket /run/used-market-stats/publisher.sock http://localhost/status \
+    | jq -e '.active == false and .verification_active == false' >/dev/null \
+    || fail 'Statistics or verification is active; defer deployment.'
+fi
+# Stop all admission paths before changing packages or installed files.
+for service in used-market-tunnel.service used-market-runner.service used-market-stats.service; do
+  if systemctl cat "$service" >/dev/null 2>&1; then systemctl stop "$service"; fi
+done
+SERVICES_STOPPED=true
+
+validate_release() {
+node --check "$APP_ROOT/aws-runner/runner.mjs"
+node --check "$APP_ROOT/aws-runner/lifecycle-status-cache.mjs"
+node --check "$APP_ROOT/aws-runner/lifecycle-queue.mjs"
+node --check "$APP_ROOT/aws-runner/publish-pc-stats-runner.mjs"
+node --check "$APP_ROOT/aws-runner/isolated-stats-publisher.mjs"
+node --check "$APP_ROOT/aws-runner/stats-service.mjs"
+node --check "$APP_ROOT/aws-runner/verify-pc-stats-runner.mjs"
+node --check "$APP_ROOT/aws-runner/publication-job-state.mjs"
+node --check "$APP_ROOT/aws-runner/reconcile-publication.mjs"
+node --check "$APP_ROOT/aws-runner/pc-publication-maintenance.mjs"
+node --check "$APP_ROOT/aws-runner/stream-stats-checksum.mjs"
+node --check "$APP_ROOT/aws-runner/pc-stats-publication-client.mjs"
+node --check "$APP_ROOT/aws-runner/search-index.mjs"
+node --check "$APP_ROOT/aws-runner/backup-storage-policy.mjs"
+node "$APP_ROOT/aws-runner/backup-storage-policy.mjs"
+node --check "$APP_ROOT/aws-runner/migration-smoke.mjs"
+migration_smoke_dir="$(mktemp -d)"
+node "$APP_ROOT/aws-runner/migration-smoke.mjs" "$migration_smoke_dir/search-index.sqlite"
+rm -rf -- "$migration_smoke_dir"
+node --check "$APP_ROOT/aws-runner/pc-parts-ledger.mjs"
+node --check "$APP_ROOT/aws-runner/pc-shadow-pipeline.mjs"
+node --check "$APP_ROOT/aws-runner/compact-pc-storage.mjs"
+node --check "$APP_ROOT/aws-runner/backfill-legacy-inactive.mjs"
+node --check "$APP_ROOT/collector/logic/pc-source-registry.mjs"
+node --check "$APP_ROOT/collector/logic/pc-source-adapters.mjs"
+node --check "$APP_ROOT/collector/logic/danawa-search.mjs"
+node --check "$APP_ROOT/market/logic/pc-market-pools.mjs"
+node --check "$APP_ROOT/collector/logic/pc-specialist-targets.mjs"
+node --check "$APP_ROOT/market/logic/pc-parts-classifier.mjs"
+node --check "$APP_ROOT/market/logic/pc-search-query-variants.mjs"
+node --check "$APP_ROOT/market/logic/pc-public-catalog.mjs"
+node --check "$APP_ROOT/market/logic/pc-price-readiness.mjs"
+node --check "$APP_ROOT/market/logic/pc-product-search.mjs"
+node --check "$APP_ROOT/aws-runner/pc-stored-price-publication.mjs"
+node --check "$APP_ROOT/aws-runner/pc-publication-scopes.mjs"
+node --check "$APP_ROOT/aws-runner/collect-pc-release-sample.mjs"
+node --check "$APP_ROOT/market/logic/pc-reviewed-listing-exclusions.mjs"
+node --check "$APP_ROOT/market/logic/pc-parts-directory.mjs"
+node --check "$APP_ROOT/market/logic/listing-lifecycle.mjs"
+for browse_flow_file in "$APP_ROOT"/market/data/browse-flows/*.mjs; do
+  node --check "$browse_flow_file"
+done
+node --check "$APP_ROOT/cloudflare/live-search.mjs"
+node --check "$APP_ROOT/cloudflare/category-filter.mjs"
+node --check "$APP_ROOT/cloudflare/category-source-map.mjs"
+node --check "$APP_ROOT/cloudflare/target-sites.mjs"
+
+}
+
 export DEBIAN_FRONTEND=noninteractive
 log '기본 패키지 설치'
 apt-get update
@@ -96,7 +211,6 @@ fi
 if (( node_major < 22 )); then
   log 'Node.js 22 설치'
   node_setup_file="$(mktemp)"
-  trap 'rm -f -- "$node_setup_file"' EXIT
   curl --fail --silent --show-error --location https://deb.nodesource.com/setup_22.x -o "$node_setup_file"
   bash "$node_setup_file"
   rm -f -- "$node_setup_file"
@@ -169,7 +283,9 @@ if ! id -u "$TUNNEL_USER" >/dev/null 2>&1; then
   useradd --system --no-create-home --shell /usr/sbin/nologin "$TUNNEL_USER"
 fi
 
-log "애플리케이션 파일 설치: ${APP_ROOT}"
+STAGE_ROOT="$(mktemp -d "${LIVE_APP_ROOT}.staging.XXXXXX")"
+APP_ROOT="$STAGE_ROOT"
+log "애플리케이션 파일 검증용 준비: ${APP_ROOT}"
 install -d -o root -g root -m 0755 "$APP_ROOT"
 install -d -o root -g root -m 0755 \
   "$APP_ROOT/aws-runner" "$APP_ROOT/cloudflare" \
@@ -206,6 +322,24 @@ chown -R root:root "$APP_ROOT/aws-runner" "$APP_ROOT/cloudflare" "$APP_ROOT/coll
 find "$APP_ROOT/aws-runner" "$APP_ROOT/cloudflare" "$APP_ROOT/collector" "$APP_ROOT/market" -type d -exec chmod 0755 {} +
 find "$APP_ROOT/aws-runner" "$APP_ROOT/cloudflare" "$APP_ROOT/collector" "$APP_ROOT/market" -type f -exec chmod 0644 {} +
 chmod 0755 "$APP_ROOT/aws-runner"/*.sh
+
+validate_release
+# A content marker binds health to this release, including uncommitted changes.
+release_id="$(find "$APP_ROOT" -type f -print0 | sort -z | xargs -0 sha256sum | sed "s|$APP_ROOT/||" | sha256sum | cut -d ' ' -f1)"
+printf '%s\n' "$release_id" > "$APP_ROOT/release-id"
+if [[ -e "$LIVE_APP_ROOT" ]]; then
+  PREVIOUS_ROOT="${LIVE_APP_ROOT}.previous.$(date +%s)"
+  [[ ! -e "$PREVIOUS_ROOT" ]] || fail 'Recovery release path already exists.'
+  mv -- "$LIVE_APP_ROOT" "$PREVIOUS_ROOT"
+  touch "$PREVIOUS_ROOT/.used-market-release-backup"
+fi
+if ! mv -- "$STAGE_ROOT" "$LIVE_APP_ROOT"; then
+  [[ -z "$PREVIOUS_ROOT" ]] || mv -- "$PREVIOUS_ROOT" "$LIVE_APP_ROOT"
+  fail 'Release activation failed; previous files restored.'
+fi
+STAGE_ROOT=''
+RELEASE_SWITCHED=true
+APP_ROOT="$LIVE_APP_ROOT"
 
 log '환경변수·토큰 디렉터리 준비'
 install -d -o root -g "$RUNNER_USER" -m 0750 "$RUNNER_ENV_DIR"
@@ -327,63 +461,8 @@ sed \
 install -o root -g root -m 0644 "$tunnel_tmp" /etc/systemd/system/used-market-tunnel.service
 rm -f -- "$tunnel_tmp"
 
-node --check "$APP_ROOT/aws-runner/runner.mjs"
-node --check "$APP_ROOT/aws-runner/lifecycle-status-cache.mjs"
-node --check "$APP_ROOT/aws-runner/lifecycle-queue.mjs"
-node --check "$APP_ROOT/aws-runner/publish-pc-stats-runner.mjs"
-node --check "$APP_ROOT/aws-runner/isolated-stats-publisher.mjs"
-node --check "$APP_ROOT/aws-runner/stats-service.mjs"
-node --check "$APP_ROOT/aws-runner/verify-pc-stats-runner.mjs"
-node --check "$APP_ROOT/aws-runner/publication-job-state.mjs"
-node --check "$APP_ROOT/aws-runner/pc-publication-maintenance.mjs"
-node --check "$APP_ROOT/aws-runner/stream-stats-checksum.mjs"
-node --check "$APP_ROOT/aws-runner/pc-stats-publication-client.mjs"
-node --check "$APP_ROOT/aws-runner/search-index.mjs"
-node --check "$APP_ROOT/aws-runner/backup-storage-policy.mjs"
-node "$APP_ROOT/aws-runner/backup-storage-policy.mjs"
-node --check "$APP_ROOT/aws-runner/migration-smoke.mjs"
-migration_smoke_dir="$(mktemp -d)"
-node "$APP_ROOT/aws-runner/migration-smoke.mjs" "$migration_smoke_dir/search-index.sqlite"
-rm -rf -- "$migration_smoke_dir"
-node --check "$APP_ROOT/aws-runner/pc-parts-ledger.mjs"
-node --check "$APP_ROOT/aws-runner/pc-shadow-pipeline.mjs"
-node --check "$APP_ROOT/aws-runner/compact-pc-storage.mjs"
-node --check "$APP_ROOT/aws-runner/backfill-legacy-inactive.mjs"
-node --check "$APP_ROOT/collector/logic/pc-source-registry.mjs"
-node --check "$APP_ROOT/collector/logic/pc-source-adapters.mjs"
-node --check "$APP_ROOT/collector/logic/danawa-search.mjs"
-node --check "$APP_ROOT/market/logic/pc-market-pools.mjs"
-node --check "$APP_ROOT/collector/logic/pc-specialist-targets.mjs"
-node --check "$APP_ROOT/market/logic/pc-parts-classifier.mjs"
-node --check "$APP_ROOT/market/logic/pc-search-query-variants.mjs"
-node --check "$APP_ROOT/market/logic/pc-public-catalog.mjs"
-node --check "$APP_ROOT/market/logic/pc-price-readiness.mjs"
-node --check "$APP_ROOT/market/logic/pc-product-search.mjs"
-node --check "$APP_ROOT/aws-runner/pc-stored-price-publication.mjs"
-node --check "$APP_ROOT/aws-runner/pc-publication-scopes.mjs"
-node --check "$APP_ROOT/aws-runner/collect-pc-release-sample.mjs"
-node --check "$APP_ROOT/market/logic/pc-reviewed-listing-exclusions.mjs"
-node --check "$APP_ROOT/market/logic/pc-parts-directory.mjs"
-node --check "$APP_ROOT/market/logic/listing-lifecycle.mjs"
-for browse_flow_file in "$APP_ROOT"/market/data/browse-flows/*.mjs; do
-  node --check "$browse_flow_file"
-done
-node --check "$APP_ROOT/cloudflare/live-search.mjs"
-node --check "$APP_ROOT/cloudflare/category-filter.mjs"
-node --check "$APP_ROOT/cloudflare/category-source-map.mjs"
-node --check "$APP_ROOT/cloudflare/target-sites.mjs"
 
 systemctl daemon-reload
-if [[ -S /run/used-market-stats/publisher.sock ]]; then
-  curl --fail --silent --max-time 5 --unix-socket /run/used-market-stats/publisher.sock http://localhost/status \
-    | jq -e '.active != true and .verification_active != true' >/dev/null \
-    || fail 'Statistics or verification is active; defer deployment instead of cancelling accepted publication.'
-fi
-if systemctl is-active --quiet used-market-runner.service; then
-  curl --fail --silent --max-time 10 http://127.0.0.1:8787/health \
-    | jq -e '.pc_parts.publication_active != true and (.pc_parts.publication_job.status != "queued") and (.pc_parts.publication_job.status != "running")' >/dev/null \
-    || fail 'Publication is pending or running; defer restart and inspect its receipt.'
-fi
 systemctl enable used-market-runner.service
 systemctl enable used-market-stats.service
 systemctl restart used-market-stats.service
@@ -398,12 +477,28 @@ if [[ -s "$TUNNEL_TOKEN_FILE" ]]; then
   systemctl enable used-market-tunnel.service
   systemctl restart used-market-runner.service
   systemctl restart used-market-tunnel.service
-  RUNNER_PUBLIC_URL="$configured_public_url" \
+  RUNNER_PUBLIC_URL="$configured_public_url" RUNNER_EXPECTED_RELEASE_ID="$release_id" \
     bash "$APP_ROOT/aws-runner/health-check.sh" --require-public
   log '반복 배포: runner → tunnel 순서로 재시작하고 로컬·외부 health를 확인했습니다.'
+elif [[ "$RUNNER_WAS_ACTIVE" == true ]] || grep -Eq '^(CLOUDFLARE_RUNNER_TOKEN|RUNNER_TOKEN)=.+' "$RUNNER_ENV_FILE"; then
+  systemctl restart used-market-runner.service
+  curl --fail --silent --show-error --retry 10 --retry-connrefused --retry-delay 2 --max-time 10 http://127.0.0.1:8787/health \
+    | jq -e --arg release "$release_id" '.ok == true and .pc_parts.ledger_ready == true and .release_id == $release and .maintenance == true' >/dev/null \
+    || fail 'Local Runner release verification failed.'
 fi
 
+while IFS= read -r -d '' old_release; do
+  if [[ "$old_release" != "$PREVIOUS_ROOT" && -f "$old_release/.used-market-release-backup" && ! -e "$old_release/.keep" ]]; then
+    rm -rf -- "$old_release" || printf '[aws-runner] Cleanup deferred: %s\n' "$old_release" >&2
+  fi
+done < <(find "$(dirname -- "$LIVE_APP_ROOT")" -maxdepth 1 -type d -name "$(basename -- "$LIVE_APP_ROOT").previous.*" -mtime +7 -print0)
+rm -f -- "$MAINTENANCE_FILE"
+GATE_HELD=false
+RELEASE_SWITCHED=false
 log '설치 완료'
+if [[ -n "$PREVIOUS_ROOT" ]]; then
+  printf 'Previous code retained at %s (remove after verified recovery window, at most 7 days).\n' "$PREVIOUS_ROOT"
+fi
 printf '\n다음 단계:\n'
 printf '  1) sudo bash %s/aws-runner/configure-ubuntu24.sh\n' "$APP_ROOT"
 printf '  2) bash %s/aws-runner/health-check.sh\n' "$APP_ROOT"

@@ -5,8 +5,15 @@ const METRICS = ['active', 'reserved', 'sold', 'confirmed_transactions'];
 const keyOf = row => JSON.stringify([row.canonical_product_id, row.market_pool, row.condition_code, row.currency, row.days]);
 const dateKey = value => new Date(value).toISOString().slice(0, 10);
 
-// Full, already-computed cohorts are committed together, after the external
-// publication acknowledgement. Public reads never scan raw marketplace rows.
+export function latestCompletedPricePublication(db) {
+  // Legacy rows were all completed; read-only plans must not migrate a database.
+  const hasState = db.prepare('PRAGMA table_info(pc_stored_price_publications)').all().some(column => column.name === 'completed');
+  return db.prepare(`SELECT * FROM pc_stored_price_publications ${hasState ? 'WHERE completed = 1' : ''}
+    ORDER BY published_at DESC, publication_id DESC LIMIT 1`).get();
+}
+
+// Computed cohorts are prepared atomically and exposed only after external
+// activation. Public reads never scan raw marketplace rows.
 export function migrateStoredPricePublications(db) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS pc_stored_price_publications (
@@ -34,6 +41,9 @@ export function migrateStoredPricePublications(db) {
     CREATE INDEX IF NOT EXISTS idx_pc_stored_price_read ON pc_stored_price_publication_rows
       (canonical_product_id, market_pool, condition_code, currency, days, through_date DESC);
   `);
+  if (!db.prepare('PRAGMA table_info(pc_stored_price_publications)').all().some(column => column.name === 'completed')) {
+    db.exec('ALTER TABLE pc_stored_price_publications ADD COLUMN completed INTEGER NOT NULL DEFAULT 1 CHECK(completed IN (0, 1))');
+  }
 }
 
 function validateMetric(metric) {
@@ -51,7 +61,7 @@ function validateMetric(metric) {
   if (n > 0 && (metric.min == null || metric.max == null)) throw new Error('PUBLISHED_PRICE_RANGE_MISSING');
 }
 
-export function storeCompletedPricePublication(db, { publicationId, rows, expectedRowCount, expectedKeys, publishedAt, allowedSourceIds, validateOnly = false }) {
+export function storeCompletedPricePublication(db, { publicationId, rows, expectedRowCount, expectedKeys, publishedAt, allowedSourceIds, validateOnly = false, prepared = false }) {
   if (!publicationId || !Array.isArray(rows) || rows.length === 0 || rows.length !== expectedRowCount) throw new Error('LOCAL_PUBLICATION_INCOMPLETE');
   const keys = rows.map(keyOf).sort();
   if (new Set(keys).size !== keys.length || !Array.isArray(expectedKeys)
@@ -112,11 +122,14 @@ export function storeCompletedPricePublication(db, { publicationId, rows, expect
     const previous = db.prepare('SELECT checksum FROM pc_stored_price_publications WHERE publication_id = ?').get(publicationId);
     if (previous) {
       if (previous.checksum !== checksum) throw new Error('LOCAL_PUBLICATION_ID_CONFLICT');
+      if (!prepared) db.prepare('UPDATE pc_stored_price_publications SET completed = 1, published_at = ? WHERE publication_id = ?').run(timestamp, publicationId);
       db.exec('COMMIT');
       return { publication_id: publicationId, checksum, row_count: rows.length, unchanged: true };
     }
-    db.prepare(`INSERT INTO pc_stored_price_publications VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(publicationId, checksum, rows.length, versions.normalization, versions.parser, versions.rule, versions.filter, asOf, timestamp);
+    db.prepare(`INSERT INTO pc_stored_price_publications
+      (publication_id, checksum, row_count, normalization_version, parser_version, rule_version, filter_version, as_of, published_at, completed)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(publicationId, checksum, rows.length, versions.normalization, versions.parser, versions.rule, versions.filter, asOf, timestamp, prepared ? 0 : 1);
     const insert = db.prepare(`INSERT INTO pc_stored_price_publication_rows VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
     const insertedHash = createHash('sha256').update('[');
     for (let i = 0; i < sorted.length; i++) {
@@ -143,7 +156,7 @@ export function readCompletedPricePublication(db, options) {
   const row = db.prepare(`SELECT r.stats_json FROM pc_stored_price_publication_rows r
     JOIN pc_stored_price_publications p ON p.publication_id = r.publication_id
     WHERE r.canonical_product_id = ? AND r.market_pool = ? AND r.condition_code = ? AND r.currency = ? AND r.days = ?
-      AND p.normalization_version = ? AND p.parser_version = ? AND p.rule_version = ? AND p.filter_version = ?
+      AND p.completed = 1 AND p.normalization_version = ? AND p.parser_version = ? AND p.rule_version = ? AND p.filter_version = ?
       AND r.through_date ${options.requireAsOfCoverage ? '=' : '<='} ? AND p.as_of <= ?
     ORDER BY r.through_date DESC, p.as_of DESC, p.published_at DESC LIMIT 1`).get(
     options.canonicalProductId, options.marketPool, options.condition, options.currency, options.days,

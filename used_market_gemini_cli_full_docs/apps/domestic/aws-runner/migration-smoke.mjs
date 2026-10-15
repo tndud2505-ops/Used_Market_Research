@@ -1,6 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 import { SEARCH_INDEX_SCHEMA_VERSION, SearchIndex } from "./search-index.mjs";
+import { PcPartsLedger } from './pc-parts-ledger.mjs';
 
 const filePath = path.resolve(String(process.argv[2] || ""));
 if (!process.argv[2]) throw new Error("SQLite path is required");
@@ -10,14 +11,18 @@ const index = new SearchIndex({
   filePath,
   backupDir: path.join(path.dirname(filePath), "migration-smoke-backups")
 });
+new PcPartsLedger({ db: index.db }).migrate();
 index.close();
 
 const database = new DatabaseSync(filePath, { readOnly: true });
+// Integrity checks evaluate the ledger's canonical-identity expression index.
+new PcPartsLedger({ db: database });
 const userVersion = Number(database.prepare("PRAGMA user_version").get()?.user_version || 0);
 const integrity = String(database.prepare("PRAGMA integrity_check").get()?.integrity_check || "unknown");
+const observationSchemaReady = Boolean(database.prepare('SELECT 1 FROM pc_parts_schema_migrations WHERE version = 12').get());
 database.close();
 
-const passed = userVersion === SEARCH_INDEX_SCHEMA_VERSION && integrity === "ok";
+const passed = userVersion === SEARCH_INDEX_SCHEMA_VERSION && integrity === "ok" && observationSchemaReady;
 console.log(JSON.stringify({
   status: passed ? "passed" : "failed",
   duration_ms: Date.now() - startedAt,

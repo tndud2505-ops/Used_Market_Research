@@ -5,6 +5,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { classifyPcPartListingPublic } from '../market/logic/pc-parts-classifier.mjs';
 import { PC_PRODUCT_MASTER_V2 } from '../market/data/pc-product-master-v2.mjs';
 import { PcPartsLedger } from './pc-parts-ledger.mjs';
+import { latestCompletedPricePublication } from './pc-stored-price-publication.mjs';
 import { PcShadowPipeline } from './pc-shadow-pipeline.mjs';
 import { reconcileExactModelStatistics } from './pc-classification-consistency.mjs';
 import { toPcProjectionImportItem } from './republish-pc-projections.mjs';
@@ -180,7 +181,7 @@ async function main() {
   await idle();
   const db = new DatabaseSync(process.env.RUNNER_INDEX_PATH, { readOnly: mode !== 'apply' });
   try {
-    const cohort = mode === 'plan' ? db.prepare('SELECT as_of FROM pc_stored_price_publications ORDER BY published_at DESC LIMIT 1').get() : null;
+    const cohort = mode === 'plan' ? latestCompletedPricePublication(db) : null;
     const plan = mode === 'plan' ? buildUnknownIdentityRepair(db, { cohortAsOf: cohort?.as_of }) : JSON.parse(readFileSync(filename, 'utf8'));
     const { checksum, ...contents } = plan;
     if (checksum !== digest(contents)) throw new Error('REPAIR_CHECKSUM_MISMATCH');

@@ -7,7 +7,7 @@ export function fullPublicationScopes(db, observedScopes, options = {}) {
   if (!Array.isArray(observedScopes)) throw new Error('PC_STATS_OBSERVED_SCOPES_REQUIRED');
   const previous = db.prepare(`SELECT canonical_product_id, market_pool, condition_code, currency, days
     FROM pc_stored_price_publication_rows
-    WHERE publication_id = (SELECT publication_id FROM pc_stored_price_publications
+    WHERE publication_id = (SELECT publication_id FROM pc_stored_price_publications WHERE completed = 1
       ORDER BY published_at DESC, publication_id DESC LIMIT 1) AND days = 30`).all();
   // The first exact local publication has no local history. Its predecessor
   // can nevertheless be active on D1: omission is not proof of an empty set.

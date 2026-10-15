@@ -3,10 +3,11 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { PcPartsLedger } from './pc-parts-ledger.mjs';
+import { latestCompletedPricePublication } from './pc-stored-price-publication.mjs';
 import { PcShadowPipeline } from './pc-shadow-pipeline.mjs';
 import { toPcProjectionImportItem } from './republish-pc-projections.mjs';
 import { reconcileExactModelStatistics } from './pc-classification-consistency.mjs';
-import { isAxNetworkCardTitle } from '../market/logic/pc-parts-classifier.mjs';
+import { isAxNetworkCardTitle, isWholeCamcorderTitle, ramSingleSetQuantity } from '../market/logic/pc-parts-classifier.mjs';
 
 const digest = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const json = value => JSON.parse(value || '{}');
@@ -21,6 +22,7 @@ function correction(previous, item, pipeline) {
   const next = pipeline.normalizeItem(item, item.observed_at, null, { reclassification: true }).normalized;
   const statistics=reconcileExactModelStatistics(previous,next,item.currency);
   if (previous.canonical_product_id === next.canonicalProductId && previous.listing_kind === next.listingKind
+    && previous.quantity === next.quantity && previous.price_scope === next.priceScope
     && previous.statistics_eligible===statistics.statistics_eligible
     && previous.exact_product===statistics.exact_product
     && previous.statistics_exclusion_reasons_json===statistics.statistics_exclusion_reasons_json) return null;
@@ -34,17 +36,30 @@ function correction(previous, item, pipeline) {
     && isAxNetworkCardTitle(item.title) && next.categoryCode === 'EXPANSION_CARD'
     && next.listingKind === previous.listing_kind && !next.canonicalProductId
     && !next.statisticsEligible;
+  const camcorderCorrection = previous.category_code === 'HDD' && isWholeCamcorderTitle(item.title)
+    && next.listingKind === 'NON_PC_ITEM' && next.categoryCode === 'UNKNOWN' && !next.canonicalProductId
+    && !next.priceEligible && !next.statisticsEligible;
+  const ramSetCorrection = previous.category_code === 'RAM' && next.categoryCode === 'RAM'
+    && previous.canonical_product_id === next.canonicalProductId && Boolean(next.canonicalProductId)
+    && previous.quantity === 1 && previous.price_scope === 'TOTAL' && next.priceScope === 'TOTAL'
+    && next.quantity === ramSingleSetQuantity(item.title) && next.quantity > 1
+    && next.listingKind === 'SAME_PRODUCT_LOT';
   if (!['SINGLE_COMPONENT', 'SAME_PRODUCT_LOT'].includes(previous.listing_kind)
-    || (!fullSystemCorrection && !networkCardCorrection && (!['SINGLE_COMPONENT', 'SAME_PRODUCT_LOT', 'WANTED'].includes(next.listingKind)
+    || (!fullSystemCorrection && !networkCardCorrection && !camcorderCorrection && (!['SINGLE_COMPONENT', 'SAME_PRODUCT_LOT', 'WANTED'].includes(next.listingKind)
       || !next.canonicalProductId || previous.category_code !== next.categoryCode))
-    || previous.quantity !== next.quantity || previous.price_scope !== next.priceScope
+    || (!ramSetCorrection && (previous.quantity !== next.quantity || previous.price_scope !== next.priceScope))
     || previous.condition_code !== next.conditionCode || previous.market_pool !== next.marketPool)
     throw new Error('CLASSIFICATION_REPAIR_SEMANTICS_CHANGED');
   const after = { ...previous };
   for (const [column, key] of Object.entries(fields)) after[column] = next[key];
+  if (ramSetCorrection) {
+    after.quantity = next.quantity;
+    after.quantity_confidence = next.quantityConfidence;
+    after.price_scope_confidence = next.priceScopeConfidence;
+  }
   after.price_eligible = previous.price_eligible && next.priceEligible ? 1 : 0;
   Object.assign(after,statistics);
-  if ((fullSystemCorrection || networkCardCorrection) && Object.hasOwn(after,'exact_product')) after.exact_product=0;
+  if ((fullSystemCorrection || networkCardCorrection || camcorderCorrection) && Object.hasOwn(after,'exact_product')) after.exact_product=0;
   after.exclusion_reasons_json = JSON.stringify(merge(json(previous.exclusion_reasons_json || '[]'), next.exclusionReasons));
   after.evidence_json = JSON.stringify([...json(previous.evidence_json || '[]'),
     { field: 'classification', source: 'SCOPED_CLASSIFICATION_REPAIR',
@@ -61,7 +76,7 @@ export function buildListingClassificationRepair(db, itemIds, { asOf = new Date(
   const active = ledger.getActivePipelineVersion();
   if (!active) throw new Error('ACTIVE_PIPELINE_REQUIRED');
   const pipeline = new PcShadowPipeline({ ledger });
-  const cohort = db.prepare('SELECT as_of FROM pc_stored_price_publications ORDER BY published_at DESC LIMIT 1').get();
+  const cohort = latestCompletedPricePublication(db);
   const cutoff = new Date(Math.min(Date.parse(asOf), Date.parse(cohort?.as_of || asOf)) - 30 * 86400000).toISOString();
   const normalizations = [], listings = [], scopes = new Map();
   const addScopes = (before, after, currency) => {
@@ -93,7 +108,7 @@ export function buildListingClassificationRepair(db, itemIds, { asOf = new Date(
       status: before.pc_lifecycle_status, seller_type: before.pc_market_pool === 'KR_DEALER_USED' ? 'DEALER' : undefined }, pipeline);
     if (changed) {
     const updated = { ...metadata };
-    for (const column of Object.keys(fields)) updated[column] = changed.after[column];
+    for (const column of [...Object.keys(fields), 'quantity', 'price_scope', 'quantity_confidence', 'price_scope_confidence']) updated[column] = changed.after[column];
     updated.canonical_manufacturer = changed.next.canonicalManufacturer;
     updated.chip_manufacturer = changed.next.spec?.chip_manufacturer || null;
     updated.board_manufacturer = changed.next.spec?.board_manufacturer || null;
@@ -112,19 +127,22 @@ export function buildListingClassificationRepair(db, itemIds, { asOf = new Date(
       pc_category_code: updated.category_code,
       pc_canonical_manufacturer: updated.canonical_manufacturer,
       pc_board_manufacturer: updated.board_manufacturer,
-      pc_listing_kind: updated.listing_kind, pc_price_eligible: updated.price_eligible ? 1 : 0 };
+      pc_listing_kind: updated.listing_kind, pc_price_eligible: updated.price_eligible ? 1 : 0,
+      pc_quantity: updated.quantity, pc_price_scope: updated.price_scope };
     listings.push({ before, after });
     addScopes(current, changed.after, before.currency);
     }
 
     const sourceListingId = itemId.slice(before.site.length + 1);
     const rows = db.prepare(`SELECT n.*, s.source_id, s.source_listing_id, s.price_value, s.currency,
-        s.observed_at, s.lifecycle_status, r.raw_json, r.title, r.description
+        s.observed_at, s.lifecycle_status, r.last_seen_at, r.raw_json, r.title, r.description
       FROM listing_snapshots s JOIN raw_listings r ON r.id=s.raw_listing_id
       JOIN normalized_listings n ON n.snapshot_id=s.id
-      WHERE s.source_id=? AND s.source_listing_id IN (?,?,?,?) AND s.observed_at>=?
+      WHERE s.source_id=? AND s.source_listing_id IN (?,?,?,?)
+        AND (s.observed_at>=? OR (s.lifecycle_status IN ('ACTIVE','RESERVED') AND r.last_seen_at>=?))
+        AND s.observed_at<=?
         AND n.normalization_version=? AND n.parser_version=? AND n.rule_version=? AND n.filter_version=?
-      ORDER BY n.id`).all(before.site, sourceListingId, before.url, itemId, `${before.site}:${before.url}`, cutoff, active.normalization_version,
+      ORDER BY n.id`).all(before.site, sourceListingId, before.url, itemId, `${before.site}:${before.url}`, cutoff, cutoff, asOf, active.normalization_version,
         active.parser_version, active.rule_version, active.filter_version);
     for (const row of rows) {
       const original = db.prepare('SELECT * FROM normalized_listings WHERE id=?').get(row.id);
@@ -139,6 +157,9 @@ export function buildListingClassificationRepair(db, itemIds, { asOf = new Date(
       const child = children[0];
       normalizations.push({ before: original, after: repaired.after, beforeChild: child,
         afterChild: { ...child, canonical_product_id: repaired.next.canonicalProductId,
+          ...(original.quantity !== repaired.next.quantity ? {
+            quantity: repaired.next.quantity, unit_price: repaired.next.unitPrice, total_price: repaired.next.totalPrice
+          } : {}),
           spec_json: JSON.stringify(original.category_code === repaired.next.categoryCode
             ? { ...json(child.spec_json), ...repaired.next.spec } : repaired.next.spec) },
         evidence_hash: digest(row) });
@@ -171,10 +192,10 @@ export function applyListingClassificationRepair(db, plan) {
       // Only classification columns change; source text, prices and observation
       // dates are retained, including last_checked_at (no live check occurred).
       db.prepare(`UPDATE listings SET pc_metadata_json=?, pc_canonical_product_id=?, pc_category_code=?,
-        pc_canonical_manufacturer=?, pc_board_manufacturer=?, pc_listing_kind=?, pc_price_eligible=? WHERE item_id=?`)
+        pc_canonical_manufacturer=?, pc_board_manufacturer=?, pc_listing_kind=?, pc_price_eligible=?, pc_quantity=?, pc_price_scope=? WHERE item_id=?`)
         .run(entry.after.pc_metadata_json, entry.after.pc_canonical_product_id, entry.after.pc_category_code,
           entry.after.pc_canonical_manufacturer, entry.after.pc_board_manufacturer, entry.after.pc_listing_kind,
-          entry.after.pc_price_eligible, entry.after.item_id);
+          entry.after.pc_price_eligible, entry.after.pc_quantity, entry.after.pc_price_scope, entry.after.item_id);
     }
     db.exec('COMMIT');
   } catch (error) { db.exec('ROLLBACK'); throw error; }

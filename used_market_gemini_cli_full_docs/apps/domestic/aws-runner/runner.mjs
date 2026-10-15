@@ -2,8 +2,9 @@ import http from "node:http";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { requestIsolatedPublication, requestIsolatedVerification, statsWorkerStatus } from './isolated-stats-publisher.mjs';
 import { PublicationJobState } from './publication-job-state.mjs';
+import { completeReconciledPublication } from './reconcile-publication.mjs';
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
-import { statfsSync } from "node:fs";
+import { statfsSync, existsSync, readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
@@ -107,6 +108,8 @@ const INDEX_ROOT = process.env.RUNNER_INDEX_DIR || (process.platform === "linux"
   ? "/var/lib/used-market-runner"
   : path.join(os.tmpdir(), "used-market-runner"));
 const INDEX_PATH = process.env.RUNNER_INDEX_PATH || path.join(INDEX_ROOT, "search-index.sqlite");
+const deploymentPaused = () => existsSync(path.join(path.dirname(INDEX_PATH), 'deployment-maintenance'));
+const releaseId = (() => { try { return readFileSync(new URL('../release-id', import.meta.url), 'utf8').trim(); } catch { return null; } })();
 const lifecycleStatusCache = createLifecycleStatusCache(INDEX_PATH);
 const INDEX_SOFT_LIMIT_BYTES = Math.min(8 * 1024 * 1024 * 1024, Math.max(1024 * 1024 * 1024,
   Number.parseInt(process.env.RUNNER_INDEX_SOFT_LIMIT_BYTES || String(3 * 1024 * 1024 * 1024), 10)
@@ -296,7 +299,7 @@ function pcPartsLedgerMigrationNeedsBackup(db) {
     if (!table) return true;
     // One-time data migrations use numbers such as 1001; they must not hide
     // a missing schema migration when deciding whether a backup is required.
-    return !db.prepare("SELECT 1 FROM pc_parts_schema_migrations WHERE version = 11").get();
+    return !db.prepare("SELECT 1 FROM pc_parts_schema_migrations WHERE version = 12").get();
   } catch {
     return true;
   }
@@ -422,6 +425,7 @@ function searchHttpStatus(error) {
 }
 
 function withSearchJobSlot(task) {
+  if (deploymentPaused()) return Promise.reject(new Error('RUNNER_DEPLOYMENT_MAINTENANCE'));
   return new Promise((resolve, reject) => {
     let queueTimer;
     const run = async () => {
@@ -669,7 +673,7 @@ async function mirrorPcListingCollectionManifest({ sourceId, asOf, successfulTar
 
 function runPcStatsPublisher() {
   // No in-process fallback: a missing isolated worker must not take down public reads.
-  return requestIsolatedPublication();
+  return requestIsolatedPublication({ payload: { job_key: pcPublicationJob?.status === 'running' ? pcPublicationJob.key : null } });
 }
 
 async function publishPcProductStats() {
@@ -1085,6 +1089,7 @@ function searchOnlyItem(site, item) {
 }
 
 async function searchOnly(body) {
+  if (deploymentPaused()) throw new Error('RUNNER_DEPLOYMENT_MAINTENANCE');
   const sourceKey = typeof body?.source === "string" ? body.source.trim() : "";
   const source = searchOnlySource(sourceKey);
   if (!source) throw new Error(`source is not approved for live collection: ${sourceKey || "unknown"}`);
@@ -1720,6 +1725,7 @@ function pcSourceAdapter(sourceKey) {
 }
 
 async function runPcSourceSchedulerTick() {
+  if (deploymentPaused()) return;
   if (!PC_PARTS_SCHEDULER_ENABLED || !pcPipeline || !pcLedger || pcSchedulerActive || pcPublicationActive || pcStatsVerificationActive) return;
   const admission = schedulerReadDeferral({
     lastPublicReadAtMs: lastPcPublicReadAt,
@@ -2164,6 +2170,7 @@ function requestForIndexedQuery(query) {
 }
 
 async function runBackgroundRefreshTick() {
+  if (deploymentPaused()) return;
   if (pcPublicationActive) return;
   if (!BACKGROUND_REFRESH_ENABLED) return;
   if (!searchIndex || backgroundRefreshActive || !refreshBudgetAvailable()) return;
@@ -2208,6 +2215,7 @@ async function runBackgroundRefreshTick() {
 }
 
 async function runJobs(jobNames, idempotencyKey) {
+  if (deploymentPaused() || pcStatsVerificationActive) throw new Error('RUNNER_MAINTENANCE_OR_VERIFICATION');
   if (idempotencyKey && idempotencyResults.has(idempotencyKey)) return idempotencyResults.get(idempotencyKey);
   if (activeRun) {
     return {
@@ -2243,19 +2251,20 @@ async function runJobs(jobNames, idempotencyKey) {
 }
 
 async function dispatchQueuedPublication() {
+  if (deploymentPaused() || pcStatsVerificationActive) return;
   if (publicationDispatchActive || pcPublicationJob?.status !== 'queued' || activeRun || pcPublicationActive) return;
   publicationDispatchActive = true;
   try {
     // Service startup/restart is not a failed publication. Keep durable intent.
     let worker;
     try { worker = await statsWorkerStatus(); } catch { return; }
-    if (worker.active || worker.verification_active || activeRun || pcPublicationActive) return;
+    if (deploymentPaused() || pcStatsVerificationActive || worker.active || worker.verification_active || activeRun || pcPublicationActive) return;
     pcPublicationJob = publicationJobs.update({ status: 'running', started_at: new Date().toISOString() });
     const result = await runJobs(['daily-price-refresh'], pcPublicationJob.key);
-    pcPublicationJob = publicationJobs.update({ status: result.status, finished_at: new Date().toISOString() });
+    pcPublicationJob = publicationJobs.finish(result.status);
     console.log(JSON.stringify({ event: 'pc_publication_job_finished', ...pcPublicationJob, result }));
   } catch (error) {
-    try { pcPublicationJob = publicationJobs.update({ status: 'failed', finished_at: new Date().toISOString() }); }
+    try { pcPublicationJob = publicationJobs.finish('failed'); }
     catch { pcPublicationJob = { status: 'blocked', error: 'PC_PUBLICATION_JOB_STATE_UNAVAILABLE' }; }
     console.error(JSON.stringify({ event: 'pc_publication_job_finished', ...pcPublicationJob, error: error.message }));
   } finally { publicationDispatchActive = false; }
@@ -2269,6 +2278,10 @@ const server = http.createServer(async (req, res) => {
       service: "used-market-aws-runner",
       target_sites: TARGET_SITES,
       active_run: activeRun,
+      maintenance: deploymentPaused(),
+      release_id: releaseId,
+      draining: activeRun || pcSchedulerActive || pcPublicationActive || pcStatsVerificationActive
+        || backgroundRefreshActive || activeSearchJobs > 0 || activePersistenceJobs > 0 || waitingSearchJobs.length > 0,
       search_capacity: {
         active: activeSearchJobs,
         queued: waitingSearchJobs.length,
@@ -2298,6 +2311,9 @@ const server = http.createServer(async (req, res) => {
       }
     });
   }
+  if (deploymentPaused() && req.method === 'POST'
+    && !['/api/runner/publication-intent', '/api/runner/verify-stats-publication'].includes(url.pathname))
+    return json(res, 503, { ok: false, error: 'RUNNER_DEPLOYMENT_MAINTENANCE' });
   if (req.method === "GET" && url.pathname === "/api/pc/catalog") {
     if (!tokenMatches((req.headers.authorization || "").replace(/^Bearer\s+/i, ""), RUNNER_TOKEN)) {
       return json(res, 401, { ok: false, error: "Unauthorized" });
@@ -2545,6 +2561,34 @@ const server = http.createServer(async (req, res) => {
       }
     });
   }
+  if (req.method === 'POST' && url.pathname === '/api/runner/publication-intent') {
+    if (!tokenMatches((req.headers.authorization || '').replace(/^Bearer\s+/i, ''), RUNNER_TOKEN))
+      return json(res, 401, { ok: false, error: 'Unauthorized' });
+    try {
+      const { key, intent } = await readJson(req);
+      pcPublicationJob = publicationJobs.prepare(key, intent);
+      return json(res, 200, { ok: true });
+    } catch (error) { return json(res, 409, { ok: false, error: error.message }); }
+  }
+  if (req.method === 'POST' && url.pathname === '/api/runner/reconcile-publication') {
+    if (!tokenMatches((req.headers.authorization || '').replace(/^Bearer\s+/i, ''), RUNNER_TOKEN))
+      return json(res, 401, { ok: false, error: 'Unauthorized' });
+    if (activeRun || pcSchedulerActive || pcPublicationActive || pcStatsVerificationActive)
+      return json(res, 409, { ok: false, error: 'Publication recovery busy' });
+    pcStatsVerificationActive = true;
+    try {
+      const { key } = await readJson(req);
+      if (pcPublicationJob?.key !== key || pcPublicationJob.status !== 'interrupted' || !pcPublicationJob.intent)
+        throw new Error('PUBLICATION_RECOVERY_REQUIRES_DURABLE_INTENT');
+      const worker = await statsWorkerStatus();
+      if (worker.active || worker.verification_active) throw new Error('PUBLICATION_RECOVERY_BUSY');
+      const proof = await requestIsolatedVerification({ reconcile: true, intent: pcPublicationJob.intent });
+      if (proof.outcome === 'published') completeReconciledPublication(searchIndex.db, pcPublicationJob.intent, proof);
+      pcPublicationJob = publicationJobs.reconcile(key, proof);
+      return json(res, 200, { ok: true, trigger: pcPublicationJob });
+    } catch (error) { return json(res, 409, { ok: false, error: error.message }); }
+    finally { pcStatsVerificationActive = false; }
+  }
   if (req.method === 'POST' && url.pathname === '/api/runner/verify-stats-publication') {
     if (!tokenMatches((req.headers.authorization || '').replace(/^Bearer\s+/i, ''), RUNNER_TOKEN))
       return json(res, 401, { ok: false, error: 'Unauthorized' });
@@ -2588,7 +2632,10 @@ const server = http.createServer(async (req, res) => {
   try {
     const body = await readJson(req);
     const jobNames = jobNamesFrom(body);
+    if (deploymentPaused()) return json(res, 503, { ok: false, error: 'RUNNER_DEPLOYMENT_MAINTENANCE' });
     if (!jobNames.length) return json(res, 400, { ok: false, error: "job_name or job_names is required" });
+    if (jobNames.includes('daily-price-refresh') && jobNames.length !== 1)
+      return json(res, 400, { ok: false, error: 'Daily publication requires its own durable job' });
     if (jobNames.length === 1 && jobNames[0] === 'daily-price-refresh') {
       try {
         const key = req.headers['idempotency-key'] || body.idempotency_key || `manual:${randomUUID()}`;

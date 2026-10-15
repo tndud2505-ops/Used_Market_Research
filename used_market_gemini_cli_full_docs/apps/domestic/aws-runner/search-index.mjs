@@ -1064,6 +1064,13 @@ export class SearchIndex {
   }
 
   browsePcListings(options = {}) {
+    // Retain one SQLite read view across the compact scope scan and page fetch.
+    this.db.exec('SAVEPOINT pc_browse_read');
+    try { return this.browsePcListingsInReadView(options); }
+    finally { this.db.exec('RELEASE pc_browse_read'); }
+  }
+
+  browsePcListingsInReadView(options = {}) {
     const canonicalProductId = cleanText(options.canonicalProductId, 300);
     const canonicalProductIds = Array.isArray(options.canonicalProductIds)
       ? [...new Set(options.canonicalProductIds.map((value) => cleanText(value, 300)).filter(Boolean))]
@@ -1152,19 +1159,51 @@ export class SearchIndex {
     // bounded to the requested models; predicates and dedupe are unchanged.
     const modelIndex = canonicalProductId || canonicalProductIds
       ? ' INDEXED BY idx_listings_pc_product_recent' : '';
-    const candidateRows = this.db.prepare(`SELECT * FROM listings${modelIndex}
-      WHERE ${where.join(" AND ")}`).all(...params);
-    const rows = dedupePcListingRows(candidateRows)
-      .sort((left, right) => comparePcListingRows(left, right, sort));
-    const afterIndex = after?.item_id
-      ? rows.findIndex((row) => row.item_id === after.item_id)
-      : -1;
-    const cursorFound = !after?.item_id || afterIndex >= 0;
-    const pageStart = afterIndex >= 0 ? afterIndex + 1 : 0;
-    const page = cursorFound ? rows.slice(pageStart, pageStart + limit) : [];
-    const hasMore = cursorFound && pageStart + page.length < rows.length;
+    const candidates = this.db.prepare(`SELECT item_id, site, url, price_value, posted_at, last_checked_at, pc_canonical_product_id,
+      json_type(pc_metadata_json, '$.statistics_eligible') = 'true' AS statistics_eligible,
+      json_extract(pc_metadata_json, '$.statistics_exclusion_reasons') AS statistics_exclusion_reasons
+      FROM listings${modelIndex}
+      WHERE ${where.join(" AND ")}`).iterate(...params);
+    let latestObservedAt = "";
+    const rows = dedupePcListingRows((function* () {
+      for (const row of candidates) {
+        if (String(row.last_checked_at) > latestObservedAt) latestObservedAt = String(row.last_checked_at);
+        yield row;
+      }
+    })());
+    const anchor = after?.item_id ? rows.find(row => row.item_id === after.item_id) : null;
+    const cursorFound = !after?.item_id || Boolean(anchor);
+    // Exact counts and canonical identity selection still require a scope scan.
+    // Keep the worst retained row at the root of a bounded max-heap.
+    // Only sort the next page, not every winner in that scope.
+    const selected = [];
+    const compare = (a, b) => comparePcListingRows(a, b, sort);
+    if (cursorFound) for (const row of rows) {
+      if (anchor && compare(row, anchor) <= 0) continue;
+      if (selected.length < limit + 1) {
+        let at = selected.push(row) - 1;
+        while (at > 0) {
+          const parent = (at - 1) >>> 1;
+          if (compare(selected[parent], selected[at]) >= 0) break;
+          [selected[parent], selected[at]] = [selected[at], selected[parent]];
+          at = parent;
+        }
+      } else if (compare(row, selected[0]) < 0) {
+        selected[0] = row;
+        let at = 0;
+        while (at * 2 + 1 < selected.length) {
+          let child = at * 2 + 1;
+          if (child + 1 < selected.length && compare(selected[child + 1], selected[child]) > 0) child++;
+          if (compare(selected[at], selected[child]) >= 0) break;
+          [selected[at], selected[child]] = [selected[child], selected[at]];
+          at = child;
+        }
+      }
+    }
+    selected.sort(compare);
+    const hasMore = selected.length > limit;
+    const page = selected.slice(0, limit);
     const last = page.at(-1);
-    const latestObservedAt = candidateRows.reduce((latest, row) => String(row.last_checked_at) > latest ? String(row.last_checked_at) : latest, "");
     const sourceTotals = {};
     // These are the same scope and identities already read and deduplicated
     // above. Reuse them instead of scanning the scope again just for counts.
@@ -1178,15 +1217,13 @@ export class SearchIndex {
         if (id) modelCounts[id] = (modelCounts[id] || 0) + 1;
       }
     }
-    const statisticsCoverage = pcListingStatisticsCoverage(rows.map((row) => {
-      const metadata = jsonObject(row.pc_metadata_json);
-      return {
-        statistics_eligible: metadata.statistics_eligible === true,
-        statistics_exclusion_reasons: metadata.statistics_exclusion_reasons
-      };
-    }), rows.length);
+    const statisticsCoverage = pcListingStatisticsCoverage(rows.map(row => ({
+      statistics_eligible: row.statistics_eligible === 1,
+      statistics_exclusion_reasons: jsonArray(row.statistics_exclusion_reasons)
+    })), rows.length);
+    const readPageItem = this.db.prepare('SELECT * FROM listings WHERE item_id = ?');
     return {
-      items: page.map(publicItem),
+      items: page.map(row => publicItem(readPageItem.get(row.item_id))),
       total: rows.length,
       asOf,
       latestObservedAt: latestObservedAt || null,

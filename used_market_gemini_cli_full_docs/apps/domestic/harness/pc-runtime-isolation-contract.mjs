@@ -14,6 +14,7 @@ import { canonicalPcStatsTraceMembers, pcStatsTraceability } from '../aws-runner
 import { probeRunnerReadiness } from '../cloudflare/runner-readiness.mjs';
 import { createLifecycleStatusCache, createLifecycleQueueBootstrap } from '../aws-runner/lifecycle-status-cache.mjs';
 import { PcPartsLedger } from '../aws-runner/pc-parts-ledger.mjs';
+import { reconcilePublication, completeReconciledPublication } from '../aws-runner/reconcile-publication.mjs';
 
 const rows = [3, 1, 2].map(value => ({ canonical_product_id: `cpu:한글:${value}`, market_pool: 'KR_DOMESTIC_USED', condition_code: 'USED_WORKING', currency: 'KRW', days: 30, stats_json: { price: value, nullable: null, text: '"\\\n😀' }, as_of: '2026-10-11' }));
 for (const data of [[], rows, rows.map(row => ({ ...row, stats_json: JSON.stringify(row.stats_json) }))]) assert.equal(streamStatsChecksum(data), await statsChecksum(data));
@@ -30,12 +31,58 @@ try {
   assert.equal(queue.admit('cron:first').status, 'queued');
   assert.throws(() => queue.admit('different'), /BUSY/);
   queue.update({ status: 'running' });
+  assert.equal(new PublicationJobState(file).current.status, 'failed', 'new jobs interrupted before durable intent cannot have written D1');
+  queue.update({ status: 'running', intent_required: false });
   assert.equal(new PublicationJobState(file).current.status, 'interrupted', 'ambiguous in-flight work cannot be replayed');
   assert.throws(() => new PublicationJobState(file).admit('different'), /UNCERTAIN/);
+  queue = new PublicationJobState(file);
+  assert.throws(() => queue.reconcile('cron:first', { outcome: 'published' }), /REJECTED/, 'legacy jobs without intent stay blocked');
   queue.update({ status: 'completed' });
   queue = new PublicationJobState(file);
   assert.equal(queue.admit('cron:first').status, 'completed');
   assert.equal(queue.admit('cron:next').status, 'queued');
+  queue.update({ status: 'running' });
+  const intent = { publication_id: 'prepared', checksum: 'a'.repeat(64), local_checksum: 'b'.repeat(64), expected_row_count: 2,
+    expected_chunk_count: 1, expected_non_empty_scope_count: 2, normalization_version: 1, parser_version: 'p', rule_version: 'r', filter_version: 'f',
+    created_at: '2026-10-15T00:00:00.000Z', expected_previous_publication: { publication_id: 'previous', checksum: 'c'.repeat(64) } };
+  queue.prepare('cron:next', intent);
+  assert.throws(() => queue.prepare('wrong-key', intent), /NOT_RUNNING/);
+  assert.throws(() => queue.prepare('cron:next', { ...intent, checksum: 'd'.repeat(64) }), /CONFLICT/);
+  assert.equal(queue.finish('failed').status, 'interrupted', 'a response failure after intent must never authorize a new publication');
+  queue = new PublicationJobState(file);
+  assert.deepEqual(queue.current.intent, intent);
+  const recoveryDb = new DatabaseSync(':memory:');
+  recoveryDb.exec(`CREATE TABLE pc_publication_runtime(publication_kind TEXT PRIMARY KEY, publication_id TEXT, checksum TEXT, row_count INTEGER, published_at TEXT);
+    CREATE TABLE pc_stored_price_publications(publication_id TEXT, checksum TEXT, row_count INTEGER, completed INTEGER, published_at TEXT);
+    CREATE TABLE pc_stored_price_publication_rows(publication_id TEXT);`);
+  recoveryDb.prepare('INSERT INTO pc_publication_runtime VALUES(?,?,?,?,?)').run('PRODUCT_STATS', intent.expected_previous_publication.publication_id, intent.expected_previous_publication.checksum, 2, intent.created_at);
+  recoveryDb.prepare('INSERT INTO pc_stored_price_publications VALUES(?,?,?,?,?)').run(intent.publication_id, intent.local_checksum, 2, 0, intent.created_at);
+  recoveryDb.prepare('INSERT INTO pc_stored_price_publication_rows VALUES(?),(?)').run(intent.publication_id, intent.publication_id);
+  const { normalization_version: omitted, local_checksum: ignored, expected_previous_publication: previous, ...metadata } = intent;
+  let proofCalls = 0;
+  const recovery = { intent, db: recoveryDb, importUrl: 'https://fixture.invalid/admin/import-product-stats', token: 'fixture',
+    readActive: async () => ({ publication_id: intent.publication_id, checksum: intent.checksum, row_count: 2 }),
+    readJson: async () => ({ page: { publication: { ...metadata, active: 1, activated_at: intent.created_at } } }),
+    verify: async input => { assert.equal(input.expectedActive, 1); proofCalls++; } };
+  try {
+    const proof = await reconcilePublication(recovery);
+    assert.equal(proofCalls, 1, 'active recovery requires a full row readback');
+    assert.equal(recoveryDb.prepare('SELECT completed FROM pc_stored_price_publications').get().completed, 0, 'verification itself is read-only');
+    completeReconciledPublication(recoveryDb, intent, proof);
+    completeReconciledPublication(recoveryDb, intent, proof);
+    assert.equal(recoveryDb.prepare('SELECT completed FROM pc_stored_price_publications').get().completed, 1);
+    assert.equal(recoveryDb.prepare('SELECT publication_id FROM pc_publication_runtime').get().publication_id, intent.publication_id, 'activation response loss recovers from the prepared local response');
+    assert.equal(queue.reconcile('cron:next', proof).status, 'partial_success', 'recovery must not claim maintenance completion');
+    recoveryDb.exec("UPDATE pc_stored_price_publications SET checksum = 'wrong'");
+    await assert.rejects(reconcilePublication(recovery), /AWS_MISMATCH/);
+    const inactive = { ...recovery, readActive: async () => ({ ...previous, row_count: 2 }),
+      readJson: async () => ({ page: { publication: { ...metadata, active: 0, activated_at: null } } }) };
+    assert.equal((await reconcilePublication(inactive)).outcome, 'never_activated');
+    await assert.rejects(reconcilePublication({ ...inactive, readJson: async () => ({ page: { publication: { ...metadata, active: 0, activated_at: intent.created_at } } }) }), /AMBIGUOUS/);
+    await assert.rejects(reconcilePublication({ ...inactive, readActive: async () => ({ publication_id: 'other', checksum: 'other', row_count: 2 }) }), /AMBIGUOUS/);
+    await assert.rejects(reconcilePublication({ ...inactive, readJson: async () => { throw new Error('MISSING_OR_UNKNOWN'); } }), /MISSING_OR_UNKNOWN/);
+    await assert.rejects(reconcilePublication({ ...recovery, verify: async () => { throw new Error('ROW_CHECKSUM_MISMATCH'); } }), /ROW_CHECKSUM_MISMATCH/);
+  } finally { recoveryDb.close(); }
   writeFileSync(file, 'corrupt');
   queue = new PublicationJobState(file);
   assert.equal(queue.current.status, 'blocked');

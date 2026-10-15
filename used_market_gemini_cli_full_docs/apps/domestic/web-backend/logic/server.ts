@@ -690,7 +690,8 @@ export function createServer(
 
         const expectedToken = process.env.CLOUDFLARE_RUNNER_TOKEN?.trim();
         const authorization = req.headers.authorization ?? '';
-        if (!expectedToken || authorization !== `Bearer ${expectedToken}`) {
+        if (!expectedToken || expectedToken === 'replace_with_a_long_random_token'
+          || authorization !== `Bearer ${expectedToken}`) {
           throw new ApiError(401, 'Unauthorized', 'Cloudflare runner token is missing or invalid');
         }
 
@@ -874,7 +875,7 @@ export function createServer(
     }
   });
 
-  server.listen(port, () => {
+  server.listen(port, WEB_BACKEND_CONFIG.host, () => {
     console.log(`[web-backend] Listening on port ${port}`);
     console.log('[web-backend] Available endpoints:', ROUTE_DRAFTS);
   });

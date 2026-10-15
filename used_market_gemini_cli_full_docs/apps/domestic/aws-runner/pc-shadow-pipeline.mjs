@@ -294,7 +294,7 @@ export class PcShadowPipeline {
     const source = getPcSource(item.site);
     const textClassified = classifyPcPartListing(item);
     const sourceCategory = trustedSpecialistCategory(item);
-    const sourceCategoryEligible = sourceCategory && !["COMPONENT_BUNDLE", "FULL_SYSTEM", "MONITOR"].includes(textClassified.listing_kind);
+    const sourceCategoryEligible = sourceCategory && !["COMPONENT_BUNDLE", "FULL_SYSTEM", "MONITOR", "NON_PC_ITEM"].includes(textClassified.listing_kind);
     const sourceCategoryManufacturer = sourceCategoryEligible
       ? detectPcPartManufacturer(`${item.title || ""} ${item.description || ""}`, sourceCategory)
       : null;

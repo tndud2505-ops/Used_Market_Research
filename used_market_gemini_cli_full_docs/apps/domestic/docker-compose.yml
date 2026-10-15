@@ -12,6 +12,7 @@ services:
     environment:
       NODE_ENV: production
       PORT: "8787"
+      HOST: "0.0.0.0"
       LOCAL_BROWSER_BINARY: /usr/bin/chromium
       LOCAL_BROWSER_COMMAND_TIMEOUT_MS: "15000"
       NODE_OPTIONS: "--max-old-space-size=700"

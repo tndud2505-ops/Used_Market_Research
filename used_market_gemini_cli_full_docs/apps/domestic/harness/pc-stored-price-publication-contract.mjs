@@ -97,6 +97,8 @@ try {
   `], { encoding:'utf8',timeout:30000,windowsHide:true,maxBuffer:16384 });
   assert.equal(memoryProbe.status,0,`bounded-memory validation failed: ${memoryProbe.stderr.slice(-1000)}`);
   assert.equal(JSON.parse(memoryProbe.stdout).rows,80);
+  storeCompletedPricePublication(db, { ...publication, prepared: true });
+  assert.equal(readCompletedPricePublication(db, options), null, 'prepared output stays hidden until D1 activation is proven');
   storeCompletedPricePublication(db, publication);
   assert.equal(storeCompletedPricePublication(db, publication).unchanged, true);
   const persisted = ledger.getStoredDailyPriceStats(options);

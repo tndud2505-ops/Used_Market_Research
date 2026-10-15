@@ -8,7 +8,7 @@ try {
   migrateStoredPricePublications(db);
   const scope = (id, currency = 'KRW', market = 'KR_C2C_USED') => ({ canonical_product_id: id,
     market_pool: market, condition_code: 'USED_WORKING', currency, days: 30 });
-  db.prepare(`INSERT INTO pc_stored_price_publications VALUES (?,?,?,?,?,?,?,?,?)`).run(
+  db.prepare(`INSERT INTO pc_stored_price_publications VALUES (?,?,?,?,?,?,?,?,?,1)`).run(
     'previous', 'previous-checksum', 1, 17, 'pc-parser-v7', 'pc-rules-v17', 'pc-filter-v6',
     '2026-09-16T12:00:00.000Z', '2026-09-16T12:01:00.000Z');
   db.prepare(`INSERT INTO pc_stored_price_publication_rows VALUES (?,?,?,?,?,?,?,?)`).run(

@@ -12,7 +12,7 @@ function commaSeparatedValues(value: string | undefined) {
 
 export const WEB_BACKEND_CONFIG = {
   port: positiveInteger(process.env.PORT, 8787),
-  host: process.env.HOST || 'localhost',
+  host: process.env.HOST || '127.0.0.1',
 
   // Keep expensive browser searches bounded on small production hosts.
   search_concurrency_limit: positiveInteger(process.env.SEARCH_CONCURRENCY_LIMIT, 1),

@@ -73,8 +73,9 @@ check_health() {
   done
 
   if command -v jq >/dev/null 2>&1; then
-    printf '%s\n' "$payload" | jq -e --argjson require_pc_continuous "$REQUIRE_PC_CONTINUOUS" '
+    printf '%s\n' "$payload" | jq -e --argjson require_pc_continuous "$REQUIRE_PC_CONTINUOUS" --arg expected_release "${RUNNER_EXPECTED_RELEASE_ID:-}" '
       .ok == true and
+      ($expected_release == "" or .release_id == $expected_release) and
       .service == "used-market-aws-runner" and
       .search_index.enabled == true and
       (.search_index.process_instance.id | type == "string" and length > 0) and

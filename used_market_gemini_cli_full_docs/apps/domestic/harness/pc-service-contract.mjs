@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { once } from "node:events";
 import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import net from "node:net";
+import http from 'node:http';
 import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -1070,6 +1071,20 @@ try {
     body: JSON.stringify({ ...pcRequest, cursor: `${payload.data.pagination.next_cursor}x` })
   });
   assert.equal(tampered.status, 400);
+  const slowAdmission = http.request(`${baseUrl}/api/runner/run`, { method: 'POST', headers });
+  const slowResult = new Promise((resolve, reject) => {
+    slowAdmission.on('response', response => { response.resume(); response.on('end', () => resolve(response.statusCode)); });
+    slowAdmission.on('error', reject);
+  });
+  slowAdmission.write('{"job_name":');
+  await new Promise(resolve => setTimeout(resolve, 80));
+  const gate = path.join(directory, 'deployment-maintenance');
+  await writeFile(gate, 'fixture');
+  assert.equal((await (await fetch(`${baseUrl}/health`)).json()).maintenance, true);
+  slowAdmission.end('"daily-price-refresh","idempotency_key":"blocked-during-deploy"}');
+  assert.equal(await slowResult, 503, 'a body completed after drain must not be durably admitted');
+  assert.equal((await (await fetch(`${baseUrl}/health`)).json()).pc_parts.publication_job, null);
+  await rm(gate);
 } finally {
   child.kill("SIGTERM");
   await Promise.race([
@@ -2734,6 +2749,7 @@ const server = createServer(0, {
 try {
   if (!server.listening) await once(server, "listening");
   const address = server.address();
+  assert.equal(address.address, '127.0.0.1', 'the default local web server must bind only to loopback');
   const baseUrl = `http://127.0.0.1:${address.port}`;
   const localHome = await fetch(`${baseUrl}/`);
   assert.equal(localHome.status, 200);
@@ -2794,4 +2810,19 @@ try {
 }
 
 await import("./monetization-trust-contract.mjs");
+const privateServer = createServer(0, { initializeStorage: false, publicApiOnly: false });
+const originalRunnerToken = process.env.CLOUDFLARE_RUNNER_TOKEN;
+try {
+  if (!privateServer.listening) await once(privateServer, 'listening');
+  const endpoint = `http://127.0.0.1:${privateServer.address().port}/api/runner/run`;
+  process.env.CLOUDFLARE_RUNNER_TOKEN = 'replace_with_a_long_random_token';
+  assert.equal((await fetch(endpoint, { method: 'POST', headers: { authorization: `Bearer ${process.env.CLOUDFLARE_RUNNER_TOKEN}`, 'content-type': 'application/json' }, body: '{}' })).status, 401);
+  process.env.CLOUDFLARE_RUNNER_TOKEN = 'private-fixture-token';
+  assert.equal((await fetch(endpoint, { method: 'POST', headers: { authorization: 'Bearer private-fixture-token', 'content-type': 'application/json' }, body: '{}' })).status, 400, 'a configured private token reaches request validation without executing any job');
+} finally {
+  if (originalRunnerToken === undefined) delete process.env.CLOUDFLARE_RUNNER_TOKEN;
+  else process.env.CLOUDFLARE_RUNNER_TOKEN = originalRunnerToken;
+  privateServer.close();
+  if (privateServer.listening) await once(privateServer, 'close');
+}
 console.log(JSON.stringify({ status: "passed", contract: "pc-service" }, null, 2));

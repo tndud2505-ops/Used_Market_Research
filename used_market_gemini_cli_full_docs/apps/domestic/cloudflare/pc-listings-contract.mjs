@@ -257,7 +257,7 @@ function isLegacyUrlIdentity(row) {
 
 export function dedupePcListingRows(rows) {
   const selected = new Map();
-  for (const row of Array.isArray(rows) ? rows : []) {
+  for (const row of typeof rows?.[Symbol.iterator] === 'function' ? rows : []) {
     const identity = pcListingPublicIdentity(row);
     const previous = selected.get(identity);
     if (!previous) {

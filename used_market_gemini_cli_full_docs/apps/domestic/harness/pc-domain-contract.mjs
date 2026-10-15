@@ -1883,4 +1883,5 @@ assert.equal(ledger.runIntegrityAudit(new Date(now + 2 * DAY_MS)).ok, true,
 
 ledger.close();
 db.close();
+await import('./pc-observation-days-contract.mjs');
 console.log(JSON.stringify({ status: "passed", contract: "pc-domain" }, null, 2));

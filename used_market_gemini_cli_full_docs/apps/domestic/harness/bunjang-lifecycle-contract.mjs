@@ -133,6 +133,8 @@ assert.ok(db.prepare("SELECT 1 FROM pc_lifecycle_queue WHERE source_listing_id='
 assert.equal(db.prepare('SELECT count(*) n FROM listing_snapshots').get().n,beforeHistory+2,'bootstrap preserves history');
 assert.equal(db.prepare('SELECT count(*) n FROM pc_lifecycle_queue').get().n,6);
 const latestTwo=ledger.latestSnapshot('bunjang','2').id;
+assert.throws(() => db.prepare('DELETE FROM listing_snapshots WHERE id=?').run(latestTwo), /FOREIGN KEY/, 'live observation evidence must prevent direct snapshot deletion');
+db.prepare('DELETE FROM listing_snapshot_observation_days WHERE snapshot_id=?').run(latestTwo);
 db.prepare('DELETE FROM listing_snapshots WHERE id=?').run(latestTwo);
 assert.equal(db.prepare("SELECT snapshot_id FROM pc_lifecycle_queue WHERE source_id='bunjang' AND source_listing_id='2'").get().snapshot_id,
   ledger.latestSnapshot('bunjang','2').id,'removing current snapshot safely falls back instead of losing the identity');

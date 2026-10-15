@@ -100,7 +100,20 @@ function detectSellerType(text, evidence, input) {
   return 'INDIVIDUAL_OR_UNKNOWN';
 }
 
+export function isWholeCamcorderTitle(title) {
+  const text = String(title || '');
+  if (!/캠코더|\bcamcorder\b/iu.test(text)) return false;
+  // The device owns its built-in HDD; an explicitly removed/replacement drive
+  // is still a valid component, even when its compatibility names a camcorder.
+  const componentSale = /(?:HDD|하드\s*디스크).{0,20}(?:단품|만\s*판매|교체용|분리품)|(?:분리한|분리품|적출한|적출품|교체용).{0,20}(?:HDD|하드\s*디스크)|캠코더\s*(?:용|호환(?:용)?|에서\s*(?:분리|적출)).{0,30}(?:HDD|하드\s*디스크)|(?:HDD|하드\s*디스크).{0,20}캠코더\s*호환|(?:HDD|hard\s*drive).{0,20}\b(?:for|removed\s+from|replacement\s+for)\b/iu.test(text);
+  return !componentSale;
+}
+
 function detectSpecialKind(text, evidence, title = text) {
+  if (isWholeCamcorderTitle(title)) {
+    addEvidence(evidence, 'listing_kind', title, 'NON_PC_ITEM');
+    return 'NON_PC_ITEM';
+  }
   const nonPcItem = firstMatch(title, /(?:^|\s)(?:전신\s*거울|벽걸이\s*거울|탁상\s*거울)(?:\s|$)/iu);
   if (nonPcItem) {
     addEvidence(evidence, 'listing_kind', nonPcItem.matchedText, 'NON_PC_ITEM');
@@ -689,9 +702,16 @@ function koreanNumber(value) {
   return { 한: 1, 하나: 1, 두: 2, 세: 3, 네: 4 }[value] ?? Number(value);
 }
 
+export function ramSingleSetQuantity(text) {
+  const match = String(text || '').match(/(?:^|[\s,(/])(\d+|두|세|네)\s*(?:개|장|매)\s*(?:1|한)\s*(?:세트|셋트)(?=\s|$|[,.()]|판매|팝니다|일괄|묶음)/iu);
+  const count = match ? koreanNumber(match[1]) : null;
+  return Number.isSafeInteger(count) && count > 1 && count <= 100 ? count : null;
+}
+
 function detectRamQuantity(text, evidence) {
+  const singleSetQuantity = ramSingleSetQuantity(text);
   const rank = text.match(/\b([12]Rx[48])\b/i)?.[1] || null;
-  const partial = text.match(/(\d+|한|하나|두|세|네)\s*(개|장|매)\s*중\s*(\d+|한|하나|두|세|네)\s*(?:개|장|매)\s*판매\s*완료/i);
+  const partial = text.match(/(\d+|한|하나|두|세|네)\s*(개|장|매)\s*(?:(?:1|한)\s*(?:세트|셋트)\s*)?중\s*(\d+|한|하나|두|세|네)\s*(?:개|장|매)\s*판매\s*완료/i);
   const capacityFirst = text.match(/(\d+(?:\.\d+)?)\s*(?:GB|G|기가)\s*[x×*]\s*(\d+)\b/i);
   const countFirst = text.match(/(\d+)\s*[x×*]\s*(\d+(?:\.\d+)?)\s*(?:GB|G|기가)\b/i);
   const compactKit = text.match(/(?:^|[(\s])(\d+(?:\.\d+)?)\s*[x×*]\s*(\d+)(?=\s*(?:\d{4}[A-Z]?|개|EA|[,)]|$))/iu);
@@ -728,6 +748,10 @@ function detectRamQuantity(text, evidence) {
     listedQuantity = koreanNumber(match[2]);
     availableQuantity = listedQuantity;
     matchedText = match[0];
+  } else if (singleSetQuantity) {
+    listedQuantity = availableQuantity = singleSetQuantity;
+    moduleCapacity = Number(leadingCapacity?.[1]) || null;
+    matchedText = `${singleSetQuantity}개 1세트`;
   } else if (explicitCount || lotOfCount || trailingMultiplier || pair) {
     const match = explicitCount || lotOfCount || trailingMultiplier || pair;
     moduleCapacity = Number(leadingCapacity?.[1]) || null;
@@ -777,8 +801,8 @@ function detectRamQuantity(text, evidence) {
     sold_quantity: soldQuantity,
     partialSold: soldQuantity > 0,
     no_available_quantity: availableQuantity === 0,
-    kit_price_total: Boolean(declaredKitTotal || kit || /(?:듀얼|쿼드|트리플)\s*킷|\bKIT\b|\bLOT\s+OF\s+\d+\b/iu.test(text)),
-    kit_price_total_evidence: declaredKitTotal ? multiplication[0].trim() : null,
+    kit_price_total: Boolean(singleSetQuantity || declaredKitTotal || kit || /(?:듀얼|쿼드|트리플)\s*킷|\bKIT\b|\bLOT\s+OF\s+\d+\b/iu.test(text)),
+    kit_price_total_evidence: singleSetQuantity ? `${singleSetQuantity}개 1세트` : declaredKitTotal ? multiplication[0].trim() : null,
     ram_unit_price_marker: ramUnitMarker,
     quantity_unknown: quantityUnknown,
     module_capacity_gb: moduleCapacity,

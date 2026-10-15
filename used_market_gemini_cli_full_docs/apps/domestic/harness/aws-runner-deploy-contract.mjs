@@ -242,8 +242,20 @@ assert.match(installScript, /node --check "\$APP_ROOT\/aws-runner\/publish-pc-st
   "AWS deployment must syntax-check the isolated statistics publisher before restarting services");
 assert.match(installScript, /node --check "\$APP_ROOT\/aws-runner\/pc-stats-publication-client\.mjs"/u,
   "AWS deployment must syntax-check the chunked publication client before restarting services");
-assert.match(runnerScript, /return requestIsolatedPublication\(\)/u,
+assert.match(runnerScript, /return requestIsolatedPublication\(\{ payload:/u,
   "product-stat generation must run in a separately limited service");
+assertOrdered(installScript, [
+  'install -m 0644 /dev/null "$MAINTENANCE_FILE"',
+  ".maintenance == true and .draining == false",
+  "apt-get update",
+  'cp -a "$SOURCE_ROOT/aws-runner/." "$APP_ROOT/aws-runner/"',
+  '\nvalidate_release\n',
+  'mv -- "$LIVE_APP_ROOT" "$PREVIOUS_ROOT"',
+  'mv -- "$STAGE_ROOT" "$LIVE_APP_ROOT"',
+  'RUNNER_EXPECTED_RELEASE_ID="$release_id"'
+], 'deployment must drain, stage, validate and verify its code identity');
+assert.match(installScript, /mv -- "\$PREVIOUS_ROOT" "\$LIVE_APP_ROOT"/u);
+assert.match(healthScript, /\.release_id == \$expected_release/u);
 const isolatedStatsUnit = await read('aws-runner/used-market-stats.service');
 assert.match(isolatedStatsUnit, /^Nice=10$/mu);
 assert.match(isolatedStatsUnit, /^IOSchedulingClass=idle$/mu);

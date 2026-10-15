@@ -34,7 +34,12 @@ try {
   // generated normalization/item IDs collide with IDs allocated in the stage.
   pipeline.recordItem(item('three', 'Samsung DDR5 16GB 메모리'), date);
   const before = db.prepare('SELECT * FROM listing_snapshots ORDER BY id').all();
-  const call = extra => importStagedNormalizations({ ledger, stagingPath: stage, versions, expectedSnapshotCount: 2, ...extra });
+  const observationDaysBefore = db.prepare('SELECT * FROM listing_snapshot_observation_days ORDER BY snapshot_id, observation_day').all();
+  const call = extra => {
+    const result = importStagedNormalizations({ ledger, stagingPath: stage, versions, expectedSnapshotCount: 2, ...extra });
+    assert.deepEqual(db.prepare('SELECT * FROM listing_snapshot_observation_days ORDER BY snapshot_id, observation_day').all(), observationDaysBefore);
+    return result;
+  };
   assert.throws(() => call({ expectedSnapshotCount: 3 }), /COVERAGE_INCOMPLETE/);
   assert.throws(() => call({ versions: { ...versions, modelVersion: 'pc-master-wrong' } }), /QUALITY_NOT_SEALED/);
   // A rollback preserves everything if the staged observation no longer agrees.
