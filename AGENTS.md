@@ -30,6 +30,15 @@ whether the current execution path actually uses Chat On Steroids.
 
 Read `README.md` and `used_market_gemini_cli_full_docs/SETUP.md` first.
 
+## Patch history
+
+- For user-visible features, update `used_market_gemini_cli_full_docs/apps/domestic/web-backend/public/changelog.html` in the same task. Group related released changes under their actual release date in Asia/Seoul, newest first, with a short Korean title, one real browser screenshot in `public/changelog/`, and a concise explanation. Reuse the page's native disclosure and original-image link; retain its historical-image notice.
+- Record confirmed releases. Keep an explicitly requested preview visibly labelled as a preview until publication is verified. Generated design concepts and planned work are not released-screen evidence.
+- Keep implementation rationale, verification, deployment status and recovery evidence in `used_market_gemini_cli_full_docs/apps/domestic/docs/daily_history/YYYY-MM-DD.md`; keep the daily-history index current. Public notes describe what a user can do, without internal paths, credentials or deployment plumbing.
+- Reuse the existing focused UI/analytics checks and desktop/mobile browser flow to verify menu access, disclosure, real image loading and original-size viewing. This adds no approval checkpoint, data job or separate release pipeline; retain the existing deployment/rollback rules.
+
+## Application and operations
+
 - Always apply the local skill `used-pick-sample-preserving-filters` at
   `C:/Users/tndud/.codex/skills/used-pick-sample-preserving-filters/SKILL.md`
   when changing listing classification or statistics filters. Prevent excessive

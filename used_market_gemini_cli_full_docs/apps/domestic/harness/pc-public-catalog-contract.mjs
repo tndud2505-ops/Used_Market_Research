@@ -107,6 +107,13 @@ assert.deepEqual(exactCpuFacets.socket.map(({ value }) => value), ["LGA1151"],
   "text search facets must describe matching models instead of the whole category");
 
 const ramFacets = publicPcFacetsForApi({ category: "RAM", usage: "CONSUMER_DESKTOP", generation: "DDR5" });
+const ramListingFacets = publicPcFacetsForApi({ category: 'RAM', memory_usage: 'LAPTOP', speed_mt_s: '3200' });
+assert.deepEqual(Object.keys(ramListingFacets.facets).slice(0,4), ['memory_usage','generation','module_capacity_gb','speed_mt_s']);
+assert.ok(ramListingFacets.available_facets.memory_usage.some(option => option.value === 'UNKNOWN'));
+assert.equal(ramListingFacets.available_facets.speed_mt_s.find(option => option.value === '3200')?.label, '3200 MT/s');
+assert.equal('count' in ramListingFacets.available_facets.memory_usage[0], false, 'listing facets must not invent catalog-model counts');
+assert.equal(publicPcModelsForApi({ category: 'RAM', memory_usage: 'LAPTOP', speed_mt_s: '3200' }).models.length,
+  publicPcModelsForApi({ category: 'RAM' }).models.length, 'listing attributes must not hide broad RAM models');
 assert.deepEqual(ramFacets.category, "RAM");
 assert.deepEqual(ramFacets.filters, { usage: ["CONSUMER_DESKTOP"], generation: ["DDR5"] });
 assert.ok(ramFacets.facets.module_capacity_gb.values.length > 0);

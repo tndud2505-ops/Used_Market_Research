@@ -4,8 +4,7 @@ const SOURCE_ID_PATTERNS = Object.freeze({
   joonggonara: [/\/product\/(\d+)(?:[/?#]|$)/iu],
   ebay: [/^v1\|(\d{8,14})\|/iu, /\/itm\/(?:[^/?#]+\/)?(\d{8,14})(?:[/?#]|$)/iu],
   danawa: [/[?&](?:seq|saleSeq)=([a-z0-9_-]+)(?:[&#]|$)/iu],
-  rethinkmall: [/\/goods\/(\d+)(?:[/?#]|$)/iu, /[?&]goodsNo=([a-z0-9_-]+)(?:[&#]|$)/iu],
-  coolenjoy: [/\/mart2\/(\d+)(?:[/?#]|$)/iu, /[?&](?:wr_id|no)=(\d+)(?:[&#]|$)/iu]
+  rethinkmall: [/\/goods\/(\d+)(?:[/?#]|$)/iu, /[?&]goodsNo=([a-z0-9_-]+)(?:[&#]|$)/iu]
 });
 
 function text(value) {

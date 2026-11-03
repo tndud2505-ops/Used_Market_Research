@@ -28,9 +28,10 @@ const defaultCapacity = pcCollectionCapacityPlan();
 assert.equal(defaultCapacity.all_sources_sufficient, false,
   "Danawa's protective cap must report daily coverage shortfall honestly");
 assert.equal(defaultCapacity.sources.find(source=>source.source_key==='danawa').configured_targets_per_run,20);
-assert.equal(defaultCapacity.sources.find(source=>source.source_key==='danawa').daily_capacity_per_day,240);
-assert.equal(defaultCapacity.sources.find(source=>source.source_key==='danawa').hourly_capacity_sufficient,false,
-  'fair rotation does not promise all categories every hour under the protective cap');
+assert.equal(defaultCapacity.sources.find(source=>source.source_key==='danawa').daily_capacity_per_day,384,
+  'hourly runs with six-hour category refreshes leave 16 of 20 requests per run for models');
+assert.equal(defaultCapacity.sources.find(source=>source.source_key==='danawa').hourly_capacity_sufficient,true,
+  'four category slots per run cover all categories every six hours');
 assert.ok(defaultCapacity.sources.filter(source=>source.source_key!=='danawa').every(source=>source.capacity_sufficient));
 assert.equal(defaultCapacity.configured_targets_per_run, 100);
 assert.ok(defaultCapacity.sources.every((source) => source.minimum_targets_per_run <= defaultCapacity.configured_targets_per_run));
@@ -58,7 +59,7 @@ for (const product of publicProducts) {
 const directorySources = PC_SOURCE_REGISTRY
   .filter((source) => source.directory_source === true && source.policy_status === "APPROVED" && source.runtime_status === "ENABLED")
   .map((source) => source.key);
-assert.deepEqual([...operationalSites].sort(), [...new Set(directorySources)].sort(),
+assert.deepEqual([...OPERATIONAL_PC_DIRECTORY_SITES].sort(), [...new Set(directorySources)].sort(),
   "operational directory sites must come from the approved enabled registry");
 
 for (const categoryCode of PC_PART_CATEGORY_CODES) {

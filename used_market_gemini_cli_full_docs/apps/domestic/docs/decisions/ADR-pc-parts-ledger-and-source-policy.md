@@ -30,7 +30,7 @@ USED-PICK은 범용 중고 검색 데이터를 `legacy_general`로 보존하고,
 - 정책: `REVIEW_REQUIRED`, `APPROVED`, `DENIED`
 - 런타임: `DISABLED`, `ADAPTER_READY`, `ENABLED`, `QUARANTINED`
 
-기존 중고나라 HTML/Next, 번개장터 사이트 JSON, 헬로마켓 JSON/렌더링, 리씽크 HTML+Livewire, eBay Browse API 방식을 유지한다. API-only 전환은 하지 않는다. 다나와·퀘이사존·쿨엔조이도 각각의 사이트 adapter를 사용하며 운영자 승인 기록과 런타임 상태를 source registry에서 관리한다.
+기존 중고나라 HTML/Next, 번개장터 사이트 JSON, 헬로마켓 JSON/렌더링, 리씽크 HTML+Livewire, eBay Browse API 방식을 유지한다. API-only 전환은 하지 않는다. 다나와·퀘이사존도 각각의 사이트 adapter를 사용하며 운영자 승인 기록과 런타임 상태를 source registry에서 관리한다.
 
 AWS Runner가 고주기 수집 scheduler의 단일 소유자다. Cloudflare cron은 watchdog과 하루 한 번의 AWS `daily-price-refresh` 호출을 담당한다. 실제 사이트 canary와 정책 확인은 자동 테스트가 아니라 운영자 명시 작업이다.
 

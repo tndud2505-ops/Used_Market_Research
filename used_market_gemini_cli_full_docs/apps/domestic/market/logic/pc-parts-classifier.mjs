@@ -20,6 +20,15 @@ export function isAxNetworkCardTitle(title) {
     && !/\bPSU\b|POWER\s*SUPPLY|파워|서플라이/iu.test(text);
 }
 
+export function isTammuzRx550SsdTitle(title) {
+  const text = String(title || '').normalize('NFKC');
+  const outsideStorageModel = text.replace(/(?:타무즈|\bTAMMUZ\b)[\s)]*RX\s*550\b/giu, ' ');
+  return /(?:타무즈|\bTAMMUZ\b)[\s)]*RX\s*550\b/iu.test(text)
+    && /\bSSD\b/iu.test(text)
+    && !/\bRX\s*550\s*(?:2|4)\s*G(?:B)?\b/iu.test(outsideStorageModel)
+    && !/그래픽\s*카드|\b(?:GPU|GRAPHICS|RADEON|GEFORCE)\b|라데온|지포스/iu.test(text);
+}
+
 const CONDITION_EXCLUSIONS = Object.freeze({
   BROKEN: 'BROKEN',
   MINED: 'MINED',
@@ -160,6 +169,17 @@ function detectSpecialKind(text, evidence, title = text) {
     addEvidence(evidence, 'listing_kind', title, 'ACCESSORY_ONLY');
     return 'ACCESSORY_ONLY';
   }
+  // GPU model names on a replacement light bar or NVLink connector describe
+  // compatibility, not the item being sold. Support/included-feature wording
+  // on an actual card does not make that card an accessory.
+  const gpuAccessory = /(?:RTX|GTX|GEFORCE|그래픽\s*카드|\bGPU\b)/iu.test(title)
+    && !/(?:NV\s*LINK|엔비링크|브리지|라이트\s*바|LIGHT\s*BAR).{0,12}(?:지원|포함|내장|장착\s*가능|SUPPORT|INCLUDED)/iu.test(title)
+    && (/(?:(?:교체용|액세서리|REPLACEMENT|ACCESSORY).{0,35}(?:라이트\s*바|LIGHT\s*BAR)|(?:라이트\s*바|LIGHT\s*BAR).{0,35}(?:교체용|액세서리|REPLACEMENT|ACCESSORY))/iu.test(title)
+      || /(?:NV\s*LINK|엔비링크).{0,20}(?:브리[지징]|BRIDGE|[234]\s*(?:SLOT|슬롯))|(?:브리지|BRIDGE).{0,20}NV\s*LINK/iu.test(title));
+  if (gpuAccessory) {
+    addEvidence(evidence, 'listing_kind', title, 'ACCESSORY_ONLY');
+    return 'ACCESSORY_ONLY';
+  }
   const accessory = firstMatch(text, /본품\s*(?:없음|없이).*(?:쿨러|방열판)|(?:(?:SSD|HDD|NVMe|M\.2).{0,30}(?:방열판|히트\s*싱크|heat\s*sink|heatsink)|(?:방열판|히트\s*싱크|heat\s*sink|heatsink).{0,30}(?:SSD|HDD|NVMe|M\.2)).{0,20}(?:only|만|지원|호환|전용)|(?:RTX|GTX|RX\s*\d{4}|그래픽\s*카드|\bGPU\b).{0,30}(?:쿨러|방열판)만\s*판매|(?:RTX|GTX|RX)\s*\d{3,4}.{0,30}(?:키캡|브라켓|백플레이트|지지대)(?=$|[\s,.)])/iu);
   if (accessory) {
     addEvidence(evidence, 'listing_kind', accessory.matchedText, 'ACCESSORY_ONLY');
@@ -176,7 +196,7 @@ function detectSpecialKind(text, evidence, title = text) {
   }
   // A standalone title label expresses intent; purchase history/receipts in
   // ordinary sale descriptions do not. Keep verb matching for body-only intent.
-  const wanted = firstMatch(title, /(?:^|[\s([{<])(?:구매|구입)(?=$|\s*[)\]}>.,!?]\s*$)/iu)
+  const wanted = firstMatch(title, /(?:^|[\s([{<])(?:구매|구입)(?=$|\s*[)\]}>.,!?]\s*$)|\[\s*(?:구매|구입)\s*\/\s*(?:개인|업자|업체)\s*\]|(?:구매|구입)\s+(?:합니다|희망합니다|희망|원합니다)(?=$|[\s.,!?])/iu)
     || firstMatch(text, /(?:\[\s*(?:구매|구입|삽니다|매입)\s*\]|대량\s*매입(?:합니다)?|(?:RTX|GTX|RX\s*\d{3,4}|그래픽\s*카드|\d{4,5}X(?:3D)?).{0,40}(?:삽니다|구합니다|구입합니다|구해요|구합니[다드당]|구매[합힙]니다|구매\s*원해요|매입합니(?:다|가)|사\s*봅니다|구해\s*봅니다|원합니다)|(?:^|[\s([{<])(?:삽니다|구합니다|구입합니다|구해요|구합니[다드당]|매입합니다|구매합니다|구매해요|구매원합니다|구매\s*원해요)(?=$|[\s)\]}>.,!?]))/iu);
   if (wanted) {
     addEvidence(evidence, 'listing_kind', wanted.matchedText, 'WANTED');
@@ -245,6 +265,9 @@ function detectSpecialKind(text, evidence, title = text) {
   for (const [group, pattern] of componentRules) {
     if (pattern.test(title)) componentGroups.add(group);
   }
+  if (/(?:마더\s*보드|\bMOTHERBOARD\b)/iu.test(title)
+    && (!/호환|지원|테스트|\b(?:COMPATIBLE|SUPPORTS?|FOR|TESTED)\b/iu.test(title)
+      || /콤보|\bCOMBO\b|묶음|세트|CPU\s*와/iu.test(title))) componentGroups.add('MOTHERBOARD');
   if (LEGACY_DISCRETE_GPU_PATTERN.test(title)) componentGroups.add('GPU');
   if (CORE_ULTRA_PATTERN.test(title)) componentGroups.add('CPU');
   if (/\b2\d{2}K(?:F|S)?\b/iu.test(title)) componentGroups.add('CPU');
@@ -257,10 +280,22 @@ function detectSpecialKind(text, evidence, title = text) {
     && !/(?:NT\d{3,}|\d{2}(?:\.\d)?\s*인치|삼성\s*센스|아티브\s*북|갤럭시\s*북)/iu.test(title);
   const describedPortableSystem = componentGroups.size >= 1 && !portableComponentWording
     && /(?:노트북(?!\s*(?:용|램|RAM|메모리|하드|HDD|SSD|부품))|삼성\s*센스\s*R\d|아티브\s*북|갤럭시\s*북|랩탑(?!용)|NOTEBOOK(?!\s*(?:용|RAM|MEMORY|HDD|SSD|GPU|GRAPHICS))|LAPTOP(?!\s*(?:RAM|MEMORY|HDD|SSD|GPU|GRAPHICS)))/iu.test(title);
-  const namedPortableSystem = (hasGpuModel || combinedHasGpuModel)
+  // A system family in a component's provenance is not the item being sold.
+  const componentSaleTitle = title.replace(/(?:분리|탈거|적출)\s*판매\s*(?:는\s*)?(?:하지\s*않|안\s*(?:함|해|합)|불가)[^,.]*/giu, ' ');
+  const separateComponentSale = /(?:CPU|프로세서|GPU|그래픽\s*카드|SSD|HDD|RAM|램|메모리)\s*(?:단품|만(?=\s*(?:판매|팝니다|$)))|(?:분리|탈거|적출)(?:한|품)?|호환|교체용|(?:에서|으로)\s*(?:사용|테스트)|\b(?:FOR|COMPATIBLE|REPLACEMENT|REMOVED)\b/iu.test(componentSaleTitle)
+    || /(?:CPU|프로세서|GPU|그래픽\s*카드|SSD|HDD|RAM|램|메모리)\s*(?:단품|만)\s*(?:팝니다|판매합니다|판매(?!\s*(?:는\s*)?(?:안|않|하지|불가)))/iu.test(text);
+  const namedPortableSystem = !separateComponentSale && (hasGpuModel || combinedHasGpuModel)
     && /(?:노트북(?!\s*(?:용|램|RAM|메모리|하드|HDD|SSD|부품))|게이밍\s*북|랩탑(?!용)|NOTEBOOK(?!\s*(?:RAM|MEMORY|HDD|SSD|GPU|GRAPHICS))|LAPTOP(?!\s*(?:RAM|MEMORY|HDD|SSD|GPU|GRAPHICS))|RAZER\s*BLADE|레이저\s*블레이드|ROG\s*(?:STRIX\s*)?SCAR|로그\s*스카|ALIENWARE|에일리언웨어|LEGION\s*[A-Z]?\d|레노버\s*Y\d|리전\s*(?:프로|Y?\d)|MSI\s*GF\d{2}|HP\s*OMEN.{0,30}\d{2}[- ][A-Z0-9]|오멘.{0,30}(?:RTX|GTX)|제피러스|ZEPHYRUS|(?:비보북|VIVOBOOK|아이디어패드|IDEAPAD|젠북|ZENBOOK|서피스\s*북|SURFACE\s*BOOK)(?!\s*(?:용|GPU|그래픽\s*카드|그래픽카드))|LG\s*(?:그램|GRAM)(?![A-Z가-힣])|(?:ASUS|아수스)\s*TUF\s*A\d{2})/iu.test(title);
   const workstationSystem = componentGroups.size >= 1 && /(?:워크스테이션|WORKSTATION)/iu.test(title);
   const describedCompactSystem = componentGroups.size >= 2 && /(?:미니|슬림)\s*PC/i.test(title);
+  const compactComputerSale = componentGroups.has('CPU')
+    && /(?:미니\s*PC(?![A-Z])|\bMINI\s*PC\b)/iu.test(title)
+    && !separateComponentSale && !/단품|PC\s*용|지원/iu.test(title);
+  const gramComputerSale = componentGroups.has('GPU')
+    && (/(?:LG|엘지)(?:전자)?\s*(?:\d{4}\s*(?:년형?\s*)?)?(?:1[4-7]\s*)?(?:그램|GRAM)(?:\s*(?:프로|PRO))?(?![A-Z가-힣])/iu.test(title)
+      || (/(?:^|[^A-Z가-힣])(?:그램|GRAM)(?:\s*(?:프로|PRO))?(?![A-Z가-힣])/iu.test(title)
+        && /\b1[4-7](?:\.\d)?\s*(?:인치|INCH)|\b1[4-7]Z[DGP]?\d{2,3}[A-Z]{0,2}-[A-Z0-9]+/iu.test(title)))
+    && !separateComponentSale && !/단품|(?:그램|GRAM)(?:\s*(?:프로|PRO))?\s*용/iu.test(title);
   const componentRichSystem = componentGroups.has('CPU') && componentGroups.has('RAM')
     && componentGroups.size >= 4;
   const cpuComponentWording = /컴퓨터.{0,20}\bCPU\b.{0,20}(?:RYZEN|라이젠|I[3579][ -]?\d{3,5}|\d{4,5}X(?:3D)?)/iu.test(title);
@@ -274,8 +309,24 @@ function detectSpecialKind(text, evidence, title = text) {
     && /(?:^|[^A-Z])PC\s*(?:팝니다|판매(?:합니다)?|팔아요|급처)|(?:데스크탑|데스크톱)\s*(?:본체\s*)?(?:팝니다|판매(?:합니다)?|팔아요|급처)|(?:중고|게임용|사무용|업무용|브랜드)\s*컴퓨터|(?:게임용|사무용|업무용)\s*(?:PC|데스크탑)|미니\s*컴퓨터|HP\s*(?:PRODESK|프로\s*데스크|ELITEDESK|엘리트\s*데스크|PAVILION|파빌리온|일체형)|컴퓨터.{0,30}(?:RYZEN|라이젠|\d{4,5}X(?:3D)?|울트라\s*[3579]?[- ]?\d{3}[A-Z]*|I[3579][ -]?\d{4,5}[A-Z]*)|(?:RYZEN|라이젠|\d{4,5}X(?:3D)?|울트라\s*[3579]?[- ]?\d{3}[A-Z]*|I[3579][ -]?\d{4,5}[A-Z]*).{0,30}(?:데스크탑(?:\s*PC)?|컴퓨터\s*(?:팝니다|판매|급처)?)/iu.test(title);
   const namedGpuPortable = hasGpuModel && PORTABLE_GPU_SYSTEM_PATTERN.test(title)
     && !/(?:탈거|분리|적출|부품|쿨러|팬|키보드|배터리|어댑터|호환|장착\s*테스트|에서\s*사용)/iu.test(title);
+  const namedConfiguredPortable = /(?:LG\s*(?:그램|GRAM)|갤럭시\s*북|GALAXY\s*BOOK)/iu.test(title)
+    && /\d{2}(?:\.\d)?\s*(?:인치|INCH)|\b\d{2}Z[DGP]?\d{2,3}[A-Z]?[- ]/iu.test(title)
+    && componentGroups.size >= 1
+    && !/단품|만\s*판매|분리|탈거|적출|교체용|호환|부품|(?:그램|GRAM|북|BOOK)\s*용|\b(?:FOR|COMPATIBLE|REPLACEMENT|REMOVED)\b/iu.test(title);
+  const allInOneSystem = /(?:올인원|일체형|ALL[ -]?IN[ -]?ONE)\s*(?:PC|컴퓨터)/iu.test(title)
+    && componentGroups.size >= 1
+    && !/단품|만\s*판매|분리|탈거|적출|교체용|호환|부품|(?:PC|컴퓨터)\s*용|\b(?:FOR|COMPATIBLE|REPLACEMENT|REMOVED)\b/iu.test(title);
+  // Retail desktops can put the system name before the CPU and abbreviate
+  // storage as S256/H1T. Require a CPU + memory + storage configuration;
+  // a desktop-compatible or removed component remains a component sale.
+  const configuredDesktopSystem = componentGroups.has('CPU') && hasMemoryConfiguration
+    && /데스크[탑톱](?!\s*용)|\bDESKTOP\b/iu.test(title)
+    && (hasStorageConfiguration || /(?:^|[\s(/,])(?:S|H)\s*\d{1,4}(?:G(?:B)?|T(?:B)?)?(?=$|[\s/),])/iu.test(title))
+    && !/단품|CPU\s*만|호환|지원|분리|탈거|적출|사용하던|(?:에서|으로)\s*(?:테스트|사용)/iu.test(title)
+    && !/(?:CPU|프로세서)\s*(?:단품|만)\s*(?:판매|팝니다)|(?:분리|탈거|적출)(?:한|품)\s*(?:CPU|프로세서)/iu.test(text);
   const fullSystem = explicitSystem || describedSystem || describedPortableSystem || namedPortableSystem || namedGpuPortable
-    || workstationSystem || describedCompactSystem || compactPcConfiguration || componentRichSystem || clearDesktopSystem;
+    || workstationSystem || describedCompactSystem || compactComputerSale || gramComputerSale || compactPcConfiguration || componentRichSystem || clearDesktopSystem || configuredDesktopSystem
+    || namedConfiguredPortable || allInOneSystem;
   if (fullSystem) {
     addEvidence(evidence, 'listing_kind', fullSystem.matchedText || [...componentGroups].join('+'), 'FULL_SYSTEM');
     return 'FULL_SYSTEM';
@@ -367,6 +418,13 @@ function detectCategory(text, specialKind, evidence, title = '') {
   if (isAxNetworkCardTitle(title)) {
     addEvidence(evidence, 'category_code', title, 'EXPANSION_CARD');
     return 'EXPANSION_CARD';
+  }
+  // TAMMUZ uses RX550 for an SSD, independently of AMD's GPU model name.
+  // Require the storage sale identity in the title; body compatibility text
+  // must not move a genuine graphics card into storage.
+  if (isTammuzRx550SsdTitle(title)) {
+    addEvidence(evidence, 'category_code', title, 'SSD');
+    return 'SSD';
   }
   const rules = [
     ['COOLING', /(?:CPU\s*(?:공랭|수랭)?\s*쿨러(?!\s*(?:별도|제외|없음|미포함))|공랭\s*쿨러|수랭\s*쿨러|케이스\s*팬|(?:120|240|280|360|420)\s*(?:MM\s*)?수랭|NH-D15)/i],
@@ -530,9 +588,16 @@ function ssdManufacturerEvidence(text) {
 function detectProductManufacturer(text, category, evidence) {
   // Memory-chip makers (e.g. Samsung B-die) are not the assembled module brand.
   // Remove only explicitly chip-scoped mentions; conflicting module brands stay ambiguous.
-  const manufacturerText = category === 'RAM' ? text.replace(
+  let manufacturerText = category === 'RAM' ? text.replace(
     /(?:\bSamsung\b|삼성(?:전자)?|\b(?:SK\s*)?hynix\b|하이닉스|\bMicron\b|마이크론)\s*(?:[ABM]\s*[- ]?\s*)?(?:다이|DIE\b|칩|CHIPS?\b|IC\b)/giu, ' '
   ) : category === 'SSD' ? ssdManufacturerEvidence(text) : text;
+  if (category === 'PSU') {
+    // Series abbreviations are fallback evidence only. An explicitly named
+    // maker takes precedence; unsupported makers retain the unknown bucket.
+    if (/(?:썬루트|\bSUNROOT\b)/iu.test(manufacturerText)) return null;
+    const namedMakerText = manufacturerText.replace(/\b(?:RM|HX|AX|TX|CX|CV|SF)\d{3,4}(?:X|I|M)?\b|\bGX[- ]?\d{3,4}\b/giu, ' ');
+    if (CATEGORY_MANUFACTURER_PATTERNS.PSU.some(([, pattern]) => pattern.test(namedMakerText))) manufacturerText = namedMakerText;
+  }
   const matches = (CATEGORY_MANUFACTURER_PATTERNS[category] || [])
     .filter(([, pattern]) => pattern.test(manufacturerText))
     .map(([manufacturer]) => manufacturer);

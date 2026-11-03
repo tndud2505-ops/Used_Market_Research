@@ -306,18 +306,27 @@ assert.equal(gapView.emptyViewport,true,'a viewport without observations remains
 assert.equal(marketLinePath(emptyWindowPoints.slice(-10),gapView.x,gapView.y),'','the empty viewport has no invented price line');
 
 // Exercise the actual renderer's event handlers without browser/network state.
-const savedDom=Object.fromEntries(['document','ResizeObserver','requestAnimationFrame','cancelAnimationFrame'].map(key=>[key,globalThis[key]]));
+const savedDom=Object.fromEntries(['document','window','ResizeObserver','MutationObserver','requestAnimationFrame','cancelAnimationFrame'].map(key=>[key,globalThis[key]]));
 class ChartNode {
-  constructor(tag){this.tag=tag;this.children=[];this.dataset={};this.attributes={};this.events={};this.clientWidth=900;this.clientHeight=400;this.offsetWidth=220;this.offsetHeight=120;this.style={setProperty(){}};}
+  constructor(tag){
+    this.tag=tag;this.children=[];this.dataset={};this.attributes={};this.events={};this.clientWidth=900;this.clientHeight=400;this.offsetWidth=220;this.offsetHeight=120;this.isConnected=true;
+    const styles=new Map();
+    this.style={setProperty:(key,value,priority='')=>styles.set(key,{value,priority}),getPropertyValue:key=>styles.get(key)?.value||'',getPropertyPriority:key=>styles.get(key)?.priority||'',removeProperty:key=>styles.delete(key)};
+    this.classList={contains:value=>(this.className||'').split(' ').includes(value),toggle:(value,force)=>{const classes=new Set((this.className||'').split(' ').filter(Boolean));const enabled=force??!classes.has(value);if(enabled)classes.add(value);else classes.delete(value);this.className=[...classes].join(' ');return enabled;},add:value=>this.classList.toggle(value,true)};
+  }
   append(...items){this.children.push(...items);} prepend(item){this.children.unshift(item);} replaceChildren(...items){this.children=items;this.replaceCount=(this.replaceCount||0)+1;}
-  setAttribute(key,value){this.attributes[key]=String(value);} addEventListener(key,fn){this.events[key]=fn;} removeEventListener(key){delete this.events[key];}
+  setAttribute(key,value){this.attributes[key]=String(value);} addEventListener(key,fn){(this.events[key]??=new Set()).add(fn);} removeEventListener(key,fn){this.events[key]?.delete(fn);}
   setPointerCapture(){} hasPointerCapture(){return true;} releasePointerCapture(){} focus(){} contains(){return true;}
-  getBoundingClientRect(){return {left:0,top:0,width:this.clientWidth,height:this.clientHeight};}
-  emit(type,props={}){this.events[type]?.({button:0,pointerId:1,pointerType:'touch',clientX:500,clientY:200,preventDefault(){},...props});}
+  closest(){return this.pane||null;}
+  getBoundingClientRect(){return {left:0,top:0,width:this.boundsWidth||this.clientWidth,height:this.clientHeight};}
+  emit(type,props={}){for(const fn of this.events[type]||[])fn({button:0,pointerId:1,pointerType:'touch',clientX:500,clientY:200,preventDefault(){},stopPropagation(){},...props});}
 }
 try{
-  globalThis.document={createElement:tag=>new ChartNode(tag),createElementNS:(_,tag)=>new ChartNode(tag),addEventListener(){},removeEventListener(){}};
-  globalThis.ResizeObserver=class{observe(){}disconnect(){}};
+  globalThis.document=Object.assign(new ChartNode('document'),{body:new ChartNode('body'),createElement:tag=>new ChartNode(tag),createElementNS:(_,tag)=>new ChartNode(tag)});
+  globalThis.window={scrollX:12,scrollY:432,scrollTo({left,top}){this.scrollX=left;this.scrollY=top;}};
+  globalThis.ResizeObserver=class{constructor(callback){this.callback=callback;}observe(target){target.resize=this;}disconnect(){this.disconnected=true;}};
+  const removals=[];
+  globalThis.MutationObserver=class{constructor(callback){this.callback=callback;removals.push(this);}observe(){}disconnect(){this.disconnected=true;}};
   globalThis.requestAnimationFrame=fn=>{fn();return 1;};globalThis.cancelAnimationFrame=()=>{};
   const chart=new ChartNode('div'),timeline=Array.from({length:120},(_,i)=>({date:shiftDate('2026-10-07',i-119),value:100+i,sampleCount:5}));
   let olderRequests=0,lastView;
@@ -394,7 +403,7 @@ try{
     identity:'docked',showLegend:false,showNote:false,dockedReadout:true,axisLeft:true,
     readoutInput:[line,{...line,id:'danawa:active',label:'다나와',points:[]}],
   });
-  assert.equal(docked.children.length,2,'only fixed readout and chart, no explanatory footer');
+  assert.equal(docked.children.length,3,'fixed readout, chart and expand icon, no explanatory footer');
   const dockedReadout=docked.children[0],dockedStage=docked.children[1],dockedSvg=dockedStage.children[0];
   assert.equal(dockedReadout.attributes.role,'region');assert.equal(dockedStage.children.length,1,'no floating tooltip on the plot');
   assert.equal(dockedReadout.hidden,false);
@@ -421,5 +430,104 @@ try{
   cornerSvg.emit('pointerdown',{clientX:750});cornerSvg.emit('pointerup',{clientX:750});
   assert.equal(popup.hidden,true,'second click releases the pinned popup');
   move(200);cornerSvg.emit('keydown',{key:'Escape'});assert.equal(popup.hidden,true);
+  const unified=new ChartNode('div');let selected;
+  drawMarketChart(unified,[line],{identity:'unified',showLegend:false,showNote:false,axisLeft:true,
+    wheelZoom:true,externalReadout:true,connectGaps:false,onReadout:value=>{selected=value;}});
+  const unifiedStage=unified.children[0],unifiedSvg=unifiedStage.children[0];
+  assert.equal(unifiedStage.children.length,1,'external readout does not create a second tooltip');
+  assert.equal(selected.date,null,'the rail starts in latest-observation mode');
+  const fullCount=Number(unifiedSvg.dataset.visibleCount),fullScale=Number(unifiedSvg.dataset.scaleMax)-Number(unifiedSvg.dataset.scaleMin);
+  assert.equal(fullCount,timeline.length);
+  unifiedSvg.emit('wheel',{deltaX:0,deltaY:-160});
+  [...frames.values()].forEach(fn=>fn());frames.clear();
+  assert.ok(Number(unifiedSvg.dataset.visibleCount)<fullCount,'ordinary wheel zooms the analysis chart');
+  assert.ok(Number(unifiedSvg.dataset.scaleMax)-Number(unifiedSvg.dataset.scaleMin)<fullScale,'price scale follows the visible data');
+  unifiedSvg.emit('pointermove',{pointerType:'mouse',clientX:500});
+  [...frames.values()].forEach(fn=>fn());frames.clear();
+  assert.ok(selected.date);assert.equal(selected.pinned,false);
+  unifiedSvg.emit('pointerdown',{clientX:500});unifiedSvg.emit('pointerup',{clientX:500});
+  assert.equal(selected.pinned,true,'pinning an already-hovered date updates the rail');
+  unifiedStage.emit('pointerleave');assert.equal(selected.pinned,true);
+  unified.emit('chart-clear');assert.equal(selected.date,null,'release restores latest observations');
+  unifiedSvg.emit('dblclick');[...frames.values()].forEach(fn=>fn());frames.clear();
+  assert.equal(Number(unifiedSvg.dataset.visibleCount),fullCount);
+  const missingDateChart=new ChartNode('div');let gapSelection;
+  const missingDatePoints=[{date:'2026-10-01',value:100,sampleCount:5},{date:'2026-10-02',value:null,sampleCount:0},
+    {date:'2026-10-03',value:120,sampleCount:6},{date:'2026-10-04',value:130,sampleCount:7},{date:'2026-10-05',value:125,sampleCount:5}];
+  drawMarketChart(missingDateChart,[{...line,points:missingDatePoints}],{identity:'missing-date',showLegend:false,showNote:false,
+    axisLeft:true,wheelZoom:true,externalReadout:true,connectGaps:true,onReadout:value=>{gapSelection=value;}});
+  const missingSvg=missingDateChart.children[0].children[0],rendered=missingSvg.children[0].children.flatMap(node=>[node,...node.children]);
+  assert.ok(rendered.some(node=>node.attributes['data-gap-bridge']==='true'),'missing dates have a separate visual bridge');
+  assert.equal(rendered.filter(node=>node.tag==='circle').length,4,'bridges add no observation markers');
+  missingSvg.emit('pointermove',{pointerType:'mouse',clientX:90+(900-106)/5*1.5});
+  [...frames.values()].forEach(fn=>fn());frames.clear();
+  assert.equal(gapSelection.date,'2026-10-02','a missing date does not jump to a measured neighbour');
+  assert.equal(missingDatePoints[1].value,null,'hover and bridges never manufacture a missing price');
+
+  const flush=()=>{while(frames.size){const callbacks=[...frames.values()];frames.clear();callbacks.forEach(fn=>fn());}};
+  const interactive=new ChartNode('div'),pane=new ChartNode('section');interactive.pane=pane;
+  const mobileLine={...line,points:timeline.map(point=>({...point,value:35000}))};
+  let mobileRange,rangeChanges=0;
+  const mobileOptions={identity:'mobile-controls',showLegend:false,showNote:false,wheelZoom:true,axisLeft:true,onViewChange:range=>{mobileRange=range;rangeChanges++;}};
+  drawMarketChart(interactive,[mobileLine],mobileOptions);
+  let mobileStage=interactive.children[0],mobileSvg=mobileStage.children[0],expand=interactive.children[1];
+  const fitMobile=()=>{mobileStage.clientWidth=390;mobileSvg.clientWidth=390;mobileStage.resize.callback();flush();};
+  const pinchBy=factor=>{mobileSvg.emit('pointerdown',{pointerId:1,clientX:120});mobileSvg.emit('pointerdown',{pointerId:2,clientX:220});mobileSvg.emit('pointermove',{pointerId:2,clientX:120+100*factor});flush();mobileSvg.emit('pointerup',{pointerId:2,clientX:120+100*factor});mobileSvg.emit('pointerup',{pointerId:1,clientX:120});};
+  assert.equal(interactive.children.length,2,'no legend or zoom toolbar is generated');
+  assert.equal(expand.className,'market-chart-expand-button');assert.equal(expand.dataset.chartAction,'expand');
+  assert.equal(expand.attributes['aria-label'],'차트 크게 보기');assert.equal(expand.children[0].attributes['aria-hidden'],'true');
+  assert.deepEqual(interactive.children.filter(node=>node.tag==='button').map(node=>node.dataset.chartAction),['expand'],'no in/out/reset buttons exist');
+  assert.equal(mobileSvg.style.touchAction,'none','native gestures cannot cancel custom chart navigation');
+  const desktopLabels=mobileSvg.children[0].children.filter(node=>node.attributes['data-price-y']!==undefined).map(node=>node.textContent);
+  assert.ok(desktopLabels.includes('35,000'),'desktop ticks retain full price formatting');
+  fitMobile();
+  const mobileGeometry=buildMarketView([mobileLine],timeline.map(point=>point.date),120,0,390,400,{axisLeft:true});
+  assert.equal(mobileGeometry.pad.left,46);assert.equal(mobileGeometry.pad.right,10);
+  assert.ok(mobileSvg.children[0].children.some(node=>node.textContent==='3.5만'));assert.ok(mobileSvg.children[0].children.some(node=>node.textContent==='단위: 원'));
+  mobileSvg.emit('pointerdown',{clientX:200,clientY:196});mobileSvg.emit('pointerup',{clientX:200,clientY:196});
+  assert.equal(mobileSvg.children[1].children[2].children[1].textContent,'35,000','crosshair price stays unabbreviated');
+  assert.equal(mobileStage.children[1].children[1].children[1].children[0].children[1].children[0].textContent,'35,000원','readout retains the full actual price and currency');
+  pinchBy(4/3);const zoomedCount=Number(mobileSvg.dataset.visibleCount);assert.ok(zoomedCount<timeline.length);
+  mobileSvg.emit('wheel',{deltaY:-160,deltaX:0,ctrlKey:true});mobileSvg.emit('dblclick');mobileSvg.emit('keydown',{key:'+'});flush();
+  assert.equal(Number(mobileSvg.dataset.visibleCount),zoomedCount,'mobile scaling uses touch gestures only');
+  const beforeExpand={...mobileRange},beforeResizeChanges=rangeChanges;
+  document.body.style.setProperty('position','relative','important');document.body.style.setProperty('overflow-y','scroll');
+  expand.emit('click');flush();
+  assert.equal(pane.classList.contains('is-expanded'),true);assert.equal(document.body.classList.contains('has-expanded-chart'),true);
+  assert.equal(expand.attributes['aria-label'],'차트 닫기');assert.equal(expand.attributes['aria-pressed'],'true');
+  mobileStage.clientWidth=390;mobileStage.resize.callback();flush();
+  assert.deepEqual(mobileRange,beforeExpand,'expansion and width changes preserve the calendar window');
+  assert.equal(rangeChanges,beforeResizeChanges,'size-only redraw does not republish an unchanged range');
+  drawMarketChart(interactive,[mobileLine],mobileOptions);flush();
+  mobileStage=interactive.children[0];mobileSvg=mobileStage.children[0];expand=interactive.children[1];fitMobile();
+  assert.equal(expand.attributes['aria-pressed'],'true','same-identity render keeps expanded mode');
+  assert.deepEqual(mobileRange,beforeExpand,'same-identity render keeps zoom');
+  window.scrollX=0;window.scrollY=0;document.emit('keydown',{key:'Escape'});flush();
+  assert.equal(pane.classList.contains('is-expanded'),false);assert.equal(document.body.classList.contains('has-expanded-chart'),false);
+  assert.equal(expand.attributes['aria-label'],'차트 크게 보기');assert.equal(expand.attributes['aria-pressed'],'false');
+  assert.equal(document.body.style.getPropertyValue('position'),'relative');assert.equal(document.body.style.getPropertyPriority('position'),'important');
+  assert.equal(document.body.style.getPropertyValue('overflow-y'),'scroll');assert.equal(document.body.style.getPropertyValue('top'),'');
+  assert.equal(window.scrollX,12);assert.equal(window.scrollY,432);
+  pinchBy(.001);assert.equal(Number(mobileSvg.dataset.visibleCount),timeline.length,'pinching inward is bounded by loaded dates');
+  pinchBy(100);assert.equal(Number(mobileSvg.dataset.visibleCount),5,'pinching outward stops at five dates');
+  pinchBy(.001);pinchBy(4/3);
+  mobileSvg.emit('pointerdown',{pointerId:1,clientX:120});mobileSvg.emit('pointerdown',{pointerId:2,clientX:220});
+  mobileSvg.emit('pointermove',{pointerId:2,clientX:320});flush();const afterPinch=Number(mobileSvg.dataset.offset);
+  mobileSvg.emit('pointerup',{pointerId:2,clientX:320});mobileSvg.emit('pointermove',{pointerId:1,clientX:200});flush();
+  assert.ok(Number(mobileSvg.dataset.offset)>afterPinch,'one remaining finger continues panning after a pinch');
+  mobileSvg.emit('lostpointercapture',{pointerId:1});
+  const heldRange={...mobileRange},appended=[...mobileLine.points,{date:shiftDate(timeline.at(-1).date,1),value:35000,sampleCount:5}];
+  mobileSvg.emit('pointerdown',{clientX:200});drawMarketChart(interactive,[{...mobileLine,points:appended}],mobileOptions);
+  assert.equal(interactive.children[0],mobileStage,'incoming data does not replace the active pointer target');
+  mobileSvg.emit('pointercancel');await Promise.resolve();flush();
+  assert.notEqual(interactive.children[0],mobileStage,'cancelled interaction releases the queued data render');
+  assert.deepEqual(mobileRange,heldRange,'new daily data preserves an intentional historical window');
+  mobileStage=interactive.children[0];mobileSvg=mobileStage.children[0];expand=interactive.children[1];fitMobile();
+  pinchBy(.001);assert.equal(Number(mobileSvg.dataset.visibleCount),appended.length);assert.equal(Number(mobileSvg.dataset.offset),0);
+  expand.emit('click');flush();const removal=removals.at(-1),keyListeners=document.events.keydown.size;
+  interactive.isConnected=false;removal.callback();flush();
+  assert.equal(document.body.classList.contains('has-expanded-chart'),false,'detaching an expanded chart unlocks scrolling');
+  assert.equal(removal.disconnected,true);assert.equal(document.events.keydown.size,keyListeners-1,'detachment removes the expansion keyboard listener');
+  assert.equal(document.body.style.getPropertyValue('overflow-y'),'scroll');
 }finally{for(const [key,value] of Object.entries(savedDom))if(value===undefined)delete globalThis[key];else globalThis[key]=value;}
 console.log('PC tools: grouping, independent prices, partial sums, quantity, compatibility, storage validation and chart gaps passed');

@@ -309,7 +309,7 @@ D1 payload checksum `317d7c4b...`는 과거 감사 값이다. 이번 D1 저장�
 - 2026-09-18 23:10:25 KST, HTTP 403. Cloudflare Security Events는 Browser Integrity Check `Block`, Ray ID `a3d0ef1b0cd23121`, ASN Amazon, user-agent `Python-urllib/3.12`, host `used-pick.com`, path `/admin/product-stats-scopes`, method GET으로 기록했다.
 - 403 뒤 다른 user-agent·클라이언트로 재시도하거나 rule 범위를 넓히지 않았다. 실제 `POST /api/runner/run` 호출은 0회이며 새 게시·분할 staging·최종 activation도 0회다.
 - 최종 preflight는 `AWS_PC_RELEASE_NOT_READY:PC_PUBLICATION_NOT_RECENT`, exit 1이다.
-- 복구 후 공개 API 재감사는 798/798 HTTP 200, 계약 실패 3개다: `ram:corsair:ddr3:16gb:EXACT_PUBLICATION_MISSING`, `ram:corsair:ddr3:4gb:EXACT_PUBLICATION_MISSING`, `ram:corsair:ddr3:4gb:UNAPPROVED_SOURCE:coolenjoy`. 독립 부분 합계는 1,295,937.32원, 가격 있는 행 7/9였지만 이를 새 고정 정답으로 승인하지 않는다.
+- 복구 후 공개 API 재감사는 798/798 HTTP 200, 계약 실패 3개다: `ram:corsair:ddr3:16gb:EXACT_PUBLICATION_MISSING`, `ram:corsair:ddr3:4gb:EXACT_PUBLICATION_MISSING`, `ram:corsair:ddr3:4gb:UNAPPROVED_SOURCE`. 독립 부분 합계는 1,295,937.32원, 가격 있는 행 7/9였지만 이를 새 고정 정답으로 승인하지 않는다.
 - 다음 최소 조치는 BIC를 우회하지 않는 정상 인증된 내부 게시 경로를 확보하거나, 사이트 소유자가 exact-path 관리 요청 정책을 명시적으로 결정한 뒤 predecessor GET → 단 1회 daily job → 최종 activation → 새 ID API 감사 → preflight 순으로 재개하는 것이다.
 
 ### 자동 스케줄과 브라우저 구분

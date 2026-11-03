@@ -18,4 +18,4 @@ npm run cloudflare:harness
 - `pc-publication-contract.mjs`: 통계 요청 범위·checksum·원자적 active pointer·실패 복구
 - `pc-service-contract.mjs`: 인증·서명 cursor·snapshot·backup·D1 fallback·오류 비노출
 
-정책 검토 중인 번개장터·다나와·쿨엔조이는 기본 계약에서 실제 호출하지 않는다. 승인 상태와 운영 활성화가 모두 충족된 뒤에만 별도 canary를 추가한다.
+정책 검토 중인 번개장터·다나와는 기본 계약에서 실제 호출하지 않는다. 승인 상태와 운영 활성화가 모두 충족된 뒤에만 별도 canary를 추가한다.

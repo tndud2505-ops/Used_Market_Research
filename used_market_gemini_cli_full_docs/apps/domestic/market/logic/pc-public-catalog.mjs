@@ -3,6 +3,7 @@ import {
   PC_PRODUCT_MASTER_V2_VERSION
 } from "../data/pc-product-master-v2.mjs";
 import { pcBrandSearchAliases, pcProductMatchesQuery } from './pc-product-search.mjs';
+import { RAM_MEMORY_USAGES, RAM_SPEEDS_MT_S, RAM_USAGE_LABELS } from './ram-listing-facets.mjs';
 
 export const PUBLIC_PC_CATEGORY_CODES = Object.freeze([
   "CPU", "GPU", "RAM", "MOTHERBOARD", "SSD", "HDD", "PSU"
@@ -26,7 +27,7 @@ const FACETS = Object.freeze({
     ["manufacturer", "칩 제조사"], ["family", "제품군"], ["generation", "세대"], ["vram_gb", "VRAM"]
   ],
   RAM: [
-    ["generation", "DDR 세대"], ["module_capacity_gb", "모듈 용량"], ["manufacturer", "제조사"]
+    ["memory_usage", "용도"], ["generation", "DDR 세대"], ["module_capacity_gb", "개당 용량"], ["speed_mt_s", "속도"], ["manufacturer", "제조사"]
   ],
   MOTHERBOARD: [
     ["platform_vendor", "CPU 플랫폼"], ["socket", "CPU 소켓"], ["chipset", "칩셋"], ["manufacturer", "제조사"]
@@ -41,7 +42,7 @@ const FACETS = Object.freeze({
     ["watts_bucket", "정격 출력"], ["form_factor", "크기 규격"], ["manufacturer", "제조사"]
   ]
 });
-const LISTING_ONLY_FACETS = new Set(["product_kind", "placement", "form_factor"]);
+const LISTING_ONLY_FACETS = new Set(["product_kind", "placement", "form_factor", "memory_usage", "speed_mt_s"]);
 
 const PUBLIC_PRODUCTS = Object.freeze([
   ...PC_PRODUCT_MASTER_V2.filter((product) => PUBLIC_PC_CATEGORY_CODES.includes(product.category))
@@ -215,6 +216,8 @@ function publicFacetValues(product, key) {
     case "form_factor": return values(spec.form_factor);
     case "product_kind": return product.category === "SSD" ? ["M2_NVME", "SATA_2_5", "M2_SATA", "EXTERNAL", "OTHER_UNKNOWN"] : [];
     case "placement": return product.category === "HDD" ? ["INTERNAL", "EXTERNAL", "UNKNOWN"] : values(spec.placement);
+    case "memory_usage": return product.category === "RAM" ? [...RAM_MEMORY_USAGES] : [];
+    case "speed_mt_s": return product.category === "RAM" ? [...RAM_SPEEDS_MT_S] : [];
     case "form_interface": {
       const forms = values(spec.form_factor);
       const interfaces = values(spec.interface);
@@ -268,6 +271,7 @@ function normalizeFilters(options = {}) {
   const aliases = {
     manufacturer: ["manufacturer", "brand"], generation: ["generation", "memory_generation"], model: ["model", "exact_model"],
     gpu_model: ["gpu_model"], board_brand: ["board_brand", "board_manufacturer"], usage: ["usage", "market_segment"],
+    memory_usage: ["memory_usage"], speed_mt_s: ["speed_mt_s"],
     platform_vendor: ["platform_vendor"], family: ["family"], suffix: ["suffix"],
     configuration: ["configuration", "config"], module_capacity_gb: ["module_capacity_gb", "capacity_per_module_gb"], vram_gb: ["vram_gb", "vram_options_gb"], socket: ["socket"], chipset: ["chipset"], form_factor: ["form_factor"],
     form_interface: ["form_interface"], product_kind: ["product_kind"], placement: ["placement"], capacity: ["capacity", "marketed_capacity_gb"], purpose: ["purpose", "use_class"],
@@ -291,6 +295,8 @@ function productMatchesQuery(product, query) {
 }
 
 function optionLabel(key, value) {
+  if (key === "memory_usage") return RAM_USAGE_LABELS[value] || value;
+  if (key === "speed_mt_s") return value === "UNKNOWN" ? "확인 불가" : `${value} MT/s`;
   if (key === "suffix" && value === "NONE") return "일반";
   if (key === "capacity") {
     const rangeLabels = {
@@ -352,6 +358,10 @@ export function publicPcCatalogForApi() {
     categories,
     brand_label_by_category: Object.fromEntries(PUBLIC_PC_CATEGORY_DEFINITIONS.map(({ code, brand_label }) => [code, brand_label])),
     facet_schema: Object.fromEntries(PUBLIC_PC_CATEGORY_CODES.map((code) => [code, publicPcFacetDefinitions(code)])),
+    listing_facet_options: { RAM: {
+      memory_usage: RAM_MEMORY_USAGES.map(value => ({ value, label: optionLabel('memory_usage', value) })),
+      speed_mt_s: RAM_SPEEDS_MT_S.map(value => ({ value, label: optionLabel('speed_mt_s', value) }))
+    } },
     browse_flow: Object.fromEntries(PUBLIC_PC_CATEGORY_CODES.map((code) => [code, { category_code: code, steps: publicPcFacetDefinitions(code) }])),
     products: PUBLIC_PRODUCTS.map((product) => publicProductForApi(product))
   };

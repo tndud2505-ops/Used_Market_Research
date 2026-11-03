@@ -11,6 +11,8 @@ const MAX_JITTER_SECONDS = 120;
 const LIVE_CANARY_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 const FAILURE_BACKOFF_MS = Object.freeze([5 * 60 * 1000, 15 * 60 * 1000]);
 const QUARANTINE_MS = 6 * 60 * 60 * 1000;
+// One blocked or captcha response quarantines these sources for six hours.
+const IMMEDIATE_ACCESS_QUARANTINE_SOURCES = new Set(["danawa"]);
 export const DANAWA_COLLECTION_LIMITS = Object.freeze({ requestIntervalMs: 10_000, targetsPerRun: 20, requestsPerHour: 20, accessCooldownMs: QUARANTINE_MS });
 
 function source(config) {
@@ -156,25 +158,6 @@ export const PC_SOURCE_REGISTRY = Object.freeze([
     directory_order: 6,
     cadence: { timezone: "Asia/Seoul", kst_minutes: [44], jitter_max_seconds: MAX_JITTER_SECONDS },
     access: { strategy: "official_browse_api", adapter_kind: "existing_site_script", api_only_required: true }
-  }),
-  source({
-    key: "coolenjoy",
-    name: "쿨엔조이",
-    market_pool: "KR_C2C_USED",
-    policy_status: "APPROVED",
-    runtime_status: "DISABLED",
-    public_search: false,
-    directory_source: false,
-    directory_order: 8,
-    policy_reviewed_at: "2026-08-31",
-    policy_basis_url: "https://coolenjoy.net/robots.txt",
-    policy_note: "The USED-PICK operator attests scoped permission for PC-parts collection and publication. Use normal public routes only; HTTP 403 or captcha responses must enter runtime backoff and quarantine.",
-    approval_basis: "OPERATOR_ATTESTED_DIRECT_PERMISSION",
-    approval_attested_at: "2026-08-31",
-    approval_scope: "PC_PARTS_COLLECTION_AND_PUBLICATION",
-    access_constraints: "PUBLIC_ROUTES_ONLY_NO_AUTH_OR_BLOCK_BYPASS",
-    cadence: { timezone: "Asia/Seoul", kst_minutes: [52], jitter_max_seconds: MAX_JITTER_SECONDS },
-    access: { strategy: "site_html", adapter_kind: "specialist_fixture_parser", api_only_required: false }
   })
 ]);
 
@@ -442,10 +425,21 @@ export function sourceRuntimePauseReason(runtime, now = new Date()) {
 
 function failureRuntime(runtime, now, error) {
   const consecutiveFailures = Number(runtime.consecutive_failures || 0) + 1;
-  const accessBlocked = runtime.source_key === 'danawa' && (
-    /DANAWA_SEARCH_(?:HTTP_(?:403|429)|BLOCKED)|SOURCE_ACCESS_BLOCKED/iu.test(String(error?.message || error))
+  const accessBlocked = IMMEDIATE_ACCESS_QUARANTINE_SOURCES.has(runtime.source_key) && (
+    /DANAWA_SEARCH_(?:HTTP_(?:403|429)|BLOCKED)|SOURCE_ACCESS_BLOCKED|SOURCE_CAPTCHA/iu.test(String(error?.message || error))
     || Number(error?.collection_metrics?.http_blocked_count || 0) > 0
     || Number(error?.collection_metrics?.captcha_count || 0) > 0);
+  const metrics = error?.collection_metrics;
+  // Verified responses from the same batch show that this is a target failure,
+  // not a source outage. Keep the partial outcome and its last clean success.
+  if (runtime.source_key === 'danawa' && !accessBlocked
+      && Number(metrics?.parse_failure_count || 0) > 0
+      && (Number(metrics?.parsed_count || 0) > 0 || Number(metrics?.request_count || 0) > Math.max(
+        Number(metrics?.request_failure_count || 0), Number(metrics?.parse_failure_count || 0)))) {
+    return { ...runtime, runtime_status: 'ENABLED', consecutive_failures: 0,
+      backoff_until: null, quarantine_until: null, last_started_at: now.toISOString(),
+      last_error: error instanceof Error ? error.message : String(error) };
+  }
   if (accessBlocked || consecutiveFailures >= 3) {
     return {
       ...runtime,
@@ -519,11 +513,12 @@ export async function runSourceCollection({ sourceKey, adapter, runtime, governa
       && Number(result.metrics?.captcha_count || 0) === 0;
     const accessFailure = Number(result.metrics?.http_blocked_count || 0) > 0
       || Number(result.metrics?.captcha_count || 0) > 0;
-    const danawaAccessBlocked = sourceKey === "danawa" && accessFailure;
+    const danawaAccessBlocked = IMMEDIATE_ACCESS_QUARANTINE_SOURCES.has(sourceKey) && accessFailure;
     const danawaParseFailure = sourceKey === 'danawa' && Number(result.metrics?.parse_failure_count || 0) > 0;
     if (danawaAccessBlocked || danawaParseFailure || (requestCount > 0 && successRate < 0.95 && !singleTargetTolerance)) {
       const partialReason = danawaAccessBlocked ? "SOURCE_ACCESS_BLOCKED" : danawaParseFailure ? 'SOURCE_RESPONSE_UNRECOGNIZED' : "SOURCE_SUCCESS_RATE_BELOW_THRESHOLD";
       const partialError = new Error(`${partialReason}:${sourceKey}:${successRate.toFixed(4)}`);
+      partialError.collection_metrics = result.metrics;
       const partialRuntime = accessFailure || danawaParseFailure ? failureRuntime(currentRuntime, runAt, partialError) : {
         ...currentRuntime,
         runtime_status: "ENABLED",

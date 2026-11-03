@@ -4,6 +4,8 @@ import { dirname, join, resolve } from 'node:path';
 // Shared ESM contract has no TypeScript declaration file.
 // @ts-ignore
 import { pcListingStatisticsCoverage } from '../../../cloudflare/pc-listings-contract.mjs';
+// @ts-ignore — shared runtime ESM helper
+import { deriveRamListingFacets } from '../../../market/logic/ram-listing-facets.mjs';
 
 type JsonRecord = Record<string, any>;
 
@@ -183,7 +185,9 @@ export function createLocalPcPublicationReader() {
     const files = publicationFiles();
     if (!files) return emptyListings(new Date().toISOString(), 'LOCAL_PUBLICATION_NOT_CONFIGURED');
     const publication = readPublication(files.listingsPath);
-    const allItems = Array.isArray(publication?.items) ? publication.items : [];
+    const allItems = (Array.isArray(publication?.items) ? publication.items : []).map((item: JsonRecord) =>
+      item.category_code === 'RAM' || /^ram:/i.test(item.canonical_product_id || '')
+        ? { ...item, ...deriveRamListingFacets(item.title) } : item);
     const sites = new Set(query.sites.map(normalize).filter(Boolean));
     const canonicalProductIds = Array.isArray(query.canonicalProductIds)
       ? new Set(query.canonicalProductIds.map(normalize).filter(Boolean))

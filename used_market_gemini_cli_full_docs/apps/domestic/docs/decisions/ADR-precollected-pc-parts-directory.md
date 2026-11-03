@@ -30,11 +30,11 @@ Workers Free의 전체 통계 검증 CPU 초과가 확인돼 AWS가 D1 저장 �
 
 현재 운영 수집은 시간별 부품군 검색 `HOURLY_CATEGORY`와 24시간 간격 master 분할 순회 `DAILY_MASTER`로 나뉜다. 소스별 실제 실행 분과 jitter·배치 제한은 source registry 및 활성 target set을 따른다. 사용자 요청은 수집 target을 생성하거나 즉시 실행하지 않는다.
 
-운영 디렉터리 source는 중고나라·번개장터·다나와 중고·eBay 4개다. 다나와는 중고 통합검색을 사용하고 상품 규격별 일반 표시가격을 한 표본으로 수집한다. 국내 개인·업체 중고 표본은 `KR_DOMESTIC_USED`에서 합산한다. eBay는 `OVERSEAS_USED`로 분리하며 국내 통계와 합치지 않는다. 기존 다나와 장터 adapter·헬로마켓·리씽크몰·쿨엔조이는 비활성 이력으로만 남는다.
+운영 디렉터리 source는 중고나라·번개장터·다나와 중고·eBay 4개다. 다나와는 중고 통합검색을 사용하고 상품 규격별 일반 표시가격을 한 표본으로 수집한다. 국내 개인·업체 중고 표본은 `KR_DOMESTIC_USED`에서 합산한다. eBay는 `OVERSEAS_USED`로 분리하며 국내 통계와 합치지 않는다. 기존 다나와 장터 adapter·헬로마켓·리씽크몰은 비활성 이력으로만 남는다.
 
 검색형 source는 11개 부품군의 대표 검색과 versioned master를 분할 순회한다. 2026-09-24 확인 target set은 `pc-targets:5:full-master-v13`, 활성 target은 2,441개다. 소스별 대상은 번개장터·중고나라 각각 1,570개, eBay 871개이며 같은 target이 여러 소스에 속할 수 있다. 공개 API 요청은 이 target을 실행하지 않는다. 이후 대상 수는 활성 set에서 다시 확인한다.
 
-정상 공개 요청에도 HTTP 403을 반환하는 시점에는 우회·로그인·captcha 처리를 하지 않는다. 해당 source만 backoff·격리하고 마지막 정상 publication을 유지한다. 쿨엔조이는 공개 목록에서 확인되는 명시적 판매/판매완료 상태만 기록한다.
+정상 공개 요청에도 HTTP 403을 반환하는 시점에는 우회·로그인·captcha 처리를 하지 않는다. 해당 source만 backoff·격리하고 마지막 정상 publication을 유지한다.
 
 ## 가격
 

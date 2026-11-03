@@ -88,3 +88,7 @@ secrets/
 # OS/editor
 .DS_Store
 Thumbs.db
+
+# local deployment staging (copies of release packages, receipts, probes)
+.release-staging/
+/.tmp-*

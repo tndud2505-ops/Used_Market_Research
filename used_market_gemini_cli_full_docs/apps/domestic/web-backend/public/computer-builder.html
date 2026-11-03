@@ -8,26 +8,34 @@
   <link rel="icon" href="/assets/mark.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/styles.css?v=pc-tools-v1"><link rel="stylesheet" href="/pc-tools.css?v=parts-ux-v6"><link rel="stylesheet" href="/ui-concept-a.css?v=aligned-shell-v1">
   <link rel="stylesheet" href="/builder-toolbar.css?v=price-clarity-v1">
-  <link rel="stylesheet" href="/pc-workspace.css?v=danawa-display-v2">
+  <link rel="stylesheet" href="/pc-workspace.css?v=sold-joongna-v1">
   <link rel="stylesheet" href="/adfit-layout.css?v=adfit-all-v3">
   <link rel="stylesheet" href="/site-header-links.css?v=1">
+  <link rel="stylesheet" href="/mobile-tools.css?v=sold-joongna-v1">
+  <link rel="stylesheet" href="/mobile-model-picker.css?v=tab-picker-v1">
 </head>
-<body class="pc-tools ui-a" data-page="builder" data-ui-release="search-first-v2">
+<body class="pc-tools ui-a" data-page="builder" data-ui-release="search-first-v2" data-build-price="active">
   <a class="skip-link" href="#main">본문으로 건너뛰기</a>
   <header class="tools-header">
+    <button class="tools-mobile-menu-open" type="button" data-mobile-tools="menu" aria-label="메뉴" aria-haspopup="dialog" aria-controls="tools-menu-dialog"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg><span>메뉴</span></button>
     <a class="brand" href="/" aria-label="USED PICK 홈"><img src="/assets/mark.svg" alt=""><span class="brand-used">USED</span><span class="brand-pick">PICK</span></a>
-    <nav aria-label="주 메뉴"><a href="/">중고 시세</a><a href="/computer-builder.html" aria-current="page">컴퓨터 맞추기</a><a href="/price-analysis.html">가격 분석</a></nav>
-    <nav class="up-header-links" aria-label="이용 및 정책"><a href="/guide.html">이용 안내</a><a href="/privacy.html">개인정보처리방침</a><a href="/terms.html">이용약관</a></nav>
+    <nav aria-label="주 메뉴"><a href="/">검색</a><a href="/price-analysis.html">가격 분석</a><a href="/computer-builder.html" aria-current="page">컴퓨터 시세</a></nav>
+    <nav class="up-header-links" aria-label="이용 및 정책"><a href="/changelog.html">패치 내역</a><a href="/support.html">후원</a><a href="/contact.html">문의</a><a href="/guide.html">이용 안내</a><a href="/privacy.html">개인정보처리방침</a><a href="/terms.html">이용약관</a></nav>
   </header>
   <div class="adfit-layout">
     <main id="main" class="tools-main">
     <header class="sf-page-bar sf-builder-bar">
-      <div class="build-heading"><h1>컴퓨터 맞추기</h1></div>
+      <div class="build-heading"><h1>컴퓨터 시세</h1></div>
       <div class="sf-page-actions">
       <button class="up-button" type="button" data-action="save-build">구성 저장</button>
       <button class="up-button" type="button" data-action="print-build">인쇄</button>
     </div></header>
     <div id="tools-status" role="status" aria-live="polite">불러오는 중</div>
+    <div class="tools-build-price-kind" role="radiogroup" aria-label="표시할 부품 가격">
+      <label><input type="radio" name="build-price-kind" value="active" checked><span>판매중</span></label>
+      <label><input type="radio" name="build-price-kind" value="sold"><span>판매완료 표시가</span></label>
+      <label><input type="radio" name="build-price-kind" value="danawa"><span>다나와</span></label>
+    </div>
     <section class="sf-build-panel" aria-label="내 PC 구성">
       <div id="build-table" class="tools-table-scroll" aria-label="선택 부품 표"></div>
       <p id="build-save-status" class="up-save-status" role="status" aria-live="polite" hidden></p>
@@ -38,8 +46,18 @@
       <p id="compatibility-explanation"></p><p id="compatibility-recommendation"></p><div id="compatibility-actions"></div>
     </dialog>
     <dialog id="builder-model-dialog" class="up-dialog up-picker-dialog" aria-labelledby="picker-title">
-      <div class="up-dialog-heading"><h2 id="picker-title" tabindex="-1">모델 선택</h2><button class="up-button" type="button" data-action="close-picker">닫기</button></div>
-      <div id="model-controls"></div><div id="model-price-status" class="tools-model-price-status" role="status" aria-live="polite" hidden></div><div id="model-table" class="tools-table-scroll" tabindex="0" aria-label="부품 모델 목록"></div><nav id="model-pages" class="tools-pages" aria-label="모델 페이지"></nav>
+      <div class="up-dialog-heading"><h2 id="picker-title" tabindex="-1">모델 선택</h2><div class="model-picker-heading-actions"><button class="model-picker-mobile" type="button" data-action="reset-filters">초기화</button><button class="up-button model-picker-close" type="button" data-action="close-picker" aria-label="모델 선택 닫기"><span>닫기</span></button></div></div>
+      <nav id="builder-categories" class="tools-tabs model-picker-mobile" aria-label="구성 부품"></nav>
+      <div id="model-controls"></div>
+      <nav id="model-filter-tabs" class="model-picker-mobile" role="tablist" aria-label="모델 선택 조건"></nav>
+      <p id="model-filter-context" class="model-picker-mobile"></p>
+      <div id="model-picker-scroll">
+        <div id="model-price-status" class="tools-model-price-status" role="status" aria-live="polite" hidden></div>
+        <div id="model-table" class="tools-table-scroll" tabindex="0" aria-label="부품 모델 목록"></div>
+        <div id="model-facet-options" class="model-picker-mobile" role="tabpanel" hidden></div>
+        <p id="model-picker-scope" class="model-picker-mobile"></p>
+      </div>
+      <nav id="model-pages" class="tools-pages" aria-label="모델 페이지"></nav>
     </dialog>
   </main>
     <aside class="adfit-banner" id="adfit-rail" data-placement="rail" aria-label="카카오 AdFit 광고" hidden>
@@ -49,6 +67,12 @@
       <template data-format="mobile"><ins class="kakao_ad_area" style="display:none;" data-ad-unit="DAN-gvTVDnxVn9S3leR5" data-ad-width="320" data-ad-height="100"></ins></template>
     </aside>
   </div>
-  <script type="module" src="/pc-tools.js?v=adfit-all-v3"></script>
+  <dialog id="tools-menu-dialog" class="tools-mobile-sheet" aria-labelledby="tools-menu-title">
+    <div class="tools-sheet-handle" aria-hidden="true"></div>
+    <div class="tools-sheet-heading"><h2 id="tools-menu-title" tabindex="-1">메뉴</h2><button type="button" data-close-tools-dialog aria-label="메뉴 닫기">×</button></div>
+    <nav class="tools-mobile-pages" aria-label="모바일 주 메뉴"><a href="/">매물 찾기</a><a href="/price-analysis.html">가격 분석</a><a href="/computer-builder.html">컴퓨터 시세</a></nav>
+    <nav class="tools-mobile-policy" aria-label="이용 및 정책"><a href="/changelog.html">패치 내역</a><a href="/support.html">후원</a><a href="/contact.html">문의</a><a href="/guide.html">이용 안내</a><a href="/privacy.html">개인정보처리방침</a><a href="/terms.html">이용약관</a></nav>
+  </dialog>
+  <script type="module" src="/pc-tools.js?v=sold-joongna-v1"></script>
 </body>
 </html>

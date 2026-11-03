@@ -95,7 +95,7 @@ Cloudflare만으로 이 경로를 대체하지 않는 이유는 Workers 런타�
 
 ## 시간대
 
-PC 전용 source cadence는 AWS에서 KST로 계산하며 0~120초 jitter를 적용한다. Runner의 `PC_PARTS_SCHEDULER_ENABLED=true`를 먼저 확인한 뒤 Worker를 배포한다. Worker 배포 설정은 `AWS_PC_SCHEDULER_AUTHORITY=true`이므로 Cloudflare cron은 중복 수집을 하지 않고 watchdog과 일일 통계 publication만 수행한다. 번개장터·다나와·쿨엔조이는 registry 정책이 `REVIEW_REQUIRED`라 이 플래그만 켜도 호출되지 않으며, 별도의 governance JSON과 운영자 승인이 필요하다.
+PC 전용 source cadence는 AWS에서 KST로 계산하며 0~120초 jitter를 적용한다. Runner의 `PC_PARTS_SCHEDULER_ENABLED=true`를 먼저 확인한 뒤 Worker를 배포한다. Worker 배포 설정은 `AWS_PC_SCHEDULER_AUTHORITY=true`이므로 Cloudflare cron은 중복 수집을 하지 않고 watchdog과 일일 통계 publication만 수행한다. 번개장터·다나와는 registry 정책이 `REVIEW_REQUIRED`라 이 플래그만 켜도 호출되지 않으며, 별도의 governance JSON과 운영자 승인이 필요하다.
 
 | 소스 | KST 분 |
 | --- | --- |
@@ -105,7 +105,6 @@ PC 전용 source cadence는 AWS에서 KST로 계산하며 0~120초 jitter를 적
 | 헬로마켓 | 27 |
 | 리씽크몰 | 36 |
 | eBay | 44 |
-| 쿨엔조이 | 52 |
 
 Cloudflare Cron은 UTC 기준으로 해석된다. 현재 Node 스케줄러의 `Asia/Seoul` 표기와 완전히 같은 시각이 필요하면 Cron 표현식을 UTC로 변환하고 배포 후 실제 실행 로그를 확인한다.
 

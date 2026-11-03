@@ -47,8 +47,7 @@ function canonicalSourceUrl(site, token, fallback) {
     joonggonara: (id) => `https://web.joongna.com/product/${id}`,
     ebay: (id) => `https://www.ebay.com/itm/${id}`,
     danawa: (id) => `https://dmall.danawa.com/v3/?controller=sale&methods=blog&seq=${id}`,
-    rethinkmall: (id) => `https://web.rethinkmall.com/goods/${id}`,
-    coolenjoy: (id) => `https://coolenjoy.net/bbs/mart2/${id}`
+    rethinkmall: (id) => `https://web.rethinkmall.com/goods/${id}`
   };
   if (builders[site]) return builders[site](encodeURIComponent(token));
   try {

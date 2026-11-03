@@ -189,7 +189,7 @@ export function pcCollectionTargetSetV2() {
       && source.runtime_status === "ENABLED")
     .map((source) => source.key));
   const categoryEndpointSources = ["ebay"].filter((source) => operationalDirectorySources.has(source));
-  const searchMarketplaceSources = ["joonggonara", "hellomarket", "bunjang", "danawa", "rethinkmall", "coolenjoy"]
+  const searchMarketplaceSources = ["joonggonara", "hellomarket", "bunjang", "danawa", "rethinkmall"]
     .filter((source) => operationalDirectorySources.has(source));
   const overseasExactSources = operationalDirectorySources.has("ebay") ? ["ebay"] : [];
   const generalQueries = [
@@ -344,12 +344,13 @@ export function pcCollectionCapacityPlan(targetsPerRun = 100) {
       const dailyTargetCount = assigned.filter((target) => target.cadenceClass === "DAILY_MASTER").length;
       const runsPerDay = source.cadence.kst_minutes.length * 24;
       const sourceTargetsPerRun = source.key === 'danawa' ? Math.min(configuredTargetsPerRun, DANAWA_COLLECTION_LIMITS.targetsPerRun) : configuredTargetsPerRun;
+      // Danawa refreshes its category queries every six hours (pc-parts-ledger).
       const categorySlots = source.key === 'danawa' && dailyTargetCount > 0
-        ? Math.min(hourlyTargetCount, Math.floor(sourceTargetsPerRun / 2)) : hourlyTargetCount;
+        ? Math.min(Math.ceil(hourlyTargetCount / 6), Math.floor(sourceTargetsPerRun / 2)) : hourlyTargetCount;
       const dailyCapacityPerDay = Math.max(0, sourceTargetsPerRun - categorySlots) * runsPerDay;
       const minimumTargetsPerRun = hourlyTargetCount + Math.ceil(dailyTargetCount / Math.max(1, runsPerDay));
       const hourlyCapacitySufficient = source.key === 'danawa'
-        ? categorySlots >= hourlyTargetCount : sourceTargetsPerRun >= hourlyTargetCount;
+        ? categorySlots * 6 >= hourlyTargetCount : sourceTargetsPerRun >= hourlyTargetCount;
       return {
         source_key: source.key,
         runs_per_day: runsPerDay,

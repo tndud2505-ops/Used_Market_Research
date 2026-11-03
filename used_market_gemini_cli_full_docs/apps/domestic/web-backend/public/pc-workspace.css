@@ -123,7 +123,8 @@ body.ui-a.pc-tools .market-series { display:inline-flex; align-items:center; min
 .market-chart-stage > svg:focus-visible { outline:2px solid var(--focus); outline-offset:2px; }
 .market-chart-stage circle[data-date], .market-sample-bar { cursor:pointer; }
 .market-chart-stage g[data-series] path, .market-chart-stage line { pointer-events:none; }
-.market-chart-stage text { font-family:inherit; font-size:15px; fill:var(--ink-soft); font-variant-numeric:tabular-nums; }
+.market-chart-stage text { font-family:"Segoe UI","Noto Sans KR","Malgun Gothic",sans-serif; font-size:12px; fill:var(--ink-soft); font-variant-numeric:tabular-nums; }
+.market-chart-stage :is(.market-axis-unit,.market-gap-key) { font-size:11px; fill:var(--muted); }
 .market-grid { stroke:#e5eaf0; stroke-width:1; }
 .market-crosshair { stroke:#53657a; stroke-width:1; stroke-dasharray:4 4; }
 .market-chart-readout { position:absolute; top:8px; left:8px; pointer-events:none; z-index:5; box-sizing:border-box; width:max-content; max-width:calc(100% - 16px); padding:12px 14px 14px; background:var(--surface,#fff); border:1px solid var(--line); border-radius:6px; box-shadow:0 4px 18px #15283a1c; font-size:12px; line-height:20px; }
@@ -293,4 +294,72 @@ body.ui-a.pc-tools .market-chart-readout-corner .market-tooltip-values :is(th,td
 @media print {
   .build-row-menu { display:none; }
   body.ui-a.pc-tools #build-table tbody tr { break-inside:avoid; }
+}
+
+/* Analysis: one model/scope row and one shared latest/selected-date rail. */
+.analysis-sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; border:0; }
+body[data-page=analysis] .market-page-heading { padding:18px 0 8px; gap:20px; }
+body[data-page=analysis] .market-heading-content { display:flex; align-items:center; gap:18px; flex:1; min-width:0; }
+body[data-page=analysis] .market-heading-actions { display:flex; align-items:center; flex-shrink:0; gap:10px; }
+body[data-page=analysis] .market-page-heading h1 { flex:0 1 auto; min-width:0; }
+body.ui-a.pc-tools[data-page=analysis] #analysis-model-select { max-width:100%; min-height:36px; margin:0; white-space:normal; overflow-wrap:anywhere; font-size:20px; text-align:left; }
+body.ui-a.pc-tools[data-page=analysis] #analysis-model-select::after { content:'⌄'; display:inline-block; margin-left:10px; font-size:.8em; color:var(--muted); }
+body.ui-a.pc-tools[data-page=analysis] #chart-sources { width:auto; max-width:152px; height:36px; min-height:36px; padding:6px 24px 6px 0; border:0; border-radius:0; background-color:transparent; box-shadow:none; color:var(--ink-soft); font:inherit; font-size:13px; cursor:pointer; }
+body.ui-a.pc-tools[data-page=analysis] #chart-sources:hover { color:var(--ink); }
+body.ui-a.pc-tools[data-page=analysis] #chart-sources:focus-visible { outline:2px solid var(--accent,#e65b32); outline-offset:3px; }
+body[data-page=analysis] #analysis-listing-link { display:inline-flex; align-items:center; justify-content:center; gap:8px; min-height:36px; padding:6px 10px; box-sizing:border-box; color:var(--ink-soft); font-size:13px; font-weight:550; white-space:nowrap; text-decoration:none; border-radius:3px; }
+body[data-page=analysis] #analysis-listing-link:hover { background:var(--surface-subtle,#f5f7f9); color:var(--ink); }
+body[data-page=analysis] #analysis-listing-link[hidden] { display:none; }
+body[data-page=analysis] .market-filter-field { flex-shrink:0; padding-left:18px; border-left:1px solid var(--line); }
+body[data-page=analysis] .market-toolbar { min-height:44px; padding:0; border-top:0; gap:12px; }
+.market-price-tabs { display:flex; gap:22px; }
+body.ui-a.pc-tools .market-price-tabs button { min-height:44px; margin:0; padding:10px 2px; border:0; border-bottom:2px solid transparent; border-radius:0; background:none; color:var(--muted); font-size:13px; font-weight:550; cursor:pointer; }
+body.ui-a.pc-tools .market-price-tabs button[aria-pressed=true] { color:var(--ink); border-bottom-color:var(--accent,#e65b32); font-weight:700; }
+body.ui-a.pc-tools .market-price-tabs button:disabled { color:var(--line-strong,#c4c9d0); border-bottom-color:transparent; font-weight:550; cursor:default; }
+body[data-page=analysis] #chart-history-status { margin-left:auto; color:var(--muted); font-size:12px; }
+body[data-page=analysis] #chart-history-status:empty { display:none; }
+body[data-page=analysis] #analysis-workspace[data-prices-open=true] { grid-template-columns:minmax(0,1fr) 224px; gap:20px; padding-top:16px; }
+body[data-page=analysis] #analysis-chart-pane { padding-top:0; }
+body[data-page=analysis] .market-chart-stage { height:clamp(300px,calc(100dvh - 380px),440px); }
+body.ui-a.pc-tools[data-page=analysis] .adfit-layout > main#main { padding-bottom:0; }
+body.ui-a.pc-tools[data-page=analysis] .adfit-layout > .adfit-banner[data-placement=bottom] { margin:8px 0 12px; }
+@media (min-width:1360px) {
+  body.ui-a.pc-tools[data-page=analysis] .adfit-layout:has(> .adfit-banner[data-placement=rail]:not([hidden])) { grid-template-rows:max-content 1fr; }
+}
+body[data-page=analysis] .market-price-rail { padding-top:4px; padding-left:18px; }
+body[data-page=analysis] .market-price-rail > header { min-height:28px; margin-bottom:2px; }
+body[data-page=analysis] .market-price-rail h2 { font-size:16px; line-height:24px; font-variant-numeric:tabular-nums; }
+body.ui-a.pc-tools #analysis-readout-reset[hidden] { display:none; }
+body[data-page=analysis] .market-chart-foot { display:flex; flex-wrap:wrap; justify-content:space-between; gap:4px 20px; padding-top:6px; }
+body[data-page=analysis] .market-chart-foot p { margin:0; color:var(--muted); font-size:12px; line-height:1.7; }
+body[data-page=analysis] .market-chart-foot p[hidden] { display:none; }
+body[data-page=analysis] .market-chart-foot:not(:has(p:not([hidden]))) { display:none; }
+body[data-page=analysis] .market-price-rail .market-snapshot-item { grid-template-columns:16px minmax(0,1fr); gap:4px 10px; min-height:96px; box-sizing:border-box; padding:14px 0; align-content:start; }
+body[data-page=analysis] .market-price-rail .market-snapshot-marker { display:none; }
+body[data-page=analysis] .market-price-rail .market-snapshot-source { padding-left:0; font-size:13px; line-height:20px; }
+body[data-page=analysis] .market-price-rail .market-source-check { width:14px; height:14px; }
+body[data-page=analysis] .market-price-rail .market-snapshot-amount { font-size:19px; line-height:28px; letter-spacing:-.2px; }
+body[data-page=analysis] .market-price-rail .market-snapshot-meta { grid-column:2; grid-row:3; font-size:11px; line-height:18px; color:var(--muted); overflow-wrap:anywhere; }
+@media (max-width:1000px) and (min-width:761px) {
+  body[data-page=analysis] #analysis-workspace[data-prices-open=true] { grid-template-columns:minmax(0,1fr) 188px; gap:16px; }
+  body[data-page=analysis] .market-price-rail .market-snapshot-amount { font-size:20px; }
+}
+@media (max-width:760px) {
+  body[data-page=analysis] .market-page-heading { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:4px 12px; padding:12px 0 4px; }
+  body[data-page=analysis] .market-heading-content { display:contents; }
+  body[data-page=analysis] .market-page-heading h1 { grid-column:1/-1; }
+  body.ui-a.pc-tools[data-page=analysis] #analysis-model-select { font-size:16px; line-height:1.5; }
+  body[data-page=analysis] .market-heading-actions { gap:8px; }
+  body[data-page=analysis] .market-filter-field { padding-left:0; border-left:0; }
+  body.ui-a.pc-tools[data-page=analysis] #chart-sources { max-width:128px; font-size:12px; }
+  body[data-page=analysis] #analysis-listing-link { font-size:12px; padding-inline:6px; }
+  body[data-page=analysis] #analysis-workspace[data-prices-open=true] { grid-template-columns:minmax(0,1fr); gap:16px; padding-top:16px; }
+  body[data-page=analysis] .market-chart-stage { height:300px; }
+  body[data-page=analysis] .market-price-rail { padding:12px 0 0; }
+  body[data-page=analysis] .market-price-rail .market-snapshot-list { grid-template-columns:repeat(3,minmax(0,1fr)); gap:0 12px; }
+  body[data-page=analysis] .market-price-rail .market-snapshot-item { grid-template-columns:14px minmax(0,1fr); gap:4px; min-height:88px; padding-block:10px; border-top:0; }
+  body[data-page=analysis] .market-price-rail .market-snapshot-source { font-size:12px; padding-left:0; }
+  body[data-page=analysis] .market-price-rail .market-snapshot-marker { display:none; }
+  body[data-page=analysis] .market-price-rail .market-snapshot-amount { grid-column:1/-1; font-size:17px; }
+  body[data-page=analysis] .market-price-rail :is(.market-snapshot-basis,.market-snapshot-meta) { grid-column:1/-1; font-size:11px; }
 }

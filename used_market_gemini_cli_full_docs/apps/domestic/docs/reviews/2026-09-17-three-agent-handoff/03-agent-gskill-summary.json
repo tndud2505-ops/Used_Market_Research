@@ -1,0 +1,737 @@
+{
+  "checked_at": "2026-09-17T05:47:03.878Z",
+  "requested_period": {
+    "market_pool": "KR_C2C_USED",
+    "condition": "USED_WORKING",
+    "currency": "KRW",
+    "days": 30
+  },
+  "source_report": "tmp/pc-agent3-public-after-2026-09-17T05-45-38-397Z/report.json",
+  "entries": [
+    {
+      "id": "ram:g-skill:ddr3:4gb",
+      "aliases": {
+        "G.Skill": true,
+        "gskill": true,
+        "G SKILL": true,
+        "G-SKILL": true,
+        "지스킬": true
+      },
+      "active_count_api": 7,
+      "sold_count_api": 0,
+      "active_price": 18850,
+      "sold_price": null,
+      "publication_id": "1d112ab0-6f45-4224-8ba3-a5d026427d86",
+      "price_status": "대표값 있음(상태별 구분)",
+      "exclusions_api": {
+        "total": 24,
+        "reasons": {
+          "PRICE_SCOPE_AMBIGUOUS": 24
+        }
+      },
+      "prior_handoff_korean_requests": "Both sources succeeded; not independently recounted here",
+      "received": null,
+      "stored": null,
+      "requested_product_matches": null,
+      "raw_evidence_status": "BLOCKED",
+      "unique_listing_recount": "NOT_EXECUTED"
+    },
+    {
+      "id": "ram:g-skill:ddr3:8gb",
+      "aliases": {
+        "G.Skill": true,
+        "gskill": true,
+        "G SKILL": true,
+        "G-SKILL": true,
+        "지스킬": true
+      },
+      "active_count_api": 6,
+      "sold_count_api": 1,
+      "active_price": 72666.67,
+      "sold_price": null,
+      "publication_id": "1d112ab0-6f45-4224-8ba3-a5d026427d86",
+      "price_status": "대표값 있음(상태별 구분)",
+      "exclusions_api": {
+        "total": 8,
+        "reasons": {
+          "PRICE_SCOPE_AMBIGUOUS": 8
+        }
+      },
+      "prior_handoff_korean_requests": "Both sources succeeded; not independently recounted here",
+      "received": null,
+      "stored": null,
+      "requested_product_matches": null,
+      "raw_evidence_status": "BLOCKED",
+      "unique_listing_recount": "NOT_EXECUTED"
+    },
+    {
+      "id": "ram:g-skill:ddr3:16gb",
+      "aliases": {
+        "G.Skill": true,
+        "gskill": true,
+        "G SKILL": true,
+        "G-SKILL": true,
+        "지스킬": true
+      },
+      "active_count_api": 0,
+      "sold_count_api": 0,
+      "active_price": null,
+      "sold_price": null,
+      "publication_id": "1d112ab0-6f45-4224-8ba3-a5d026427d86",
+      "price_status": "게시된 판매중/완료 유효 표본 0",
+      "exclusions_api": {
+        "total": 0,
+        "reasons": {}
+      },
+      "prior_handoff_korean_requests": "Both sources succeeded; not independently recounted here",
+      "received": null,
+      "stored": null,
+      "requested_product_matches": null,
+      "raw_evidence_status": "BLOCKED",
+      "unique_listing_recount": "NOT_EXECUTED"
+    },
+    {
+      "id": "ram:g-skill:ddr3:24gb",
+      "aliases": {
+        "G.Skill": true,
+        "gskill": true,
+        "G SKILL": true,
+        "G-SKILL": true,
+        "지스킬": true
+      },
+      "active_count_api": 0,
+      "sold_count_api": 0,
+      "active_price": null,
+      "sold_price": null,
+      "publication_id": null,
+      "price_status": "요청 범위 게시행 없음; 시장 0건 미확정",
+      "exclusions_api": {
+        "total": null,
+        "reasons": {}
+      },
+      "prior_handoff_korean_requests": "Both sources succeeded; not independently recounted here",
+      "received": null,
+      "stored": null,
+      "requested_product_matches": null,
+      "raw_evidence_status": "BLOCKED",
+      "unique_listing_recount": "NOT_EXECUTED"
+    },
+    {
+      "id": "ram:g-skill:ddr3:32gb",
+      "aliases": {
+        "G.Skill": true,
+        "gskill": true,
+        "G SKILL": true,
+        "G-SKILL": true,
+        "지스킬": true
+      },
+      "active_count_api": 0,
+      "sold_count_api": 0,
+      "active_price": null,
+      "sold_price": null,
+      "publication_id": "1d112ab0-6f45-4224-8ba3-a5d026427d86",
+      "price_status": "게시된 판매중/완료 유효 표본 0",
+      "exclusions_api": {
+        "total": 0,
+        "reasons": {}
+      },
+      "prior_handoff_korean_requests": "Both sources succeeded; not independently recounted here",
+      "received": null,
+      "stored": null,
+      "requested_product_matches": null,
+      "raw_evidence_status": "BLOCKED",
+      "unique_listing_recount": "NOT_EXECUTED"
+    },
+    {
+      "id": "ram:g-skill:ddr3:48gb",
+      "aliases": {
+        "G.Skill": true,
+        "gskill": true,
+        "G SKILL": true,
+        "G-SKILL": true,
+        "지스킬": true
+      },
+      "active_count_api": 0,
+      "sold_count_api": 0,
+      "active_price": null,
+      "sold_price": null,
+      "publication_id": null,
+      "price_status": "요청 범위 게시행 없음; 시장 0건 미확정",
+      "exclusions_api": {
+        "total": null,
+        "reasons": {}
+      },
+      "prior_handoff_korean_requests": "Both sources succeeded; not independently recounted here",
+      "received": null,
+      "stored": null,
+      "requested_product_matches": null,
+      "raw_evidence_status": "BLOCKED",
+      "unique_listing_recount": "NOT_EXECUTED"
+    },
+    {
+      "id": "ram:g-skill:ddr3:64gb",
+      "aliases": {
+        "G.Skill": true,
+        "gskill": true,
+        "G SKILL": true,
+        "G-SKILL": true,
+        "지스킬": true
+      },
+      "active_count_api": 0,
+      "sold_count_api": 0,
+      "active_price": null,
+      "sold_price": null,
+      "publication_id": null,
+      "price_status": "요청 범위 게시행 없음; 시장 0건 미확정",
+      "exclusions_api": {
+        "total": null,
+        "reasons": {}
+      },
+      "prior_handoff_korean_requests": "Both sources succeeded; not independently recounted here",
+      "received": null,
+      "stored": null,
+      "requested_product_matches": null,
+      "raw_evidence_status": "BLOCKED",
+      "unique_listing_recount": "NOT_EXECUTED"
+    },
+    {
+      "id": "ram:g-skill:ddr3:96gb",
+      "aliases": {
+        "G.Skill": true,
+        "gskill": true,
+        "G SKILL": true,
+        "G-SKILL": true,
+        "지스킬": true
+      },
+      "active_count_api": 0,
+      "sold_count_api": 0,
+      "active_price": null,
+      "sold_price": null,
+      "publication_id": null,
+      "price_status": "요청 범위 게시행 없음; 시장 0건 미확정",
+      "exclusions_api": {
+        "total": null,
+        "reasons": {}
+      },
+      "prior_handoff_korean_requests": "Both sources succeeded; not independently recounted here",
+      "received": null,
+      "stored": null,
+      "requested_product_matches": null,
+      "raw_evidence_status": "BLOCKED",
+      "unique_listing_recount": "NOT_EXECUTED"
+    },
+    {
+      "id": "ram:g-skill:ddr3:128gb",
+      "aliases": {
+        "G.Skill": true,
+        "gskill": true,
+        "G SKILL": true,
+        "G-SKILL": true,
+        "지스킬": true
+      },
+      "active_count_api": 0,
+      "sold_count_api": 0,
+      "active_price": null,
+      "sold_price": null,
+      "publication_id": null,
+      "price_status": "요청 범위 게시행 없음; 시장 0건 미확정",
+      "exclusions_api": {
+        "total": null,
+        "reasons": {}
+      },
+      "prior_handoff_korean_requests": "Both sources succeeded; not independently recounted here",
+      "received": null,
+      "stored": null,
+      "requested_product_matches": null,
+      "raw_evidence_status": "BLOCKED",
+      "unique_listing_recount": "NOT_EXECUTED"
+    },
+    {
+      "id": "ram:g-skill:ddr4:4gb",
+      "aliases": {
+        "G.Skill": true,
+        "gskill": true,
+        "G SKILL": true,
+        "G-SKILL": true,
+        "지스킬": true
+      },
+      "active_count_api": 1,
+      "sold_count_api": 0,
+      "active_price": null,
+      "sold_price": null,
+      "publication_id": "1d112ab0-6f45-4224-8ba3-a5d026427d86",
+      "price_status": "상태별 1~2건: 대표값 없음",
+      "exclusions_api": {
+        "total": 0,
+        "reasons": {}
+      },
+      "prior_handoff_korean_requests": "Both sources succeeded; not independently recounted here",
+      "received": null,
+      "stored": null,
+      "requested_product_matches": null,
+      "raw_evidence_status": "BLOCKED",
+      "unique_listing_recount": "NOT_EXECUTED"
+    },
+    {
+      "id": "ram:g-skill:ddr4:8gb",
+      "aliases": {
+        "G.Skill": true,
+        "gskill": true,
+        "G SKILL": true,
+        "G-SKILL": true,
+        "지스킬": true
+      },
+      "active_count_api": 7,
+      "sold_count_api": 2,
+      "active_price": 66414.29,
+      "sold_price": null,
+      "publication_id": "1d112ab0-6f45-4224-8ba3-a5d026427d86",
+      "price_status": "대표값 있음(상태별 구분)",
+      "exclusions_api": {
+        "total": 58,
+        "reasons": {
+          "PRICE_SCOPE_AMBIGUOUS": 57,
+          "WANTED": 2,
+          "HISTORICAL_INACTIVE_SOURCE": 5,
+          "ANOMALOUS_PRICE": 1
+        }
+      },
+      "prior_handoff_korean_requests": "Both sources succeeded; not independently recounted here",
+      "received": null,
+      "stored": null,
+      "requested_product_matches": null,
+      "raw_evidence_status": "BLOCKED",
+      "unique_listing_recount": "NOT_EXECUTED"
+    },
+    {
+      "id": "ram:g-skill:ddr4:16gb",
+      "aliases": {
+        "G.Skill": true,
+        "gskill": true,
+        "G SKILL": true,
+        "G-SKILL": true,
+        "지스킬": true
+      },
+      "active_count_api": 15,
+      "sold_count_api": 8,
+      "active_price": 129500,
+      "sold_price": 126237.5,
+      "publication_id": "1d112ab0-6f45-4224-8ba3-a5d026427d86",
+      "price_status": "대표값 있음(상태별 구분)",
+      "exclusions_api": {
+        "total": 17,
+        "reasons": {
+          "PRICE_SCOPE_AMBIGUOUS": 17
+        }
+      },
+      "prior_handoff_korean_requests": "Both sources succeeded; not independently recounted here",
+      "received": null,
+      "stored": null,
+      "requested_product_matches": null,
+      "raw_evidence_status": "BLOCKED",
+      "unique_listing_recount": "NOT_EXECUTED"
+    },
+    {
+      "id": "ram:g-skill:ddr4:24gb",
+      "aliases": {
+        "G.Skill": true,
+        "gskill": true,
+        "G SKILL": true,
+        "G-SKILL": true,
+        "지스킬": true
+      },
+      "active_count_api": 0,
+      "sold_count_api": 0,
+      "active_price": null,
+      "sold_price": null,
+      "publication_id": null,
+      "price_status": "요청 범위 게시행 없음; 시장 0건 미확정",
+      "exclusions_api": {
+        "total": null,
+        "reasons": {}
+      },
+      "prior_handoff_korean_requests": "Both sources succeeded; not independently recounted here",
+      "received": null,
+      "stored": null,
+      "requested_product_matches": null,
+      "raw_evidence_status": "BLOCKED",
+      "unique_listing_recount": "NOT_EXECUTED"
+    },
+    {
+      "id": "ram:g-skill:ddr4:32gb",
+      "aliases": {
+        "G.Skill": true,
+        "gskill": true,
+        "G SKILL": true,
+        "G-SKILL": true,
+        "지스킬": true
+      },
+      "active_count_api": 6,
+      "sold_count_api": 4,
+      "active_price": 317500,
+      "sold_price": 230000,
+      "publication_id": "1d112ab0-6f45-4224-8ba3-a5d026427d86",
+      "price_status": "대표값 있음(상태별 구분)",
+      "exclusions_api": {
+        "total": 13,
+        "reasons": {
+          "HISTORICAL_INACTIVE_SOURCE": 3,
+          "PRICE_SCOPE_AMBIGUOUS": 8,
+          "ANOMALOUS_PRICE": 3,
+          "ANOMALOUS_LOW_PRICE": 1
+        }
+      },
+      "prior_handoff_korean_requests": "Both sources succeeded; not independently recounted here",
+      "received": null,
+      "stored": null,
+      "requested_product_matches": null,
+      "raw_evidence_status": "BLOCKED",
+      "unique_listing_recount": "NOT_EXECUTED"
+    },
+    {
+      "id": "ram:g-skill:ddr4:48gb",
+      "aliases": {
+        "G.Skill": true,
+        "gskill": true,
+        "G SKILL": true,
+        "G-SKILL": true,
+        "지스킬": true
+      },
+      "active_count_api": 0,
+      "sold_count_api": 0,
+      "active_price": null,
+      "sold_price": null,
+      "publication_id": null,
+      "price_status": "요청 범위 게시행 없음; 시장 0건 미확정",
+      "exclusions_api": {
+        "total": null,
+        "reasons": {}
+      },
+      "prior_handoff_korean_requests": "Both sources succeeded; not independently recounted here",
+      "received": null,
+      "stored": null,
+      "requested_product_matches": null,
+      "raw_evidence_status": "BLOCKED",
+      "unique_listing_recount": "NOT_EXECUTED"
+    },
+    {
+      "id": "ram:g-skill:ddr4:64gb",
+      "aliases": {
+        "G.Skill": true,
+        "gskill": true,
+        "G SKILL": true,
+        "G-SKILL": true,
+        "지스킬": true
+      },
+      "active_count_api": 1,
+      "sold_count_api": 0,
+      "active_price": null,
+      "sold_price": null,
+      "publication_id": "1d112ab0-6f45-4224-8ba3-a5d026427d86",
+      "price_status": "상태별 1~2건: 대표값 없음",
+      "exclusions_api": {
+        "total": 1,
+        "reasons": {
+          "REPORT": 1
+        }
+      },
+      "prior_handoff_korean_requests": "Both sources succeeded; not independently recounted here",
+      "received": null,
+      "stored": null,
+      "requested_product_matches": null,
+      "raw_evidence_status": "BLOCKED",
+      "unique_listing_recount": "NOT_EXECUTED"
+    },
+    {
+      "id": "ram:g-skill:ddr4:96gb",
+      "aliases": {
+        "G.Skill": true,
+        "gskill": true,
+        "G SKILL": true,
+        "G-SKILL": true,
+        "지스킬": true
+      },
+      "active_count_api": 0,
+      "sold_count_api": 0,
+      "active_price": null,
+      "sold_price": null,
+      "publication_id": null,
+      "price_status": "요청 범위 게시행 없음; 시장 0건 미확정",
+      "exclusions_api": {
+        "total": null,
+        "reasons": {}
+      },
+      "prior_handoff_korean_requests": "Both sources succeeded; not independently recounted here",
+      "received": null,
+      "stored": null,
+      "requested_product_matches": null,
+      "raw_evidence_status": "BLOCKED",
+      "unique_listing_recount": "NOT_EXECUTED"
+    },
+    {
+      "id": "ram:g-skill:ddr4:128gb",
+      "aliases": {
+        "G.Skill": true,
+        "gskill": true,
+        "G SKILL": true,
+        "G-SKILL": true,
+        "지스킬": true
+      },
+      "active_count_api": 0,
+      "sold_count_api": 0,
+      "active_price": null,
+      "sold_price": null,
+      "publication_id": null,
+      "price_status": "요청 범위 게시행 없음; 시장 0건 미확정",
+      "exclusions_api": {
+        "total": null,
+        "reasons": {}
+      },
+      "prior_handoff_korean_requests": "Both sources succeeded; not independently recounted here",
+      "received": null,
+      "stored": null,
+      "requested_product_matches": null,
+      "raw_evidence_status": "BLOCKED",
+      "unique_listing_recount": "NOT_EXECUTED"
+    },
+    {
+      "id": "ram:g-skill:ddr5:4gb",
+      "aliases": {
+        "G.Skill": true,
+        "gskill": true,
+        "G SKILL": true,
+        "G-SKILL": true,
+        "지스킬": true
+      },
+      "active_count_api": 0,
+      "sold_count_api": 0,
+      "active_price": null,
+      "sold_price": null,
+      "publication_id": null,
+      "price_status": "요청 범위 게시행 없음; 시장 0건 미확정",
+      "exclusions_api": {
+        "total": null,
+        "reasons": {}
+      },
+      "prior_handoff_korean_requests": "Both sources succeeded; not independently recounted here",
+      "received": null,
+      "stored": null,
+      "requested_product_matches": null,
+      "raw_evidence_status": "BLOCKED",
+      "unique_listing_recount": "NOT_EXECUTED"
+    },
+    {
+      "id": "ram:g-skill:ddr5:8gb",
+      "aliases": {
+        "G.Skill": true,
+        "gskill": true,
+        "G SKILL": true,
+        "G-SKILL": true,
+        "지스킬": true
+      },
+      "active_count_api": 0,
+      "sold_count_api": 0,
+      "active_price": null,
+      "sold_price": null,
+      "publication_id": null,
+      "price_status": "요청 범위 게시행 없음; 시장 0건 미확정",
+      "exclusions_api": {
+        "total": null,
+        "reasons": {}
+      },
+      "prior_handoff_korean_requests": "Both sources succeeded; not independently recounted here",
+      "received": null,
+      "stored": null,
+      "requested_product_matches": null,
+      "raw_evidence_status": "BLOCKED",
+      "unique_listing_recount": "NOT_EXECUTED"
+    },
+    {
+      "id": "ram:g-skill:ddr5:16gb",
+      "aliases": {
+        "G.Skill": true,
+        "gskill": true,
+        "G SKILL": true,
+        "G-SKILL": true,
+        "지스킬": true
+      },
+      "active_count_api": 14,
+      "sold_count_api": 5,
+      "active_price": 322500,
+      "sold_price": 307500,
+      "publication_id": "1d112ab0-6f45-4224-8ba3-a5d026427d86",
+      "price_status": "대표값 있음(상태별 구분)",
+      "exclusions_api": {
+        "total": 9,
+        "reasons": {
+          "PRICE_SCOPE_AMBIGUOUS": 2,
+          "ANOMALOUS_PRICE": 7
+        }
+      },
+      "prior_handoff_korean_requests": "Both sources succeeded; not independently recounted here",
+      "received": null,
+      "stored": null,
+      "requested_product_matches": null,
+      "raw_evidence_status": "BLOCKED",
+      "unique_listing_recount": "NOT_EXECUTED"
+    },
+    {
+      "id": "ram:g-skill:ddr5:24gb",
+      "aliases": {
+        "G.Skill": true,
+        "gskill": true,
+        "G SKILL": true,
+        "G-SKILL": true,
+        "지스킬": true
+      },
+      "active_count_api": 1,
+      "sold_count_api": 0,
+      "active_price": null,
+      "sold_price": null,
+      "publication_id": "1d112ab0-6f45-4224-8ba3-a5d026427d86",
+      "price_status": "상태별 1~2건: 대표값 없음",
+      "exclusions_api": {
+        "total": 0,
+        "reasons": {}
+      },
+      "prior_handoff_korean_requests": "Both sources succeeded; not independently recounted here",
+      "received": null,
+      "stored": null,
+      "requested_product_matches": null,
+      "raw_evidence_status": "BLOCKED",
+      "unique_listing_recount": "NOT_EXECUTED"
+    },
+    {
+      "id": "ram:g-skill:ddr5:32gb",
+      "aliases": {
+        "G.Skill": true,
+        "gskill": true,
+        "G SKILL": true,
+        "G-SKILL": true,
+        "지스킬": true
+      },
+      "active_count_api": 17,
+      "sold_count_api": 1,
+      "active_price": 613232.65,
+      "sold_price": null,
+      "publication_id": "1d112ab0-6f45-4224-8ba3-a5d026427d86",
+      "price_status": "대표값 있음(상태별 구분)",
+      "exclusions_api": {
+        "total": 9,
+        "reasons": {
+          "PRICE_SCOPE_AMBIGUOUS": 9
+        }
+      },
+      "prior_handoff_korean_requests": "Both sources succeeded; not independently recounted here",
+      "received": null,
+      "stored": null,
+      "requested_product_matches": null,
+      "raw_evidence_status": "BLOCKED",
+      "unique_listing_recount": "NOT_EXECUTED"
+    },
+    {
+      "id": "ram:g-skill:ddr5:48gb",
+      "aliases": {
+        "G.Skill": true,
+        "gskill": true,
+        "G SKILL": true,
+        "G-SKILL": true,
+        "지스킬": true
+      },
+      "active_count_api": 2,
+      "sold_count_api": 0,
+      "active_price": null,
+      "sold_price": null,
+      "publication_id": "1d112ab0-6f45-4224-8ba3-a5d026427d86",
+      "price_status": "상태별 1~2건: 대표값 없음",
+      "exclusions_api": {
+        "total": 0,
+        "reasons": {}
+      },
+      "prior_handoff_korean_requests": "Both sources succeeded; not independently recounted here",
+      "received": null,
+      "stored": null,
+      "requested_product_matches": null,
+      "raw_evidence_status": "BLOCKED",
+      "unique_listing_recount": "NOT_EXECUTED"
+    },
+    {
+      "id": "ram:g-skill:ddr5:64gb",
+      "aliases": {
+        "G.Skill": true,
+        "gskill": true,
+        "G SKILL": true,
+        "G-SKILL": true,
+        "지스킬": true
+      },
+      "active_count_api": 4,
+      "sold_count_api": 1,
+      "active_price": 1200000,
+      "sold_price": null,
+      "publication_id": "1d112ab0-6f45-4224-8ba3-a5d026427d86",
+      "price_status": "대표값 있음(상태별 구분)",
+      "exclusions_api": {
+        "total": 0,
+        "reasons": {}
+      },
+      "prior_handoff_korean_requests": "Both sources succeeded; not independently recounted here",
+      "received": null,
+      "stored": null,
+      "requested_product_matches": null,
+      "raw_evidence_status": "BLOCKED",
+      "unique_listing_recount": "NOT_EXECUTED"
+    },
+    {
+      "id": "ram:g-skill:ddr5:96gb",
+      "aliases": {
+        "G.Skill": true,
+        "gskill": true,
+        "G SKILL": true,
+        "G-SKILL": true,
+        "지스킬": true
+      },
+      "active_count_api": 0,
+      "sold_count_api": 1,
+      "active_price": null,
+      "sold_price": null,
+      "publication_id": "1d112ab0-6f45-4224-8ba3-a5d026427d86",
+      "price_status": "상태별 1~2건: 대표값 없음",
+      "exclusions_api": {
+        "total": 0,
+        "reasons": {}
+      },
+      "prior_handoff_korean_requests": "Both sources succeeded; not independently recounted here",
+      "received": null,
+      "stored": null,
+      "requested_product_matches": null,
+      "raw_evidence_status": "BLOCKED",
+      "unique_listing_recount": "NOT_EXECUTED"
+    },
+    {
+      "id": "ram:g-skill:ddr5:128gb",
+      "aliases": {
+        "G.Skill": true,
+        "gskill": true,
+        "G SKILL": true,
+        "G-SKILL": true,
+        "지스킬": true
+      },
+      "active_count_api": 0,
+      "sold_count_api": 0,
+      "active_price": null,
+      "sold_price": null,
+      "publication_id": null,
+      "price_status": "요청 범위 게시행 없음; 시장 0건 미확정",
+      "exclusions_api": {
+        "total": null,
+        "reasons": {}
+      },
+      "prior_handoff_korean_requests": "Both sources succeeded; not independently recounted here",
+      "received": null,
+      "stored": null,
+      "requested_product_matches": null,
+      "raw_evidence_status": "BLOCKED",
+      "unique_listing_recount": "NOT_EXECUTED"
+    }
+  ]
+}

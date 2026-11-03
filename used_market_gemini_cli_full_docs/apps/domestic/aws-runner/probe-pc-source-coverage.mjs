@@ -24,12 +24,8 @@ if (selection.runs.some(({ target }) => /MONITOR|모니터/iu.test(`${target.cat
   throw new Error("PC_PROBE_MONITOR_TARGET_FORBIDDEN");
 }
 
-const specialistSearchUrls = Object.freeze({
-  coolenjoy: "https://coolenjoy.net/bbs/mart2?sfl=wr_subject&stx={query}&sop=and",
-});
-const specialistHosts = Object.freeze({
-  coolenjoy: new Set(["coolenjoy.net", "www.coolenjoy.net"]),
-});
+const specialistSearchUrls = Object.freeze({});
+const specialistHosts = Object.freeze({});
 
 async function collectTargetItems(sourceKey, target) {
   if (sourceKey === "danawa") {

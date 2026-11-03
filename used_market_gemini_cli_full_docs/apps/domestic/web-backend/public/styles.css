@@ -5611,6 +5611,8 @@ body.has-selected-product .results-flow {
 .listing-source[data-source="bunjang"] { border-color: #ffc7bc; background: #fff0ed; color: #de4e35; }
 .listing-commerce { display: flex; align-self: center; flex-direction: column; align-items: flex-end; gap: 4px; }
 .listing-price { color: var(--ink); font-size: 18px; font-weight: 900; letter-spacing: -0.03em; }
+.listing-price-warning { color: #93420b; font-size: 12px; font-weight: 600; }
+.listing-price-warning[hidden] { display: none; }
 .listing-sale-state { color: var(--accent); font-size: 11px; font-weight: 800; }
 .listing-sale-state.is-reserved { color: var(--reserved); }
 .listing-time { color: var(--muted); font-size: 10px; }

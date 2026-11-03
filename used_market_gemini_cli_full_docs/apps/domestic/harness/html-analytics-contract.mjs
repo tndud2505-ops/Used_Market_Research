@@ -44,7 +44,7 @@ const verificationBody = await readFile(new URL('../web-backend/public/google605
 const verification = makeHtml(verificationBody);
 assert.equal(await withHtmlAnalytics(verification, new Request('https://used-pick.com/google605c6edd3bd9a682.html')), verification);
 assert.equal(await verification.text(), verificationBody);
-for (const route of ['/', '/index.html', '/guide.html', '/price-analysis.html', '/categories', '/categories/gpu']) {
+for (const route of ['/', '/index.html', '/guide.html', '/changelog.html', '/support.html', '/price-analysis.html', '/categories', '/categories/gpu']) {
   const response = await worker.fetch(new Request(`https://used-pick.com${route}`, { headers: { 'if-none-match': '"old"' } }), {
     ASSETS: { fetch: async (assetRequest) => {
       assert.equal(assetRequest.headers.get('if-none-match'), null);

@@ -28,7 +28,9 @@ export function createListingPricePreview(dialog, opener) {
     const loading = !record || record.state === 'loading';
     const data = record?.state === 'ready' ? sourceStats(record.data, source) : null;
     const issue = priceRecordIssue(record, data);
-    const series = SERIES.slice(0, 2).map(({ key }) => ({ key, points: dailySeries(issue ? null : data, key, 30) }));
+    // Only Joonggonara still reports completed sales; other sites show asking prices only.
+    const soldData = source === 'joonggonara' ? data : source || !data?.daily?.length ? null : sourceStats(data, 'joonggonara');
+    const series = SERIES.slice(0, 2).map(({ key }) => ({ key, points: dailySeries(issue ? null : key === 'sold' ? soldData : data, key, 30) }));
     const hasPoints = series.some(s => s.points.some(p => p.value != null));
     chart.dataset.modelId = idOf(product);
     chart.dataset.source = source;

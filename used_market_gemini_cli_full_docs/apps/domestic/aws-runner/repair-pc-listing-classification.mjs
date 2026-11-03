@@ -7,7 +7,7 @@ import { latestCompletedPricePublication } from './pc-stored-price-publication.m
 import { PcShadowPipeline } from './pc-shadow-pipeline.mjs';
 import { toPcProjectionImportItem } from './republish-pc-projections.mjs';
 import { reconcileExactModelStatistics } from './pc-classification-consistency.mjs';
-import { isAxNetworkCardTitle, isWholeCamcorderTitle, ramSingleSetQuantity } from '../market/logic/pc-parts-classifier.mjs';
+import { isAxNetworkCardTitle, isTammuzRx550SsdTitle, isWholeCamcorderTitle, ramSingleSetQuantity } from '../market/logic/pc-parts-classifier.mjs';
 
 const digest = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const json = value => JSON.parse(value || '{}');
@@ -31,6 +31,15 @@ function correction(previous, item, pipeline) {
   const fullSystemCorrection = next.listingKind === 'FULL_SYSTEM' && next.categoryCode === 'SYSTEM'
     && !next.canonicalProductId && !next.priceEligible && !next.statisticsEligible
     && next.exclusionReasons.includes('FULL_SYSTEM');
+  const accessoryCorrection = next.listingKind === 'ACCESSORY_ONLY' && next.categoryCode === 'ACCESSORY'
+    && !next.canonicalProductId && !next.priceEligible && !next.statisticsEligible
+    && next.exclusionReasons.includes('ACCESSORY_ONLY');
+  const bundleCorrection = next.listingKind === 'COMPONENT_BUNDLE' && next.categoryCode === 'BUNDLE'
+    && !next.canonicalProductId && !next.priceEligible && !next.statisticsEligible
+    && next.exclusionReasons.includes('COMPONENT_BUNDLE')
+    && previous.price_scope === 'TOTAL' && next.priceScope === 'BUNDLE'
+    && previous.quantity === next.quantity;
+  const clearsComponentIdentity = fullSystemCorrection || accessoryCorrection || bundleCorrection;
   const networkCardCorrection = previous.category_code === 'PSU'
     && previous.canonical_product_id === 'psu:corsair:watts-bucket:gt-1200'
     && isAxNetworkCardTitle(item.title) && next.categoryCode === 'EXPANSION_CARD'
@@ -39,19 +48,27 @@ function correction(previous, item, pipeline) {
   const camcorderCorrection = previous.category_code === 'HDD' && isWholeCamcorderTitle(item.title)
     && next.listingKind === 'NON_PC_ITEM' && next.categoryCode === 'UNKNOWN' && !next.canonicalProductId
     && !next.priceEligible && !next.statisticsEligible;
+  const storageModelCollision = previous.category_code === 'GPU'
+    && previous.canonical_product_id === 'gpu:amd:rx-550'
+    && isTammuzRx550SsdTitle(item.title) && next.categoryCode === 'SSD'
+    && next.canonicalProductId?.startsWith('ssd:')
+    && next.listingKind === previous.listing_kind;
   const ramSetCorrection = previous.category_code === 'RAM' && next.categoryCode === 'RAM'
     && previous.canonical_product_id === next.canonicalProductId && Boolean(next.canonicalProductId)
     && previous.quantity === 1 && previous.price_scope === 'TOTAL' && next.priceScope === 'TOTAL'
     && next.quantity === ramSingleSetQuantity(item.title) && next.quantity > 1
     && next.listingKind === 'SAME_PRODUCT_LOT';
   if (!['SINGLE_COMPONENT', 'SAME_PRODUCT_LOT'].includes(previous.listing_kind)
-    || (!fullSystemCorrection && !networkCardCorrection && !camcorderCorrection && (!['SINGLE_COMPONENT', 'SAME_PRODUCT_LOT', 'WANTED'].includes(next.listingKind)
+    || (!clearsComponentIdentity && !networkCardCorrection && !camcorderCorrection && !storageModelCollision && (!['SINGLE_COMPONENT', 'SAME_PRODUCT_LOT', 'WANTED'].includes(next.listingKind)
       || !next.canonicalProductId || previous.category_code !== next.categoryCode))
-    || (!ramSetCorrection && (previous.quantity !== next.quantity || previous.price_scope !== next.priceScope))
+    || (!ramSetCorrection && !bundleCorrection && (previous.quantity !== next.quantity || previous.price_scope !== next.priceScope))
     || previous.condition_code !== next.conditionCode || previous.market_pool !== next.marketPool)
     throw new Error('CLASSIFICATION_REPAIR_SEMANTICS_CHANGED');
   const after = { ...previous };
   for (const [column, key] of Object.entries(fields)) after[column] = next[key];
+  // Re-label the same observed total as a bundle price. Never split the price
+  // among inferred components or change the original observed amount/quantity.
+  if (bundleCorrection) after.price_scope = next.priceScope;
   if (ramSetCorrection) {
     after.quantity = next.quantity;
     after.quantity_confidence = next.quantityConfidence;
@@ -59,7 +76,7 @@ function correction(previous, item, pipeline) {
   }
   after.price_eligible = previous.price_eligible && next.priceEligible ? 1 : 0;
   Object.assign(after,statistics);
-  if ((fullSystemCorrection || networkCardCorrection || camcorderCorrection) && Object.hasOwn(after,'exact_product')) after.exact_product=0;
+  if ((clearsComponentIdentity || networkCardCorrection || camcorderCorrection) && Object.hasOwn(after,'exact_product')) after.exact_product=0;
   after.exclusion_reasons_json = JSON.stringify(merge(json(previous.exclusion_reasons_json || '[]'), next.exclusionReasons));
   after.evidence_json = JSON.stringify([...json(previous.evidence_json || '[]'),
     { field: 'classification', source: 'SCOPED_CLASSIFICATION_REPAIR',
@@ -94,8 +111,22 @@ export function buildListingClassificationRepair(db, itemIds, { asOf = new Date(
   for (const itemId of itemIds) {
     const before = db.prepare('SELECT * FROM listings WHERE item_id=?').get(itemId);
     if (!before || `${before.site}:` !== itemId.slice(0, before.site.length + 1)) throw new Error('REPAIR_LISTING_TARGET_MISMATCH');
-    if (before.active !== 1 || before.pc_lifecycle_status !== 'ACTIVE') throw new Error('REPAIR_REQUIRES_CURRENT_ACTIVE_LISTING');
     const metadata = json(before.pc_metadata_json);
+    const soldStorageTarget = before.active === 0 && before.pc_lifecycle_status === 'SOLD'
+      && isTammuzRx550SsdTitle(before.title);
+    const soldStorageCollision = soldStorageTarget && before.pc_category_code === 'GPU'
+      && before.pc_canonical_product_id === 'gpu:amd:rx-550';
+    // Permit a repeat preview of this exact completed repair, without opening
+    // arbitrary terminal listings to reclassification.
+    const repairedSoldStorage = soldStorageTarget && before.pc_category_code === 'SSD'
+      && before.pc_canonical_product_id?.startsWith('ssd:')
+      && metadata.evidence?.some(entry => entry.field === 'classification'
+        && entry.source === 'SCOPED_CLASSIFICATION_REPAIR'
+        && entry.previous_product_id === 'gpu:amd:rx-550'
+        && entry.value === before.pc_canonical_product_id);
+    if ((before.active !== 1 || before.pc_lifecycle_status !== 'ACTIVE')
+      && !soldStorageCollision && !repairedSoldStorage)
+      throw new Error('REPAIR_REQUIRES_CURRENT_ACTIVE_LISTING');
     const current = { ...metadata, category_code: before.pc_category_code,
       canonical_product_id: before.pc_canonical_product_id, listing_kind: before.pc_listing_kind,
       quantity: before.pc_quantity, price_scope: before.pc_price_scope, condition_code: before.pc_condition_code,
@@ -106,6 +137,7 @@ export function buildListingClassificationRepair(db, itemIds, { asOf = new Date(
       evidence_json: JSON.stringify(metadata.evidence || []) };
     const changed = correction(current, { ...before, price: before.price_value,
       status: before.pc_lifecycle_status, seller_type: before.pc_market_pool === 'KR_DEALER_USED' ? 'DEALER' : undefined }, pipeline);
+    if (repairedSoldStorage && changed) throw new Error('CLASSIFICATION_REPAIR_SEMANTICS_CHANGED');
     if (changed) {
     const updated = { ...metadata };
     for (const column of [...Object.keys(fields), 'quantity', 'price_scope', 'quantity_confidence', 'price_scope_confidence']) updated[column] = changed.after[column];
@@ -151,6 +183,11 @@ export function buildListingClassificationRepair(db, itemIds, { asOf = new Date(
         status: row.lifecycle_status, seller_type: original.market_pool === 'KR_DEALER_USED' ? 'DEALER' : undefined };
       const repaired = correction(original, item, pipeline);
       if (!repaired) continue;
+      if (soldStorageTarget && (original.category_code !== 'GPU'
+        || original.canonical_product_id !== 'gpu:amd:rx-550'
+        || !isTammuzRx550SsdTitle(item.title) || repaired.next.categoryCode !== 'SSD'
+        || !repaired.next.canonicalProductId?.startsWith('ssd:')))
+        throw new Error('CLASSIFICATION_REPAIR_SEMANTICS_CHANGED');
       const children = db.prepare('SELECT * FROM listing_items WHERE normalized_listing_id=? ORDER BY item_index').all(row.id);
       if (children.length !== 1 || children[0].canonical_product_id !== original.canonical_product_id)
         throw new Error('REPAIR_COMPONENT_TARGET_MISMATCH');

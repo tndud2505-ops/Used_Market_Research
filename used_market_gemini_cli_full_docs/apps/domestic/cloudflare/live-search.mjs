@@ -1,5 +1,6 @@
 import { TARGET_SITES, normalizeTargetSites } from "./target-sites.mjs";
 import { bunjangLifecycleStatus } from "../market/logic/bunjang-lifecycle.mjs";
+import { statusFieldToken } from "../market/logic/listing-lifecycle.mjs";
 import { categoryIdsFromBody, filterCategoryItems, isCategoryExcluded, isKeywordCategoryNoise } from "./category-filter.mjs";
 import { hasOfficialCategory, sourceCategoryIds } from "./category-source-map.mjs";
 import { ebayTargetForCategory, pcCategoryTitleMatches } from "../collector/logic/pc-specialist-targets.mjs";
@@ -276,7 +277,7 @@ function priceInRange(item, priceRange) {
 function filterItemsByPriceRange(items, priceRange) {
   if (!Array.isArray(items) || (priceRange.min === null && priceRange.max === null)) return items;
   const filtered = items.filter((item) => priceInRange(item, priceRange));
-  for (const key of ["received_count", "partial_error", "partial_notice", "suggested_items", "suggested_keyword", "stale_cache"]) {
+  for (const key of ["received_count", "partial_error", "partial_notice", "suggested_items", "suggested_keyword", "stale_cache", "status_observations", "search_windows", "source_cache_hit", "raw_status_summary"]) {
     if (Object.hasOwn(items, key)) filtered[key] = items[key];
   }
   filtered.price_range_removed_count = (Number(items.price_range_removed_count) || 0)
@@ -721,16 +722,26 @@ async function collectBunjangKeyword(keyword, categoryId, limit, queryKeyword = 
   const { pageSize, maxPages } = bunjangKeywordPagePlan(limit, priceRange);
   const items = [];
   const fallbackItems = [];
+  const statusObservations = [];
+  const windowStartedAt = new Date().toISOString();
+  const windowRows = [];
+  let windowPages = 0;
+  let exhausted = false;
   let receivedCount = 0;
   let cursor = null;
   const visitedCursors = new Set();
   for (let page = 0; page < maxPages; page += 1) {
     const url = bunjangKeywordUrl(keyword, sortMode, pageSize, cursor);
+    const observedAt = new Date().toISOString();
     const response = await requestImpl(url, { headers: requestHeaders("application/json, text/plain, */*") });
     if (!response.ok) throw new Error(`HTTP_${response.status}`);
     const payload = await response.json();
     const searchPage = bunjangSearchPage(payload);
     const rows = searchPage.data;
+    windowPages++;
+    windowRows.push(...rows.filter(row => row?.type !== 'EXT_AD').map(row => ({
+      id: String(row?.pid || ''), updated_at: parseTimestamp(row?.updatedAt)
+    })));
     receivedCount += rows.length;
     const pageItems = rows.map((row) => sourceItem({
       site: "bunjang",
@@ -744,13 +755,17 @@ async function collectBunjangKeyword(keyword, categoryId, limit, queryKeyword = 
       postedAt: row?.updatedAt,
       searchText: `${row?.name || ""} ${row?.tag || ""}`,
       lifecycleStatus: bunjangLifecycleStatus(row?.status)
-    })).filter(Boolean).filter((item) => matchesRequestedKeyword(item, queryKeyword || keyword))
+    })).filter(Boolean);
+    statusObservations.push(...pageItems.map(item => ({ item, observed_at: observedAt })));
+    const matchingItems = pageItems.filter((item) => matchesRequestedKeyword(item, queryKeyword || keyword))
       .filter((item) => !isObviousKeywordNoise(categoryId, item, queryKeyword || keyword));
-    items.push(...pageItems);
+    items.push(...matchingItems);
     const usableCount = dedupeItems(hasPriceRange ? filterItemsByPriceRange(items, priceRange) : items, limit).length;
     if (usableCount >= limit) break;
     cursor = searchPage.cursor;
-    if (typeof cursor !== "string" || !cursor || visitedCursors.has(cursor)) break;
+    // No next cursor: this window holds the query's entire current result set.
+    if (typeof cursor !== "string" || !cursor) { exhausted = true; break; }
+    if (visitedCursors.has(cursor)) break;
     visitedCursors.add(cursor);
   }
   if (sortMode === "price_asc") {
@@ -783,6 +798,11 @@ async function collectBunjangKeyword(keyword, categoryId, limit, queryKeyword = 
   }
   const result = dedupeItems(filterItemsByPriceRange([...items, ...fallbackItems], priceRange), limit);
   result.received_count = receivedCount;
+  result.status_observations = statusObservations;
+  if (sortMode === 'recent' && !hasPriceRange) result.search_windows = [{
+    scope: JSON.stringify(['bunjang-keyword-v1', keyword, categoryId, 'latest', pageSize, maxPages, windowPages]),
+    observed_at: windowStartedAt, rows: windowRows, complete: exhausted
+  }];
   if (sortMode === "price_asc" && fallbackItems.length > 0) {
     result.partial_notice = "가격순 상단의 비정상 가격을 피하기 위해 최신 정상 매물 표본도 함께 비교했습니다";
   }
@@ -893,6 +913,30 @@ export function joongnaPagePlan(limit) {
   };
 }
 
+// Enum-only shape of raw Joonggonara search rows: field names plus code values
+// of genuine status fields. Titles, sellers, prices, URLs and IDs are excluded.
+function joongnaRawStatusSummary(rows) {
+  const summary = { rows: 0, state: {}, status_fields: {}, keys: [] };
+  const keys = new Set();
+  for (const row of rows) {
+    if (!row || typeof row !== "object" || Array.isArray(row)) continue;
+    summary.rows += 1;
+    const stateToken = row.state === undefined ? "missing" : statusFieldToken("state", row.state);
+    const stateKey = stateToken?.startsWith("state=") ? stateToken.slice(6) : stateToken === "missing" ? "missing" : "other";
+    summary.state[stateKey] = (summary.state[stateKey] || 0) + 1;
+    for (const [key, value] of Object.entries(row)) {
+      if (!/^[A-Za-z][A-Za-z0-9_]{0,39}$/u.test(key)) continue;
+      if (keys.size < 60) keys.add(key);
+      const token = key === "state" ? null : statusFieldToken(key, value);
+      if (token && (Object.hasOwn(summary.status_fields, token) || Object.keys(summary.status_fields).length < 40)) {
+        summary.status_fields[token] = (summary.status_fields[token] || 0) + 1;
+      }
+    }
+  }
+  summary.keys = [...keys].sort();
+  return summary;
+}
+
 async function collectJoongna(keyword, categoryId, limit, queryKeyword = "", sortMode = "price_asc", priceRange = { min: null, max: null }, { requestImpl = fetchWithRetry, expandQueries = true } = {}) {
   const categoryIds = sourceCategoryIds("joonggonara", categoryId);
   const rawUrls = categoryIds.length > 0 && !queryKeyword
@@ -940,10 +984,14 @@ async function collectJoongna(keyword, categoryId, limit, queryKeyword = "", sor
     if (priceRange.max !== null) url.searchParams.set("maxPrice", String(priceRange.max));
     return url.toString();
   }));
+  const statusPages = [];
   const settled = await Promise.allSettled(urls.map(async (url) => {
+    const observedAt = new Date().toISOString();
     const response = await requestImpl(url, { headers: requestHeaders("text/html,application/xhtml+xml,*/*;q=0.8") });
     if (!response.ok) throw new Error(`HTTP_${response.status}`);
-    return parseJoongnaItems(await response.text());
+    const rows = parseJoongnaItems(await response.text());
+    statusPages.push({ rows, observed_at: observedAt });
+    return rows;
   }));
   const pages = settled
     .filter((result) => result.status === "fulfilled")
@@ -952,7 +1000,7 @@ async function collectJoongna(keyword, categoryId, limit, queryKeyword = "", sor
   if (!pages.length) {
     if (failed[0]) throw failed[0].reason;
   }
-  const items = pages.flat().map((row) => sourceItem({
+  const mapRow = (row) => sourceItem({
     site: "joonggonara",
     categoryId,
     sourceListingId: String(row?.seq ?? ""),
@@ -964,7 +1012,8 @@ async function collectJoongna(keyword, categoryId, limit, queryKeyword = "", sor
     postedAt: row?.sortDate,
     searchText: row?.title,
     lifecycleStatus: marketplaceLifecycleStatus(row?.state)
-  })).filter(Boolean);
+  });
+  const items = pages.flat().map(mapRow).filter(Boolean);
   const localMinPrice = priceRange.min !== null
     ? Math.max(priceRange.min, categoryId === "free_share" ? 0 : minimumPriceForSite("joonggonara", categoryId))
     : adaptiveMinPrice;
@@ -978,6 +1027,9 @@ async function collectJoongna(keyword, categoryId, limit, queryKeyword = "", sor
     : keywordItems;
   const result = relevantItems.slice(0, limit);
   result.received_count = pages.flat().length + referenceItems.length;
+  result.status_observations = statusPages.flatMap(page => page.rows.map(row =>
+    ({ item: mapRow(row), observed_at: page.observed_at })).filter(observation => observation.item));
+  try { result.raw_status_summary = joongnaRawStatusSummary(statusPages.flatMap(page => page.rows)); } catch {}
   if (failed.length) result.partial_error = `PARTIAL_CATEGORY_FAILURE:${failed.length}`;
   return result;
 }
@@ -1568,7 +1620,7 @@ export async function collectApprovedDomesticQueryOnce(site, keyword, limit = 20
 async function collectOne(site, keyword, categoryId, limit, queryKeyword = keyword, sortMode = "price_asc", priceRange = { min: null, max: null }) {
   const key = JSON.stringify({ site, keyword, categoryId, limit, queryKeyword, sortMode, priceRange });
   const cached = sourceSearchCache.get(key);
-  if (cached && cached.expiresAt > Date.now()) return cached.items;
+  if (cached && cached.expiresAt > Date.now()) return Object.assign([...cached.items], cached.items, { source_cache_hit: true });
   if (cached && cached.staleUntil <= Date.now()) sourceSearchCache.delete(key);
   const pending = sourceSearchInflight.get(key);
   if (pending) return pending;
@@ -1605,6 +1657,8 @@ async function collectOne(site, keyword, categoryId, limit, queryKeyword = keywo
     items.received_count = variantResults.reduce((sum, result) => sum + (Number(result.received_count) || result.length), 0);
     items.price_range_removed_count = variantResults.reduce((sum, result) => sum + (Number(result.price_range_removed_count) || 0), 0);
     items.stale_cache = variantResults.some((result) => result.stale_cache === true);
+    items.status_observations = variantResults.flatMap(result => result.status_observations || []);
+    items.search_windows = variantResults.flatMap(result => result.search_windows || []);
     const partialErrors = [
       ...variantResults.map((result) => result.partial_error).filter(Boolean),
       ...variantErrors.map((error) => String(error?.message || error))
@@ -1634,6 +1688,7 @@ async function collectOne(site, keyword, categoryId, limit, queryKeyword = keywo
     if (cached?.staleUntil > Date.now() && Array.isArray(cached.items) && cached.items.length > 0) {
       const staleItems = [...cached.items];
       staleItems.stale_cache = true;
+      staleItems.source_cache_hit = true;
       staleItems.partial_notice = "실시간 조회 실패로 최근 저장 결과를 표시했습니다";
       return staleItems;
     }
@@ -2480,4 +2535,4 @@ export async function fetchThroughLiveSearchCache(request, env, fallback) {
   return new Response(response.body, { status: response.status, headers });
 }
 
-export { buildCollectionRequest, buildLivePayload, categoryQuery, collectOne, enrichHelloImages, matchesRequestedKeyword, parseJoongnaItems, parseTimestamp, requestedAcquisitionMode, requestedCollectionSites, requestedPriceRange, requestedSiteWindow, requestedSites, requestedSort, requestedViewSites, selectQualifiedItems, sourceCandidateLimit };
+export { buildCollectionRequest, buildLivePayload, categoryQuery, collectOne, enrichHelloImages, getEbayAccessToken, matchesRequestedKeyword, parseJoongnaItems, parseTimestamp, requestedAcquisitionMode, requestedCollectionSites, requestedPriceRange, requestedSiteWindow, requestedSites, requestedSort, requestedViewSites, selectQualifiedItems, sourceCandidateLimit };

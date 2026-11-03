@@ -8,9 +8,19 @@ import {
   pcListingStatisticsCoverage
 } from "../cloudflare/pc-listings-contract.mjs";
 import { assertBackupSpace } from './backup-storage-policy.mjs';
+import { deriveRamListingFacets, matchesRamListingFacets } from '../market/logic/ram-listing-facets.mjs';
+import { PC_DIRECTORY_PUBLICATION_SOURCE_KEYS } from '../collector/logic/pc-source-registry.mjs';
 
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
+const BUNJANG_VISIBILITY_MAX_AGE_MS = 7 * DAY_MS;
+// eBay collection samples the top Browse results per query, so an active offer
+// can go unseen for a week; in October 6% did, but only 1.1% beyond 14 days.
+const EBAY_VISIBILITY_MAX_AGE_MS = 14 * DAY_MS;
+// Danawa listed models are re-searched about every two days; an offer that has
+// not come back for two weeks has left the result even after a re-search.
+// An offer that a re-run of its own model search no longer returns leaves sooner.
+const DANAWA_VISIBILITY_MAX_AGE_MS = 14 * DAY_MS;
 const FRESH_MAX_AGE_MS = 6 * HOUR_MS;
 const HOT_REFRESH_MS = 15 * 60 * 1000;
 const WARM_REFRESH_MS = HOUR_MS;
@@ -301,6 +311,8 @@ function publicItem(row) {
     product_kind: pc.product_kind || null,
     placement: pc.placement || null,
     form_factor: pc.form_factor || null,
+    ...((pc.category_code === 'RAM' || /^ram:/iu.test(pc.canonical_product_id || ''))
+      ? deriveRamListingFacets(row.title) : {}),
     quantity: Number.isInteger(pc.quantity) ? pc.quantity : null,
     price_scope: pc.price_scope || "UNKNOWN",
     condition_code: pc.condition_code || "UNKNOWN",
@@ -383,6 +395,8 @@ export class SearchIndex {
         ON listings(active, last_seen_at DESC);
       CREATE INDEX IF NOT EXISTS idx_listings_site_price
         ON listings(active, site, price_value);
+      CREATE INDEX IF NOT EXISTS idx_listings_site_url
+        ON listings(site, url);
 
       CREATE VIRTUAL TABLE IF NOT EXISTS listing_fts USING fts5(
         item_id UNINDEXED,
@@ -1070,6 +1084,62 @@ export class SearchIndex {
     finally { this.db.exec('RELEASE pc_browse_read'); }
   }
 
+  bunjangConfirmationSql(alias) {
+    // Unchanged search observations refresh the lifecycle queue without
+    // rewriting the display projection. Use that actual confirmation too.
+    // Standalone/legacy indexes without the ledger retain their own timestamp.
+    if (!this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='pc_lifecycle_queue'").get()) {
+      return `${alias}.last_checked_at`;
+    }
+    return `MAX(${alias}.last_checked_at, COALESCE((SELECT MAX(q.last_checked_at)
+      FROM pc_lifecycle_queue q WHERE q.source_id = 'bunjang'
+      AND q.source_listing_id IN (SUBSTR(${alias}.item_id, 9), ${alias}.url, 'bunjang:' || ${alias}.url)), ${alias}.last_checked_at))`;
+  }
+
+  bunjangMissingSql(alias) {
+    // A comparable scheduled search no longer contains this listing inside its
+    // fetched range. Hide it from current listings until a later confirmation.
+    // This is not sale evidence: stored status, prices and history are unchanged.
+    if (!this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='pc_bunjang_missing_candidates'").get()) return '';
+    return ` AND (${alias}.site <> 'bunjang' OR NOT EXISTS (SELECT 1 FROM pc_bunjang_missing_candidates m
+      WHERE m.source_listing_id = SUBSTR(${alias}.item_id, 9)
+      AND m.missing_at > ${this.bunjangConfirmationSql(alias)}))`;
+  }
+
+  danawaMissingSql(alias) {
+    // A re-run of the offer's own model search, with a page that was not full,
+    // no longer returned it. Hidden until a later observation; nothing else changes.
+    if (!this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='pc_danawa_missing_candidates'").get()) return '';
+    return ` AND NOT EXISTS (SELECT 1 FROM pc_danawa_missing_candidates dm
+      WHERE dm.source_listing_id = SUBSTR(${alias}.item_id, 8) AND dm.missing_at > ${alias}.last_checked_at)`;
+  }
+
+  ebayConfirmationSql(alias) {
+    // Scheduled collection rewrites the projection; an unchanged getItem
+    // confirmation updates only the ledger row v1|<item id>|0 (primary key).
+    if (!this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='pc_lifecycle_queue'").get()) {
+      return `${alias}.last_checked_at`;
+    }
+    return `MAX(${alias}.last_checked_at, COALESCE((SELECT q.last_checked_at FROM pc_lifecycle_queue q
+      WHERE q.source_id = 'ebay' AND q.source_listing_id = 'v1|' || SUBSTR(${alias}.item_id, 6) || '|0'), ${alias}.last_checked_at))`;
+  }
+
+  // Sources without a detail recheck stay current only while recent scheduled
+  // searches or eBay item checks keep confirming them (Browse returns active
+  // offers only). Display only: lifecycle status, prices and history are unchanged.
+  // Bindings: currentVisibilityCutoffs() (Bunjang, eBay, then Danawa).
+  currentVisibilitySql(alias) {
+    return `(${alias}.site NOT IN ('bunjang', 'ebay', 'danawa')
+      OR (${alias}.site = 'bunjang' AND ${this.bunjangConfirmationSql(alias)} >= ?${this.bunjangMissingSql(alias)})
+      OR (${alias}.site = 'ebay' AND ${this.ebayConfirmationSql(alias)} >= ?)
+      OR (${alias}.site = 'danawa' AND ${alias}.last_checked_at >= ?${this.danawaMissingSql(alias)}))`;
+  }
+
+  currentVisibilityCutoffs() {
+    return [iso(this.now() - BUNJANG_VISIBILITY_MAX_AGE_MS), iso(this.now() - EBAY_VISIBILITY_MAX_AGE_MS),
+      iso(this.now() - DANAWA_VISIBILITY_MAX_AGE_MS)];
+  }
+
   browsePcListingsInReadView(options = {}) {
     const canonicalProductId = cleanText(options.canonicalProductId, 300);
     const canonicalProductIds = Array.isArray(options.canonicalProductIds)
@@ -1082,6 +1152,8 @@ export class SearchIndex {
     const currency = cleanText(options.currency, 12).toUpperCase();
     const sites = sortedStrings(options.sites);
     const listingFacets = options.listingFacets && typeof options.listingFacets === "object" ? options.listingFacets : {};
+    const hasRamListingFilters = ['memory_usage', 'speed_mt_s']
+      .some(key => Array.isArray(listingFacets[key]) && listingFacets[key].length > 0);
     const minPrice = options.minPrice !== null && options.minPrice !== undefined && options.minPrice !== ""
       && Number.isFinite(Number(options.minPrice)) ? Number(options.minPrice) : null;
     const maxPrice = options.maxPrice !== null && options.maxPrice !== undefined && options.maxPrice !== ""
@@ -1092,6 +1164,7 @@ export class SearchIndex {
     const where = [
       "active = 1",
       "last_checked_at <= ?",
+      this.currentVisibilitySql('listings'),
       "price_value IS NOT NULL",
       "price_value > 0",
       "pc_canonical_product_id IS NOT NULL",
@@ -1104,7 +1177,7 @@ export class SearchIndex {
       "pc_price_scope IN ('TOTAL', 'UNIT')",
       "((pc_market_pool IN ('KR_C2C_USED', 'KR_DEALER_USED', 'KR_REFURB_RETAIL') AND currency = 'KRW') OR (pc_market_pool = 'OVERSEAS_USED' AND currency = 'USD'))"
     ];
-    const params = [asOf];
+    const params = [asOf, ...this.currentVisibilityCutoffs()];
     if (canonicalProductId) {
       where.push("pc_canonical_product_id = ?");
       params.push(canonicalProductId);
@@ -1133,6 +1206,9 @@ export class SearchIndex {
       where.push(`UPPER(json_extract(pc_metadata_json, '$.${key}')) IN (SELECT UPPER(value) FROM json_each(?))`);
       params.push(JSON.stringify(selected));
     }
+    if (hasRamListingFilters) {
+      where.push("(pc_category_code = 'RAM' OR (pc_category_code IS NULL AND pc_canonical_product_id LIKE 'ram:%'))");
+    }
     if (minPrice !== null) {
       where.push("price_value >= ?");
       params.push(minPrice);
@@ -1152,6 +1228,10 @@ export class SearchIndex {
     if (sites.length > 0) {
       where.push(`site IN (${sqlPlaceholders(sites)})`);
       params.push(...sites);
+    } else {
+      // Inactive sources keep their history but are not current public listings.
+      where.push(`site IN (${sqlPlaceholders(PC_DIRECTORY_PUBLICATION_SOURCE_KEYS)})`);
+      params.push(...PC_DIRECTORY_PUBLICATION_SOURCE_KEYS);
     }
     const after = options.after && typeof options.after === "object" ? options.after : null;
     // Bound model/category reads before fetching wide listing rows. Without
@@ -1160,7 +1240,7 @@ export class SearchIndex {
     const scopeIndex = canonicalProductId || canonicalProductIds
       ? ' INDEXED BY idx_listings_pc_product_recent'
       : categoryCode ? ' INDEXED BY idx_listings_pc_scope_recent' : '';
-    const candidates = this.db.prepare(`SELECT item_id, site, url, price_value, posted_at, last_checked_at, pc_canonical_product_id,
+    const candidates = this.db.prepare(`SELECT item_id, site, url, price_value, posted_at, last_checked_at, pc_canonical_product_id${hasRamListingFilters ? ', title' : ''},
       json_type(pc_metadata_json, '$.statistics_eligible') = 'true' AS statistics_eligible,
       json_extract(pc_metadata_json, '$.statistics_exclusion_reasons') AS statistics_exclusion_reasons
       FROM listings${scopeIndex}
@@ -1168,6 +1248,7 @@ export class SearchIndex {
     let latestObservedAt = "";
     const rows = dedupePcListingRows((function* () {
       for (const row of candidates) {
+        if (hasRamListingFilters && !matchesRamListingFacets(row.title, listingFacets)) continue;
         if (String(row.last_checked_at) > latestObservedAt) latestObservedAt = String(row.last_checked_at);
         yield row;
       }
@@ -1512,8 +1593,11 @@ export class SearchIndex {
       throw error;
     }
 
-    const conditions = ["si.query_key = ?", "si.snapshot_version = ?"];
-    const bindings = [identity.key, snapshotVersion];
+    // Apply visibility at read time, including already materialized snapshots.
+    // Age never changes the ledger's lifecycle state or price history.
+    const conditions = ["si.query_key = ?", "si.snapshot_version = ?",
+      `(si.site NOT IN ('bunjang', 'ebay', 'danawa') OR EXISTS (SELECT 1 FROM listings current WHERE current.item_id = si.item_id AND ${this.currentVisibilitySql('current')}))`];
+    const bindings = [identity.key, snapshotVersion, ...this.currentVisibilityCutoffs()];
     const requestedViewSites = sortedStrings(body?.view_sites);
     const invalidViewSites = requestedViewSites.filter((site) => !identity.sites.includes(site));
     if (invalidViewSites.length > 0) {

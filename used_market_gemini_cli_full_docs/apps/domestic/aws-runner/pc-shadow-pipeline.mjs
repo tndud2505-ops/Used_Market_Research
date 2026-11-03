@@ -384,7 +384,20 @@ export class PcShadowPipeline {
     const prices = quantityValid && priceScopeValid
       ? comparablePrices(price, classified.quantity, classified.price_scope)
       : { unitPrice: null, totalPrice: null };
-    const state = lifecycle(item);
+    let state = lifecycle(item);
+    // Joonggonara search rows only carry a selling code. A reservation verified
+    // on the product page stays until the next page recheck decides otherwise.
+    if (source.key === "joonggonara" && state.status === "ACTIVE") {
+      const previous = this.ledger.latestSnapshot(source.key, sourceListingId(item));
+      if (previous?.lifecycle_status === "RESERVED" && String(previous.status_evidence_json || "").includes("productStatus=1")) {
+        let evidence;
+        try { evidence = JSON.parse(previous.status_evidence_json); } catch { evidence = null; }
+        if (evidence) {
+          state = { status: "RESERVED", evidence };
+          this.reservedSearchHolds = (this.reservedSearchHolds || 0) + 1;
+        }
+      }
+    }
     const previousLifecycleStatus = !options.reclassification && matched
       ? this.ledger.latestSnapshot(source.key, sourceListingId(item))?.lifecycle_status || null
       : null;
@@ -597,7 +610,11 @@ export class PcShadowPipeline {
       versions
     });
     nextStage('secondary_writes');
-    if (normalized.canonicalProductId && (state.status !== "ACTIVE"
+    // An identical reservation cannot change the sold reference consumed here.
+    // New snapshots/normalizations and duplicate assignments still invalidate it.
+    const unchangedReservation = state.status === "RESERVED" && previousLifecycleStatus === "RESERVED"
+      && observation.snapshotCreated === false && observation.normalizationCreated === false;
+    if (normalized.canonicalProductId && !unchangedReservation && (state.status !== "ACTIVE"
       || (previousLifecycleStatus && previousLifecycleStatus !== state.status))) {
       this.invalidatePriceReference(normalized.canonicalProductId);
     }
@@ -628,6 +645,8 @@ export class PcShadowPipeline {
           item.currency || (source.market_pool === "OVERSEAS_USED" ? "USD" : "KRW"),
           rollbackVersions
         );
+        if (normalized.canonicalProductId) this.invalidatePriceReference(normalized.canonicalProductId);
+        if (rollbackNormalized.canonicalProductId) this.invalidatePriceReference(rollbackNormalized.canonicalProductId);
       }
     }
     if (duplicate) {

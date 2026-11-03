@@ -53,7 +53,7 @@
 - 가격 의미: 판매완료는 명시적 SOLD만 인정하고, 통계에는 실제 체결가가 아닌 `sold_last_ask_price`를 사용한다. 기존 검색 `price_history`는 legacy read-only다.
 - 메인보드 가격 의미: B550 같은 칩셋과 제조사·플랫폼 facet은 검색 조건일 뿐 통계 identity가 아니다. 기준가격과 저가 판정은 `pc-master-v4`의 검증된 정확 모델 `PRODUCT`에만 제공하고, 미확인 모델은 `EXACT_MODEL_REQUIRED`로 검색 결과에만 유지한다.
 - 과거 가격 조회: 요청 `as_of`가 저장된 통계 창과 일치할 때만 반환한다. 보존되지 않은 과거 창은 현재 통계로 가장하지 않고 명시적 unavailable 응답을 낸다.
-- 다나와 중고: 승인된 공개 통합검색 HTML로 수집하고 원본은 `KR_DEALER_USED`에 보존한다. 국내 평균 `KR_DOMESTIC_USED`는 국내 개인·업체 중고의 유효 표본을 합산하며 eBay는 제외한다. 기존 다나와 장터 adapter와 쿨엔조이는 비활성이다.
+- 다나와 중고: 승인된 공개 통합검색 HTML로 수집하고 원본은 `KR_DEALER_USED`에 보존한다. 국내 평균 `KR_DOMESTIC_USED`는 국내 개인·업체 중고의 유효 표본을 합산하며 eBay는 제외한다. 기존 다나와 장터 adapter는 비활성이다.
 
 ## 위험 경계
 

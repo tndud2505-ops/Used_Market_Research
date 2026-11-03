@@ -15,10 +15,11 @@ const factories = script.slice(script.indexOf('const el = '), script.indexOf('fu
 const ram = { canonical_product_id: 'ram:g-skill:ddr4:16gb', canonical_display_name: 'G.Skill DDR4 16GB',
   category_code: 'RAM', brand: 'G.Skill', key_specs: { memory_generation: 'DDR4', module_capacity_gb: 16 } };
 const metric = value => ({ sample_count: 5, mean: value, median: value, min: value, max: value });
-const raw = () => ({ canonical_product_id: ram.canonical_product_id, active: metric(129500), sold: metric(126237.5),
+// Sold prices come from Joonggonara, the only site that still reports completed sales.
+const raw = (sold = metric(126237.5)) => ({ canonical_product_id: ram.canonical_product_id, active: metric(129500), sold,
   methodology: { days: 30, market_pool: 'KR_DOMESTIC_USED', condition: 'USED_WORKING', currency: 'KRW' },
   window: { from: '2026-08-19', to: '2026-09-17' }, published_window: { from: '2026-08-19', to: '2026-09-17', days: 30 },
-  publication_id: 'synthetic-test', by_source: [], daily: [] });
+  publication_id: 'synthetic-test', by_source: [{ source_id: 'joonggonara', active: metric(129500), sold }], daily: [] });
 function node(text = '') {
   return { textContent: text, children: [], dataset: {}, append(...items) { this.children.push(...items); },
     replaceChildren(...items) { this.children = items; this.textContent = ''; },
@@ -40,7 +41,7 @@ function setup({ builder = true, data = raw() } = {}) {
     $: selector => selector === '#build-table' ? table : selector === '#tools-summary' ? summary : node(),
     prices: { get: () => ({ state: 'ready', data }) }, overseasPrices: null,
     displayPrice: value => value == null ? '—' : core.money(value), PAGE_SIZE: 12, brandOf: catalog.toolBrand,
-    clearTimeout() {}, SOURCE_LABELS: { bunjang: '번개장터' },
+    clearTimeout() {}, SOURCE_LABELS: { bunjang: '번개장터' }, modelPickerView: { dimension: 'models' },
     location: { href: 'https://example.test/price-analysis.html' }, history: { replaceState() {} } });
   vm.runInContext(`${factories}\n${declarations}`, sandbox);
   vm.runInContext('render = () => {}; refreshPrices = () => {};', sandbox);
@@ -54,7 +55,7 @@ test('RAM displayed sold unit × 2 preserves fractional-won arithmetic', () => {
   assert.match(allText(memoryNode), /16GB × 2개 = 총 32GB/);
 });
 test('whole-won display retains precise statistical arithmetic in its title', () => {
-  const { sandbox, priceNode } = setup({ data: { ...raw(), sold: metric(100.335) } });
+  const { sandbox, priceNode } = setup({ data: raw(metric(100.335)) });
   sandbox.refreshBuildPriceDetails();
   assert.match(priceNode.title, /단가 100\.34원 × 2 ≈ 200\.67원/);
   assert.equal(allText(priceNode), '201원');

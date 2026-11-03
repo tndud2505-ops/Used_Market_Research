@@ -10,7 +10,8 @@ import { spawn } from "node:child_process";
 
 import worker from "../cloudflare/worker.mjs";
 import { probeRunnerReadiness } from '../cloudflare/runner-readiness.mjs';
-import { buildCacheKey, fetchThroughPcReadCache, isCacheableRequest } from "../cloudflare/free-tier.mjs";
+import { browsePcListingsD1, buildCacheKey, fetchThroughPcReadCache, isCacheableRequest } from "../cloudflare/free-tier.mjs";
+import { deriveRamListingFacets } from '../market/logic/ram-listing-facets.mjs';
 
 const readinessEnv = { RUNNER_URL: 'https://runner.example.test', RUNNER_TOKEN: 'fixture-token' };
 const readyProbe = await probeRunnerReadiness(readinessEnv, async (url, options) => {
@@ -35,7 +36,9 @@ import {
 import { verifyStoredStatsOnAws } from '../aws-runner/pc-stats-readback.mjs';
 import {
   comparePcListingRows,
+  decodePcListingsCursor,
   dedupePcListingRows,
+  encodePcListingsCursor,
   parsePcListingsRequest,
   pcListingStatisticsCoverage,
   pcListingsIdentity
@@ -43,6 +46,7 @@ import {
 import { OPERATIONAL_PC_DIRECTORY_SITES, OPERATIONAL_TARGET_SITES } from "../cloudflare/target-sites.mjs";
 import { decodeSearchCursor, encodeSearchCursor } from "../aws-runner/search-cursor.mjs";
 import { SearchIndex, collectionIdentity } from "../aws-runner/search-index.mjs";
+import { recordDanawaQueryWindows } from "../aws-runner/lifecycle-queue.mjs";
 import { MAX_PRICE_HISTORY_DAYS, parsePriceStatsRequest } from "../aws-runner/pc-price-stats-http.mjs";
 import { pcCollectionTargetSetV2 } from "../cloudflare/pc-directory-http.mjs";
 import {
@@ -138,6 +142,62 @@ const exactStorageListingRequest = parsePcListingsRequest(
   { allowedSites: [] }
 );
 assert.deepEqual(exactStorageListingRequest.listingFacets, { product_kind: ["M2_NVME"] });
+for (const [title, expected] of [
+  ['삼성 DDR4 16GB 3200 데스크탑용', { memory_usage: 'DESKTOP', speed_mt_s: '3200' }],
+  ['DDR4 SODIMM 16GB PC4-21300', { memory_usage: 'LAPTOP', speed_mt_s: '2666' }],
+  ['서버용 DDR4 RDIMM 16GB 2400MHz', { memory_usage: 'SERVER', speed_mt_s: '2400' }],
+  ['DDR4 16GB M378A2K43CB1 2026년 구매', { memory_usage: 'DESKTOP', speed_mt_s: 'UNKNOWN' }],
+  ['DDR4 16GB 3200원', { memory_usage: 'DESKTOP', speed_mt_s: 'UNKNOWN' }],
+  ['DDR4 데스크탑 노트북 3200/2666', { memory_usage: 'UNKNOWN', speed_mt_s: 'UNKNOWN' }],
+  ['DDR5 UDIMM 16GB PC5-44800', { memory_usage: 'DESKTOP', speed_mt_s: '5600' }],
+  ['DDR3 DIMM 8GB PC3-12800', { memory_usage: 'DESKTOP', speed_mt_s: '1600' }],
+  ['삼성 DDR5 32GB PC5-5600MHz 램', { memory_usage: 'DESKTOP', speed_mt_s: '5600' }],
+  ['SK하이닉스 DDR5 5600 32GB2 (64GB) 노트북 RAM 정품', { memory_usage: 'LAPTOP', speed_mt_s: '5600' }],
+  ['삼성램 DDR4 3200 8GB 오늘만 일괄시 24', { memory_usage: 'DESKTOP', speed_mt_s: '3200' }],
+  ['삼성 노트북램 DDR4 4GB 2666V(21300)', { memory_usage: 'LAPTOP', speed_mt_s: '2666' }],
+  ['삼성 데스크탑램 DDR3 4GB 12800U / 10600U 일반', { memory_usage: 'DESKTOP', speed_mt_s: 'UNKNOWN' }],
+  ['삼성 데스크탑용 32GB 램 DDR4 PC4-25600 3200 2개 일괄', { memory_usage: 'DESKTOP', speed_mt_s: '3200' }],
+  ['노트북용 삼성램 16gb ddr5-4800 메모리', { memory_usage: 'LAPTOP', speed_mt_s: '4800' }],
+  ['삼성 DDR4 16GB 3200', { memory_usage: 'DESKTOP', speed_mt_s: '3200' }],
+  ['노트북용 아님 DDR4 16GB', { memory_usage: 'DESKTOP', speed_mt_s: 'UNKNOWN' }],
+  ['데스크탑용 아니고 노트북용 DDR4 16GB', { memory_usage: 'LAPTOP', speed_mt_s: 'UNKNOWN' }],
+  ['데스크탑용 아님 DDR4 16GB', { memory_usage: 'UNKNOWN', speed_mt_s: 'UNKNOWN' }],
+  ['NOT FOR LAPTOP DDR4 16GB', { memory_usage: 'DESKTOP', speed_mt_s: 'UNKNOWN' }],
+  ['노트북 호환 불가 DDR4 16GB', { memory_usage: 'DESKTOP', speed_mt_s: 'UNKNOWN' }],
+  ['NON-REGISTERED DDR4 16GB', { memory_usage: 'DESKTOP', speed_mt_s: 'UNKNOWN' }],
+  ['NON-RDIMM DDR4 16GB', { memory_usage: 'DESKTOP', speed_mt_s: 'UNKNOWN' }],
+  ['UDIMM 데스크탑용 아님 DDR4 16GB', { memory_usage: 'UNKNOWN', speed_mt_s: 'UNKNOWN' }],
+  ['삼성 8GB DDR4 2666V 램 M471A1K43CB1', { memory_usage: 'LAPTOP', speed_mt_s: '2666' }],
+  ['삼성 DDR4 2666V ECC 램 32GB 팝니다', { memory_usage: 'UNKNOWN', speed_mt_s: '2666' }],
+  ['DDR4 노트북용 서버용 혼합', { memory_usage: 'UNKNOWN', speed_mt_s: 'UNKNOWN' }]
+]) assert.deepEqual(deriveRamListingFacets(title), expected, title);
+const ramFilteredRequest = parsePcListingsRequest(
+  'https://used-pick.test/api/pc/listings?canonical_product_id=ram%3Asamsung%3Addr4%3A16gb&memory_usage=DESKTOP&speed_mt_s=3200',
+  { allowedSites: [] }
+);
+assert.deepEqual(ramFilteredRequest.listingFacets, { memory_usage: ['DESKTOP'], speed_mt_s: ['3200'] });
+assert.equal(ramFilteredRequest.catalogScope, null, 'RAM listing facets do not redefine a selected product');
+const ramCatalogRequest = parsePcListingsRequest(
+  'https://used-pick.test/api/pc/listings?category_code=RAM&generation=DDR4&module_capacity_gb=16&memory_usage=UNKNOWN&speed_mt_s=UNKNOWN',
+  { allowedSites: [] }
+);
+assert.deepEqual(ramCatalogRequest.catalogScope.facets, { generation: ['DDR4'], module_capacity_gb: ['16'] },
+  'usage and speed filter listings rather than broad canonical RAM models');
+for (const parameter of ['memory_usage=GAMING', 'speed_mt_s=21300']) assert.throws(() => parsePcListingsRequest(
+  `https://used-pick.test/api/pc/listings?category_code=RAM&${parameter}`, { allowedSites: [] }
+), /unsupported .* listing filter/u);
+const ramCursor = encodePcListingsCursor(ramFilteredRequest, {
+  asOf: '2026-08-29T00:00:00.000Z', after: { item_id: 'danawa:ram-a' }
+}, 'ram-fixture-secret');
+assert.equal(decodePcListingsCursor({ ...ramFilteredRequest, cursor: ramCursor }, 'ram-fixture-secret').after.item_id, 'danawa:ram-a');
+assert.throws(() => decodePcListingsCursor({ ...ramFilteredRequest, cursor: ramCursor,
+  listingFacets: { ...ramFilteredRequest.listingFacets, memory_usage: ['LAPTOP'] }
+}, 'ram-fixture-secret'), /cursor|query/iu, 'cursors are bound to RAM listing filters');
+const ramD1Fallback = await browsePcListingsD1(new Request(
+  'https://used-pick.test/api/pc/listings?category_code=RAM&memory_usage=LAPTOP'
+), { DB: { prepare() { throw new Error('RAM fallback must not perform an unfiltered read'); } } });
+assert.equal(ramD1Fallback.status, 503);
+assert.equal((await ramD1Fallback.json()).error, 'RAM_LISTING_FILTERS_REQUIRE_RUNNER');
 assert.throws(
   () => parsePcListingsRequest("https://used-pick.test/api/pc/listings?category_code=SSD&product_kind=NOT_REAL", { allowedSites: [] }),
   /unsupported product_kind/u
@@ -249,7 +309,7 @@ const republishProjectionFixtures = new Map([
   ["system", { ...eligibleRepublishProjection, item_id: "bunjang:1003", source_listing_id: "1003", listing_kind: "FULL_SYSTEM", price_eligible: false }],
   ["accessory", { ...eligibleRepublishProjection, item_id: "joonggonara:1004", source_listing_id: "1004", site: "joonggonara", listing_kind: "ACCESSORY_ONLY", price_eligible: false }],
   ["quantity-unknown", { ...eligibleRepublishProjection, item_id: "danawa:1005", source_listing_id: "1005", site: "danawa", quantity: null, price_eligible: false }],
-  ["sold", { ...eligibleRepublishProjection, item_id: "coolenjoy:1006", source_listing_id: "1006", site: "coolenjoy", lifecycle_status: "SOLD", price_eligible: false }],
+  ["sold", { ...eligibleRepublishProjection, item_id: "joonggonara:1006", source_listing_id: "1006", site: "joonggonara", lifecycle_status: "SOLD", price_eligible: false }],
   ["zero", { ...eligibleRepublishProjection, item_id: "rethinkmall:1007", source_listing_id: "1007", site: "rethinkmall", price: 0, price_eligible: false }]
 ]);
 const republishProjectionBySourcePair = new Map([...republishProjectionFixtures.values()]
@@ -723,6 +783,175 @@ const items = [
   statistics_exclusion_reasons: [], exclusion_reasons: []
 }));
 
+// Read-time RAM facets preserve stored identities and filter the entire scope
+// before counting, deduplicating or choosing the next globally sorted page.
+{
+  const ramIndex = new SearchIndex({ filePath: ':memory:', now: () => now });
+  const ramProduct = 'ram:samsung:ddr4:16gb';
+  const ramFixtures = [
+    ['laptop', '노트북용 DDR4 SODIMM 16GB 3200', 10_000],
+    ['desktop-low', '데스크탑용 DDR4 16GB 3200', 20_000],
+    ['unknown', '삼성 DDR4 16GB', 25_000],
+    ['server', '서버용 DDR4 RDIMM 16GB 3200', 30_000],
+    ['desktop-high', 'DDR4 UDIMM 16GB PC4-25600', 40_000],
+    ['mixed', '데스크탑용 노트북용 DDR4 16GB 2666/3200', 50_000]
+  ].map(([id, title, price]) => ({ ...items[0], id: `danawa:ram-${id}`, item_id: `danawa:ram-${id}`,
+    site: 'danawa', url: `https://dmall.danawa.com/v3/?controller=sale&methods=blog&seq=ram-${id}`,
+    title, price, category_code: 'RAM', canonical_product_id: ramProduct,
+    market_segment: 'CONSUMER_DESKTOP' }));
+  ramIndex.upsertPublicProjections([...ramFixtures, { ...ramFixtures[1], id: 'danawa:ram-other-model',
+    item_id: 'danawa:ram-other-model', url: 'https://dmall.danawa.com/v3/?controller=sale&methods=blog&seq=ram-other-model',
+    title: '데스크탑용 DDR4 8GB 3200', canonical_product_id: 'ram:samsung:ddr4:8gb' }],
+  { observedAt: '2026-08-29T00:00:00.000Z' });
+  const storedRamBefore = ramIndex.db.prepare('SELECT item_id, pc_metadata_json FROM listings ORDER BY item_id').all();
+  const ramScope = { canonicalProductId: ramProduct, sites: ['danawa'], sort: 'price_asc', currency: 'KRW', limit: 1,
+    listingFacets: { memory_usage: ['DESKTOP'], speed_mt_s: ['3200'] }, asOf: '2026-08-29T00:00:01.000Z' };
+  const firstRamPage = ramIndex.browsePcListings(ramScope);
+  assert.deepEqual(firstRamPage.items.map(item => item.item_id), ['danawa:ram-desktop-low']);
+  assert.equal(firstRamPage.total, 2);
+  assert.equal(firstRamPage.sourceTotals.danawa, 2);
+  assert.equal(firstRamPage.modelCounts[ramProduct], 2);
+  assert.equal(firstRamPage.statisticsCoverage.eligible_count, 2);
+  assert.equal(firstRamPage.items[0].memory_usage, 'DESKTOP');
+  assert.equal(firstRamPage.items[0].speed_mt_s, '3200');
+  const secondRamPage = ramIndex.browsePcListings({ ...ramScope, after: firstRamPage.nextAfter });
+  assert.deepEqual(secondRamPage.items.map(item => item.item_id), ['danawa:ram-desktop-high']);
+  assert.equal(secondRamPage.nextAfter, null);
+  const generalRam = ramIndex.browsePcListings({ ...ramScope, limit:10, listingFacets:{memory_usage:['DESKTOP']} });
+  assert.deepEqual(generalRam.items.map(item=>item.item_id), ['danawa:ram-desktop-low','danawa:ram-unknown','danawa:ram-desktop-high'],
+    'ordinary unmarked RAM remains visible in the general desktop group');
+  for (const [usage, expected] of [['LAPTOP', 'laptop'], ['SERVER', 'server'], ['UNKNOWN', 'mixed']]) {
+    const page = ramIndex.browsePcListings({ ...ramScope, listingFacets: { memory_usage: [usage] } });
+    assert.equal(page.total, 1);
+    assert.equal(page.items[0].item_id, `danawa:ram-${expected}`);
+  }
+  const unknownSpeeds = ramIndex.browsePcListings({ ...ramScope, limit: 10, listingFacets: { speed_mt_s: ['UNKNOWN'] } });
+  assert.deepEqual(unknownSpeeds.items.map(item => item.item_id), ['danawa:ram-unknown', 'danawa:ram-mixed']);
+  assert.deepEqual(ramIndex.db.prepare('SELECT item_id, pc_metadata_json FROM listings ORDER BY item_id').all(), storedRamBefore,
+    'listing browse facets do not rewrite classifications or statistics eligibility');
+  ramIndex.close();
+}
+
+// Listing age is a read policy: preserve the stored state and restore visibility
+// after a genuine new observation, including an old listing's original post date.
+{
+  let clock = now;
+  const ageIndex = new SearchIndex({ filePath: ':memory:', now: () => clock });
+  const ageRequest = { ...pcRequest, sites: ['bunjang', 'joonggonara'], limit: 30 };
+  const b = { ...items[0], id: 'bunjang:70001', item_id: 'bunjang:70001', site: 'bunjang',
+    url: 'https://m.bunjang.co.kr/products/70001', posted_at: '2020-01-01T00:00:00.000Z' };
+  ageIndex.registerQuery(ageRequest);
+  ageIndex.ingest(ageRequest, [b, items[1]], { deep: true, complete: true, successfulSites: ageRequest.sites });
+  const browse = () => ageIndex.browsePcListings({ canonicalProductId: b.canonical_product_id, limit: 30 });
+  const storedBefore = ageIndex.db.prepare('SELECT active, pc_lifecycle_status, last_checked_at FROM listings WHERE item_id=?').get(b.id);
+  clock += 7 * 86400000;
+  assert.ok(browse().items.some(x => x.id === b.id), 'exactly seven days remains visible');
+  // Materialize just before expiration so an existing search snapshot must also hide it.
+  const snapshot = ageIndex.searchPage(ageRequest, { allowStale: true });
+  clock += 1;
+  assert.equal(browse().items.some(x => x.id === b.id), false, 'older than seven days disappears from PC listings');
+  const page = ageIndex.searchPage(ageRequest, { allowStale: true, snapshotVersion: snapshot.snapshotVersion });
+  assert.equal(page.items.some(x => x.id === b.id), false, 'existing general search snapshot applies the same visibility rule');
+  assert.equal(page.total, 1);
+  assert.equal(page.sourceTotals.bunjang || 0, 0);
+  assert.ok(page.items.some(x => x.site === 'joonggonara'), 'other sites keep their visibility');
+  assert.deepEqual(ageIndex.db.prepare('SELECT active, pc_lifecycle_status, last_checked_at FROM listings WHERE item_id=?').get(b.id), storedBefore,
+    'hiding does not manufacture SOLD or refresh confirmation time');
+  const ageLedger = new PcPartsLedger({ db: ageIndex.db, now: () => clock });
+  ageLedger.migrate();
+  ageLedger.upsertSource({ sourceId: 'bunjang', displayName: 'Bunjang', marketPool: 'KR_C2C_USED', policyStatus: 'APPROVED', runtimeStatus: 'ENABLED' });
+  const confirm = at => ageLedger.recordObservation({ sourceId: 'bunjang', sourceListingId: '70001', title: b.title,
+    price: b.price, currency: b.currency, status: 'ACTIVE', rawPayload: { url: b.url },
+    statusEvidence: { type: 'STRUCTURED_STATUS', value: 'ACTIVE' }, observedAt: at });
+  confirm(new Date(now).toISOString());
+  assert.equal(browse().items.some(x => x.id === b.id), false, 'expired ledger confirmation also stays hidden');
+  const unchanged = confirm(new Date(clock).toISOString());
+  assert.equal(unchanged.snapshotCreated, false);
+  assert.ok(browse().items.some(x => x.id === b.id), 'fresh unchanged search evidence restores visibility even when the display projection was not rewritten');
+  assert.ok(ageIndex.searchPage(ageRequest, { allowStale: true, snapshotVersion: snapshot.snapshotVersion }).items.some(x => x.id === b.id));
+  assert.deepEqual(ageIndex.db.prepare('SELECT active, pc_lifecycle_status, last_checked_at FROM listings WHERE item_id=?').get(b.id), storedBefore);
+  ageIndex.upsertPublicProjections([b], { observedAt: new Date(clock).toISOString() });
+  assert.ok(browse().items.some(x => x.id === b.id), 'fresh confirmation restores the same ID with its old post date');
+  // Vanishing inside a comparable scheduled search hides it until a newer confirmation.
+  ageIndex.db.prepare('INSERT OR REPLACE INTO pc_bunjang_missing_candidates VALUES (?,?,?,?)')
+    .run('70001', 'fixture-comparable-search', new Date(clock + 60000).toISOString(), new Date(clock + 86460000).toISOString());
+  clock += 120000;
+  assert.equal(browse().items.some(x => x.id === b.id), false, 'a listing missing from a comparable search leaves current listings');
+  assert.equal(ageIndex.searchPage(ageRequest, { allowStale: true, snapshotVersion: snapshot.snapshotVersion }).items.some(x => x.id === b.id), false,
+    'existing search snapshots apply the same hiding');
+  assert.equal(ageIndex.db.prepare('SELECT pc_lifecycle_status FROM listings WHERE item_id=?').get(b.id).pc_lifecycle_status, 'ACTIVE',
+    'disappearance is not recorded as SOLD');
+  confirm(new Date(clock).toISOString());
+  assert.ok(browse().items.some(x => x.id === b.id), 'a later search confirmation restores the listing');
+  // eBay Browse returns active offers only; inactive sources keep history but leave current listings.
+  const e = { ...items[0], id: 'ebay:1234567890', item_id: 'ebay:1234567890', site: 'ebay',
+    url: 'https://www.ebay.com/itm/1234567890', currency: 'USD', market_pool: 'OVERSEAS_USED', price: 300 };
+  const h = { ...items[0], id: 'hellomarket:h1', item_id: 'hellomarket:h1', site: 'hellomarket', url: 'https://www.hellomarket.com/item/h1' };
+  ageIndex.upsertPublicProjections([e, h], { observedAt: new Date(clock).toISOString() });
+  assert.ok(browse().items.some(x => x.id === e.id), 'a recently confirmed eBay offer is current');
+  assert.equal(browse().items.some(x => x.id === h.id), false, 'an inactive source is not a current public listing');
+  clock += 7 * 86400000 + 1;
+  assert.ok(browse().items.some(x => x.id === e.id), 'a sampled eBay offer unseen for a week is not hidden too early');
+  clock += 7 * 86400000;
+  assert.equal(browse().items.some(x => x.id === e.id), false, 'an eBay offer unconfirmed for over fourteen days leaves current listings');
+  ageIndex.upsertPublicProjections([e], { observedAt: new Date(clock).toISOString() });
+  assert.ok(browse().items.some(x => x.id === e.id), 'a fresh eBay confirmation restores it');
+  ageLedger.upsertSource({ sourceId: 'ebay', displayName: 'eBay', marketPool: 'OVERSEAS_USED', policyStatus: 'APPROVED', runtimeStatus: 'ENABLED' });
+  clock += 15 * 86400000;
+  assert.equal(browse().items.some(x => x.id === e.id), false);
+  ageLedger.recordObservation({ sourceId: 'ebay', sourceListingId: 'v1|1234567890|0', title: e.title, price: e.price, currency: 'USD',
+    status: 'ACTIVE', rawPayload: { url: e.url }, statusEvidence: { type: 'STRUCTURED_STATUS', value: 'ACTIVE' }, observedAt: new Date(clock).toISOString() });
+  assert.ok(browse().items.some(x => x.id === e.id), 'an eBay item-status confirmation keeps the offer current without rewriting the projection');
+  // Danawa offers that a re-search no longer returns leave after fourteen days.
+  const d = { ...items[0], id: 'danawa:search_fixture', item_id: 'danawa:search_fixture', site: 'danawa',
+    url: 'https://prod.danawa.com/info/?pcode=1', price: 280000 };
+  ageIndex.upsertPublicProjections([d], { observedAt: new Date(clock).toISOString() });
+  clock += 14 * 86400000;
+  assert.ok(browse().items.some(x => x.id === d.id), 'a Danawa offer confirmed exactly fourteen days ago stays current');
+  clock += 1;
+  assert.equal(browse().items.some(x => x.id === d.id), false, 'a Danawa offer unconfirmed for over fourteen days leaves current listings');
+  assert.equal(ageIndex.db.prepare('SELECT pc_lifecycle_status FROM listings WHERE item_id=?').get(d.id).pc_lifecycle_status, 'ACTIVE',
+    'age hiding keeps the stored Danawa status');
+  ageIndex.upsertPublicProjections([d], { observedAt: new Date(clock).toISOString() });
+  assert.ok(browse().items.some(x => x.id === d.id), 'a Danawa re-search restores it');
+  // A re-run of the same model search that no longer returns an offer hides it early.
+  const danawaId = (n) => 'search_' + String(n).repeat(24);
+  const offer = (n) => ({ ...d, id: 'danawa:' + danawaId(n), item_id: 'danawa:' + danawaId(n), url: 'https://prod.danawa.com/info/?pcode=' + n });
+  const window = (query, ids, cardCount) => recordDanawaQueryWindows(ageIndex.db, { now: clock,
+    windows: [{ query, model: true, card_count: cardCount, ids: ids.map(danawaId), observed_at: new Date(clock).toISOString() }] });
+  ageIndex.upsertPublicProjections([offer(1), offer(2), offer(3)], { observedAt: new Date(clock).toISOString() });
+  assert.equal(window('RTX 3080', [1, 2], 2).compared_windows, 0, 'the first run of a query is only a baseline');
+  window('RTX 3070', [3], 25);
+  clock += 3 * 86400000;
+  const receipt = window('RTX 3080', [2], 1);
+  assert.equal(receipt.added, 1);
+  assert.equal(browse().items.some(x => x.id === offer(1).id), false, 'an offer missing from a re-run of its model search leaves current listings');
+  assert.ok(browse().items.some(x => x.id === offer(2).id), 'offers the re-run still returns stay');
+  assert.equal(ageIndex.db.prepare('SELECT pc_lifecycle_status FROM listings WHERE item_id=?').get(offer(1).id).pc_lifecycle_status, 'ACTIVE',
+    'disappearance from a search is not recorded as a sale');
+  assert.equal(window('RTX 3070', [], 30).added, 0, 'a full result page may have pushed the offer to a later page');
+  assert.ok(browse().items.some(x => x.id === offer(3).id));
+  clock += 60000;
+  ageIndex.upsertPublicProjections([offer(1)], { observedAt: new Date(clock).toISOString() });
+  assert.ok(browse().items.some(x => x.id === offer(1).id), 'a later observation restores it');
+  const burst = recordDanawaQueryWindows(ageIndex.db, { now: clock, windows: ['a', 'b', 'c', 'd'].map(query => ({ query, model: true, card_count: 0, ids: [], observed_at: new Date(clock).toISOString() })) });
+  assert.equal(burst.added, 0);
+  window('RTX 3060', [4], 1);
+  ageIndex.upsertPublicProjections([offer(4)], { observedAt: new Date(clock).toISOString() });
+  clock += 86400000;
+  const crossed = recordDanawaQueryWindows(ageIndex.db, { now: clock, windows: [
+    { query: 'RTX 3060', model: true, card_count: 0, ids: [], observed_at: new Date(clock).toISOString() },
+    { query: '그래픽카드', model: false, card_count: 30, ids: [danawaId(4)], observed_at: new Date(clock).toISOString() }] });
+  assert.equal(crossed.added, 0, 'an offer another query of the same run returned is not missing');
+  assert.ok(browse().items.some(x => x.id === offer(4).id), 'even when the unchanged sighting skips the projection update');
+  window('RTX 3050', [5], 1);
+  clock += 86400000;
+  const partial = recordDanawaQueryWindows(ageIndex.db, { now: clock, seenIds: [danawaId(5)],
+    windows: [{ query: 'RTX 3050', model: true, card_count: 0, ids: [], observed_at: new Date(clock).toISOString() }] });
+  assert.equal(partial.added, 0, 'offers recovered from a partially failed search also count as seen');
+  ageIndex.close();
+}
+
 let index = new SearchIndex({ filePath: indexPath, backupDir, now: () => now });
 index.registerQuery(pcRequest);
 index.ingest(pcRequest, items, { deep: true, complete: true, successfulSites: ["joonggonara"] });
@@ -903,6 +1132,11 @@ assert.doesNotMatch(JSON.stringify(storedProjection), /010-1234-5678|seller@exam
 const numericJoongnaId = "joonggonara:232316045";
 const joongnaUrl = "https://web.joongna.com/product/232316045";
 const legacyJoongnaId = `joonggonara:${joongnaUrl}`;
+const lifecycleAliasPlan = index.db.prepare(`EXPLAIN QUERY PLAN UPDATE listings SET active = 0
+  WHERE site = ? AND url = ? AND item_id <> ? AND last_checked_at <= ?`)
+  .all('joonggonara', joongnaUrl, legacyJoongnaId, '2026-08-29T13:00:00.000Z');
+assert.ok(lifecycleAliasPlan.some(row => /SEARCH listings USING INDEX idx_listings_site_url/u.test(row.detail)),
+  'each lifecycle alias update must seek the exact source URL instead of scanning all listings');
 index.upsertPublicProjections([{ ...items[0], id: numericJoongnaId, item_id: numericJoongnaId,
   url: joongnaUrl, lifecycle_status: "ACTIVE" }], { observedAt: "2026-08-29T12:00:00.000Z" });
 assert.equal(index.db.prepare("SELECT active FROM listings WHERE item_id = ?").get(legacyJoongnaId), undefined,
@@ -1479,7 +1713,7 @@ assert.deepEqual(
   [...OPERATIONAL_PC_DIRECTORY_SITES].sort(),
   "the catalog must expose every operational PC directory source"
 );
-assert.equal(workerCatalogPayload.data.source_candidates.some((source) => ["bunjang", "hellomarket", "coolenjoy"]
+assert.equal(workerCatalogPayload.data.source_candidates.some((source) => ["bunjang", "hellomarket"]
   .includes(source.source_id)), false,
 "operational directory sources must not remain in the inactive candidate list");
 const workerProducts = await worker.fetch(new Request("https://used-pick.test/api/pc/products?category_code=GPU&query=RTX%203080"), importEnv);
@@ -2387,13 +2621,6 @@ const importResponse = await worker.fetch(new Request("https://used-pick.test/ad
     canonical_manufacturer: "NVIDIA", board_manufacturer: "MSI", listing_kind: "SINGLE_COMPONENT", category_code: "GPU",
     quantity: 1, price_scope: "TOTAL", condition_code: "USED_WORKING", price_eligible: true, exclusion_reasons: []
   }, {
-    item_id: "coolenjoy:allowed-import", site: "coolenjoy", category_id: "pc",
-    title: "RTX 3080 쿨엔조이", price: 484_000, currency: "KRW",
-    url: "https://coolenjoy.net/bbs/market/910004", lifecycle_status: "ACTIVE", market_pool: "KR_C2C_USED",
-    canonical_product_id: "gpu:nvidia:rtx-3080", canonical_display_name: "NVIDIA GeForce RTX 3080",
-    canonical_manufacturer: "NVIDIA", board_manufacturer: "GALAX", listing_kind: "SINGLE_COMPONENT", category_code: "GPU",
-    quantity: 1, price_scope: "TOTAL", condition_code: "USED_WORKING", price_eligible: true, exclusion_reasons: []
-  }, {
     item_id: "danawa:wrong-source-host", site: "danawa", category_id: "pc",
     title: "RTX 3080 잘못된 출처 URL", price: 485_000, currency: "KRW",
     url: "https://web.joongna.com/product/910005", lifecycle_status: "ACTIVE", market_pool: "KR_C2C_USED",
@@ -2463,7 +2690,7 @@ for (const itemId of ["bunjang:allowed-import"]) {
   assert.equal(d1.prepare("SELECT active FROM listings WHERE item_id = ?").get(itemId)?.active, 1,
     `${itemId} must be accepted into the stored PC directory projection`);
 }
-for (const itemId of ["hellomarket:allowed-import", "coolenjoy:allowed-import"]) {
+for (const itemId of ["hellomarket:allowed-import"]) {
   assert.equal(d1.prepare("SELECT 1 FROM listings WHERE item_id = ?").get(itemId), undefined,
     `${itemId} must be rejected after its source is retired`);
 }
@@ -2828,3 +3055,4 @@ try {
   if (privateServer.listening) await once(privateServer, 'close');
 }
 console.log(JSON.stringify({ status: "passed", contract: "pc-service" }, null, 2));
+import { PcPartsLedger } from '../aws-runner/pc-parts-ledger.mjs';

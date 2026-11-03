@@ -3,6 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { saveDanawaResponseEvidence } from './danawa-response-evidence.mjs';
 import { collectOne, enrichHelloMarketDetails } from "../cloudflare/live-search.mjs";
 import { pcCollectionTargetSetV2 } from "../cloudflare/pc-directory-http.mjs";
 import {
@@ -22,7 +23,7 @@ import { PcPartsLedger } from "./pc-parts-ledger.mjs";
 import { PcShadowPipeline } from "./pc-shadow-pipeline.mjs";
 import { filterCollectionTargets } from "./pc-source-coverage-core.mjs";
 import { ebayTargetForCategory } from "../collector/logic/pc-specialist-targets.mjs";
-import { collectDanawaSearchListings, collectDanawaSearchTargetBatch, createDanawaPacedFetch } from '../collector/logic/danawa-search.mjs';
+import { collectDanawaSearchListings, collectDanawaSearchTargetBatch, createDanawaPacedFetch, danawaPartialItems } from '../collector/logic/danawa-search.mjs';
 
 const sourceKey = String(process.env.PC_COLLECT_SOURCE || "").trim().toLowerCase();
 const operationalSourceKeys = PC_SOURCE_REGISTRY
@@ -72,15 +73,11 @@ function jsonEnvironment(name) {
 }
 
 const specialistSearchUrls = Object.freeze({
-  coolenjoy: "https://coolenjoy.net/bbs/mart2?sfl=wr_subject&stx={query}&sop=and",
   ...jsonEnvironment("PC_SPECIALIST_SEARCH_URLS_JSON")
 });
-const specialistHosts = Object.freeze({
-  coolenjoy: new Set(["coolenjoy.net", "www.coolenjoy.net"])
-});
+const specialistHosts = Object.freeze({});
 const specialistPublicQueryOverrides = Object.freeze({});
 const sourceTargetPacingMs = Object.freeze({
-  coolenjoy: 200,
   ebay: 300
 });
 
@@ -100,6 +97,7 @@ async function collectTargetItems(target) {
     return (await collectDanawaSearchListings({
       query: target.query_text,
       categoryCode: target.category_code,
+      onUnrecognizedResponse: evidence => saveDanawaResponseEvidence(indexPath, evidence),
       fetchImpl: fetchDanawaPublicWithPacing
     })).items.slice(0, collectLimit);
   }
@@ -273,14 +271,17 @@ try {
   const successful = settled.filter((result) => result.status === "fulfilled");
   uncommittedTargets = successful.map(result => result.value.target);
   const failed = settled.filter((result) => result.status === "rejected");
+  const partialItems = sourceKey === 'danawa' ? danawaPartialItems(failed).slice(0, collectLimit * failed.length) : [];
   const failureMessages = failed
     .map((result) => result.reason instanceof Error ? result.reason.message : String(result.reason));
   const blockedFailure = failureMessages.some((message) => /(?:HTTP[_ ]?(?:403|429)|\b403\b|\b429\b|blocked|captcha)/iu.test(message));
-  collectionMetrics = {request_count:settled.length,request_failure_count:failed.length,
+  collectionMetrics = {request_count:settled.length,request_failure_count:failed.length,parsed_count:partialItems.length,
+    parse_failure_count:failureMessages.filter(message => /MARKUP_UNRECOGNIZED|NO_CARDS_UNVERIFIED/u.test(message)).length,
     http_blocked_count:failureMessages.filter(message => /HTTP_(?:403|429)|BLOCKED/iu.test(message)).length};
   if (sourceKey === "danawa" && (blockedFailure || failureMessages.some(message => /MARKUP_UNRECOGNIZED|NO_CARDS_UNVERIFIED/u.test(message)))) {
-    danawaFailureRuntime = sourceRuntimeAfterFailure(sourceKey, runtimeBeforeRun,
-      new Error(failureMessages.join("; ")), new Date(startedAt));
+    const failure = new Error(failureMessages.join("; "));
+    failure.collection_metrics = collectionMetrics;
+    danawaFailureRuntime = sourceRuntimeAfterFailure(sourceKey, runtimeBeforeRun, failure, new Date(startedAt));
   }
   settled.forEach((result, index) => result.status === "rejected" && ledger.updateSourceTargetRuntime({
     sourceId: sourceKey,
@@ -294,7 +295,7 @@ try {
       ? (result.reason instanceof Error ? result.reason.message : String(result.reason))
       : null
   }));
-  if (successful.length === 0) {
+  if (successful.length === 0 && partialItems.length === 0) {
     const error = new Error(`ALL_SOURCE_TARGETS_FAILED:${sourceKey}:0/${settled.length}:${failureMessages.join(";")}`);
     error.collection_metrics = collectionMetrics;
     throw error;
@@ -302,7 +303,7 @@ try {
   console.info(JSON.stringify({ phase: "collected", source: sourceKey, targets: successful.length,
     items: successful.reduce((count, result) => count + (result.value.items || []).length, 0), limit: collectLimit }));
   const deduped = new Map();
-  for (const result of successful) {
+  for (const result of [...successful, { value: { items: partialItems } }]) {
     for (const item of result.value.items || []) {
       const sourceListingId = String(item.source_listing_id || item.item_id || item.id || item.url || "").trim();
       if (!sourceListingId) continue;
@@ -358,6 +359,7 @@ try {
         : (blockedFailure ? "QUARANTINED" : "FAILED")) : "SUCCEEDED", finishedAt,
     collectedCount: projections.length, changedCount: projections.filter((item) => item._pc_snapshot_created === true).length,
     requestCount: settled.length, requestFailureCount: failed.length, parsedCount: projections.length,
+    parseFailureCount: collectionMetrics.parse_failure_count,
     httpBlockedCount: collectionMetrics.http_blocked_count,
     error: failed.length > 0 ? failureMessages.join("; ") : null,
     adapterVersion: "operator-source-refresh-v1"
@@ -389,6 +391,7 @@ try {
       finishedAt: new Date().toISOString(), error: error.message,
       requestCount: failureMetrics?.request_count || 0,
       requestFailureCount: failureMetrics?.request_failure_count || 0,
+      parseFailureCount: failureMetrics?.parse_failure_count || 0,
       httpBlockedCount: failureMetrics?.http_blocked_count || 0 });
       if (danawaFailureRuntime) ledger.updateSourceRuntime(sourceKey, danawaFailureRuntime);
     }

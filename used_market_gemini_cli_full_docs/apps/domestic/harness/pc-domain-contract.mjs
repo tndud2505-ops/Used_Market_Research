@@ -332,6 +332,17 @@ for (const fixture of section21Cases.filter((entry) => entry.kind !== "missing_s
 }
 
 const observedSystemAndBundleRegressions = [
+  ["ASUS PB63 i7-13700 미니PC", "FULL_SYSTEM"],
+  ["ASUS MINI PC i7-13700 32GB 1TB", "FULL_SYSTEM"],
+  ["A급 엘지 그램프로 17zd90tr-ex79k rtx5050 급처", "FULL_SYSTEM"],
+  ["LG전자 2025 그램 프로16rtx5050 16Z90TR-ED79K", "FULL_SYSTEM"],
+  ["LG grampro RTX5050", "FULL_SYSTEM"],
+  ["LG 그램 RTX5050 SSD만 교체", "FULL_SYSTEM"],
+  ["레이저 블레이드 RTX4070 SSD만 업그레이드", "FULL_SYSTEM"],
+  ["LG 17그램프로 RTX3050 (17Z90SP-EA5CK)외장그래픽모델 판매", "FULL_SYSTEM"],
+  ["그램 울트라7 16인치 RTX3050 램32 배터리효율100", "FULL_SYSTEM"],
+  ["HP [중고] [리퍼] HP 마이크로타워 데스크탑 280 Pro G8 (i5-11400/8G/S256/윈11P)", "FULL_SYSTEM"],
+  ["브랜드 데스크톱 (i5-11400/16G/H1T)", "FULL_SYSTEM"],
   ["레노버 슬림 데스크탑 (i5 8500, ram 16gb, ssd512gb)", "FULL_SYSTEM"],
   ["중고컴퓨터~i5~6500~렘16 ssd250 gtx1060", "FULL_SYSTEM"],
   ["게임용본체 i3-9100f 램8 1050ti ssd250 hdd1테라", "FULL_SYSTEM"],
@@ -390,6 +401,48 @@ const helloZenbookSystem = classifyPcPartListing({
 assert.equal(helloZenbookSystem.listing_kind, "FULL_SYSTEM",
   "portable product names in enriched detail must not enter GPU statistics");
 assert.equal(helloZenbookSystem.price_eligible, false);
+for (const [title, description] of [
+  ['ASUS PB63 i7-13700 미니PC', '분리 판매는 하지 않습니다. 윈도우11 호환 가능합니다.'],
+  ['A급 엘지 그램프로 17zd90tr-ex79k rtx5050 급처', 'SSD만 교체했고 정상 작동합니다.'],
+  ['ASUS ROG SCAR RTX4070', '게임 호환 문제 없습니다.'],
+  ['레이저 블레이드 RTX4070', 'SSD만 업그레이드했습니다.']
+]) assert.equal(classifyPcPartListing({title, description, price:900000}).listing_kind, 'FULL_SYSTEM', title);
+for (const [title, kind] of [
+  ['기가바이트 AORUS GeForce RTX 3080 3080TI 3090 그래픽 카드한 중고 교체용 액세서리 라이트 바', 'ACCESSORY_ONLY'],
+  ['GeForce rtx 3090 호환 nvlink 4 slot 팝니다.', 'ACCESSORY_ONLY'],
+  ['[구매/개인] RTX 3090 BLOWER 24GB', 'WANTED'],
+  ['RTX 3060 Ti 게이밍 그래픽카드 구매 합니다.', 'WANTED'],
+  ['LG그램 17인치 i7 17ZD90N-VX70K 인텔 SSD 512GB', 'FULL_SYSTEM'],
+  ['32인치 고사양 올인원PC (rtx3060ti 배그가능)', 'FULL_SYSTEM'],
+  ['중고 12세대 인텔 코어 i7-12700K CPU와 QXZR M-ATX 마더보드 콤보 8코어12스레드 PCIe 2.0x8 통합 그래픽', 'COMPONENT_BUNDLE']
+]) {
+  const actual = classifyPcPartListing({title, price:650000, currency:'KRW'});
+  assert.equal(actual.listing_kind, kind, title);
+  assert.equal(actual.price_eligible, false, title);
+}
+for (const title of [
+  'RTX 3090 24GB 그래픽카드 NVLink 지원',
+  'RTX 3080 그래픽카드 라이트 바 내장',
+  'LG그램 17인치에서 분리한 인텔 SSD 512GB 단품',
+  'Intel SSD 512GB LG그램 호환',
+  'SSD 512GB replacement for LG Gram 17ZD90N-VX70K',
+  'i7-12700K CPU compatible with motherboard',
+  'i7-12700K CPU 마더보드 호환',
+  'RTX 3060 Ti 올인원PC에서 분리한 그래픽카드 단품',
+  '인텔 i7-12700K CPU 단품',
+  'ASUS PB63 미니PC에서 분리한 i7-13700 CPU 단품',
+  'i7-13700 CPU ASUS 미니PC 호환',
+  'LG 그램 RTX5050에서 분리한 그래픽카드 단품',
+  '엘지 그램프로에서 탈거한 RTX5050 GPU 단품',
+  'LG grampro compatible RTX5050 GPU',
+  'rtx 3090ti 조텍 익스트림 홀로그램'
+]) assert.equal(classifyPcPartListing({title, price:200000}).listing_kind, 'SINGLE_COMPONENT', title);
+const sunrootPsu = classifyPcPartListing({title:'썬루트 TX750 750W 브론즈 파워 서플라이',price:35000});
+assert.equal(sunrootPsu.manufacturer, null);
+assert.equal(sunrootPsu.price_eligible, true, 'unknown maker is still a valid PSU sample');
+for (const title of ['Corsair TX750 750W 파워', 'TX750 750W 파워', '커세어 CX750(750w) 컴퓨터 파워'])
+  assert.equal(classifyPcPartListing({title,price:40000}).manufacturer, 'Corsair', title);
+assert.equal(classifyPcPartListing({title:'FSP TX750 750W 파워',price:40000}).manufacturer, 'FSP', 'explicit maker beats a series alias');
 for (const [title, listingKind] of [
   ["RX 9070 xt그래픽카드 구매합니다.", "WANTED"],
   ["기가바이트 RX 9070 XT 게이밍 OC 16GB 사기꾼", "REPORT"],
@@ -402,6 +455,9 @@ for (const [title, listingKind] of [
   assert.ok(actual.exclusion_reasons.includes(listingKind), `exclusion reason must explain ${listingKind}: ${title}`);
 }
 for (const title of [
+  "인텔 i5-11400 CPU 단품 중고",
+  "HP 데스크탑 280 Pro G8 (i5-11400/8G/S256/윈11P)에서 분리한 CPU 단품",
+  "HP 데스크탑 280 Pro G8 (i5-11400/8G/S256/윈11P) 호환 CPU",
   "삼성 DDR4 2400 16GB 데스크탑 램 단품",
   "WD BLUE HDD 1TB WD10EZEX 데스크탑 SATA 하드디스크",
   "시소닉 프라임 gx-1000 파워 서플라이 본체만 판매합니다",
@@ -1163,6 +1219,79 @@ assert.equal(movedOldBucketStats.daily.find((row) => row.date === movedDate)?.so
 
 const pipeline = new PcShadowPipeline({ ledger });
 await pipeline.initialize();
+const reservationCacheDb = new DatabaseSync(":memory:");
+try {
+  const cacheLedger = new PcPartsLedger({ db: reservationCacheDb, now: () => now });
+  cacheLedger.migrate();
+  const cachePipeline = new PcShadowPipeline({ ledger: cacheLedger });
+  await cachePipeline.initialize();
+  let referenceQueries = 0;
+  const getStats = cacheLedger.getPriceStats.bind(cacheLedger);
+  cacheLedger.getPriceStats = (...args) => { referenceQueries += 1; return getStats(...args); };
+  const reserved = {
+    item_id: 'joonggonara:cache-reservation', source_listing_id: 'cache-reservation', site: 'joonggonara',
+    title: 'MSI MAG B650M 박격포 WIFI 메인보드', description: '정상 작동', price: 100_000, currency: 'KRW',
+    url: 'https://web.joongna.com/product/cache-reservation', status: 'RESERVED'
+  };
+  let offset = 0;
+  const record = (item = reserved) => cachePipeline.recordItem(item, new Date(now + ++offset * 1000).toISOString());
+  record();
+  const repeated = record();
+  const beforeStable = referenceQueries;
+  const stable = record();
+  assert.ok(beforeStable > 0, 'exact SKU reservation obtains a real sold reference');
+  assert.equal(referenceQueries, beforeStable, 'unchanged reservation retains its sold-reference cache');
+  assert.equal(stable._pc_snapshot_created, false);
+  assert.equal(stable.reference_price, repeated.reference_price);
+  const snapshot = cacheLedger.latestSnapshot('joonggonara', 'cache-reservation');
+  assert.equal(snapshot.lifecycle_status, 'RESERVED');
+  assert.equal(reservationCacheDb.prepare('SELECT last_checked_at FROM raw_listings WHERE id=?')
+    .get(snapshot.raw_listing_id).last_checked_at, new Date(now + offset * 1000).toISOString(),
+  'cache reuse still records the actual observation time');
+  const changed = { ...reserved, price: 110_000 };
+  assert.equal(record(changed)._pc_snapshot_created, true);
+  const beforeChanged = referenceQueries;
+  record(changed);
+  assert.ok(referenceQueries > beforeChanged, 'a changed reservation invalidates the reference');
+  const beforeTransition = referenceQueries;
+  record({ ...changed, status: 'ACTIVE' });
+  assert.ok(referenceQueries > beforeTransition, 'a lifecycle transition refreshes the reference');
+  record(changed);
+  record(changed);
+  const current = cacheLedger.latestSnapshot('joonggonara', 'cache-reservation');
+  reservationCacheDb.prepare('UPDATE normalized_listings SET normalization_version=99 WHERE snapshot_id=?').run(current.id);
+  const restored = record(changed);
+  assert.equal(restored._pc_snapshot_created, false);
+  const beforeNormalization = referenceQueries;
+  record(changed);
+  assert.ok(referenceQueries > beforeNormalization, 'adding a missing normalization invalidates even an unchanged snapshot');
+  const rollbackVersions = { ...cachePipeline.pipelineVersions(), normalizationVersion: 2 };
+  const rollbackVersion = cacheLedger.registerPipelineVersion({ versionKey: 'cache-rollback', ...rollbackVersions });
+  const rollbackItem = { ...reserved, item_id: 'joonggonara:cache-rollback', source_listing_id: 'cache-rollback',
+    url: 'https://web.joongna.com/product/cache-rollback', status: 'SOLD' };
+  record(rollbackItem);
+  const soldSnapshot = cacheLedger.latestSnapshot('joonggonara', 'cache-rollback');
+  const rollbackNormalized = cachePipeline.normalizeItem(rollbackItem, new Date(now + offset * 1000).toISOString(),
+    rollbackVersions).normalized;
+  cacheLedger.insertNormalization(soldSnapshot.id, rollbackNormalized, 100_000, 'KRW', rollbackVersions);
+  record({ ...rollbackItem, status: 'ACTIVE' });
+  record({ ...rollbackItem, status: 'RESERVED' });
+  record({ ...rollbackItem, status: 'RESERVED' });
+  const rollbackOptions = { canonicalProductId: rollbackNormalized.canonicalProductId, marketPool: 'KR_C2C_USED',
+    condition: 'USED_WORKING', currency: 'KRW', days: 30, asOf: new Date(now + offset * 1000).toISOString(),
+    ...rollbackVersions };
+  assert.equal(cachePipeline.priceReference(rollbackOptions).sold.sample_count, 0,
+    'a reactivated reservation must not re-enter SOLD statistics through an older normalization');
+  const activeVersion = cacheLedger.getActivePipelineVersion();
+  cacheLedger.getActivePipelineVersion = () => ({ ...activeVersion, previous_version_key: rollbackVersion.version_key });
+  record({ ...rollbackItem, status: 'RESERVED' });
+  const beforeRollbackRead = referenceQueries;
+  assert.equal(cachePipeline.priceReference(rollbackOptions).sold.sample_count, 0,
+    'dual-writing the newer RESERVED normalization preserves the correct sold cohort');
+  assert.ok(referenceQueries > beforeRollbackRead, 'rollback normalization writes invalidate cached references');
+} finally {
+  reservationCacheDb.close();
+}
 const comparisonDb = new DatabaseSync(":memory:");
 try {
   const comparisonLedger = new PcPartsLedger({ db: comparisonDb, now: () => now });
@@ -1358,6 +1487,28 @@ const directoryFacetFixtures = [
   ["EXPANSION_CARD", "ASUS XG-C100C PCIe x16 랜카드 확장카드", "expansion:facet:network:asus", "ASUS"],
   ["ODD", "LG GP60NB50 외장 DVD ODD", "odd:facet:dvd-writer:lg", "LG"]
 ];
+for (const [title, capacityBucket] of [
+  ['타무즈 RX550 SSD 240GB', 'le-256-gb'],
+  ['컴퓨터 저장장치 2.5인치 SSD TAMMUZ RX550 480GB', '257-512-gb'],
+  ['탐뮤즈(Tammuz) RX550 PRO 1TB SATA SSD 판매합니다', '513-gb-1-tb']
+]) {
+  const result = pipeline.normalizeItem({ site: 'bunjang', title, price: 30000, currency: 'KRW' },
+    new Date(now).toISOString(), null, { reclassification: true }).normalized;
+  assert.equal(result.categoryCode, 'SSD', title);
+  assert.equal(result.canonicalProductId, `ssd:other-unclassified:capacity-bucket:${capacityBucket}`, title);
+  assert.equal(result.priceEligible, true, 'the genuine SSD remains searchable');
+  assert.equal(result.statisticsEligible, true, 'the genuine SSD remains a storage price sample');
+}
+for (const [title, description] of [
+  ['RX550 2GB', ''],
+  ['RX550 2GB 타무즈 RX550 SSD 240GB에서 테스트', ''],
+  ['RX 550 4GB 그래픽카드', '타무즈 RX550 SSD 240GB에서 테스트'],
+  ['RX550 그래픽카드 타무즈 RX550 SSD 240GB에서 테스트', '']
+]) {
+  const result = classifyPcPartListingPublic({ title, description, price: 30000, currency: 'KRW' });
+  assert.equal(result.canonical_product_id, 'gpu:amd:rx-550', title);
+  assert.equal(result.statistics_eligible, true, 'valid abbreviated GPU listings remain counted');
+}
 for (const [categoryCode, title, canonicalProductId, manufacturer] of directoryFacetFixtures) {
   const facetProjection = pipeline.recordItem({
     item_id: `joonggonara:facet-${categoryCode.toLowerCase()}`, site: "joonggonara", title,

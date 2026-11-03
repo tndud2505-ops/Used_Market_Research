@@ -1,7 +1,8 @@
 import { createAdfitSlots } from "./adfit.js?v=adfit-all-v3";
-import { createListingPricePreview } from "./listing-price-preview.mjs?v=shared-price-v2";
 import { toolQueryMatches } from "./pc-tools-catalog.mjs?v=parts-ux-v4";
 import { readJsonResponse } from "./read-json.mjs?v=lookup-recovery-v1";
+import { createPriceStore } from "./pc-tools-data.mjs?v=domestic-danawa-v1";
+import { listingPriceWarning } from "./listing-price-warning.mjs?v=iqr-disclosure-v1";
 
 const PRODUCT_QUERY_KEYS = new Set([
   "manufacturer", "model", "gpu_model", "board_brand", "usage", "configuration", "socket", "chipset", "form_interface", "capacity", "purpose", "rated_wattage",
@@ -9,7 +10,7 @@ const PRODUCT_QUERY_KEYS = new Set([
   "platform_vendor", "socket", "suffix", "memory_generation", "module_capacity_gb", "form_factor", "ecc", "buffering",
   "chipset", "capacity_bucket", "interface", "protocol", "pcie_generation", "use_class", "recording_technology",
   "watts_bucket", "atx_spec", "modularity", "efficiency", "product_kind", "subtype", "radiator_mm", "fan_mm", "chassis_class",
-  "motherboard_support", "side_panel", "host_interface", "bracket", "media_family", "capability", "placement",
+  "motherboard_support", "side_panel", "host_interface", "bracket", "media_family", "capability", "placement", "memory_usage", "speed_mt_s",
 ]);
 const FALLBACK_BROWSE_FLOWS = Object.freeze({
   CPU: Object.freeze([
@@ -26,8 +27,10 @@ const FALLBACK_BROWSE_FLOWS = Object.freeze({
     Object.freeze({ key: "vram_gb", label: "VRAM" }),
   ]),
   RAM: Object.freeze([
+    Object.freeze({ key: "memory_usage", label: "용도" }),
     Object.freeze({ key: "generation", label: "DDR 세대" }),
-    Object.freeze({ key: "module_capacity_gb", label: "모듈 용량" }),
+    Object.freeze({ key: "module_capacity_gb", label: "개당 용량" }),
+    Object.freeze({ key: "speed_mt_s", label: "속도" }),
     Object.freeze({ key: "manufacturer", label: "제조사" }),
   ]),
   MOTHERBOARD: Object.freeze([
@@ -58,6 +61,11 @@ const FILTER_COLUMN_DEFAULT = 224;
 let browseListingTimer = null;
 let browseGeneration = 0;
 let catalogSearchTimer = null;
+let mobileChoiceKind = "";
+let mobileFacetRow = "";
+const mobileDialogOpeners = new Map();
+const mobileOpenDialogs = new Set();
+let mobileScrollRestore = null;
 
 const state = {
   catalog: null,
@@ -101,6 +109,26 @@ const state = {
 };
 
 const dom = {
+  catalogSearchForm: document.querySelector("#catalog-search-form"),
+  catalogQuery: document.querySelector("#catalog-query"),
+  catalogQueryClear: document.querySelector("#catalog-query-clear"),
+  mobileCategoryOpen: document.querySelector("#mobile-category-open"),
+  mobileCategoryLabel: document.querySelector("#mobile-category-label"),
+  mobileModelOpen: document.querySelector("#mobile-model-open"),
+  mobileModelLabel: document.querySelector("#mobile-model-label"),
+  mobileSourceOpen: document.querySelector("#mobile-source-open"),
+  mobileSourceLabel: document.querySelector("#mobile-source-label"),
+  mobileListingSort: document.querySelector("#mobile-listing-sort"),
+  mobileListingCount: document.querySelector("#mobile-listing-count"),
+  mobileChoiceDialog: document.querySelector("#mobile-choice-dialog"),
+  mobileChoiceTitle: document.querySelector("#mobile-choice-title"),
+  mobileChoiceClose: document.querySelector("#mobile-choice-close"),
+  mobileChoiceSearch: document.querySelector("#mobile-choice-search"),
+  mobileChoiceQuery: document.querySelector("#mobile-choice-query"),
+  mobileChoiceList: document.querySelector("#mobile-choice-list"),
+  mobileMenuOpen: document.querySelector("#mobile-menu-open"),
+  mobileMenuDialog: document.querySelector("#mobile-menu-dialog"),
+  mobileMenuClose: document.querySelector("#mobile-menu-close"),
   catalogMeta: document.querySelector("#catalog-meta"),
   categorySelect: document.querySelector("#category-select"),
   workspaceTitle: document.querySelector("#workspace-title"),
@@ -120,6 +148,7 @@ const dom = {
   sourceFilterSummary: document.querySelector("#source-filter-summary"),
   resetFilters: document.querySelector("#reset-filters"),
   showMatchedModels: document.querySelector("#show-matched-models"),
+  filterOpen: document.querySelector("#up-filter-open"),
   catalogMessage: document.querySelector("#catalog-message"),
   modelSelect: document.querySelector("#model-select"),
   listingSection: document.querySelector("#listing-section"),
@@ -127,7 +156,6 @@ const dom = {
   listingCount: document.querySelector("#listing-count"),
   listingMessage: document.querySelector("#listing-message"),
   backToModels: document.querySelector("#back-to-models"),
-  modelDetailOpen: document.querySelector("#model-detail-open"),
   listingSort: document.querySelector("#listing-sort"),
   listingSortTabs: [...document.querySelectorAll(".listing-sort-tab")],
   listingRows: document.querySelector("#listing-rows"),
@@ -330,7 +358,6 @@ function sourceLabel(sourceId) {
     rethinkmall: "리씽크몰",
     danawa: "다나와",
     ebay: "eBay",
-    coolenjoy: "쿨엔조이",
     daangn: "당근",
   };
   return state.sources.find((source) => source.id === normalized)?.label || known[normalized] || normalized || "출처 미확인";
@@ -463,6 +490,7 @@ function resetListingPagination() {
   state.listingTotal = null;
   state.listingStatisticsCoverage = null;
   dom.listingCount.textContent = "";
+  if (dom.mobileListingCount) dom.mobileListingCount.textContent = "";
   dom.listingPageNumbers.replaceChildren();
   dom.listingPagination.hidden = true;
 }
@@ -472,6 +500,8 @@ function catalogCategoryProducts(category) {
 }
 
 function facetOptionLabel(key, value) {
+  if (key === 'memory_usage') return ({ DESKTOP: '일반·데스크톱용', LAPTOP: '노트북용', SERVER: '서버용', UNKNOWN: '혼재·확인 필요' })[value] || value;
+  if (key === 'speed_mt_s') return value === 'UNKNOWN' ? '확인 불가' : `${value} MT/s`;
   if (key === "suffix" && value === "NONE") return "일반";
   const capacityLabels = {
     LE_256_GB: "256GB 이하", "257_512_GB": "257~512GB", "513_GB_1_TB": "513GB~1TB",
@@ -583,6 +613,10 @@ function hasSelectedFacets() {
 }
 
 function productFacetValues(product, key) {
+  // Listing attributes vary within a RAM model; leave model selection intact.
+  if (productCategory(product) === 'RAM' && ['memory_usage', 'speed_mt_s'].includes(key)) {
+    return toArray((state.catalog?.listing_facet_options || state.catalog?.public_catalog?.listing_facet_options)?.RAM?.[key]).map(option => normalizeText(option.value));
+  }
   if (key === "manufacturer") {
     const category = productCategory(product);
     const manufacturer = category === "GPU"
@@ -629,6 +663,18 @@ function compareFacetOptions(left, right) {
 }
 
 function sortFacetOptions(category, key, options) {
+  if (category === 'RAM' && key === 'memory_usage') {
+    const order = ['DESKTOP', 'LAPTOP', 'SERVER', 'UNKNOWN'];
+    return [...options].sort((a,b) => order.indexOf(a.value) - order.indexOf(b.value));
+  }
+  if (category === 'RAM' && key === 'speed_mt_s') {
+    const generation = selectedFacetValues('generation');
+    const common = generation.length === 1 ? ({ DDR3: ['1066','1333','1600','1866','2133'],
+      DDR4: ['2133','2400','2666','2933','3200'], DDR5: ['4800','5200','5600','6000','6400'] })[generation[0]] : null;
+    const priority = common || ['1600','2666','3200','4800','5600'];
+    const rank = value => priority.includes(value) ? priority.indexOf(value) : value === 'UNKNOWN' ? Infinity : Number(value) + 10;
+    return [...options].sort((a,b) => rank(a.value) - rank(b.value));
+  }
   const makerOrder = {
     CPU: ["Intel", "AMD"],
     GPU: ["NVIDIA", "AMD", "Intel"],
@@ -663,6 +709,11 @@ function buildFacetUniverse() {
     const products = catalogCategoryProducts(code);
     universe[code] = {};
     browseFlowForCategory(code).forEach((step) => {
+      const listingOptions = (state.catalog?.listing_facet_options || state.catalog?.public_catalog?.listing_facet_options)?.[code]?.[step.key];
+      if (listingOptions) {
+        universe[code][step.key] = sortFacetOptions(code, step.key, listingOptions);
+        return;
+      }
       const counts = new Map();
       products.forEach((product) => {
         productFacetValues(product, step.key).forEach((value) => {
@@ -819,6 +870,7 @@ function renderCategories() {
   });
   dom.categorySelect.disabled = state.categories.length === 0;
   renderCategoryTabs();
+  syncMobileControls();
 }
 
 function renderCategoryTabs() {
@@ -862,6 +914,7 @@ function makeFacetButton(label, value, active, onClick, disabled = false) {
 }
 
 function makeFacetCheckboxRow(definition) {
+  if (mobileFacetMedia.matches) return makeMobileFacetRow(definition);
   const row = createElement("section", "model-facet-row");
   row.dataset.facetKey = definition.key;
   row.dataset.facetRow = definition.rowKey;
@@ -911,7 +964,7 @@ function makeFacetCheckboxRow(definition) {
     checkbox.checked = selectedSet.has(option.value);
     checkbox.addEventListener("change", () => updateFacet(definition.key, option.value, definition.rowKey));
     choice.append(checkbox, createElement("span", "model-facet-option-label", option.label));
-    const listingOnlyFacet = ["product_kind", "placement"].includes(definition.key)
+    const listingOnlyFacet = ["product_kind", "placement", "memory_usage", "speed_mt_s"].includes(definition.key)
       || (state.categoryCode === "PSU" && definition.key === "form_factor");
     if (!listingOnlyFacet && Number.isFinite(Number(option.count))) {
       choice.append(createElement("span", "model-facet-count", `${Number(option.count).toLocaleString("ko-KR")}개`));
@@ -935,6 +988,79 @@ function makeFacetCheckboxRow(definition) {
   }
   row.append(disclosure, body);
   return row;
+}
+
+function makeMobileFacetRow(definition) {
+  const row = createElement("section", "model-facet-row mobile-facet-panel");
+  row.dataset.facetKey = definition.key;
+  row.dataset.facetRow = definition.rowKey;
+  row.id = `mobile-facet-panel-${definition.rowKey}`;
+  row.setAttribute("role", "tabpanel");
+  row.setAttribute("aria-labelledby", `mobile-facet-tab-${definition.rowKey}`);
+  const selected = new Set(selectedFacetValues(definition.key));
+  const values = createElement("div", "model-facet-values");
+  const all = createElement("label", "model-facet-choice mobile-facet-all");
+  const clear = document.createElement("input");
+  clear.type = "checkbox"; clear.name = definition.key; clear.value = ""; clear.dataset.facetClear = "true";
+  clear.checked = !definition.options.some(option => selected.has(option.value));
+  clear.addEventListener("change", () => {
+    const rowValues = new Set(definition.options.map(option => option.value));
+    const next = selectedFacetValues(definition.key).filter(value => !rowValues.has(value));
+    if (next.length) state.facets[definition.key] = next;
+    else delete state.facets[definition.key];
+    syncCatalogUrl(); updateFacetSelectionUi(); refreshBrowseScope(180);
+  });
+  all.append(createElement("span", "model-facet-option-label", "전체"), clear);
+  values.append(all);
+  for (const option of definition.options) {
+    const choice = createElement("label", "model-facet-choice");
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox"; checkbox.name = definition.key; checkbox.value = option.value;
+    checkbox.checked = selected.has(option.value);
+    checkbox.addEventListener("change", () => updateFacet(definition.key, option.value, definition.rowKey));
+    choice.append(createElement("span", "model-facet-option-label", option.label), checkbox);
+    values.append(choice);
+  }
+  row.append(values); return row;
+}
+
+function renderMobileFacetTabs(definitions) {
+  const tabs = document.querySelector("#mobile-filter-tabs");
+  if (!tabs) return;
+  const focused = tabs.contains(document.activeElement) ? document.activeElement.dataset.facetTab : null;
+  if (!definitions.some(definition => definition.rowKey === mobileFacetRow)) mobileFacetRow = definitions[0]?.rowKey || "";
+  tabs.replaceChildren();
+  for (const definition of definitions) {
+    const tab = createElement("button", "mobile-filter-tab", definition.label);
+    tab.type = "button"; tab.id = `mobile-facet-tab-${definition.rowKey}`; tab.dataset.facetTab = definition.rowKey;
+    tab.setAttribute("role", "tab"); tab.setAttribute("aria-controls", `mobile-facet-panel-${definition.rowKey}`);
+    const active = definition.rowKey === mobileFacetRow;
+    tab.setAttribute("aria-selected", String(active)); tab.tabIndex = active ? 0 : -1;
+    tab.addEventListener("click", () => {
+      mobileFacetRow = definition.rowKey; renderMobileFacetTabs(definitions);
+      document.querySelector("#up-filter-slot").scrollTop = 0;
+      document.querySelector(`#mobile-facet-tab-${definition.rowKey}`)?.focus({preventScroll:true});
+    });
+    tab.addEventListener("keydown", event => {
+      if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+      event.preventDefault();
+      const index = definitions.findIndex(item => item.rowKey === definition.rowKey);
+      const next = event.key === "Home" ? 0 : event.key === "End" ? definitions.length - 1
+        : (index + (event.key === "ArrowRight" ? 1 : -1) + definitions.length) % definitions.length;
+      tabs.children[next]?.click();
+    });
+    tabs.append(tab);
+  }
+  dom.facetRows.querySelectorAll(".mobile-facet-panel").forEach(row => { row.hidden = row.dataset.facetRow !== mobileFacetRow; });
+  const labels = definitions.flatMap(definition => definition.options
+    .filter(option => selectedFacetValues(definition.key).includes(option.value)).map(option => option.label));
+  const summary = document.querySelector("#mobile-filter-selection");
+  summary.textContent = labels.length ? [...new Set(labels)].join(" · ") : "전체";
+  summary.title = summary.textContent;
+  const category = state.categories.find(item => categoryCode(item) === state.categoryCode);
+  document.querySelector("#up-filter-title").textContent = `${category ? categoryLabel(category) : "상품"} 필터`;
+  document.querySelector("#up-filter-reset").disabled = dom.resetFilters.hidden;
+  if (focused) document.querySelector(`#mobile-facet-tab-${focused}`)?.focus({preventScroll:true});
 }
 
 function renderActiveFilterSummary(definitions) {
@@ -986,14 +1112,16 @@ function updateFacetSelectionUi(definitions = facetDefinitionsForCategory(state.
         : "전체";
     }
     row.querySelectorAll('input[type="checkbox"]').forEach((checkbox) => {
-      checkbox.checked = selected.has(checkbox.value);
+      checkbox.checked = checkbox.dataset.facetClear ? labels.length === 0 : selected.has(checkbox.value);
     });
   });
 
   renderActiveFilterSummary(definitions);
   dom.resetFilters.hidden = !hasSelectedFacets() && !state.query
     && !state.selectedSites.size && !listingPriceControlsActive();
+  renderMobileFacetTabs(definitions);
   updateMatchedModelButton();
+  syncMobileControls();
 }
 
 function renderFacets() {
@@ -1025,7 +1153,7 @@ function renderFacets() {
     const target = focusedFacet.name
       ? [...(row?.querySelectorAll('input') || [])].find(n => n.name === focusedFacet.name && n.value === focusedFacet.value)
       : row?.querySelector(focusedFacet.more ? '.facet-more' : 'button.facet-disclosure');
-    (target || dom.modelFilterToggle)?.focus({ preventScroll: true });
+    (target || (mobileFacetMedia.matches && document.querySelector('#mobile-filter-tabs [aria-selected="true"]')) || dom.modelFilterToggle)?.focus({ preventScroll: true });
   }
 }
 
@@ -1039,6 +1167,7 @@ function setModelFiltersCollapsed(collapsed) {
 function syncListingSortTabs() {
   const activeSort = state.listingSort || dom.listingSort.value || "recent";
   dom.listingSort.value = activeSort;
+  if (dom.mobileListingSort) dom.mobileListingSort.value = activeSort;
   dom.listingSortTabs.forEach((button) => {
     button.setAttribute("aria-pressed", String(button.dataset.sort === activeSort));
   });
@@ -1056,13 +1185,12 @@ function syncSourceFilterSummary() {
 
 function reloadListingsForControls(focusSourceValue) {
   syncCatalogUrl();
-  updatePriceGraphLink();
   updateFacetSelectionUi();
   renderSourceFilters();
   if (focusSourceValue !== undefined) {
     window.requestAnimationFrame(() => {
-      dom.sourceFilters.querySelector(`input[data-value="${CSS.escape(focusSourceValue)}"]`)
-        ?.focus({ preventScroll: true });
+      const input = dom.sourceFilters.querySelector(`input[data-value="${CSS.escape(focusSourceValue)}"]`);
+      if (input?.getClientRects().length) input.focus({ preventScroll: true });
     });
   }
   if (state.selectedProduct) {
@@ -1077,13 +1205,13 @@ function renderSourceFilters() {
   dom.sourceFilters.replaceChildren();
   dom.sourceFacetRow.hidden = state.sources.length === 0;
   syncSourceFilterSummary();
+  syncMobileControls();
   if (!state.sources.length) return;
   const priority = ["joonggonara", "bunjang", "danawa", "ebay"];
   const compactLabels = {
     joonggonara: "중고나라",
     bunjang: "번개장터",
     hellomarket: "헬로마켓",
-    coolenjoy: "쿨엔조이",
     danawa: "다나와",
   };
   const orderedSources = [...state.sources].sort((left, right) => {
@@ -1139,6 +1267,7 @@ function selectCategory(code) {
   if (!nextCode && !state.query) return;
   if (nextCode === state.categoryCode) return;
   state.categoryCode = nextCode;
+  state.availableFacets = null;
   state.facets = {};
   state.openFacetRows.clear();
   state.expandedFacetOptions.clear();
@@ -1261,8 +1390,8 @@ function renderProducts() {
     && Number(state.modelCounts[selectedId] || 0) === 0));
   // Model count is not listing count. Keep the results region for every state.
   dom.listingSection.hidden = false;
-  updatePriceGraphLink();
   updateMatchedModelButton();
+  syncMobileControls();
 }
 
 function buildProductQuery(cursor = "") {
@@ -1354,6 +1483,7 @@ async function loadProducts() {
     if (state.productRequest === controller) {
       state.productRequest = null;
       dom.modelSelect.removeAttribute("aria-busy");
+      syncMobileControls();
     }
   }
 }
@@ -1367,7 +1497,6 @@ function resetDetail() {
   document.body.classList.remove("has-selected-product");
   dom.listingSection.hidden = false;
   dom.backToModels.hidden = true;
-  dom.modelDetailOpen.hidden = true;
   dom.listingRows.replaceChildren();
   dom.listingEmpty.hidden = true;
   showListingMessage("");
@@ -1400,7 +1529,6 @@ function showScopedListings(listingDelayMs = 0) {
     ? "선택한 조건에 맞는 현재 매물이 없습니다."
     : "선택한 조건에 맞는 모델이 없습니다.";
   syncCatalogUrl();
-  updatePriceGraphLink();
   if (!shouldAutoLoadScopedListings()) {
     dom.listingCount.textContent = "0건";
     dom.listingEmpty.hidden = false;
@@ -1427,18 +1555,6 @@ async function refreshBrowseScope(listingDelayMs = 0, requestedModel = '') {
   const requested = requestedModel && state.products.find(item => productId(item) === requestedModel);
   if (requested) { selectProduct(requested); return; }
   showScopedListings(listingDelayMs);
-}
-
-function updatePriceGraphLink() {
-  const product = pricePreviewProduct();
-  dom.modelDetailOpen.hidden = !product;
-  if (!product) { dom.modelDetailOpen.removeAttribute("aria-label"); return; }
-  dom.modelDetailOpen.setAttribute("aria-label", productName(product) + " 가격 그래프 보기");
-}
-
-function pricePreviewProduct() {
-  const candidates = state.products.filter(isSelectableModel);
-  return state.selectedProduct || (state.productTotal === 1 && candidates.length === 1 ? candidates[0] : null);
 }
 
 function revealSection(section) {
@@ -1515,7 +1631,8 @@ function buildListingQuery(cursor = "", includeSelectedProduct = true) {
   }
   const listingFacetKeys = new Set(state.categoryCode === "SSD" ? ["product_kind"]
     : state.categoryCode === "HDD" ? ["placement"]
-      : state.categoryCode === "PSU" ? ["form_factor"] : []);
+      : state.categoryCode === "PSU" ? ["form_factor"]
+        : state.categoryCode === "RAM" ? ["memory_usage", "speed_mt_s"] : []);
   Object.keys(state.facets).sort().forEach((key) => {
     if (!PRODUCT_QUERY_KEYS.has(key) || (selectedProduct && !listingFacetKeys.has(key))) return;
     selectedFacetValues(key).sort().forEach((value) => params.append(key, value));
@@ -1538,16 +1655,10 @@ function renderListingCount() {
   const total = Number.isFinite(state.listingTotal)
     ? state.listingTotal
     : Number.isSafeInteger(coverageCount) && coverageCount >= 0 ? coverageCount : null;
-  const parts = Number.isFinite(total) ? [`${total.toLocaleString("ko-KR")}건`] : [];
-  if (coverage && pricePreviewProduct()) {
-    const eligible = Number(coverage.eligible_count);
-    if (Number.isSafeInteger(eligible) && eligible >= 0) {
-      parts.push(eligible > 0 ? `통계 후보 ${eligible.toLocaleString("ko-KR")}건` : "통계 후보 없음");
-      const minimum = Number(coverage.minimum_representative_sample_count);
-      if (eligible > 0 && Number.isSafeInteger(minimum) && eligible < minimum) parts.push(`대표가격은 ${minimum}건부터`);
-    }
+  dom.listingCount.textContent = Number.isFinite(total) ? formatCount(total) : "";
+  if (dom.mobileListingCount) {
+    dom.mobileListingCount.textContent = Number.isFinite(state.listingTotal) ? formatCount(state.listingTotal) : "";
   }
-  dom.listingCount.textContent = parts.join(" · ");
 }
 
 function modelAvailabilityScope() {
@@ -1698,6 +1809,26 @@ function renderFavoriteButton(button, listing, titleText, isFavorite) {
   button.title = isFavorite ? "이 브라우저 관심 해제" : "이 브라우저에 관심 저장";
 }
 
+const listingWarningStores = {
+  KRW: createPriceStore(updateListingPriceWarnings),
+  USD: createPriceStore(updateListingPriceWarnings, { marketPool: 'OVERSEAS_USED', currency: 'USD' }),
+};
+
+function updateListingPriceWarnings() {
+  const byId = new Map(state.listings.map(listing => [listingIdentity(listing), listing]));
+  for (const node of dom.listingRows.querySelectorAll('[data-price-warning-id]')) {
+    const listing = byId.get(node.dataset.priceWarningId);
+    const record = listing && listingWarningStores[listing.currency]?.get(listing.canonical_product_id, 30);
+    const warning = record?.state === 'ready' && Date.now() - record.loadedAt < 300000
+      ? listingPriceWarning(listing, record.data) : null;
+    node.hidden = !warning;
+    node.textContent = warning ? '가격 확인 필요' : '';
+    node.title = warning
+      ? `최근 30일 같은 모델·상태의 표시가격 ${warning.sampleCount}건에서 벗어난 단가입니다. 원문 오기나 거래가격을 확정한 것은 아닙니다. 원래 표시가격을 유지하며 전체 평균에는 포함됩니다.`
+      : '';
+  }
+}
+
 function renderListings() {
   dom.listingRows.replaceChildren();
   const unique = new Map();
@@ -1751,13 +1882,17 @@ function renderListings() {
     body.append(title);
     const listingProduct = state.selectedProduct
       || state.products.find((product) => productId(product) === normalizeText(listing.canonical_product_id));
+    const listingCategory = productCategory(listingProduct) || normalizeText(listing.category_code).toUpperCase() || state.categoryCode;
+    const mobileNotes = [];
     let specText = listingProduct ? productSpecText(listingProduct) : "";
     if (listingProduct && productCategory(listingProduct) === "RAM") {
       const capacity = Number(listingProduct.key_specs?.module_capacity_gb);
       const count = Number(listing.quantity);
       const known = Number.isSafeInteger(count) && count > 0 && Number(listing.quantity_confidence) >= 0.9;
       const generation = normalizeText(listingProduct.key_specs?.memory_generation);
-      specText = [generation, capacity > 0 ? `${capacity}GB / 개` : "",
+      const usage = ({ DESKTOP: '일반·데스크톱용', LAPTOP: '노트북용', SERVER: '서버용', UNKNOWN: '혼재·확인 필요' })[listing.memory_usage];
+      const speed = listing.speed_mt_s && listing.speed_mt_s !== 'UNKNOWN' ? `${listing.speed_mt_s} MT/s` : '속도 확인 불가';
+      specText = [usage, generation, capacity > 0 ? `${capacity}GB / 개` : "", speed,
         known ? `${count}개 판매${capacity > 0 ? ` · 총 ${capacity * count}GB` : ""}` : "판매 수량 확인 필요"].filter(Boolean).join(" · ");
     }
     if (specText && specText !== "—") body.append(createElement("div", "listing-spec", specText));
@@ -1799,8 +1934,33 @@ function renderListings() {
     const quantity = Math.max(1, Number(firstDefined(listing?.quantity, 1)) || 1);
     if (quantity > 1) meta.append(createElement("span", "listing-scope", listingScopeLabel(listing)));
     if (meta.childElementCount) body.append(meta);
+    const mobileMeta = createElement("div", "mobile-listing-meta");
+    const mobileSource = createElement("span", "mobile-listing-source", sourceLabel(sourceId));
+    mobileSource.dataset.source = sourceId;
+    mobileMeta.append(mobileSource);
+    if (listingTime) {
+      const time = createElement("time", "mobile-listing-time", postedAtRaw ? listingTime : `확인 ${listingTime}`);
+      time.title = postedAtRaw ? "등록 시각" : "최근 확인 시각";
+      time.dateTime = normalizeText(firstDefined(postedAtRaw, observedAtRaw));
+      mobileMeta.append(" · ", time);
+    }
+    if (quantity > 1 || normalizeText(listing.price_scope).toUpperCase() === "UNIT") mobileNotes.push(listingScopeLabel(listing));
+    if (listingCategory === "MOTHERBOARD" && listingNodeType !== "PRODUCT") mobileNotes.push("모델 미확인");
+    if (listingCategory === "RAM") {
+      const usageNote = { LAPTOP: "노트북용", SERVER: "서버용", UNKNOWN: "용도 확인 필요" }[normalizeText(listing.memory_usage).toUpperCase()];
+      if (usageNote) mobileNotes.push(usageNote);
+    }
+    if (normalizeText(listing.market_pool).toUpperCase() === "KR_DEALER_USED") mobileNotes.push("업체 중고");
+    if (listingCategory === "RAM" && !(Number.isSafeInteger(Number(listing.quantity)) && Number(listing.quantity) > 0
+      && Number(listing.quantity_confidence) >= 0.9)) mobileNotes.push("판매 수량 확인 필요");
     const commerce = createElement("div", "listing-commerce");
     commerce.append(createElement("span", "listing-price", listingPrice(listing)));
+    commerce.append(mobileMeta);
+    if (mobileNotes.length) commerce.append(createElement("div", "mobile-listing-note", mobileNotes.join(" · ")));
+    const priceWarning = createElement('span', 'listing-price-warning');
+    priceWarning.dataset.priceWarningId = listingIdentity(listing);
+    priceWarning.hidden = true;
+    commerce.append(priceWarning);
     commerce.append(createElement("span", `listing-sale-state ${lifecycle === "RESERVED" ? "is-reserved" : "is-active"}`, listingConditionLabel(lifecycle || "ACTIVE")));
     if (listingTime) {
       const time = createElement("time", "listing-time", postedAtRaw ? listingTime : `확인 ${listingTime}`);
@@ -1829,6 +1989,16 @@ function renderListings() {
   dom.listingEmpty.hidden = visibleListings.length > 0;
   renderListingPagination();
   adfit.setEligible(visibleListings.length > 0);
+  updateListingPriceWarnings();
+  // One cached request per selected model/currency, never one per listing and
+  // never a live marketplace request. Late responses only annotate current rows.
+  if (state.selectedProduct) {
+    const id = productId(state.selectedProduct);
+    for (const currency of new Set(visibleListings.filter(item => item.canonical_product_id === id).map(item => item.currency))) {
+      const store = listingWarningStores[currency];
+      if (store && store.get(id, 30)?.state !== 'loading') void store.load([state.selectedProduct], 30);
+    }
+  }
 }
 
 function renderListingPagination() {
@@ -2010,6 +2180,7 @@ async function loadCatalog() {
     if (["recent", "price_asc", "price_desc"].includes(initialParams.get("sort"))) state.listingSort = initialParams.get("sort");
     syncListingSortTabs();
     state.query = initialQuery;
+    syncCatalogSearchInput();
     state.categoryCode = initialQuery && !requestedCategory ? "" : categoryCode(initialCategory);
     state.facets = {};
     if (state.categoryCode) {
@@ -2047,21 +2218,22 @@ function applyCatalogSearch(rawQuery, force = false) {
   clearTimeout(catalogSearchTimer);
   catalogSearchTimer = null;
   const nextQuery = normalizeText(rawQuery);
-  if (!force && nextQuery === state.query) return;
+  if (!force && nextQuery === state.query && (!nextQuery || !state.categoryCode)) return;
   state.query = nextQuery;
   if (state.query) {
+    state.categoryCode = "";
     state.facets = {};
     state.openFacetRows.clear();
     state.expandedFacetOptions.clear();
     const firstFacet = state.categoryCode ? browseFlowForCategory(state.categoryCode)[0]?.key : "";
     if (firstFacet) state.openFacetRows.add(firstFacet);
-    renderCategories();
   } else if (!state.categoryCode) {
     state.categoryCode = categoryCode(state.categories[0]);
     const firstFacet = browseFlowForCategory(state.categoryCode)[0]?.key;
     if (firstFacet) state.openFacetRows.add(firstFacet);
-    renderCategories();
   }
+  syncCatalogSearchInput();
+  renderCategories();
   syncCatalogUrl();
   updateWorkspaceHeading();
   renderFacets();
@@ -2078,6 +2250,7 @@ dom.resetFilters.addEventListener("click", () => {
   state.selectedSites.clear();
   resetListingControls();
   state.query = "";
+  syncCatalogSearchInput();
   if (!state.categoryCode) state.categoryCode = categoryCode(state.categories[0]);
   const firstFacet = browseFlowForCategory(state.categoryCode)[0]?.key;
   if (firstFacet) state.openFacetRows.add(firstFacet);
@@ -2127,12 +2300,6 @@ dom.backToModels.addEventListener("click", () => {
   window.requestAnimationFrame(() => dom.modelSelect.focus({ preventScroll: true }));
 });
 
-const pricePreview = createListingPricePreview(document.querySelector("#listing-price-dialog"), dom.modelDetailOpen);
-dom.modelDetailOpen.addEventListener("click", () => {
-  const product = pricePreviewProduct();
-  if (product) pricePreview.open(product, [...state.selectedSites][0] || "", state.listingStatisticsCoverage);
-});
-
 function setupConceptAControls() {
   const dialog = document.querySelector("#up-filter-dialog"), slot = document.querySelector("#up-filter-slot");
   const opener = document.querySelector("#up-filter-open");
@@ -2143,22 +2310,216 @@ function setupConceptAControls() {
       if (dom.modelFilters.hidden || dialog.open) return;
       slot.append(dom.modelFilters);
       setModelFiltersCollapsed(false);
-      dialog.showModal();
+      openMobileDialog(dialog, opener);
     });
-    dialog.addEventListener("close", () => {
-      home.after(dom.modelFilters);
-      setModelFiltersCollapsed(compactFilterMedia.matches);
-      if (compactFilterMedia.matches) opener.focus({ preventScroll: true });
+    setupMobileDialog(dialog, document.querySelector("#up-filter-close"), {
+      onClose() {
+        home.after(dom.modelFilters);
+        setModelFiltersCollapsed(compactFilterMedia.matches);
+      },
+      restoreFocus: () => compactFilterMedia.matches,
     });
-    document.querySelector("#up-filter-close")?.addEventListener("click", () => dialog.close());
     document.querySelector("#up-filter-done")?.addEventListener("click", () => {
       dialog.close();
       requestAnimationFrame(() => revealSection(dom.listingSection));
     });
+    document.querySelector("#up-filter-reset")?.addEventListener("click", () => dom.resetFilters.click());
     compactFilterMedia.addEventListener("change", event => { if (!event.matches && dialog.open) dialog.close(); });
   }
 }
 
+function syncCatalogSearchInput() {
+  if (dom.catalogQuery) dom.catalogQuery.value = state.query;
+  if (dom.catalogQueryClear) dom.catalogQueryClear.hidden = !state.query;
+}
+
+function syncMobileControls() {
+  if (dom.filterOpen) {
+    dom.filterOpen.dataset.active = String(hasSelectedFacets());
+    const count = selectedFacetCount();
+    dom.filterOpen.setAttribute("aria-label", count ? `상세 필터 · ${count}개 조건 선택` : "상세 필터");
+  }
+  const category = (state.categories || []).find(item => categoryCode(item) === state.categoryCode);
+  const fullCategoryLabel = category ? categoryLabel(category) : "전체 부품";
+  const fullModelLabel = state.selectedProduct ? productName(state.selectedProduct) : "모델 선택";
+  if (dom.mobileCategoryLabel) dom.mobileCategoryLabel.textContent = state.categoryCode === "PSU" ? "파워" : fullCategoryLabel;
+  if (dom.mobileCategoryOpen) {
+    dom.mobileCategoryOpen.title = fullCategoryLabel;
+    dom.mobileCategoryOpen.setAttribute("aria-label", `${fullCategoryLabel} · 부품 선택`);
+  }
+  if (dom.mobileModelLabel) dom.mobileModelLabel.textContent = fullModelLabel.replace(/^(?:NVIDIA\s+GeForce|AMD\s+Radeon|Intel\s+Core)\s+/i, "");
+  if (dom.mobileModelOpen) {
+    dom.mobileModelOpen.title = fullModelLabel;
+    dom.mobileModelOpen.setAttribute("aria-label", state.selectedProduct ? `${fullModelLabel} · 모델 선택` : fullModelLabel);
+  }
+  const source = [...(state.selectedSites || [])][0];
+  if (dom.mobileSourceLabel) dom.mobileSourceLabel.textContent = source === "ebay" ? "eBay (USD)" : source ? sourceLabel(source) : "국내 전체";
+  if (dom.mobileCategoryOpen) dom.mobileCategoryOpen.disabled = !(state.categories || []).length;
+  if (dom.mobileModelOpen) dom.mobileModelOpen.disabled = !state.catalog || Boolean(state.productRequest && !state.products.length);
+  if (dom.mobileSourceOpen) dom.mobileSourceOpen.disabled = !(state.sources || []).length;
+  if (dom.mobileChoiceDialog?.open) renderMobileChoices();
+}
+
+function openMobileDialog(dialog, opener, focusTarget) {
+  if (!dialog || dialog.open) return;
+  mobileDialogOpeners.set(dialog, opener);
+  dialog.showModal();
+  if (!mobileOpenDialogs.size) {
+    mobileScrollRestore = { body: document.body.style.overflow, root: document.documentElement.style.overflow };
+    document.body.style.overflow = "hidden";
+    document.documentElement.style.overflow = "hidden";
+    document.body.classList.add("has-mobile-sheet");
+  }
+  mobileOpenDialogs.add(dialog);
+  opener?.setAttribute("aria-expanded", "true");
+  focusTarget?.focus({ preventScroll: true });
+}
+
+function setupMobileDialog(dialog, closeButton, { onClose, restoreFocus = () => true } = {}) {
+  if (!dialog) return;
+  let backdropDown = false;
+  const outside = event => {
+    const rect = dialog.getBoundingClientRect();
+    return event.target === dialog && (event.clientX < rect.left || event.clientX > rect.right
+      || event.clientY < rect.top || event.clientY > rect.bottom);
+  };
+  dialog.addEventListener("pointerdown", event => { backdropDown = outside(event); });
+  dialog.addEventListener("pointercancel", () => { backdropDown = false; });
+  dialog.addEventListener("click", event => {
+    if (backdropDown && outside(event)) dialog.close();
+    backdropDown = false;
+  });
+  closeButton?.addEventListener("click", () => dialog.close());
+  // Escape uses the native dialog cancel/close lifecycle as well.
+  dialog.addEventListener("close", () => {
+    backdropDown = false;
+    mobileOpenDialogs.delete(dialog);
+    if (!mobileOpenDialogs.size && mobileScrollRestore) {
+      document.body.style.overflow = mobileScrollRestore.body;
+      document.documentElement.style.overflow = mobileScrollRestore.root;
+      document.body.classList.remove("has-mobile-sheet");
+      mobileScrollRestore = null;
+    }
+    const opener = mobileDialogOpeners.get(dialog);
+    mobileDialogOpeners.delete(dialog);
+    opener?.setAttribute("aria-expanded", "false");
+    onClose?.();
+    if (restoreFocus()) requestAnimationFrame(() => {
+      if (!dialog.open && opener?.isConnected && opener.getClientRects().length) opener.focus({ preventScroll: true });
+    });
+  });
+}
+
+function renderMobileChoices() {
+  const list = dom.mobileChoiceList;
+  if (!list) return;
+  const kind = mobileChoiceKind;
+  const query = kind === "model" ? normalizeText(dom.mobileChoiceQuery?.value) : "";
+  let choices = [];
+  let selected = "";
+  if (kind === "category") {
+    selected = state.categoryCode;
+    choices = (state.query ? [{ value: "", label: "전체 부품" }] : []).concat(
+      state.categories.map(category => ({ value: categoryCode(category), label: categoryLabel(category) })));
+  } else if (kind === "model") {
+    selected = state.selectedProduct ? productId(state.selectedProduct) : "";
+    const products = state.products.filter(isSelectableModel).filter(product => toolQueryMatches(product, query));
+    choices = [{ value: "", label: "전체 모델" }, ...products.map(product => {
+      const value = productId(product);
+      const count = state.modelCounts === null ? null : Number(state.modelCounts[value] || 0);
+      return { value, label: productName(product), note: Number.isFinite(count) && count >= 0 ? formatCount(count) : "" };
+    })];
+  } else if (kind === "source") {
+    selected = [...state.selectedSites][0] || "";
+    choices = [...dom.sourceFilters.querySelectorAll('input[type="radio"]')].map(input => ({
+      value: input.dataset.value,
+      label: input.dataset.value === "" ? "국내 전체" : input.parentElement.querySelector("span")?.textContent || input.getAttribute("aria-label"),
+    }));
+  }
+  list.replaceChildren();
+  for (const choice of choices) {
+    const label = createElement("label", "mobile-choice-option");
+    const input = document.createElement("input");
+    input.type = "radio";
+    input.name = "mobile-choice";
+    input.value = choice.value;
+    input.checked = choice.value === selected;
+    input.addEventListener("change", () => chooseMobileOption(kind, choice.value));
+    // Selecting the currently checked option still dismisses the sheet.
+    input.addEventListener("click", () => { if (choice.value === selected) dom.mobileChoiceDialog.close(); });
+    label.append(input, createElement("span", "mobile-choice-name", choice.label));
+    if (choice.note) label.append(createElement("span", "mobile-choice-note", choice.note));
+    list.append(label);
+  }
+  if (kind === "model" && choices.length === 1) {
+    list.append(createElement("p", "mobile-choice-empty", state.productRequest ? "모델을 불러오는 중입니다." : "일치하는 모델이 없습니다."));
+  }
+}
+
+function chooseMobileOption(kind, value) {
+  const control = kind === "category" ? dom.categorySelect : kind === "model" ? dom.modelSelect
+    : [...dom.sourceFilters.querySelectorAll('input[type="radio"]')].find(input => input.dataset.value === value);
+  if (!control) return;
+  dom.mobileChoiceDialog.close();
+  if (kind === "source") control.checked = true;
+  else control.value = value;
+  control.dispatchEvent(new Event("change", { bubbles: true }));
+  syncMobileControls();
+}
+
+function setupMobileControls() {
+  let composing = false;
+  dom.catalogQuery?.addEventListener("compositionstart", () => { composing = true; });
+  dom.catalogQuery?.addEventListener("compositionend", () => { composing = false; });
+  dom.catalogQuery?.addEventListener("keydown", event => {
+    if (event.key === "Enter" && (composing || event.isComposing || event.keyCode === 229)) event.preventDefault();
+  });
+  dom.catalogQuery?.addEventListener("input", () => {
+    if (dom.catalogQueryClear) dom.catalogQueryClear.hidden = !dom.catalogQuery.value;
+  });
+  dom.catalogSearchForm?.addEventListener("submit", event => {
+    event.preventDefault();
+    if (!composing) applyCatalogSearch(dom.catalogQuery?.value || "");
+  });
+  dom.catalogQueryClear?.addEventListener("click", () => {
+    applyCatalogSearch("", true);
+    dom.catalogQuery?.focus({ preventScroll: true });
+  });
+  setupMobileDialog(dom.mobileChoiceDialog, dom.mobileChoiceClose);
+  for (const [kind, opener, title] of [["category", dom.mobileCategoryOpen, "부품 선택"], ["model", dom.mobileModelOpen, "모델 선택"], ["source", dom.mobileSourceOpen, "거래 사이트"]]) {
+    opener?.addEventListener("click", () => {
+      if (!dom.mobileChoiceDialog) return;
+      mobileChoiceKind = kind;
+      dom.mobileChoiceTitle.textContent = title;
+      dom.mobileChoiceSearch.hidden = kind !== "model";
+      dom.mobileChoiceQuery.value = "";
+      renderMobileChoices();
+      openMobileDialog(dom.mobileChoiceDialog, opener, dom.mobileChoiceList.querySelector('input:checked') || dom.mobileChoiceClose);
+    });
+  }
+  dom.mobileChoiceQuery?.addEventListener("input", renderMobileChoices);
+  dom.mobileListingSort?.addEventListener("change", () => {
+    const sort = dom.mobileListingSort.value;
+    if (!["recent", "price_asc", "price_desc"].includes(sort) || sort === state.listingSort) return;
+    state.listingSort = sort;
+    syncListingSortTabs();
+    reloadListingsForControls();
+  });
+  setupMobileDialog(dom.mobileMenuDialog, dom.mobileMenuClose);
+  dom.mobileMenuOpen?.addEventListener("click", () => openMobileDialog(dom.mobileMenuDialog, dom.mobileMenuOpen));
+  dom.mobileMenuDialog?.addEventListener("click", event => {
+    if (event.target.closest("a[href]")) dom.mobileMenuDialog.close();
+  });
+  compactFilterMedia.addEventListener("change", event => {
+    if (!event.matches) {
+      if (dom.mobileChoiceDialog?.open) dom.mobileChoiceDialog.close();
+      if (dom.mobileMenuDialog?.open) dom.mobileMenuDialog.close();
+    }
+  });
+  syncMobileControls();
+}
+
+setupMobileControls();
 setupConceptAControls();
 setModelFiltersCollapsed(compactFilterMedia.matches);
 syncListingSortTabs();

@@ -1,0 +1,58 @@
+diff --git a/used_market_gemini_cli_full_docs/apps/domestic/web-backend/public/pc-tools.js b/used_market_gemini_cli_full_docs/apps/domestic/web-backend/public/pc-tools.js
+index 7f92393..5ec587b 100644
+--- a/used_market_gemini_cli_full_docs/apps/domestic/web-backend/public/pc-tools.js
++++ b/used_market_gemini_cli_full_docs/apps/domestic/web-backend/public/pc-tools.js
+@@ -20,6 +20,12 @@ const state = {
+ };
+ let repaintTimer, statusTimer;
+ const displayPrice = (value, currency = 'KRW') => value == null ? '—' : money(value, currency);
++function quotePrice(value, currency = 'KRW') {
++  // Means/medians may contain fractional won. Keep the same precision on BOTH
++  // sides of unit × quantity; only the final headline total is rounded to won.
++  if (currency !== 'KRW' || value == null || !Number.isFinite(value)) return money(value, currency);
++  return `${value.toLocaleString('ko-KR', { maximumFractionDigits: 2 })}원`;
++}
+ function pricePresentation(metric, seriesKey = 'active', currency = 'KRW', record = null) {
+   if (record?.state === 'error') return { text: '조회 실패', label: record.error, empty: true, state: 'error' };
+   if (record?.state === 'loading') return { text: '확인 중', label: '자료 요청 중', empty: true, state: 'loading' };
+@@ -214,6 +220,7 @@ function renderSummary() {
+       const title = total.total > 0 && !total.complete ? label.replace('합계', '부분 합계') : label;
+       summary.append(summaryItem(`${title} · 가격 확인 ${total.covered}/${total.total}개`, displayPrice(total.amount), '', `series-${key}`));
+     });
++    if (state.entries.length) summary.append(el('p', 'tools-quote-status', '단가와 부품별 금액은 소수 둘째자리까지 표시하며, 최종 부분 합계는 원 단위로 반올림합니다.'));
+     const issues = [...new Set(state.entries.map(entry => priceRecordIssue(chartRecord(entry.id), buildEntryData(entry))).filter(Boolean))];
+     if (issues.length) summary.append(el('p', 'tools-quote-status', issues.join(' ')));
+     if (state.entries.length && (!totals.active.complete || !totals.sold.complete)) {
+@@ -247,8 +254,8 @@ function refreshBuildPriceDetails() {
+         const presentation = pricePresentation(data?.[key], key, currency, record);
+         line.textContent = `${label}: ${presentation.text} · 대표가격 합계 제외`;
+       } else {
+-        line.append(document.createTextNode(`${label}: `), el('span', '', `단가 ${money(value, currency)}`),
+-          document.createTextNode(` × ${entry.quantity} = `), el('span', '', money(value * entry.quantity, currency)));
++        line.append(document.createTextNode(`${label}: `), el('span', '', `단가 ${quotePrice(value, currency)}`),
++          document.createTextNode(` × ${entry.quantity} = `), el('span', '', quotePrice(value * entry.quantity, currency)));
+       }
+       node.append(line);
+     }
+@@ -373,7 +380,7 @@ document.addEventListener('click', event => {
+   const button = event.target.closest('[data-action]'); if (!button || !state.ready) return;
+   const { action: type, id, manufacturer = '', key, category } = button.dataset;
+   if (type === 'category') { selectCategory(category); return; }
+-  if (type === 'reset-filters') { state.sort = 'name'; selectCategory(state.category); return; }
++  if (type === 'reset-filters') { resetToolFilters(); return; }
+   if (type === 'range-apply') {
+     try {
+       const from = $('#chart-from').value, to = $('#chart-to').value;
+@@ -420,6 +427,12 @@ document.addEventListener('change', event => {
+   else return;
+   applyModelFilters();
+ });
++function resetToolFilters() {
++  state.manufacturer = ''; state.generation = ''; state.capacity = ''; state.query = ''; state.sort = 'name';
++  // Do not call selectCategory(): a saved build would immediately reapply the
++  // selected component's maker/generation. Preserve the build and site scope.
++  applyModelFilters();
++}
+ function applyModelFilters({ renderFilterControls = true } = {}) {
+   state.page = 1;
+   if (!builder) {

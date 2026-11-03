@@ -1,6 +1,6 @@
 import { SERIES, idOf, nameOf, naturalCompare, money, metricValue, soldMeanValue, metricPresentation, listedPriceRange, statsUnavailable, priceRecordIssue, analysisSelectionUrl, groupProducts, scopedStats, sourceStats, priceDateRange, shiftDate, modelPageItems, buildTotals, compactBuild, compatibility, validateBuild, dailySeries, percentChange, buildAnalysisSeries } from './pc-tools-core.mjs?v=shared-price-v2';
 import { readJson, createPriceStore } from './pc-tools-data.mjs?v=picker-fast-v3';
-import { drawMarketChart as drawChart } from './pc-market-chart.mjs?v=chart-corners-v8';
+import { drawMarketChart as drawChart } from './pc-market-chart.mjs?v=compact-tools-v1';
 import { createAdfitSlots } from './adfit.js?v=adfit-all-v3';
 import { toolBrand, toolFilterSchema, toolFacetValues, toolFacetLabel, filterToolProducts, visibleSelection, toolScopeNote } from './pc-tools-catalog.mjs?v=parts-ux-v4';
 
@@ -20,6 +20,7 @@ const state = {
   priceSources: new Set(['joonggonara','bunjang','danawa','ebay']),
 };
 let repaintTimer, statusTimer, pickerRepaintTimer;
+const modelPickerView = { dimension: 'models' };
 const displayPrice = (value, currency = 'KRW') => value == null ? '—' : money(value, currency);
 function quotePrice(value, currency = 'KRW') {
   // Keep fractional-won representatives on both sides of unit × quantity.
@@ -52,7 +53,7 @@ const prices = createPriceStore(scheduleRepaint, { dailyOnly: !builder });
 const overseasPrices = builder ? null : createPriceStore(scheduleRepaint, {
   marketPool: 'OVERSEAS_USED', condition: 'USED_WORKING', currency: 'USD', dailyOnly: true
 });
-const SOURCE_LABELS = { joonggonara: '중고나라', bunjang: '번개장터', hellomarket: '헬로마켓', danawa: '다나와', coolenjoy: '쿨엔조이', ebay: 'eBay', rethinkmall: '리씽크몰' };
+const SOURCE_LABELS = { joonggonara: '중고나라', bunjang: '번개장터', hellomarket: '헬로마켓', danawa: '다나와', ebay: 'eBay', rethinkmall: '리씽크몰' };
 const el = (tag, className = '', text = '') => {
   const node = document.createElement(tag); if (className) node.className = className;
   node.textContent = text; return node;
@@ -68,6 +69,7 @@ function status(text = '', error = false) {
   if (text && !error) statusTimer = setTimeout(() => { $('#tools-status').textContent = ''; }, 3500);
 }
 function labelOf(code) { return state.categories.find(c => c.code === code)?.label || code; }
+function compactModelName(name) { return name.replace(/^(?:NVIDIA\s+GeForce|AMD\s+Radeon|Intel\s+Core|AMD)\s+/i, ''); }
 function specOf(p) { return p.key_specs || {}; }
 const brandOf = toolBrand;
 function generationOf(p) { return toolFacetValues(p, toolFilterSchema(p.category_code)[0]?.[0])[0] || ''; }
@@ -99,8 +101,14 @@ function syncAnalysisUrl(range = state.range, deferred = false) {
 function buildEntryData(entry) {
   const record = chartRecord(entry.id);
   if (record?.state !== 'ready' || statsUnavailable(record.data) || buildScopeConflict()) return null;
-  return scopedStats(record.data, entry.manufacturer);
+  return soldFromJoonggonara(scopedStats(record.data, entry.manufacturer));
 }
+// Only Joonggonara still reports completed sales, so every sold price comes
+// from its rows; older sold rows from other sites are not mixed in.
+function soldFromJoonggonara(data) {
+  return data ? { ...data, sold: sourceStats(data, 'joonggonara')?.sold ?? null } : data;
+}
+function soldSiteSelected() { return !state.source || state.source === 'joonggonara'; }
 function buildScopeConflict() {
   // Separate fetches may straddle a publication change. Never total different
   // publication/date/currency scopes as if they belonged to one estimate.
@@ -140,35 +148,106 @@ function selectControl(label, id, options, selected) {
   options.forEach(([value, text]) => { const option = el('option', '', text); option.value = value; option.selected = value === selected; select.append(option); });
   wrapper.append(select); return wrapper;
 }
-function renderControls() {
+function modelFilterOptions() {
   const base = filterToolProducts(state.products, { category: state.category });
   const manufacturers = [...new Set(base.map(brandOf).filter(Boolean))].sort(naturalCompare);
   const schema = toolFilterSchema(state.category);
-  const controls = el('div', 'tools-controls');
-  if (builder) controls.append(selectControl('부품', 'tool-category', state.categories.map(c => [c.code, c.label]), state.category));
-  const searchLabel = el('label', 'tools-search'), search = el('input');
-  search.id = 'tool-query'; search.type = 'search'; search.value = state.query; search.maxLength = 160;
-  search.placeholder = '모델·브랜드 검색 (지스킬, 5600…)'; search.setAttribute('aria-label', '모델·브랜드 검색');
-  searchLabel.append(search); controls.append(searchLabel);
   const brandLabel = state.category === 'GPU' ? '칩 제조사' : state.category === 'RAM' ? '모듈 제조사' : '제조사';
-  controls.append(selectControl(brandLabel, 'tool-manufacturer', [['', `전체 ${brandLabel}`], ...manufacturers.map(v => [v, v])], state.manufacturer));
+  const filters = [{ id: 'tool-manufacturer', label: brandLabel, value: state.manufacturer,
+    options: [['', `전체 ${brandLabel}`], ...manufacturers.map(v => [v, v])] }];
   schema.forEach(([key, label], index) => {
     const candidates = base.filter(p => (!state.manufacturer || brandOf(p) === state.manufacturer)
       && (index === 0 || !state.generation || toolFacetValues(p, schema[0][0]).includes(state.generation)));
     const options = [...new Set(candidates.flatMap(p => toolFacetValues(p, key)))].sort(naturalCompare);
-    controls.append(selectControl(label, index === 0 ? 'tool-generation' : 'tool-capacity',
-      [['', `전체 ${label}`], ...options.map(value => [value, toolFacetLabel(key, value)])], index === 0 ? state.generation : state.capacity));
+    filters.push({ id: index === 0 ? 'tool-generation' : 'tool-capacity', label,
+      value: index === 0 ? state.generation : state.capacity,
+      options: [['', `전체 ${label}`], ...options.map(value => [value, toolFacetLabel(key, value)])] });
   });
-  if(builder)controls.append(selectControl('정렬', 'tool-sort', [['name', '모델명순'], ['price','판매중 낮은가격순 (전체)']], state.sort));
+  if (builder) filters.push({ id: 'tool-sort', label: '정렬', value: state.sort,
+    options: [['name', '모델명순'], ['price', '판매중 낮은가격순 (전체)']] });
+  return filters;
+}
+function mobileModelPicker() {
+  return typeof matchMedia === 'function' && matchMedia('(max-width:760px)').matches;
+}
+function renderMobileModelFilters() {
+  const tabs = $('#model-filter-tabs'), facets = $('#model-facet-options');
+  if (!tabs || !facets) return;
+  const filters = modelFilterOptions(), dimensions = [{ id: 'models', label: '모델' }, ...filters];
+  if (!dimensions.some(item => item.id === modelPickerView.dimension)) modelPickerView.dimension = 'models';
+  const dimension = modelPickerView.dimension, mobile = mobileModelPicker(), scrollLeft = tabs.scrollLeft;
+  const query = $('#tool-query');
+  if (query) query.placeholder = mobile ? '모델명 검색' : '모델·브랜드 검색 (지스킬, 5600…)';
+  tabs.replaceChildren();
+  for (const item of dimensions) {
+    const tab = action(item.label, 'picker-dimension', { dimension: item.id });
+    tab.id = `picker-tab-${item.id}`; tab.setAttribute('role', 'tab');
+    tab.setAttribute('aria-selected', String(item.id === dimension));
+    tab.setAttribute('aria-controls', item.id === 'models' ? 'model-table' : 'model-facet-options');
+    tab.tabIndex = item.id === dimension ? 0 : -1; tabs.append(tab);
+  }
+  tabs.scrollLeft = scrollLeft;
+  const descriptor = filters.find(item => item.id === dimension);
+  facets.replaceChildren(); facets.hidden = !mobile || !descriptor;
+  if (descriptor) {
+    facets.setAttribute('aria-labelledby', `picker-tab-${dimension}`);
+    const group = el('div', 'model-picker-options'); group.setAttribute('role', 'radiogroup');
+    group.setAttribute('aria-label', descriptor.label);
+    for (const [value, text] of descriptor.options) {
+      const row = el('label', 'model-picker-option'), input = el('input');
+      input.type = 'radio'; input.name = 'model-picker-facet'; input.value = value;
+      input.checked = value === descriptor.value; input.dataset.action = 'picker-filter'; input.dataset.filter = descriptor.id;
+      row.append(el('span', '', text), input); group.append(row);
+    }
+    facets.append(group);
+  }
+  $('#model-table').hidden = mobile && Boolean(descriptor);
+  $('#model-picker-scroll').dataset.pickerView = descriptor ? 'facet' : 'models';
+  $('#model-pages').dataset.pickerView = descriptor ? 'facet' : 'models';
+  const context = filters.filter(item => item.value && !(item.id === 'tool-sort' && item.value === 'name'))
+    .map(item => item.options.find(([value]) => value === item.value)?.[1]).filter(Boolean);
+  if (state.query) context.push(state.query);
+  $('#model-filter-context').textContent = context.join(' · ') || '전체 모델';
+  const scope = $('#model-picker-scope');
+  scope.textContent = builder || state.category ? toolScopeNote(state.category) : '';
+  scope.hidden = !mobile || Boolean(descriptor) || !scope.textContent;
+}
+function setModelPickerDimension(dimension, { focus = false, resetScroll = true } = {}) {
+  if (!$('#model-filter-tabs')) return;
+  modelPickerView.dimension = dimension; renderMobileModelFilters();
+  if (resetScroll) $('#model-picker-scroll').scrollTop = 0;
+  if (focus) $(`#picker-tab-${modelPickerView.dimension}`)?.focus({ preventScroll: true });
+}
+function updateToolFilter(id, value) {
+  if (id === 'tool-manufacturer') { state.manufacturer = value; state.generation = ''; state.capacity = ''; }
+  else if (id === 'tool-generation') { state.generation = value; state.capacity = ''; }
+  else if (id === 'tool-capacity') state.capacity = value;
+  else if (id === 'tool-sort') state.sort = value;
+  else return false;
+  return true;
+}
+function renderControls() {
+  const controls = el('div', 'tools-controls');
+  if (builder) controls.append(selectControl('부품', 'tool-category', state.categories.map(c => [c.code, c.label]), state.category));
+  const searchLabel = el('label', 'tools-search'), search = el('input');
+  search.id = 'tool-query'; search.type = 'search'; search.value = state.query; search.maxLength = 160;
+  search.placeholder = mobileModelPicker() ? '모델명 검색' : '모델·브랜드 검색 (지스킬, 5600…)'; search.setAttribute('aria-label', '모델·브랜드 검색');
+  searchLabel.append(search); controls.append(searchLabel);
+  modelFilterOptions().forEach(item => controls.append(selectControl(item.label, item.id, item.options, item.value)));
   controls.append(action('조건 초기화', 'reset-filters', {}, 'tools-reset'));
   $('#model-controls').replaceChildren(controls,...(builder||state.category?[el('p','tools-scope-note',toolScopeNote(state.category))]:[]));
   if (builder) $('#picker-title').textContent = `${labelOf(state.category)} 모델 선택`;
-  else {
-    const tabs = $('#analysis-categories'); tabs.replaceChildren();
-    [{ code: '', label: '전체' }, ...state.categories].forEach(c => {
+  const tabs = $(builder ? '#builder-categories' : '#analysis-categories');
+  if (tabs) {
+    const focusedCategory = tabs.contains(document.activeElement) ? document.activeElement.dataset.category : null;
+    const scrollLeft = tabs.scrollLeft; tabs.replaceChildren();
+    [...(builder ? [] : [{ code: '', label: '전체' }]), ...state.categories].forEach(c => {
       const button = action(c.label, 'category', { category: c.code }); button.setAttribute('aria-pressed', String(c.code === state.category)); tabs.append(button);
     });
+    tabs.scrollLeft = scrollLeft;
+    if (focusedCategory != null) [...tabs.querySelectorAll('button')].find(button => button.dataset.category === focusedCategory)?.focus({ preventScroll: true });
   }
+  renderMobileModelFilters();
 }
 function makeTable(headings) {
   const table = el('table'), head = el('thead'), tr = el('tr'), body = el('tbody');
@@ -237,19 +316,24 @@ function pickerPrice(id) {
   const scopes=state.source?[{id:state.source,data}]:
     (data.by_source||[]).filter(row=>row.source_id!=='ebay').map(row=>({id:row.source_id,data:{...data,...row,by_source:undefined}}));
   const lines=scopes.flatMap(scope=>buildAnalysisSeries(scope.data,{source:scope.id,allowedSourceIds:[scope.id],days,includeSparse:false}));
-  const key=state.priceKindExplicit?state.priceKind:lines.some(line=>line.metricKey==='active')?'active':lines.some(line=>line.metricKey==='sold')?'sold':'active';
-  const points=lines.filter(line=>line.metricKey===key).flatMap(line=>line.points.map(point=>({...point,sourceId:line.id.split(':')[0]})))
+  const soldLines=soldSiteSelected()?lines.filter(line=>line.metricKey==='sold'&&line.id.startsWith('joonggonara:')):[];
+  const requested=state.priceKindExplicit?state.priceKind:lines.some(line=>line.metricKey==='active')?'active':soldLines.length?'sold':'active';
+  const key=requested==='sold'&&!soldSiteSelected()?'active':requested;
+  const points=(key==='sold'?soldLines:lines.filter(line=>line.metricKey===key)).flatMap(line=>line.points.map(point=>({...point,sourceId:line.id.split(':')[0]})))
     .filter(point=>point.value!=null).sort((a,b)=>b.date.localeCompare(a.date));
-  const combined=dailySeries(data,key,days,{listedMinimum:state.source==='danawa'&&key==='active'}).filter(point=>point.value!=null).at(-1);
-  const point=combined?{...combined,sourceId:state.source||'overall'}:points[0],currency=record.data?.methodology?.currency||'KRW';
+  const soldData=state.source?data:sourceStats(data,'joonggonara');
+  const combined=dailySeries(key==='sold'?soldData:data,key,days,{listedMinimum:state.source==='danawa'&&key==='active'}).filter(point=>point.value!=null).at(-1);
+  const point=combined?{...combined,sourceId:key==='sold'?'joonggonara':state.source||'overall'}:points[0],currency=record.data?.methodology?.currency||'KRW';
   const formatDate=date=>date.replaceAll('-','.');
   // Daily snapshots are not added together: the same listing can appear on
   // several dates. Show both lifecycle counts from one latest observed date.
   const observed=(data.daily||[]).filter(day=>['active','sold'].some(kind=>Number(day[kind]?.sample_count)>0)).sort((a,b)=>a.date.localeCompare(b.date));
   const recent=observed.at(-1);
-  const countLabel=kind=>Number.isInteger(recent?.[kind]?.sample_count)?`${recent[kind].sample_count.toLocaleString('ko-KR')}건`:'미확인';
+  const soldDay=soldSiteSelected()?(soldData?.daily||[]).find(day=>day.date===recent?.date):null;
+  const countOf=kind=>kind==='sold'?(soldSiteSelected()?soldDay?.sold?.sample_count:null):recent?.[kind]?.sample_count;
+  const countLabel=kind=>Number.isInteger(countOf(kind))?`${countOf(kind).toLocaleString('ko-KR')}건`:'미확인';
   const metadata=recent?{
-    coverage:`판매중 ${countLabel('active')} · 판매완료 ${countLabel('sold')}`,
+    coverage:soldSiteSelected()?`판매중 ${countLabel('active')} · 판매완료 ${countLabel('sold')}`:`판매중 ${countLabel('active')}`,
     period:`${formatDate(observed[0].date)} ~ ${formatDate(recent.date)}`,
     sample:`${formatDate(recent.date)} 기준`,
   }:{};
@@ -267,6 +351,7 @@ function loadPickerPrices() {
 }
 function renderModelTable() {
   const container = $('#model-table');
+  const scroll = $('#model-picker-scroll'), scrollTop = scroll?.scrollTop;
   const priceStatus = $('#model-price-status');
   if (priceStatus) {
     const hadFocus = priceStatus.contains(document.activeElement);
@@ -296,28 +381,36 @@ function renderModelTable() {
     const name = el('td', 'model-name');
     const publicCategory = !['CASE', 'COOLING'].includes(product.category_code);
     const link = el('a', 'model-name-link', nameOf(product));
+    link.setAttribute('aria-label', nameOf(product));
+    link.replaceChildren(el('span', 'tools-model-full', nameOf(product)), el('span', 'tools-model-short', compactModelName(nameOf(product))));
     if (publicCategory) {
       link.href = `/?category_code=${encodeURIComponent(product.category_code)}&model_id=${encodeURIComponent(id)}`;
+      link.dataset.action = 'picker-model-name'; link.dataset.id = id;
       name.append(link);
     } else {
-      name.append(el('span', 'model-name-link', nameOf(product)));
+      name.append(el('span', 'model-name-link model-picker-desktop-name', nameOf(product)),
+        action(nameOf(product), builder ? 'choose' : 'analyze', { id }, 'model-name-link model-picker-mobile'));
     }
     if (['FACET', 'BROWSE_FACET'].includes(specOf(product).directory_node_type)) name.title = '제조사·규격별 그룹';
     row.append(name);
-    visibleSeries.forEach(s => { const cell = priceCell(data, s.key, record, { showChange: !builder }); cell.dataset.label = s.label; row.append(cell); });
+    visibleSeries.forEach(s => { const cell = priceCell(data, s.key, record, { showChange: !builder }); cell.dataset.label = s.label; cell.setAttribute('aria-label', `${s.label} ${cell.textContent} · ${cell.title}`); row.append(cell); });
     if (builder) {
-      const cell = el('td', 'price danawa-price'); renderDanawaPrice(cell, data, record, id); row.append(cell);
+      const cell = el('td', 'price danawa-price'); renderDanawaPrice(cell, data, record, id); cell.setAttribute('aria-label', `다나와 중고 표시가 ${cell.textContent} · ${cell.title}`); row.append(cell);
     }
     const priceInfo=builder?null:pickerPrice(id);
     // Model navigation is independent of statistics availability. A sparse or
     // unpublished price must never make a real model inaccessible.
     if(!builder){link.href=analysisSelectionUrl(new URL('/price-analysis.html',location.href).href,id);link.dataset.action='analyze';link.dataset.id=id;}
-    if(!builder){const cell=el('td','analysis-model-price',priceInfo.text);if(priceInfo.priceTitle)cell.title=priceInfo.priceTitle;cell.dataset.priceState=priceInfo.state;row.append(cell);}
+    if(!builder){const cell=el('td','analysis-model-price',priceInfo.text);if(priceInfo.priceTitle)cell.title=priceInfo.priceTitle;cell.setAttribute('aria-label',[priceInfo.text,priceInfo.priceTitle,priceInfo.coverage,priceInfo.sample,priceInfo.period].filter(Boolean).join(' · '));cell.dataset.priceState=priceInfo.state;row.append(cell);}
     if(!builder){const cell=el('td','analysis-model-coverage');cell.append(el('span','',priceInfo.coverage||'기록 확인 중'));if(priceInfo.sample)cell.append(el('small','analysis-sample-date',priceInfo.sample));if(priceInfo.period){const period=el('small','analysis-record-period',priceInfo.period);period.title='가격 기록 기간';cell.append(period);}cell.dataset.priceState=priceInfo.state;row.append(cell);}
     const control = el('td');
     const currentAnalysisModel = !builder && state.selectedId === id;
     const button = action(builder ? chosen(id) ? '선택됨' : '선택' : currentAnalysisModel ? '현재 모델' : '보기', builder ? 'choose' : 'analyze', { id });
     if(!builder&&!currentAnalysisModel&&priceInfo.state==='ready')button.textContent='차트 보기';
+    button.classList.add('tools-pick-model');
+    button.setAttribute('aria-label', `${nameOf(product)} ${builder ? chosen(id) ? '선택됨' : '선택' : currentAnalysisModel ? '현재 모델' : '선택'}`);
+    button.dataset.checked = String(builder ? chosen(id) : currentAnalysisModel);
+    button.setAttribute('aria-pressed', button.dataset.checked);
     if (builder && chosen(id)) button.classList.add('primary');
     if (currentAnalysisModel) { button.disabled = true; button.setAttribute('aria-current', 'true'); }
     control.append(button);
@@ -329,22 +422,24 @@ function renderModelTable() {
   if (!body.children.length) { const tr = el('tr'), td = el('td', 'tools-empty', '해당 조건의 모델이 없습니다.'); td.colSpan = builder?visibleSeries.length+3:4; tr.append(td); body.append(tr); }
   container.replaceChildren(table);
   if (focusKey) {
-    const replacement = [...container.querySelectorAll('button')].find(b => Object.entries(focusKey).every(([k, v]) => b.dataset[k] === v));
+    const replacement = [...container.querySelectorAll('button, a[data-action]')].find(b => Object.entries(focusKey).every(([k, v]) => b.dataset[k] === v));
     replacement?.focus({ preventScroll: true });
   }
   const count = Math.max(1, Math.ceil(groups().length / PAGE_SIZE));
   const pages = $('#model-pages'), pageFocus = pages.contains(document.activeElement) ? document.activeElement.dataset.page : null;
-  pages.replaceChildren(); pages.hidden = count <= 1;
+  pages.replaceChildren(); pages.hidden = count <= 1 && !mobileModelPicker();
   const prev = action('‹', 'page', { page: state.page - 1 }), next = action('›', 'page', { page: state.page + 1 });
   prev.setAttribute('aria-label', '이전 모델 페이지'); next.setAttribute('aria-label', '다음 모델 페이지');
+  prev.className = 'model-page-prev'; next.className = 'model-page-next';
   prev.disabled = state.page <= 1; next.disabled = state.page >= count; pages.append(prev);
   modelPageItems(state.page, count).forEach(n => {
     if (n === 'ellipsis') { pages.append(el('span', '', '…')); return; }
-    const button = action(String(n), 'page', { page: n }); button.setAttribute('aria-label', `모델 ${n}페이지`);
+    const button = action(String(n), 'page', { page: n }, 'model-page-number'); button.setAttribute('aria-label', `모델 ${n}페이지`);
     if (n === state.page) button.setAttribute('aria-current', 'page'); pages.append(button);
   });
-  pages.append(next);
+  pages.append(el('span', 'model-picker-mobile model-page-position', `${state.page} / ${count}`), next);
   if (pageFocus) [...pages.querySelectorAll('button')].find(b => b.dataset.page === pageFocus)?.focus({ preventScroll: true });
+  if (scroll && scrollTop != null) scroll.scrollTop = scrollTop;
 }
 function summaryItem(label, value, detail = '', className = '') {
   const node = el('div', 'tools-summary-item'); node.append(el('span', '', label), el('strong', className, value));
@@ -374,7 +469,7 @@ function openModelPicker() {
   const dialog = $('#builder-model-dialog');
   if (!builder || !dialog || !state.ready) return;
   pickerReturnCategory = state.category;
-  if (!dialog.open) dialog.showModal();
+  if (!dialog.open) { setModelPickerDimension('models'); dialog.showModal(); }
   $('#picker-title')?.focus({ preventScroll: true });
 }
 
@@ -466,14 +561,19 @@ function renderBuild() {
   table.prepend(columns);
   state.categories.forEach(category => {
     const entry = state.entries.find(e => e.category === category.code), product = state.byId.get(entry?.id);
-    const row = el('tr'); row.dataset.category = category.code;
+    const row = el('tr'); row.dataset.category = category.code; row.dataset.hasEntry = String(Boolean(entry));
     const part = el('th', 'build-part', category.label); part.scope = 'row';
+    if (category.code === 'PSU') part.replaceChildren(el('span','tools-model-full',category.label),el('span','tools-model-short','파워'));
     const name = el('td', entry ? 'model-name' : 'model-name build-empty'); name.dataset.label = '선택 모델';
     if (entry) {
-      name.append(el('span', '', product ? nameOf(product) : '—'));
+      const modelName = product ? nameOf(product) : '—';
+      const change = action(modelName, 'category', { category: category.code }, 'build-selected-model');
+      change.title = modelName; change.setAttribute('aria-label', `${modelName} · ${category.label} 모델 변경`);
+      change.replaceChildren(el('span', 'tools-model-full', modelName), el('span', 'tools-model-short', compactModelName(modelName)));
+      name.append(change);
       if (entry.manufacturer) name.append(el('small', '', `${entry.manufacturer} · 제조사 기준`));
     } else {
-      const choose = action('+ 부품 선택', 'category', { category: category.code });
+      const choose = action('부품 선택 +', 'category', { category: category.code });
       choose.setAttribute('aria-label', `${category.label} 부품 선택`); name.append(choose);
     }
     const quantity = el('td', 'build-quantity'); quantity.dataset.label = '수량';
@@ -503,7 +603,16 @@ function renderBuild() {
         rowActions.append(warning);
       }
       const remove = action('×', 'remove', {id:entry.id}); remove.setAttribute('aria-label', `${category.label} 제거`);
-      rowActions.append(remove); control.append(rowActions);
+      rowActions.append(remove);
+      const menu = el('details', 'tools-build-row-menu'), toggle = el('summary', '', '⋮');
+      menu.open = !mobileModelPicker();
+      toggle.setAttribute('aria-label', `${category.label} 부품 메뉴`);
+      if (check && check.status !== 'match') {
+        toggle.textContent = '!'; toggle.classList.add('tools-compatibility-alert');
+        toggle.title = check.status === 'conflict' ? '호환 안 됨 · 메뉴에서 확인' : '규격 확인 · 메뉴에서 확인';
+        toggle.setAttribute('aria-label', `${category.label} ${toggle.title}`);
+      }
+      menu.append(toggle, rowActions); control.append(menu);
     }
     row.append(control); body.append(row);
   });
@@ -565,21 +674,22 @@ function analysisSources({ latest = false } = {}) {
     return { id, record, data, currency: id === 'ebay' ? 'USD' : 'KRW' };
   });
 }
-function renderLatestPrices(series,record,sources = null) {
+function renderLatestPrices(series,record,sources = null,date = null) {
   const container=$('#analysis-prices');if(!container)return;
   container.replaceChildren();
   const list=el('ul','market-snapshot-list');
   const order=['joonggonara','bunjang','danawa','ebay'];
   const rank=line=>{const index=order.indexOf(line.id.split(':')[0]);return index<0?order.length:index;};
   for(const line of [...series].sort((a,b)=>rank(a)-rank(b))){
-    const point=line.points.filter(point=>point.value!=null||point.lower!=null).at(-1);if(!point)continue;
+    const point=date ? line.points.find(point=>point.date===date&&(point.value!=null||point.lower!=null)) : line.points.filter(point=>point.value!=null||point.lower!=null).at(-1);if(!point)continue;
     const sourceId=line.id.split(':')[0],item=el('li','market-snapshot-item');item.dataset.source=sourceId;
     const price=point.value!=null?money(point.value,line.currency):`${money(point.lower,line.currency)}~${money(point.upper,line.currency)}`;
     const basis=line.priceBasis==='listed-minimum'?'최저 표시가 참고':point.priceLabel?.startsWith('등록가')?'등록가 참고 · 대표가격 아님':point.priceLabel||'대표가격';
     const count=Number.isInteger(point.sampleCount)?`${point.sampleCount.toLocaleString('ko-KR')}건`:'표본 미확인';
     const marker=el('i','market-snapshot-marker');marker.setAttribute('aria-hidden','true');
-    item.append(marker,el('strong','market-snapshot-source',line.label.split(' · ')[0]),el('span','market-snapshot-basis',basis),
-      el('b','market-snapshot-amount',price),el('span','market-snapshot-meta',`· ${count} · ${point.date.slice(5).replace('-', '.')}`));
+    const meta = [basis,count,...(date?[]:[point.date.slice(5).replace('-', '.')])].join(' · ');
+    item.append(marker,el('strong','market-snapshot-source',line.label.split(' · ')[0]),
+      el('b','market-snapshot-amount',price),el('span','market-snapshot-meta',meta));
     list.append(item);
   }
   if(sources){
@@ -589,7 +699,8 @@ function renderLatestPrices(series,record,sources = null) {
       const pending=!source.record||source.record.state==='loading';
       const failed=source.record?.state==='error'||statsUnavailable(source.record?.data);
       item.append(el('i','market-snapshot-marker'),el('strong','market-snapshot-source',SOURCE_LABELS[source.id]||source.id),
-        el('b','market-snapshot-amount',pending?'확인 중':failed?'조회 실패':'자료 없음'));
+        el('b','market-snapshot-amount',pending?'확인 중':failed?'조회 실패':date?'—':'자료 없음'));
+      if(date&&!pending&&!failed)item.append(el('span','market-snapshot-meta','관측 없음'));
       if(failed)item.append(action('다시 조회','retry',{},'market-snapshot-retry'));
       list.append(item);
     }
@@ -603,7 +714,7 @@ function renderLatestPrices(series,record,sources = null) {
       if(item.dataset.source==='ebay')item.append(action('USD 차트 ↗','source-chart',{source:'ebay'},'market-source-link'));
     }
     container.append(list);
-    if(!items.length)container.append(el('p','market-price-empty','+에서 사이트를 선택하세요.'));
+    if(!items.length)container.append(el('p','market-price-empty','가격을 표시할 사이트가 없습니다.'));
     return;
   }
   if(list.children.length){container.append(list);return;}
@@ -637,22 +748,41 @@ function renderAnalysis() {
   const referenceSeries = sources.flatMap(item => buildAnalysisSeries(statsUnavailable(item.data) ? null : item.data, {
     source: item.id, allowedSourceIds: [item.id], days: item.data?.methodology?.days || state.days, sourceLabels: SOURCE_LABELS, includeSparse:true,
   }).map(line => ({ ...line, currency:item.currency })));
-  if(!state.priceKindExplicit)state.priceKind=referenceSeries.some(line=>line.metricKey==='active')?'active':availableSeries.some(line=>line.metricKey==='sold')?'sold':'active';
-  const series=availableSeries.filter(line=>line.metricKey===state.priceKind);
+  const soldLine=line=>line.metricKey==='sold'&&line.id.startsWith('joonggonara:');
+  const soldAvailable=soldSiteSelected()&&availableSeries.some(soldLine);
+  if(!state.priceKindExplicit)state.priceKind=referenceSeries.some(line=>line.metricKey==='active')?'active':soldAvailable?'sold':'active';
+  if(state.priceKind==='sold'&&!soldAvailable){state.priceKind='active';state.priceKindExplicit=false;}
+  const kindLine=line=>state.priceKind==='sold'?soldLine(line):line.metricKey===state.priceKind;
+  const kindSources=list=>state.priceKind==='sold'?list.filter(item=>item.id==='joonggonara'):list;
+  const series=availableSeries.filter(kindLine);
   const chartSeries=series;
   const dates = [...new Set(chartSeries.flatMap(item => item.points.map(point => point.date)))].sort();
-  const latestSources=analysisSources({latest:true});
+  const latestSources=analysisSources({latest:true}).filter(item=>state.source?item.id===state.source:item.currency===currency);
   const latestSeries=latestSources.flatMap(item=>buildAnalysisSeries(statsUnavailable(item.data)?null:item.data,{
     source:item.id,allowedSourceIds:[item.id],days:item.data?.methodology?.days||60,sourceLabels:SOURCE_LABELS,includeSparse:true,
   }).map(line=>({...line,currency:item.currency})));
-  renderLatestPrices(latestSeries.filter(line=>line.metricKey===state.priceKind),record,latestSources);
-  $('#chart-price-kind').value=state.priceKind;
+  let readoutState;
+  const updateReadout=({date=null,pinned=false}={})=>{
+    const key=`${date||'latest'}:${pinned}`;
+    if(key===readoutState)return;
+    readoutState=key;
+    $('#analysis-readout-title').textContent=date?date.replaceAll('-','.'):'최근 관측';
+    $('#analysis-readout-reset').hidden=!pinned;
+    $('#analysis-price-rail').dataset.mode=date?'selected':'latest';
+    renderLatestPrices((date?referenceSeries:latestSeries).filter(kindLine),record,kindSources(date?sources:latestSources),date);
+  };
+  updateReadout();
+  document.querySelectorAll('[data-action="price-kind"]').forEach(button=>{
+    button.setAttribute('aria-pressed',String(button.dataset.kind===state.priceKind));
+    if(button.dataset.kind==='sold')button.disabled=!soldAvailable;
+  });
+  $('#chart-sold-note').hidden=state.priceKind!=='sold';
   const totalDates = dates.length;
   const workspace = $('#analysis-workspace');
   if (workspace) workspace.dataset.chartPointCount = String(totalDates);
   const product = state.byId.get(state.selectedId), modelName = product ? nameOf(product) : '선택 모델 없음';
-  $('#analysis-title').textContent = '가격 분석';
-  $('#analysis-model-select').textContent = `${modelName} ▾`;
+  $('#analysis-model-select').replaceChildren(el('span', 'tools-model-full', modelName), el('span', 'tools-model-short', compactModelName(modelName)));
+  $('#analysis-model-select').title = modelName;
   const pending = sources.some(item => !item.record || item.record.state === 'loading');
   const failedSource = sources.find(item => item.record?.state === 'error');
   const sparsePrices = sources.some(item => item.data?.daily?.some(day => metricPresentation(day.active).state === 'insufficient'));
@@ -676,9 +806,11 @@ function renderAnalysis() {
   const historyStatus=$('#chart-history-status');
   if(historyStatus)historyStatus.textContent=state.historyPending?'이전 기록 불러오는 중':'';
   renderAnalysisContext(record, data, currency);
+  syncMobileAnalysisControls();
   drawChart($('#price-chart'), chartSeries, { label: `${modelName} 가격 추이`, currency, identity: `${state.selectedId}:${state.selectedManufacturer}:${state.source}:${state.priceKind}:${window.to}`,
-    showLegend:false,showNote:false,cornerReadout:true,axisLeft:true,
-    readoutInput:sources.map(item=>referenceSeries.find(line=>line.id===`${item.id}:${state.priceKind}`)||{
+    showLegend:false,showNote:false,showGapKey:true,externalReadout:true,axisLeft:true,wheelZoom:true,connectGaps:true,pricePadding:0.23,minimumPricePadding:0.03,
+    onReadout:updateReadout,readoutContainer:$('#analysis-price-rail'),
+    readoutInput:kindSources(sources).map(item=>referenceSeries.find(line=>line.id===`${item.id}:${state.priceKind}`)||{
       id:`${item.id}:${state.priceKind}`,label:SOURCE_LABELS[item.id]||item.id,currency:item.currency,metricKey:state.priceKind,points:[],
     }),
     onLoadEarlier:loadEarlierPrices,loadingEarlier:state.historyPending,
@@ -730,6 +862,7 @@ function refreshPrices() {
   if(!builder)loadPickerPrices();
 }
 function selectCategory(category) {
+  setModelPickerDimension('models');
   if(!builder){state.category=category;state.manufacturer='';state.generation='';state.capacity='';state.query='';state.page=1;renderControls();renderModelTable();loadPickerPrices();return;}
   state.category = category; state.manufacturer = ''; state.generation = ''; state.capacity = ''; state.query = ''; state.page = 1; state.selectedManufacturer = ''; state.chartDate = ''; resetChartView();
   state.source = '';
@@ -750,13 +883,23 @@ function selectCategory(category) {
 document.addEventListener('click', event => {
   const button = event.target.closest('[data-action]'); if (!button || !state.ready) return;
   if(button.tagName==='A'&&(event.ctrlKey||event.metaKey||event.shiftKey||event.altKey))return;
-  const { action: type, id, manufacturer = '', key, category } = button.dataset;
-  if(type==='toggle-latest-prices'){
-    const rail=$('#analysis-price-rail'),toggle=$('#chart-latest-toggle'),open=rail.hidden;
-    rail.hidden=!open;$('#analysis-workspace').dataset.pricesOpen=String(open);
-    toggle.setAttribute('aria-expanded',String(open));toggle.setAttribute('aria-label',open?'최근 가격 접기':'최근 가격 펼치기');
-    toggle.textContent=open?'−':'+';
-    if(!open&&button!==toggle)toggle.focus({preventScroll:true});
+  let { action: type, id, manufacturer = '', key, category } = button.dataset;
+  if (type === 'picker-dimension') { setModelPickerDimension(button.dataset.dimension, { focus: true }); return; }
+  if (type === 'picker-filter') {
+    if (!updateToolFilter(button.dataset.filter, button.value)) return;
+    modelPickerView.dimension = 'models'; applyModelFilters();
+    setModelPickerDimension('models', { focus: true }); return;
+  }
+  if (type === 'picker-model-name') {
+    if (!mobileModelPicker()) return;
+    event.preventDefault(); type = 'choose';
+  }
+  if(type==='price-kind'){
+    if(button.disabled)return;
+    state.priceKind=button.dataset.kind==='sold'?'sold':'active';state.priceKindExplicit=true;renderAnalysis();return;
+  }
+  if(type==='clear-chart-date'){
+    $('#price-chart').dispatchEvent(new CustomEvent('chart-clear'));
     return;
   }
   if(type==='source-chart'){
@@ -767,8 +910,10 @@ document.addEventListener('click', event => {
   if(type==='analyze')event.preventDefault();
   if (type === 'open-picker') { openModelPicker(); refreshPrices(); return; }
   if (type === 'open-analysis-picker') {
-    state.category='';state.manufacturer='';state.generation='';state.capacity='';state.query='';state.page=1;
-    renderControls();renderModelTable();$('#analysis-model-dialog').showModal();$('#tool-query').focus({ preventScroll: true });loadPickerPrices();return;
+    setModelPickerDimension('models');
+    state.category=mobileModelPicker() ? state.byId.get(state.selectedId)?.category_code || '' : '';state.manufacturer='';state.generation='';state.capacity='';state.query='';state.page=1;
+    renderControls();renderModelTable();$('#analysis-model-dialog').showModal();
+    (mobileModelPicker() ? $('#analysis-picker-title') : $('#tool-query')).focus({ preventScroll: true });loadPickerPrices();return;
   }
   if (type === 'close-analysis-picker') { $('#analysis-model-dialog').close(); return; }
   if (type === 'close-picker') { closeModelPicker(); return; }
@@ -808,6 +953,7 @@ document.addEventListener('click', event => {
   if (type === 'page') {
     state.page = Math.max(1, Math.min(Math.ceil(groups().length / PAGE_SIZE) || 1, Number(button.dataset.page)));
     renderModelTable(); $('#model-table').scrollTop = 0;
+    if ($('#model-picker-scroll')) $('#model-picker-scroll').scrollTop = 0;
     // 전체 가격 정렬은 이미 필터 결과 전부를 조회 중이므로 페이지 이동으로 다시 시작하지 않습니다.
     if(!builder)loadPickerPrices();else if (state.sort !== 'price') refreshPrices();
     return;
@@ -831,12 +977,12 @@ document.addEventListener('click', event => {
 });
 document.addEventListener('change', event => {
   const target = event.target;
+  if (target.name === 'build-price-kind') { document.body.dataset.buildPrice = target.value; return; }
   if(target.dataset.priceSource){
     if(target.checked)state.priceSources.add(target.dataset.priceSource);else state.priceSources.delete(target.dataset.priceSource);
     renderAnalysis();document.querySelector(`[data-price-source="${target.dataset.priceSource}"]`)?.focus({preventScroll:true});return;
   }
   if (target.id === 'chart-sources') { state.source = target.value; state.page = 1; resetHistoryWindow();resetChartView(); syncAnalysisUrl(); renderControls(); renderModelTable(); renderAnalysis(); refreshPrices(); return; }
-  if(target.id==='chart-price-kind'){state.priceKind=target.value==='sold'?'sold':'active';state.priceKindExplicit=true;renderAnalysis();return;}
   if (target.dataset.quantity) {
     const entry = state.entries.find(e => e.id === target.dataset.quantity); const n = Number(target.value);
     if (!entry) return;
@@ -844,14 +990,11 @@ document.addEventListener('change', event => {
     entry.quantity = n; persistBuild(); renderSummary(); refreshBuildPriceDetails(); status(''); return;
   }
   if (target.id === 'tool-category') { selectCategory(target.value); return; }
-  if (target.id === 'tool-manufacturer') { state.manufacturer = target.value; state.generation = ''; state.capacity = ''; }
-  else if (target.id === 'tool-generation') { state.generation = target.value; state.capacity = ''; }
-  else if (target.id === 'tool-capacity') state.capacity = target.value;
-  else if (target.id === 'tool-sort') state.sort = target.value;
-  else return;
+  if (!updateToolFilter(target.id, target.value)) return;
   applyModelFilters();
 });
 function resetToolFilters() {
+  setModelPickerDimension('models');
   state.manufacturer = ''; state.generation = ''; state.capacity = ''; state.query = ''; state.sort = 'name';
   // selectCategory would reapply the saved component's maker/specification.
   // Preserve the build, selected site and date range; reset only its filters.
@@ -859,6 +1002,8 @@ function resetToolFilters() {
 }
 function applyModelFilters({ renderFilterControls = true } = {}) {
   state.page = 1;
+  if ($('#model-picker-scroll')) $('#model-picker-scroll').scrollTop = 0;
+  if (!renderFilterControls) renderMobileModelFilters();
   if(!builder){if(renderFilterControls)renderControls();renderModelTable();loadPickerPrices();return;}
   if (renderFilterControls) renderControls();
   renderSummary(); renderModelTable(); if (!builder) renderAnalysis(); refreshPrices();
@@ -948,6 +1093,96 @@ for (const dialog of document.querySelectorAll('#builder-model-dialog, #analysis
     event.preventDefault(); event.stopPropagation(); dialog.close();
   }, { capture: true });
 }
+function syncMobileAnalysisControls() {
+  const source = $('#mobile-chart-source-label'), kind = $('#mobile-chart-kind-label');
+  if (source) source.textContent = state.source ? state.source === 'ebay' ? 'eBay (USD)' : SOURCE_LABELS[state.source] || state.source : '국내 비교';
+  if (kind) kind.textContent = state.priceKind === 'sold' ? '판매완료' : '판매중';
+}
+
+function setupMobileTools() {
+  const openers = new WeakMap(), active = new Set();
+  let scrollBefore = null;
+  const open = (dialog, opener) => {
+    if (!dialog || dialog.open) return;
+    openers.set(dialog, opener); dialog.showModal();
+    if (!active.size) {
+      scrollBefore = { body: document.body.style.overflow, root: document.documentElement.style.overflow };
+      document.body.style.overflow = 'hidden';
+      document.documentElement.style.overflow = 'hidden';
+    }
+    active.add(dialog); opener?.setAttribute('aria-expanded', 'true');
+  };
+  for (const dialog of document.querySelectorAll('#tools-menu-dialog, #tools-choice-dialog, #analysis-model-dialog, #builder-model-dialog')) {
+    let outsideDown = false;
+    const outside = event => { const rect = dialog.getBoundingClientRect(); return event.target === dialog
+      && (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom); };
+    dialog.addEventListener('pointerdown', event => { outsideDown = outside(event); });
+    dialog.addEventListener('pointercancel', () => { outsideDown = false; });
+    dialog.addEventListener('click', event => {
+      if (event.target.closest('[data-close-tools-dialog]') || outsideDown && outside(event)) dialog.close();
+      outsideDown = false;
+    });
+    dialog.addEventListener('close', () => {
+      active.delete(dialog);
+      if (!active.size && scrollBefore !== null) {
+        document.body.style.overflow = scrollBefore.body;
+        document.documentElement.style.overflow = scrollBefore.root;
+        scrollBefore = null;
+      }
+      const opener = openers.get(dialog); opener?.setAttribute('aria-expanded', 'false');
+      if (opener?.isConnected) requestAnimationFrame(() => opener.focus({preventScroll:true}));
+    });
+    dialog.addEventListener('toggle', () => {
+      if (dialog.open && !active.has(dialog)) {
+        if (!active.size) {
+          scrollBefore = { body: document.body.style.overflow, root: document.documentElement.style.overflow };
+          document.body.style.overflow = 'hidden'; document.documentElement.style.overflow = 'hidden';
+        }
+        active.add(dialog);
+      }
+    });
+  }
+  document.addEventListener('click', event => {
+    const opener = event.target.closest('[data-mobile-tools]'); if (!opener) return;
+    if (opener.dataset.mobileTools === 'menu') { open($('#tools-menu-dialog'), opener); return; }
+    if (!state.ready) return;
+    const dialog = $('#tools-choice-dialog'), list = $('#tools-choice-list');
+    const source = opener.dataset.mobileTools === 'source';
+    $('#tools-choice-title').textContent = source ? '비교 사이트' : '가격 종류';
+    const choices = source ? [...$('#chart-sources').options].map(option => [option.value,option.textContent])
+      : [['active','판매중 가격'],['sold','판매완료 표시가']];
+    list.replaceChildren();
+    for (const [value,text] of choices) {
+      const row = el('label','tools-choice-option'), input = el('input');
+      input.type = 'radio'; input.name = 'tools-chart-choice'; input.value = value;
+      input.checked = value === (source ? state.source : state.priceKind);
+      if (!source && value === 'sold') input.disabled = Boolean(document.querySelector('[data-action="price-kind"][data-kind="sold"]')?.disabled);
+      input.addEventListener('click', () => {
+        dialog.close();
+        if (source) { $('#chart-sources').value = value; $('#chart-sources').dispatchEvent(new Event('change',{bubbles:true})); }
+        else document.querySelector(`[data-action="price-kind"][data-kind="${value}"]`)?.click();
+      });
+      row.append(el('span','',text),input); list.append(row);
+    }
+    open(dialog,opener);
+  });
+  const media = matchMedia('(max-width:760px)');
+  media.addEventListener('change', event => {
+    if (!event.matches) for (const dialog of document.querySelectorAll('.tools-mobile-sheet[open]')) dialog.close();
+    document.querySelectorAll('.tools-build-row-menu').forEach(menu => { menu.open = !event.matches; });
+    if (state.ready) { renderMobileModelFilters(); renderModelTable(); }
+  });
+  $('#model-filter-tabs')?.addEventListener('keydown', event => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    const tabs = [...$('#model-filter-tabs').querySelectorAll('[role="tab"]')];
+    const index = tabs.indexOf(event.target); if (index < 0) return;
+    event.preventDefault();
+    const next = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1
+      : (index + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+    setModelPickerDimension(tabs[next].dataset.dimension, { focus: true });
+  });
+}
+setupMobileTools();
 void start();
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible' && state.ready) refreshPrices();

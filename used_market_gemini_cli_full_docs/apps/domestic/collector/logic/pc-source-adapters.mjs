@@ -489,59 +489,6 @@ export function parseQuasarzoneListingsHtml(html) {
   return listings;
 }
 
-export function parseCoolenjoyListingsHtml(html) {
-  const fixtureListings = parseSpecialistHtml(html, {
-    cardTag: "article",
-    cardClass: "board-list-item",
-    anchorClass: "item-title",
-    priceClass: "item-price",
-    statusClass: "item-status",
-    idAttribute: "data-no",
-    idFromUrl: /\/(\d+)(?:[/?#]|$)/u,
-    baseUrl: "https://coolenjoy.net"
-  });
-  if (fixtureListings.length > 0) return fixtureListings;
-
-  const listings = [];
-  for (const block of blocksByTagAndClass(html, "li", "d-md-table-row")) {
-    const anchor = firstAnchor(block.html, "na-subject");
-    if (!anchor || !/\/bbs\/mart2\/\d+/iu.test(anchor.href)) continue;
-    const sourceListingId = anchor.href.match(/\/bbs\/mart2\/(\d+)(?:[/?#]|$)/iu)?.[1] || "";
-    if (!sourceListingId || !anchor.title) continue;
-
-    const statusMatch = block.html.match(/<div\b[^>]*\bid\s*=\s*(["'])?abcd\1?[^>]*>([\s\S]*?)<\/div>/iu);
-    const statusText = normalizeText(statusMatch?.[2] || "");
-    const priceText = elementTextByClass(block.html, "nw-11").replace(/^판매가\s*/u, "");
-    const postedAtText = elementTextByClass(block.html, "nw-6").replace(/^등록일\s*/u, "");
-    const status = explicitSoldText(`${statusText} ${anchor.title}`)
-      ? "SOLD"
-      : /예약/u.test(statusText)
-        ? "RESERVED"
-        : /^판매$/u.test(statusText)
-          ? "ACTIVE"
-          : "UNKNOWN";
-
-    listings.push({
-      source_listing_id: sourceListingId,
-      url: absoluteUrl("https://coolenjoy.net", anchor.href.replace(/&amp;/giu, "&")),
-      title: anchor.title,
-      price: /본문\s*참고/u.test(priceText) ? null : parsePrice(priceText),
-      currency: "KRW",
-      status,
-      image_url: "",
-      raw_payload: {
-        source_listing_id: sourceListingId,
-        href: anchor.href,
-        title_text: anchor.title,
-        price_text: priceText,
-        status_text: statusText,
-        posted_at_text: postedAtText
-      }
-    });
-  }
-  return listings;
-}
-
 function assertIsoDate(value, fieldName) {
   if (typeof value !== "string" || !Number.isFinite(Date.parse(value))) throw new Error(`INVALID_${fieldName.toUpperCase()}`);
 }
@@ -636,6 +583,5 @@ export function createSourceAdapter({ sourceKey, collectIncremental, recheck }) 
 export const SPECIALIST_FIXTURE_PARSERS = Object.freeze({
   danawa: parseDanawaListingsHtml,
   bunjang_partner_catalog: parseBunjangPartnerCatalogCsv,
-  quasarzone: parseQuasarzoneListingsHtml,
-  coolenjoy: parseCoolenjoyListingsHtml
+  quasarzone: parseQuasarzoneListingsHtml
 });

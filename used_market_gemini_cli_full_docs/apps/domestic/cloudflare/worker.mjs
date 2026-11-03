@@ -82,8 +82,7 @@ const IMPORT_ALLOWED_HOSTS_BY_SITE = Object.freeze({
   hellomarket: Object.freeze(["hellomarket.com", "www.hellomarket.com"]),
   rethinkmall: Object.freeze(["web.rethinkmall.com"]),
   danawa: Object.freeze(["dmall.danawa.com", "prod.danawa.com"]),
-  ebay: Object.freeze(["ebay.com", "www.ebay.com"]),
-  coolenjoy: Object.freeze(["coolenjoy.net", "www.coolenjoy.net"])
+  ebay: Object.freeze(["ebay.com", "www.ebay.com"])
 });
 const SEARCH_ONLY_SOURCE_KEYS = Object.freeze(["hellomarket", "rethinkmall"]);
 

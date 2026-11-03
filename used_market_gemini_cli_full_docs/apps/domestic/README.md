@@ -7,13 +7,17 @@
 - Public path: `/`
 - 컴퓨터 맞추기: `/computer-builder.html` — 부품·세부 모델 선택, 수량, 가격별 부분 합계, 브라우저 저장·주소 공유
 - 가격 분석: `/price-analysis.html` — 모델별 실제 금액 추이, 국내 통합·eBay·중고나라·번개장터·다나와 통계, 30일 화면을 최대 2년 범위에서 하루·한 달씩 이동
+- 패치 내역: `/changelog.html` — 날짜별 짧은 제목을 펼쳐 실제 화면과 설명 확인, 이미지 원본 보기
+- 후원: `/support.html` — 운영 안내와 공개 후원 계좌
 - Loopback port: `127.0.0.1:8789`
 - Compose project: `used-market-domestic`
 - 운영 검색: 번개장터, 중고나라, eBay 공식 Browse API
 - PC 디렉터리: 위 검색 소스와 다나와 중고 가격비교
-- 비활성 소스: 기존 다나와 장터 adapter, 헬로마켓, 리씽크몰, 쿨엔조이, 당근, 퀘이사존
+- 비활성 소스: 기존 다나와 장터 adapter, 헬로마켓, 리씽크몰, 당근, 퀘이사존
 
 운영 구조와 장애 대응은 [위키](docs/wiki/README.md)에서 시작합니다. [가격 통계 게시 운영](docs/wiki/09-price-publication-operations.md)은 AWS/Worker 역할·수집 주기·검증·복구 절차를, [2026-09-24 장애 기록](docs/worklog/2026-09-24-aws-publication-verification.md)은 CPU 장애 원인·구조 변경 결정·실제 배포 및 게시 증거를 보존합니다. Workers Free를 유지하며 전체 통계 검증은 AWS에서 수행합니다.
+
+기능을 바꿀 때는 [공개 패치 내역](web-backend/public/changelog.html)에 출시 날짜·실제 화면·짧은 설명을, [내부 변경 기록](docs/daily_history/README.md)에 변경 이유·검증·실제 배포 상태를 함께 남깁니다. 기록 기준은 저장소 루트 `AGENTS.md`의 Patch history를 따릅니다.
 
 ```bash
 npm ci

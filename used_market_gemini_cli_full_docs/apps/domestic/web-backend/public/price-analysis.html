@@ -2,43 +2,77 @@
 <html lang="ko">
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>PC 부품 가격 분석 | USED PICK</title>
+  <title>PC 부품 가격 검색 · 시세 추이 | USED PICK</title>
   <meta name="description" content="PC 부품의 판매중 가격, 판매완료 표시가와 확인 거래가의 변화를 모델별로 비교하세요.">
   <link rel="canonical" href="https://used-pick.com/price-analysis.html">
   <link rel="icon" href="/assets/mark.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/styles.css?v=pc-tools-v1"><link rel="stylesheet" href="/pc-tools.css?v=price-clarity-v1"><link rel="stylesheet" href="/ui-concept-a.css?v=aligned-shell-v1">
-  <link rel="stylesheet" href="/pc-workspace.css?v=chart-corners-v8">
+  <link rel="stylesheet" href="/pc-workspace.css?v=sold-joongna-v1">
   <link rel="stylesheet" href="/adfit-layout.css?v=adfit-all-v3">
   <link rel="stylesheet" href="/site-header-links.css?v=1">
+  <link rel="stylesheet" href="/mobile-tools.css?v=sold-joongna-v1">
+  <link rel="stylesheet" href="/mobile-model-picker.css?v=tab-picker-v1">
 </head>
 <body class="pc-tools ui-a" data-page="analysis" data-ui-release="search-first-v2">
   <a class="skip-link" href="#main">본문으로 건너뛰기</a>
   <header class="tools-header">
+    <button class="tools-mobile-menu-open" type="button" data-mobile-tools="menu" aria-label="메뉴" aria-haspopup="dialog" aria-controls="tools-menu-dialog"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg><span>메뉴</span></button>
     <a class="brand" href="/" aria-label="USED PICK 홈"><img src="/assets/mark.svg" alt=""><span class="brand-used">USED</span><span class="brand-pick">PICK</span></a>
-    <nav aria-label="주 메뉴"><a href="/">중고 시세</a><a href="/computer-builder.html">컴퓨터 맞추기</a><a href="/price-analysis.html" aria-current="page">가격 분석</a></nav>
-    <nav class="up-header-links" aria-label="이용 및 정책"><a href="/guide.html">이용 안내</a><a href="/privacy.html">개인정보처리방침</a><a href="/terms.html">이용약관</a></nav>
+    <nav aria-label="주 메뉴"><a href="/">검색</a><a href="/price-analysis.html" aria-current="page">가격 분석</a><a href="/computer-builder.html">컴퓨터 시세</a></nav>
+    <nav class="up-header-links" aria-label="이용 및 정책"><a href="/changelog.html">패치 내역</a><a href="/support.html">후원</a><a href="/contact.html">문의</a><a href="/guide.html">이용 안내</a><a href="/privacy.html">개인정보처리방침</a><a href="/terms.html">이용약관</a></nav>
   </header>
   <div class="adfit-layout">
     <main id="main" class="tools-main">
-    <header class="market-page-heading"><div><h1 id="analysis-title">가격 분석</h1><button id="analysis-model-select" type="button" data-action="open-analysis-picker" aria-haspopup="dialog" aria-controls="analysis-model-dialog">모델 선택</button></div><a id="analysis-listing-link" href="/">매물 보기 ↗</a></header>
+    <header class="market-page-heading">
+      <div class="market-heading-content">
+        <h1 id="analysis-title"><button id="analysis-model-select" type="button" data-action="open-analysis-picker" aria-label="가격을 비교할 모델 변경" aria-haspopup="dialog" aria-controls="analysis-model-dialog">모델 선택</button></h1>
+        <label class="market-filter-field" for="chart-sources"><span class="analysis-sr-only">비교 사이트</span><select id="chart-sources" aria-label="차트 사이트"></select></label>
+        <button id="mobile-chart-source" class="tools-mobile-selector" type="button" data-mobile-tools="source" aria-haspopup="dialog" aria-controls="tools-choice-dialog"><span id="mobile-chart-source-label">국내 비교</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+        <button id="mobile-chart-kind" class="tools-mobile-selector" type="button" data-mobile-tools="kind" aria-haspopup="dialog" aria-controls="tools-choice-dialog"><span id="mobile-chart-kind-label">판매중</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
+      </div>
+      <div class="market-heading-actions">
+        <a id="analysis-listing-link" href="/" aria-label="이 모델 매물 보기"><span class="tools-listing-label">매물 보기</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M20 4 10 14M10 5H5v15h15v-5"/></svg></a>
+      </div>
+    </header>
     <div id="tools-status" role="status" aria-live="polite">불러오는 중</div>
-    <div class="market-toolbar">
-      <select id="chart-sources" aria-label="차트 사이트"></select>
-      <select id="chart-price-kind" aria-label="가격 종류"><option value="active">판매중 가격</option><option value="sold">판매완료 표시가</option></select>
+    <div class="market-toolbar" role="group" aria-label="가격 비교 조건">
+      <div id="chart-price-kind" class="market-price-tabs" role="group" aria-label="가격 종류">
+        <button type="button" data-action="price-kind" data-kind="active" aria-pressed="true">판매중 가격</button>
+        <button type="button" data-action="price-kind" data-kind="sold" aria-pressed="false">판매완료 표시가</button>
+      </div>
       <span id="chart-history-status" role="status" aria-live="polite"></span>
     </div>
-    <section id="analysis-workspace" aria-label="가격 분석" data-prices-open="false">
-      <div id="analysis-chart-pane"><button id="chart-latest-toggle" type="button" data-action="toggle-latest-prices" aria-label="최근 가격 펼치기" aria-expanded="false" aria-controls="analysis-price-rail" title="최근 가격">+</button><div id="price-chart" class="market-chart"></div><p id="chart-coverage" class="tools-caption" hidden></p></div>
-      <aside id="analysis-price-rail" class="market-price-rail" aria-label="사이트별 최신 가격" hidden>
-        <header><h2>최근 가격</h2><button type="button" data-action="toggle-latest-prices" aria-label="최근 가격 닫기">×</button></header>
+    <section id="analysis-workspace" aria-label="모델별 가격 추이와 출처별 가격" data-prices-open="true">
+      <div id="analysis-chart-pane">
+        <h2 id="price-chart-heading" class="analysis-sr-only">가격 추이</h2>
+        <div id="price-chart" class="market-chart" role="region" aria-labelledby="price-chart-heading"></div>
+        <p id="chart-coverage" class="tools-caption" hidden></p>
+        <div class="market-chart-foot">
+          <p id="chart-sold-note" hidden>판매완료 표시가는 실제 거래 체결가와 다를 수 있습니다.</p>
+        </div>
+      </div>
+      <aside id="analysis-price-rail" class="market-price-rail" aria-label="사이트별 가격">
+        <header><h2 id="analysis-readout-title">최근 관측</h2><button id="analysis-readout-reset" type="button" data-action="clear-chart-date" aria-label="날짜 선택 해제" hidden>×</button></header>
         <div id="analysis-prices" class="market-latest-prices" aria-label="최근 대표가격과 참고값"></div>
       </aside>
     </section>
     <dialog id="analysis-model-dialog" class="up-dialog up-picker-dialog" aria-labelledby="analysis-picker-title">
-      <div class="up-dialog-heading"><h2 id="analysis-picker-title" tabindex="-1">분석 모델 선택</h2><button class="up-button" type="button" data-action="close-analysis-picker">닫기</button></div>
+      <div class="up-dialog-heading"><h2 id="analysis-picker-title" tabindex="-1">모델 선택</h2><div class="model-picker-heading-actions"><button class="model-picker-mobile" type="button" data-action="reset-filters">초기화</button><button class="up-button model-picker-close" type="button" data-action="close-analysis-picker" aria-label="모델 선택 닫기"><span>닫기</span></button></div></div>
       <nav id="analysis-categories" class="tools-tabs" aria-label="분석 부품"></nav>
       <div id="model-controls"></div>
-      <div id="model-table" class="tools-table-scroll" tabindex="0" aria-label="부품 모델 목록"></div><nav id="model-pages" class="tools-pages" aria-label="모델 페이지"></nav>
+      <nav id="model-filter-tabs" class="model-picker-mobile" role="tablist" aria-label="모델 선택 조건"></nav>
+      <p id="model-filter-context" class="model-picker-mobile"></p>
+      <div id="model-picker-scroll">
+        <div id="model-table" class="tools-table-scroll" tabindex="0" aria-label="부품 모델 목록"></div>
+        <div id="model-facet-options" class="model-picker-mobile" role="tabpanel" hidden></div>
+        <p id="model-picker-scope" class="model-picker-mobile"></p>
+      </div>
+      <nav id="model-pages" class="tools-pages" aria-label="모델 페이지"></nav>
+    </dialog>
+    <dialog id="tools-choice-dialog" class="tools-mobile-sheet" aria-labelledby="tools-choice-title">
+      <div class="tools-sheet-handle" aria-hidden="true"></div>
+      <div class="tools-sheet-heading"><h2 id="tools-choice-title" tabindex="-1">비교 사이트</h2><button type="button" data-close-tools-dialog aria-label="선택 화면 닫기">×</button></div>
+      <div id="tools-choice-list" class="tools-choice-list" role="radiogroup" aria-labelledby="tools-choice-title"></div>
     </dialog>
 
   </main>
@@ -49,6 +83,12 @@
       <template data-format="mobile"><ins class="kakao_ad_area" style="display:none;" data-ad-unit="DAN-gvTVDnxVn9S3leR5" data-ad-width="320" data-ad-height="100"></ins></template>
     </aside>
   </div>
-  <script type="module" src="/pc-tools.js?v=adfit-all-v3"></script>
+  <dialog id="tools-menu-dialog" class="tools-mobile-sheet" aria-labelledby="tools-menu-title">
+    <div class="tools-sheet-handle" aria-hidden="true"></div>
+    <div class="tools-sheet-heading"><h2 id="tools-menu-title" tabindex="-1">메뉴</h2><button type="button" data-close-tools-dialog aria-label="메뉴 닫기">×</button></div>
+    <nav class="tools-mobile-pages" aria-label="모바일 주 메뉴"><a href="/">매물 찾기</a><a href="/price-analysis.html">가격 분석</a><a href="/computer-builder.html">컴퓨터 시세</a></nav>
+    <nav class="tools-mobile-policy" aria-label="이용 및 정책"><a href="/changelog.html">패치 내역</a><a href="/support.html">후원</a><a href="/contact.html">문의</a><a href="/guide.html">이용 안내</a><a href="/privacy.html">개인정보처리방침</a><a href="/terms.html">이용약관</a></nav>
+  </dialog>
+  <script type="module" src="/pc-tools.js?v=sold-joongna-v1"></script>
 </body>
 </html>

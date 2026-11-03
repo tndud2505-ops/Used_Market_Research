@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { PcPartsLedger } from '../aws-runner/pc-parts-ledger.mjs';
 import { PcShadowPipeline } from '../aws-runner/pc-shadow-pipeline.mjs';
+import { canonicalSourceListingIdentity } from '../aws-runner/pc-source-listing-identity.mjs';
 
 const ledger = new PcPartsLedger(); ledger.migrate();
 const pipeline = new PcShadowPipeline({ ledger }); await pipeline.initialize();
@@ -22,6 +23,24 @@ try {
   pipeline.recordItem({ ...item('1'), title: 'NVIDIA RTX 3090 24GB 그래픽카드', price: 900_000 }, date(10).replace('12:', '14:'));
   ledger.rebuildDailyPriceStats(options);
   assert.equal(daily().at(-1).sample_count, 2, 'a newer product identity must suppress the old same-day product');
+  let identityLookups = 0;
+  ledger.db.function('pc_source_listing_identity', { deterministic: true }, (source, id) => {
+    identityLookups++;
+    return canonicalSourceListingIdentity(source, id);
+  });
+  ledger.rebuildDailyPriceStats(options);
+  const scopedLookups = identityLookups;
+  const scopedStats = ledger.getPriceStats(options);
+  for (let i = 0; i < 100; i++) ledger.recordObservation({
+    sourceId: 'joonggonara', sourceListingId: `unrelated-${i}`, title: 'Unrelated listing',
+    rawPayload: {}, price: 100_000, currency: 'KRW', status: 'ACTIVE', observedAt: date(10)
+  });
+  identityLookups = 0;
+  ledger.rebuildDailyPriceStats(options);
+  assert.ok(identityLookups <= scopedLookups + 30,
+    'same-day marketplace growth must not cause a full identity scan per scoped observation');
+  assert.deepEqual(ledger.getPriceStats(options), scopedStats,
+    'unrelated same-day listings must leave scoped prices and samples unchanged');
   const beforeStats = JSON.stringify(ledger.db.prepare('SELECT * FROM daily_price_stats ORDER BY id').all());
   const legacy = ledger.recordObservation({ sourceId: 'joonggonara', sourceListingId: 'https://web.joongna.com/product/99001',
     title: 'RTX 3080', rawPayload: { legacy: true }, price: 400_000, currency: 'KRW', status: 'ACTIVE', observedAt: date(1) });

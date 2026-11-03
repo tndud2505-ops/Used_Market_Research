@@ -13,6 +13,7 @@ import {
   operatorAttestedSourceGovernance,
   runDueSourceCollections,
   runSourceCollection,
+  sourceRuntimeAfterFailure,
   sourceRuntimeForScheduler,
   validateSourceActivation,
   validateSourceGovernance
@@ -21,7 +22,6 @@ import {
   collectDanawaCategoryListings,
   createSourceAdapter,
   parseBunjangPartnerCatalogCsv,
-  parseCoolenjoyListingsHtml,
   parseDanawaListingsHtml,
 } from "../collector/logic/pc-source-adapters.mjs";
 import {
@@ -55,7 +55,7 @@ const runtimeCanary = { ...liveCanary, observed_at: new Date().toISOString() };
 assert.equal(new Set(PC_SOURCE_REGISTRY.map((source) => source.key)).size, PC_SOURCE_REGISTRY.length);
 assert.deepEqual(Object.fromEntries(PC_SOURCE_REGISTRY.map((source) => [source.key, source.cadence.kst_minutes])), {
   joonggonara: [4], bunjang: [11], daangn: [15], danawa: [19], hellomarket: [27],
-  rethinkmall: [36], ebay: [44], coolenjoy: [52]
+  rethinkmall: [36], ebay: [44]
 });
 assert.ok(PC_SOURCE_REGISTRY.every((source) => source.cadence.jitter_max_seconds === 120));
 for (const source of PC_SOURCE_REGISTRY) {
@@ -215,18 +215,14 @@ assert.equal(bunjangCatalogRows[0].image_url, "https://media.bunjang.co.kr/produ
 assert.equal(bunjangCatalogRows[0].source_category_code, "600700001");
 assert.equal(Object.hasOwn(bunjangCatalogRows[0].raw_payload, "uid"), false,
   "the public partner catalog parser must not retain the seller shop identifier");
-assert.equal(getPcSource("coolenjoy").policy_status, "APPROVED");
-assert.equal(getPcSource("coolenjoy").runtime_status, "DISABLED");
-assert.equal(getPcSource("coolenjoy").directory_source, false);
-assert.equal(OPERATIONAL_TARGET_SITES.includes("coolenjoy"), false);
-assert.equal(sourceRuntimeForScheduler("coolenjoy", {
+assert.equal(sourceRuntimeForScheduler("hellomarket", {
   persisted: { runtime_status: "ENABLED", failure_count: 0 }
 }).runtime_status, "DISABLED", "registry retirement must override stale persisted ENABLED state");
 assert.equal(listSourceCadenceEvents({
-  after: "2026-08-29T00:51:59.000Z",
-  through: "2026-08-29T00:52:01.000Z",
-  jitterBySource: { coolenjoy: 0 }
-}).some((event) => event.source_key === "coolenjoy"), false,
+  after: "2026-08-29T00:26:59.000Z",
+  through: "2026-08-29T00:27:01.000Z",
+  jitterBySource: { hellomarket: 0 }
+}).some((event) => event.source_key === "hellomarket"), false,
 "disabled sources must not keep generating scheduler no-op events");
 assert.equal(validateSourceActivation("joonggonara", {
   policy_reviewed_at: "2026-08-29T00:00:00.000Z",
@@ -324,8 +320,7 @@ assert.deepEqual(lifecycleSeparatedPayload.summary.status_counts, { active: 3, r
 assert.equal(lifecycleSeparatedPayload.summary.unknown_count, 1, "negated sold wording must stay unknown");
 
 const specialistFixtures = await Promise.all([
-  readFile(new URL("./fixtures/source-pages/danawa-market.html", import.meta.url), "utf8"),
-  readFile(new URL("./fixtures/source-pages/coolenjoy-market.html", import.meta.url), "utf8")
+  readFile(new URL("./fixtures/source-pages/danawa-market.html", import.meta.url), "utf8")
 ]);
 assert.deepEqual(parseDanawaListingsHtml(specialistFixtures[0]), [{
   source_listing_id: "31001", url: "https://dmall.danawa.com/bbs/?seq=31001",
@@ -336,30 +331,6 @@ assert.deepEqual(parseDanawaListingsHtml(specialistFixtures[0]), [{
     price_text: "450,000원", status_text: "판매 중"
   }
 }]);
-assert.equal(parseCoolenjoyListingsHtml(specialistFixtures[1])[0]?.status, "SOLD");
-assert.equal(parseCoolenjoyListingsHtml(specialistFixtures[1])[0]?.price, 120_000);
-const currentCoolenjoyMarkup = `<ul class="na-table">
-  <li class="d-md-table-row border-bottom">
-    <div><div id="abcd">판매완료</div></div>
-    <div><a href="https://coolenjoy.net/bbs/mart2/1283457?sfl=wr_subject&amp;stx=RTX+3080" class="na-subject">MSI RTX 3080 Suprim X 판매합니다</a></div>
-    <div class="nw-11"><span class="sr-only">판매가</span>420,000 원</div>
-    <div class="nw-9"><img src="https://coolenjoy.net/img/level/n10.svg" alt="회원등급"></div>
-    <div class="nw-6"><span class="sr-only">등록일</span>10:59</div>
-  </li>
-  <li class="d-md-table-row border-bottom">
-    <div><div id="abcd">구매</div></div>
-    <div><a href="/bbs/mart2/1281399" class="na-subject">DDR5 16GB 2개 삽니다</a></div>
-    <div class="nw-11"><span class="sr-only">판매가</span>400,000 원</div>
-    <div class="nw-6"><span class="sr-only">등록일</span>08.31</div>
-  </li>
-</ul>`;
-const currentCoolenjoy = parseCoolenjoyListingsHtml(currentCoolenjoyMarkup);
-assert.equal(currentCoolenjoy.length, 2);
-assert.equal(currentCoolenjoy[0].source_listing_id, "1283457");
-assert.equal(currentCoolenjoy[0].price, 420_000);
-assert.equal(currentCoolenjoy[0].status, "SOLD");
-assert.equal(currentCoolenjoy[0].image_url, "", "member level icons are not product images");
-assert.equal(currentCoolenjoy[1].status, "UNKNOWN", "purchase requests are never treated as active sale offers");
 const currentDanawaMarkup = `<tr class="list_item_first">
   <td class="thumb"><a href="http://dmall.danawa.com/v3/?controller=sale&methods=blog&seq=52439768&parentCategoryCode=1&childCategoryCode=1" class="link_txt"><img src="/images/loading.gif" data-src="//img.example.test/cpu.jpg" alt="CPU"></a></td>
   <td class="subject"><a href="http://dmall.danawa.com/v3/?controller=sale&methods=blog&seq=52439768&parentCategoryCode=1&childCategoryCode=1" class="link_txt">인텔 코어 i5-9600K 중고</a><ul class="detail"><li><span>사업자</span></li><li>중고상품</li></ul></td>
@@ -379,7 +350,7 @@ assert.equal(unsafeDanawaImage.image_url, "", "non-HTTP image schemes must not r
 
 let disabledCalls = 0;
 const disabledAdapter = createSourceAdapter({
-  sourceKey: "coolenjoy",
+  sourceKey: "hellomarket",
   async collectIncremental() {
     disabledCalls += 1;
     throw new Error("disabled source was called");
@@ -387,11 +358,11 @@ const disabledAdapter = createSourceAdapter({
   async recheck() { throw new Error("not used"); }
 });
 const disabledResults = await runDueSourceCollections({
-  after: "2026-08-29T18:51:59.000Z",
-  through: "2026-08-29T18:52:01.000Z",
-  adapters: { coolenjoy: disabledAdapter },
-  runtimeBySource: { coolenjoy: getSourceRuntimeDefaults("coolenjoy") },
-  jitterBySource: { coolenjoy: 0 }
+  after: "2026-08-29T18:26:59.000Z",
+  through: "2026-08-29T18:27:01.000Z",
+  adapters: { hellomarket: disabledAdapter },
+  runtimeBySource: { hellomarket: getSourceRuntimeDefaults("hellomarket") },
+  jitterBySource: { hellomarket: 0 }
 });
 assert.equal(disabledCalls, 0);
 assert.deepEqual(disabledResults, [],
@@ -754,6 +725,35 @@ try {
   assert.equal(paged[0].source_listing_id, "900000000");
   assert.equal(paged[0].item_id, "bunjang:900000000");
   assert.deepEqual(cursorRequests, [null, "opaque-next-page"]);
+  assert.equal(paged.status_observations.length, 120, 'retain already fetched page overflow without another request');
+  assert.equal(paged.search_windows.length, 1);
+  assert.equal(paged.search_windows[0].rows.length, 120, 'compare raw fetched scope, not keyword-filtered output');
+  assert.equal(JSON.parse(paged.search_windows[0].scope).at(-1), 2);
+  assert.equal(paged.status_observations.at(-1).item.source_listing_id, '900000119');
+  assert.ok(paged.status_observations.every(row => Number.isFinite(Date.parse(row.observed_at))));
+  const cachedPaged = await collectOne("bunjang", "RTX 3060", "pc", 80,
+    "RTX 3060", "recent", { min: null, max: null });
+  assert.equal(cachedPaged.source_cache_hit, true, 'cached pages cannot count as new lifecycle evidence');
+  assert.equal(paged.source_cache_hit, undefined, 'cache reads must not mutate the fresh result');
+  assert.equal(cursorRequests.length, 2, 'status capture and cached reads add no network calls');
+  const joongRequests = [];
+  globalThis.fetch = async url => {
+    const parsed = new URL(url);
+    joongRequests.push(parsed);
+    const offset = parsed.searchParams.get('page') === '2' ? 50 : 0;
+    const rows = Array.from({ length: 50 }, (_, i) => ({
+      seq: 800000 + offset + i, title: 'GTX 980 그래픽카드', price: 50000,
+      state: offset + i === 99 ? 2 : 0, articleUrl: `/product/${800000 + offset + i}`
+    }));
+    return new Response(`<script>{"items":${JSON.stringify(rows)},"changedProductFilterType":null}</script>`);
+  };
+  const joongPaged = await collectOne('joonggonara', 'GTX 980', 'pc', 80, 'GTX 980', 'recent', { min: null, max: null });
+  assert.equal(joongPaged.length, 80);
+  assert.equal(joongRequests.length, pcSearchQueryVariants('GTX 980').length * 2);
+  assert.equal(joongPaged.status_observations.length, joongRequests.length * 50);
+  assert.ok(joongPaged.status_observations.some(row => row.item.status === 'SOLD'
+    && row.item.source_listing_id === 'joonggonara:https://web.joongna.com/product/800099'),
+  'explicit sold state in fetched overflow remains available with exact identity');
 
   // The CLI/browser extractor must also retain the remainder of a 60-row
   // upstream page when the consumer displays only 20 listings at a time.

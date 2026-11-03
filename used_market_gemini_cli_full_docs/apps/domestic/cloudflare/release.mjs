@@ -117,7 +117,8 @@ async function checkPublicSite(baseUrl) {
   const analysisResponse = await fetch(`${baseUrl}/price-analysis.html?release_check=${Date.now()}`);
   if (!analysisResponse.ok) throw new Error(`${baseUrl}/price-analysis.html returned HTTP ${analysisResponse.status}`);
   const analysis = await analysisResponse.text();
-  if (!analysis.includes('<title>PC 부품 가격 분석 | USED PICK</title>')
+  if (!analysis.includes('href="https://used-pick.com/price-analysis.html"')
+    || !analysis.includes('id="analysis-workspace"')
     || !analysis.includes('DAN-gvTVDnxVn9S3leR5')) {
     throw new Error(`${baseUrl}/price-analysis.html did not return the price-analysis shell`);
   }

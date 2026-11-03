@@ -4,6 +4,28 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import vm from "node:vm";
 import { coherentStats, metricValue as representative, metricPresentation, shiftDate } from '../web-backend/public/pc-tools-core.mjs';
+import { listingPriceWarning } from '../web-backend/public/listing-price-warning.mjs';
+
+{
+  const listing = { canonical_product_id: 'gpu:nvidia:rtx-5070-ti', currency: 'KRW', condition_code: 'USED_WORKING',
+    market_pool: 'KR_C2C_USED', lifecycle_status: 'ACTIVE', statistics_eligible: true, quantity: 1, price_scope: 'TOTAL', price: 15600000 };
+  const stats = { publication_id: 'verified-publication', canonical_product_id: listing.canonical_product_id,
+    methodology: { currency: 'KRW', condition: 'USED_WORKING', market_pool: 'KR_DOMESTIC_USED' },
+    active: { sample_count: 128, outlier_lower_bound: 347500, outlier_upper_bound: 2467500 } };
+  const before = JSON.stringify(listing);
+  assert.equal(listingPriceWarning(listing, stats)?.reason, 'IQR_HIGH');
+  assert.equal(JSON.stringify(listing), before, 'warning must not rewrite price, identity, visibility or statistics eligibility');
+  assert.equal(listingPriceWarning({ ...listing, price: 1560000 }, stats), null);
+  assert.equal(listingPriceWarning({ ...listing, quantity: 10 }, stats), null, 'ten-card total must compare its unit price');
+  assert.equal(listingPriceWarning({ ...listing, currency: 'USD' }, stats), null);
+  assert.equal(listingPriceWarning({ ...listing, condition_code: 'NEW' }, stats), null);
+  assert.equal(listingPriceWarning({ ...listing, market_pool: 'OVERSEAS_USED' }, stats), null);
+  assert.equal(listingPriceWarning({ ...listing, lifecycle_status: 'SOLD' }, stats), null);
+  assert.equal(listingPriceWarning(listing, { ...stats, canonical_product_id: 'gpu:nvidia:rtx-5090' }), null);
+  assert.equal(listingPriceWarning(listing, { ...stats, availability: { stale: true } }), null);
+  assert.equal(listingPriceWarning(listing, { ...stats, active: { ...stats.active, sample_count: 9 } }), null);
+  assert.equal(listingPriceWarning(listing, { ...stats, active: { sample_count: 100 } }), null);
+}
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const html = readFileSync(path.join(appRoot, "web-backend/public/index.html"), "utf8");
@@ -25,7 +47,7 @@ requireText(toolsScript, 'compactBuild(state.entries', 'builder writes must pers
 requireText(toolsScript, 'localStorage.setItem(STORAGE_KEY, raw)', 'builder selection changes must write local storage');
 requireText(toolsScript, "history.replaceState(null, '', url)", 'builder selection changes must update the share hash without reloading');
 
-requireText(html, '<a href="/" aria-current="page">중고 시세</a>',
+requireText(html, '<a href="/" aria-current="page">검색</a>',
   "the listing page must be the default home navigation target");
 requireText(analysisHtml, '<a href="/price-analysis.html" aria-current="page">가격 분석</a>',
   "price analysis must retain its own explicit navigation target");
@@ -100,7 +122,7 @@ requireText(toolsChart, "filter(item => item.points.some(point => point.value !=
   "empty sold series must not leave a misleading legend entry");
 requireText(guideHtml, '중고나라·번개장터·다나와·eBay',
   'the guide must describe every operational directory source');
-assert.doesNotMatch(guideHtml, /다나와 장터|헬로마켓|리씽크몰|쿨엔조이/u,
+assert.doesNotMatch(guideHtml, /다나와 장터|헬로마켓|리씽크몰/u,
   'the guide must not advertise retired sources as currently collected');
 assert.equal(toolsScript.includes('state.overview'), false, "removed overall-trend state must not remain reachable");
 assert.equal(toolsScript.includes("target.id === 'chart-mode'"), false, "removed index-mode control must not retain an event path");
@@ -123,7 +145,7 @@ for (const id of [
   "active-filter-chips", "reset-filters", "show-matched-models",
   "filter-column-resizer", "listing-section", "listing-rows",
   "listing-pagination", "listing-page-numbers", "listing-page-prev", "listing-page-next",
-  "model-detail-open", "listing-count",
+  "listing-count",
 ]) {
   requireText(html, `id="${id}"`, `missing required UI region #${id}`);
   requireText(script, `querySelector("#${id}")`, `app.js must bind #${id}`);
@@ -139,15 +161,12 @@ assert.equal(html.includes('class="overview-panels"'), false, "the old two-panel
 assert.equal(html.includes('class="price-panel"'), false, "price insight must not occupy the main results layout");
 assert.equal(html.includes('id="model-pagination"'), false, "the removed model table must not retain pagination controls");
 for (const removed of ['model-detail-dialog','price-summary','stats-section','analysis-column-resizer','up-market-chart',
-  'catalog-query','up-catalog-search','price-min','price-max','price-reset','price-error','listing-options-toggle']) {
+  'up-catalog-search','price-min','price-max','price-reset','price-error','listing-options-toggle']) {
   assert.equal(html.includes(`id="${removed}"`), false, `${removed} must not remain in search`);
 }
 assert.doesNotMatch(script, /\/price-stats|has-model-insight|function openModelDetail/);
-assert.match(html, /<button class="model-detail-open"[^>]*aria-haspopup="dialog"[^>]*aria-controls="listing-price-dialog"/);
-assert.equal([...html.matchAll(/>가격 그래프 보기</g)].length, 1, 'one graph action in the result toolbar');
-assert.match(html, /<dialog id="listing-price-dialog"/);
+assert.doesNotMatch(html, /id="model-detail-open"|id="listing-price-dialog"|가격 그래프 보기/);
 assert.doesNotMatch(script, /modelDetailOpen\.href|window\.open\(/);
-requireText(script, 'pricePreview.open(product, [...state.selectedSites][0] || "", state.listingStatisticsCoverage)', 'graph preview keeps the selected model, source, and listing coverage without navigation');
 requireText(script, 'dom.modelSelect.addEventListener("change"', "the compact model selector must drive exact-model selection");
 requireText(script, 'createElement("option"', "matching models must populate native selector options");
 requireText(script, "productSpecText(product)", "model choices must retain useful distinguishing specifications");
@@ -288,6 +307,9 @@ context.applyListingPayload({ items: [{ id: "page-item" }], total: 42, source_co
 assert.equal(context.state.listingTotal, 42,
   "the displayed listing total must come from the API rather than the current page length");
 assert.equal(context.dom.listingCount.textContent, "42건");
+context.applyListingPayload({items:[{id:'single-result'}],total:1,
+  statistics_coverage:{listing_count:1,eligible_count:1,minimum_representative_sample_count:3}},1);
+assert.equal(context.dom.listingCount.textContent,'1건','search reports listing count without statistics commentary');
 context.applyListingPayload({ items: Array.from({length:100}, (_,id)=>({id})), total:115, next_cursor:'next-batch' }, 1);
 assert.equal(context.state.listingPages.size,10);
 assert.equal(context.state.listings.length,10);
@@ -312,7 +334,7 @@ let listingLoads = 0;
 let statsRenders = 0;
 Object.assign(context, {
   updateFacetSelectionUi() {}, renderSourceFilters() {}, updateStatsMessage() {},
-  syncCatalogUrl() {}, updatePriceGraphLink() {}, refreshModelAvailability() {},
+  syncCatalogUrl() {}, refreshModelAvailability() {},
   window: { requestAnimationFrame() {} },
   renderStats() { statsRenders += 1; },
   loadListings() { listingLoads += 1; },
@@ -333,13 +355,10 @@ const searchUrl = new URL('https://example.test/?category_code=CPU&q=Synthetic&s
 Object.assign(linkContext, {
   state:{products:[selected],productTotal:1,selectedProduct:selected,selectedSites:new Set(['ebay']),facets:{},categoryCode:'CPU',query:'Synthetic',listingSort:'price_asc',priceMin:'100',priceMax:'900',
     sources:[{id:'bunjang',currency:'KRW',marketPools:['KR_C2C_USED']},{id:'ebay',currency:'USD',marketPools:['OVERSEAS_USED']}]},
-  dom:{modelDetailOpen:node()}, PRODUCT_QUERY_KEYS:new Set(),
+  dom:{}, PRODUCT_QUERY_KEYS:new Set(),
   window:{location:searchUrl,history:{replaceState(_a,_b,url){searchUrl.href=new URL(url,searchUrl).href;}}},
 });
-linkContext.syncCatalogUrl();linkContext.updatePriceGraphLink();
-assert.equal(linkContext.dom.modelDetailOpen.href,undefined, 'preview never creates a navigation URL');
-assert.equal(linkContext.dom.modelDetailOpen.attributes['aria-label'],'Synthetic CPU 가격 그래프 보기');
-assert.equal(linkContext.pricePreviewProduct().canonical_product_id,selected.canonical_product_id);
+linkContext.syncCatalogUrl();
 assert.equal(searchUrl.searchParams.get('q'),'Synthetic');
 assert.equal(searchUrl.searchParams.get('sort'),'price_asc');
 assert.equal(searchUrl.searchParams.has('price_min'),false,'legacy price bounds cannot become invisible filters');
@@ -361,13 +380,24 @@ linkContext.state.selectedSites.clear();
 linkContext.state.sources=[linkContext.state.sources[1]];
 assert.equal(linkContext.listingSourceScope().length,0,'domestic cannot fall back to eBay');
 linkContext.state.selectedProduct=null;linkContext.state.productTotal=2;
-linkContext.updatePriceGraphLink();assert.equal(linkContext.dom.modelDetailOpen.hidden,true);
 let singleSelections=0;linkContext.selectProduct=()=>{singleSelections++;};
 assert.equal(linkContext.openSingleSearchResult(),false);
 linkContext.state.productTotal=1;assert.equal(linkContext.openSingleSearchResult(),true);
 assert.equal(singleSelections,1);
+linkContext.state.categoryCode='RAM';
+linkContext.state.selectedProduct={canonical_product_id:'ram:samsung:ddr4:8gb'};
+linkContext.state.facets={memory_usage:['LAPTOP'],speed_mt_s:['2666'],generation:['DDR4']};
+linkContext.PRODUCT_QUERY_KEYS=new Set(['memory_usage','speed_mt_s','generation']);
+const ramListingQuery=linkContext.buildListingQuery();
+assert.equal(ramListingQuery.get('canonical_product_id'),'ram:samsung:ddr4:8gb');
+assert.equal(ramListingQuery.get('memory_usage'),'LAPTOP','model selection must retain RAM usage');
+assert.equal(ramListingQuery.get('speed_mt_s'),'2666','model selection must retain RAM speed');
+assert.equal(ramListingQuery.has('generation'),false,'exact model identity already scopes DDR generation');
+linkContext.state.catalog={public_catalog:{listing_facet_options:{RAM:{memory_usage:[{value:'LAPTOP',label:'노트북용'}]}}}};
+assert.deepEqual([...linkContext.productFacetValues({category_code:'RAM'},'memory_usage')],['LAPTOP'],
+  'listing options must read the actual nested pc catalog response');
+linkContext.state.facets={};linkContext.state.categoryCode='CPU';linkContext.state.selectedProduct=null;
 linkContext.state.products=[];linkContext.state.productTotal=0;
-linkContext.updatePriceGraphLink();assert.equal(linkContext.dom.modelDetailOpen.hidden,true);
 
 const requestContext = vm.createContext({ URLSearchParams, AbortController, clearTimeout });
 vm.runInContext(declarations, requestContext);

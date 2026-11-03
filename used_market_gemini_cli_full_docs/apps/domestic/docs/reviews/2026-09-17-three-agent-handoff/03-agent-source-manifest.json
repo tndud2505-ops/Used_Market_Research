@@ -1,0 +1,23 @@
+{
+  "created_at": "2026-09-17T05:58:21.936Z",
+  "source_hashes": {
+    "aws-runner/pc-publication-scopes.mjs": "f78c99bbb7613a9d95602cdcaf7995cc557b4f9b777be4f1d08613975e24c0c3",
+    "aws-runner/pc-price-stats-http.mjs": "c930dee7e66cdef66cec98211859608087215b522234e410c2c640043aac4d73",
+    "harness/lib/pc-independent-price-audit.mjs": "1ed49ae9d3439d7a01f25f9d918c24a5f2d68accf705dca8a0c8a58d1335d45c",
+    "harness/lib/pc-agent3-v19-candidate-source.mjs": "774cb9fe2fe81958cefc943c25e8483221c70f471ffa693ebc04ae52e1274f4c",
+    "harness/pc-agent3-independent-price-contract.mjs": "2c84b81c6554d74de809e9f17985faf58d7c0a93deee031e5a8bf0ab04b86c23",
+    "harness/pc-agent3-publication-bootstrap-contract.mjs": "78276b00ec557091328cc74382a4bc6fb37d357d923de00da2f6c7f5aef63ebb",
+    "harness/pc-agent3-stats-readiness-contract.mjs": "b1cce3f8b44211253f857b93f42ec55278f3c34475ea5d533daabd61171423c5",
+    "harness/pc-agent3-v19-candidate-contract.mjs": "3a2e83bfe492dad8a3e4bed88a402595b55519e72da203ef1271442d559d5a73",
+    "harness/pc-agent3-public-api-audit.mjs": "54fa77583e530416c3a096e6bf64b2e56f8738aec50d89a6e8aa686ac6dc8fec",
+    "harness/pc-agent3-d1-evidence-audit.mjs": "0b3d0217e1d646159092c92fdd3e04669a9f86b7911a71f66fe43b528651a043"
+  },
+  "final_report": "docs/reviews/2026-09-17-three-agent-handoff/03-agent-pricing-data-audit-result.md",
+  "final_report_sha256": "89882cdc718a0fdfc875c38ffebc0290b58a476fee45bdb9c5256edb7278ea30",
+  "tests": "tmp/pc-agent3-final-tests-20260917.json",
+  "public_audit": "tmp/pc-agent3-public-after-2026-09-17T05-45-38-397Z/report.json",
+  "d1_audit": "tmp/pc-agent3-d1-evidence-result-20260917.json",
+  "no_production_writes": true,
+  "release_approval": false,
+  "report_verified_at": "2026-09-17T06:01:11.996Z"
+}

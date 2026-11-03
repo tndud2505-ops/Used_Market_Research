@@ -62,7 +62,7 @@ assert.match(healthScript, /\["bunjang", "ebay", "joonggonara"\]/u,
   "health must bind the exact approved operational source set");
 assert.match(smokeScript, /sites: \["bunjang", "joonggonara", "ebay"\]/u,
   "authenticated smoke search must use only the current operational sources");
-assert.doesNotMatch(smokeScript, /hellomarket|rethinkmall|danawa|coolenjoy/u,
+assert.doesNotMatch(smokeScript, /hellomarket|rethinkmall|danawa/u,
   "retired sources must not return through the operator smoke command");
 assert.match(healthScript, /used-market-runner\.service used-market-tunnel\.service/u,
   "health must fail when either systemd unit is not enabled or active");
@@ -141,10 +141,10 @@ assert.match(retiredSourceMigration, /UPDATE public_stats_publications[\s\S]*exp
   "retiring published statistics must preserve the active publication manifest");
 assert.match(runnerScript, /recordPcItemsIncrementally\(result\.result\.items, result\.run_at, progress\)/u,
   "scheduler collection must yield between ledger writes so health and search remain responsive");
-assert.match(runnerScript, /stabilizeIncrementalPcProjections\(recorded\)/u,
+assert.match(runnerScript, /stabilizeIncrementalPcProjections\(allRecorded\)/u,
   "scheduler collection must repair stable source identities before public projection writes");
 assertOrdered(runnerScript, [
-  "stabilizeIncrementalPcProjections(recorded)",
+  "stabilizeIncrementalPcProjections(allRecorded)",
   "upsertPcProjectionsIncrementally(publicProjections, { observedAt: result.run_at }, progress)",
   "importToD1BestEffort(publicProjections, tickSignal)"
 ], "incremental public projection publication");
@@ -223,7 +223,7 @@ assert.match(configureScript, /pc_source_target_concurrency < 1 \|\| pc_source_t
   "interactive reconfiguration must preserve valid operator concurrency");
 assert.match(configureScript, /PC_SOURCE_TARGETS_PER_RUN \[\$\{pc_source_targets_per_run_default\}\]/u,
   "operators must be able to accept the repaired legacy target budget during reconfiguration");
-assert.match(runnerScript, /target_coverage_ready: targetCoverage\?\.coverage_ready === true/u,
+assert.match(runnerScript, /const targetCoverageReady = targetCoverage\?\.coverage_ready === true;[\s\S]*target_coverage_ready: targetCoverageReady/u,
   "continuous runner health must expose stale per-target coverage instead of only source-level success");
 assert.match(configureScript, /PC_SOURCE_TARGET_CONCURRENCY \[\$\{pc_source_target_concurrency_default\}\]/u,
   "operators must be able to adjust source concurrency without editing the protected env file manually");

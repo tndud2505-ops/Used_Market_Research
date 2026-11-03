@@ -2,14 +2,14 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import vm from 'node:vm';
-import { readFileSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import * as core from '../web-backend/public/pc-tools-core.mjs';
 import * as catalog from '../web-backend/public/pc-tools-catalog.mjs';
 
 const read = name => readFileSync(new URL(`../web-backend/public/${name}`, import.meta.url), 'utf8');
 const script = read('pc-tools.js'), app = read('app.js'), css = read('ui-concept-a.css');
-const pages = ['index.html', 'computer-builder.html', 'price-analysis.html', 'guide.html', 'privacy.html', 'terms.html'];
-test('all six pages use search-first v2 assets, unique IDs and common navigation', () => {
+const pages = ['index.html', 'computer-builder.html', 'price-analysis.html', 'guide.html', 'privacy.html', 'terms.html', 'changelog.html', 'support.html'];
+test('public pages retain accessible document structure and common navigation', () => {
   for (const name of pages) {
     const html = read(name), ids = [...html.matchAll(/\bid="([^"]+)"/g)].map(m => m[1]);
     assert.equal(ids.length, new Set(ids).size, `${name}: duplicate IDs`);
@@ -18,10 +18,31 @@ test('all six pages use search-first v2 assets, unique IDs and common navigation
     assert.doesNotMatch(html, /ui-refinement\.css/);
     assert.match(html, /class="skip-link" href="#main"/);
     assert.equal([...html.matchAll(/<h1\b/g)].length, 1);
-    for (const href of ['/', '/computer-builder.html', '/price-analysis.html', '/guide.html']) assert.ok(html.includes(`href="${href}"`));
+    for (const href of ['/', '/computer-builder.html', '/price-analysis.html', '/guide.html', '/changelog.html', '/support.html']) assert.ok(html.includes(`href="${href}"`));
     for (const [, refs] of html.matchAll(/\baria-(?:controls|labelledby)="([^"]+)"/g)) {
       for (const id of refs.split(/\s+/)) assert.ok(ids.includes(id), `${name}: missing ${id}`);
     }
+  }
+  for (const name of [...pages, 'used-market-categories.html', 'used-market-integration.html']) {
+    const menus = [...read(name).matchAll(/<nav\b[^>]*\bclass="[^"]*\b(?:up-header-links|mobile-menu-policy|tools-mobile-policy)\b[^"]*"[^>]*>([\s\S]*?)<\/nav>/g)];
+    assert.ok(menus.length > 0, `${name}: utility navigation missing`);
+    for (const [, menu] of menus) {
+      assert.match(menu, /<a\b[^>]*href="\/changelog\.html"[^>]*>\s*패치 내역\s*<\/a>/u, `${name}: patch history link missing`);
+      assert.match(menu, /<a\b[^>]*href="\/support\.html"[^>]*>\s*후원\s*<\/a>/u, `${name}: support link missing`);
+    }
+  }
+  assert.ok(read('sitemap.xml').includes('<loc>https://used-pick.com/changelog.html</loc>'));
+  assert.ok(read('sitemap.xml').includes('<loc>https://used-pick.com/support.html</loc>'));
+});
+test('changelog screenshot references resolve to files under public', () => {
+  const publicRoot = new URL('../web-backend/public/', import.meta.url);
+  const screenshots = [...read('changelog.html').matchAll(/<img\b[^>]*\bsrc=["']([^"']+)["']/giu)]
+    .map(([, src]) => src).filter(src => src.startsWith('/changelog/'));
+  assert.ok(screenshots.length > 0, 'changelog must reference a public screenshot');
+  for (const src of new Set(screenshots)) {
+    const asset = new URL(src.slice(1), publicRoot);
+    assert.ok(asset.href.startsWith(publicRoot.href), `${src}: screenshot must stay under public`);
+    assert.ok(statSync(asset).isFile(), `${src}: screenshot file missing`);
   }
 });
 test('restored UI assets use a fresh cache identity while data and calculation versions remain current', () => {
@@ -79,9 +100,9 @@ test('native dialogs are wired without destructive hash navigation or inline han
   assert.doesNotMatch(read('computer-builder.html'), /href="#build-summary"/);
   assert.match(app, /home\.after\(dom\.modelFilters\)/);
   assert.match(app, /dialog\.showModal\(\)/);
-  assert.match(read('index.html'), /<dialog id="listing-price-dialog"/);
+  assert.doesNotMatch(read('index.html'), /id="listing-price-dialog"|id="model-detail-open"/);
   assert.match(read('listing-price-preview.mjs'), /dialog\.showModal\(\)/);
-  assert.doesNotMatch(read('index.html'), /id="catalog-query"|id="price-min"|id="price-max"/);
+  assert.doesNotMatch(read('index.html'), /id="price-min"|id="price-max"/);
   assert.doesNotMatch(script, /분석중/);
   assert.match(script, /currentAnalysisModel \? '현재 모델' : '보기'/);
   assert.match(script, /if \(type === 'analyze'\) \{\s+\$\('#analysis-model-dialog'\)\?\.close\(\);/);
@@ -95,22 +116,37 @@ test('responsive theme does not hide whole-page overflow and preserves focus/red
 });
 
 class Node {
-  constructor(tag = '') { this.tagName = tag; this.children = []; this.dataset = {}; this.attributes = {}; this.ownText = ''; this.open = false; this.focused = false; this.showCount = 0; }
+  constructor(tag = '') {
+    this.tagName = tag; this.children = []; this.dataset = {}; this.attributes = {}; this.ownText = '';
+    this.open = false; this.focused = false; this.showCount = 0; this.scrollTop = 0; this.scrollLeft = 0;
+    this.className = ''; this.classList = {
+      add: (...values) => { this.className = [...new Set([...this.className.split(/\s+/).filter(Boolean), ...values])].join(' '); },
+      toggle: (value, on) => { if (on) this.classList.add(value); else this.className = this.className.split(/\s+/).filter(v => v !== value).join(' '); },
+    };
+  }
   set textContent(value) { this.ownText = String(value); this.children = []; }
   get textContent() { return this.ownText + this.children.map(n => n.textContent ?? String(n)).join(''); }
   append(...items) { this.children.push(...items); }
   prepend(...items) { this.children.unshift(...items); }
   replaceChildren(...items) { this.children = [...items]; this.ownText = ''; }
   setAttribute(key, value) { this.attributes[key] = String(value); }
-  contains(node) { return this.children.includes(node); }
-  querySelectorAll() { return []; }
+  contains(node) { return this.children.some(child => child === node || child.contains?.(node)); }
+  querySelectorAll(selector) {
+    const descendants = this.children.flatMap(child => child instanceof Node ? [child, ...child.querySelectorAll('*')] : []);
+    return descendants.filter(node => selector.split(',').some(part => {
+      const rule = part.trim(); return rule === '*' || rule === 'button' && node.tagName === 'button'
+        || rule === 'a[data-action]' && node.tagName === 'a' && node.dataset.action
+        || rule === '[role="tab"]' && node.attributes.role === 'tab';
+    }));
+  }
+  closest(selector) { return selector === '[data-action]' && this.dataset.action ? this : null; }
   focus() { this.focused = true; }
   showModal() { assert.equal(this.open, false); this.open = true; this.showCount++; }
   close() { this.open = false; }
 }
 const metric = (price, count = 5) => ({ sample_count: count, mean: price, median: price, min: price, max: price });
 const product = { canonical_product_id: 'ram:test-ui-a:ddr4:16gb', canonical_display_name: 'Synthetic RAM', category_code: 'RAM', key_specs: { directory_node_type: 'PRODUCT', module_capacity_gb: 16 } };
-function setup({ builder = false, source = '', manufacturer = '', storageFails = false, record } = {}) {
+function setup({ builder = false, source = '', manufacturer = '', storageFails = false, record, mobile = false } = {}) {
   const root = { canonical_product_id: product.canonical_product_id, active: metric(100.5), sold: metric(90.5),
     methodology: { currency: 'KRW', days: 30, market_pool: 'KR_C2C_USED' }, window: { from: '2026-08-19', to: '2026-09-17' },
     by_source: [{ source_id: 'bunjang', active: metric(101.5), sold: metric(91.5) },
@@ -121,12 +157,12 @@ function setup({ builder = false, source = '', manufacturer = '', storageFails =
     products: [product], entries: [{ id: product.canonical_product_id, category: 'RAM', quantity: 2, manufacturer: '' }],
     sources: root.by_source.map(row => ({ source_id: row.source_id, public_enabled: true })),
     category: 'RAM', selectedId: product.canonical_product_id, selectedManufacturer: manufacturer, source, days: 30,
-    range: root.window, ready: true };
+    range: root.window, ready: true, manufacturer: '', generation: '', capacity: '', query: '', sort: 'name', page: 1 };
   const stored = new Map(), historyCalls = [];
   const context = vm.createContext({ ...core, ...catalog, state, builder, URL, URLSearchParams, Intl, Number, Date, Map, Set,
     STORAGE_KEY: 'used-pick:pc-build:v1', SOURCE_LABELS: { bunjang: '번개장터', joonggonara: '중고나라', ebay: 'eBay' },
-    PAGE_SIZE: 12, pickerReturnCategory: '',
-    $: selector => nodes.get(selector) || null,
+    PAGE_SIZE: 12, pickerReturnCategory: '', modelPickerView: { dimension: 'models' }, matchMedia: () => ({ matches: mobile }),
+    $: selector => nodes.get(selector) || [...nodes.values()].flatMap(node => node.querySelectorAll('*')).find(node => `#${node.id}` === selector) || null,
     document: { createElement: tag => new Node(tag), createTextNode: text => Object.assign(new Node(), { textContent: text }) },
     localStorage: { setItem(key, value) { if (storageFails) throw new Error('quota'); stored.set(key, value); } },
     location: { href: 'https://example.test/computer-builder.html' }, history: { replaceState: (...args) => historyCalls.push(args) },
@@ -191,6 +227,62 @@ test('picker cannot open before the live catalog is ready', () => {
   const t = setup({ builder: true }); t.state.ready = false; t.context.openModelPicker();
   assert.equal(t.nodes.get('#builder-model-dialog').showCount, 0);
 });
+function mountMobilePicker(t) {
+  for (const id of ['model-controls', 'model-filter-tabs', 'model-facet-options', 'model-filter-context',
+    'model-picker-scroll', 'model-table', 'model-pages', 'model-picker-scope', 'model-price-status',
+    'analysis-categories', 'builder-categories']) t.nodes.set(`#${id}`, new Node());
+  t.context.document.addEventListener = (type, listener) => { if (type === 'click') t.click = listener; };
+  vm.runInContext(script.slice(script.indexOf("document.addEventListener('click', event => {"),
+    script.indexOf("document.addEventListener('change', event => {")), t.context);
+}
+test('mobile facet choices reuse dependent options, clear downstream filters and keep the chosen model', () => {
+  const t = setup({ mobile: true }); mountMobilePicker(t);
+  const p = (id, brand, generation, socket) => ({ canonical_product_id: id, canonical_display_name: id,
+    category_code: 'CPU', brand, key_specs: { generation, socket } });
+  t.state.products = [p('cpu:a', 'AMD', 'Zen 3', 'AM4'), p('cpu:b', 'AMD', 'Zen 4', 'AM5'), p('cpu:c', 'Intel', '14세대', 'LGA1700')];
+  Object.assign(t.state, { category: 'CPU', manufacturer: 'AMD', generation: 'Zen 3', capacity: 'AM4', query: '5600' });
+  const selected = t.state.selectedId, entries = JSON.stringify(t.state.entries), range = JSON.stringify(t.state.range);
+  const options = t.context.modelFilterOptions();
+  assert.deepEqual(Array.from(options[2].options, row => Array.from(row)), [['', '전체 CPU 소켓'], ['AM4', 'AM4']]);
+  t.context.renderModelTable = () => {}; t.context.loadPickerPrices = () => {};
+  t.context.setModelPickerDimension('tool-manufacturer');
+  const group = t.nodes.get('#model-facet-options').children[0], clear = group.children[0].children[1];
+  assert.equal(clear.value, ''); assert.equal(clear.type, 'radio');
+  t.click({ target: clear });
+  assert.equal(t.state.manufacturer, ''); assert.equal(t.state.generation, ''); assert.equal(t.state.capacity, '');
+  assert.equal(t.state.query, '5600'); assert.equal(t.context.modelPickerView.dimension, 'models');
+  assert.equal(t.nodes.get('#model-table').hidden, false);
+  assert.equal(t.state.selectedId, selected); assert.equal(JSON.stringify(t.state.entries), entries);
+  assert.equal(JSON.stringify(t.state.range), range);
+  t.state.products.push({ canonical_product_id: 'cooler:a', canonical_display_name: '공랭', category_code: 'COOLING',
+    brand: 'Noctua', key_specs: { subtype: 'AIR_CPU' } });
+  t.state.categories = [{ code: 'CPU', label: 'CPU' }, { code: 'COOLING', label: '쿨러' }];
+  t.context.setModelPickerDimension('tool-capacity'); t.context.selectCategory('COOLING');
+  assert.equal(t.context.modelPickerView.dimension, 'models');
+  const coolerOptions = t.context.modelFilterOptions();
+  assert.deepEqual(Array.from(coolerOptions, item => item.label), ['제조사', '쿨러 종류']);
+  assert.deepEqual(Array.from(coolerOptions[1].options, row => Array.from(row)), [['', '전체 쿨러 종류'], ['AIR_CPU', 'CPU 공랭']]);
+  assert.equal(t.state.selectedId, selected);
+});
+test('price rerenders retain an active facet and scroll; mobile name selection preserves builder quantity', () => {
+  const t = setup({ builder: true, mobile: true }); mountMobilePicker(t);
+  t.context.setModelPickerDimension('tool-manufacturer');
+  const options = t.nodes.get('#model-facet-options').children[0], scroll = t.nodes.get('#model-picker-scroll');
+  scroll.scrollTop = 164; t.context.renderModelTable();
+  assert.equal(t.nodes.get('#model-facet-options').children[0], options);
+  assert.equal(t.context.modelPickerView.dimension, 'tool-manufacturer'); assert.equal(scroll.scrollTop, 164);
+  assert.equal(t.nodes.get('#model-table').hidden, true);
+  t.context.setModelPickerDimension('models');
+  const container = t.nodes.get('#model-table'), link = container.querySelectorAll('a[data-action]')[0];
+  t.context.document.activeElement = link; scroll.scrollTop = 96; t.context.renderModelTable();
+  const replacement = container.querySelectorAll('a[data-action]')[0];
+  assert.equal(replacement.focused, true); assert.equal(scroll.scrollTop, 96);
+  assert.equal(t.nodes.get('#model-pages').hidden, false);
+  t.context.renderSummary = () => {}; t.context.renderBuild = () => {}; t.context.refreshPrices = () => {};
+  t.context.status = () => {}; t.click({ target: replacement, preventDefault() {} });
+  assert.equal(t.state.entries[0].id, product.canonical_product_id); assert.equal(t.state.entries[0].quantity, 2);
+  assert.equal(t.nodes.get('#builder-model-dialog').open, false);
+});
 test('models outside public listings have no false link', () => {
   const t = setup(); const p = { ...product, category_code: 'CASE', key_specs: { directory_node_type: 'FACET' } };
   t.state.byId.set(product.canonical_product_id, p);
@@ -230,7 +322,8 @@ test('footer totals align price columns and retain quantity-adjusted prices with
   assert.equal(summary.children[0].tagName, 'tr');
   assert.equal(summary.children[0].children.length, 7);
   assert.equal(summary.children[0].children[0].textContent, '합계');
-  assert.match(summary.textContent, /합계판매중 합계201원판매완료 합계181원/);
+  // Sold prices come from Joonggonara only (89.5 × 2), never the all-site aggregate.
+  assert.match(summary.textContent, /합계판매중 합계201원판매완료 합계179원/);
   assert.doesNotMatch(summary.textContent, /가격 확인/);
   t.state.entries = [];
   t.context.renderSummary();
@@ -243,5 +336,5 @@ test('unavailable prices never become a zero-won completed header quote', () => 
   const text = t.nodes.get('#tools-summary').textContent;
   assert.doesNotMatch(text, /가격 확인/);
   assert.match(text, /가격 다시 조회/);
-  assert.doesNotMatch(text, /0원|201원|181원/);
+  assert.doesNotMatch(text, /0원|201원|179원/);
 });

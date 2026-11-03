@@ -82,7 +82,7 @@ const compactedTransportStats = compactStatsForPublication({
     { date: "2026-08-31", active: emptyDailyMetric, sold: sampledDailyMetric, confirmed_transactions: emptyDailyMetric }
   ],
   by_source: [{
-    source_id: "coolenjoy",
+    source_id: "joonggonara",
     sold: { sample_count: 1 },
     daily: [
       { date: "2026-08-30", active: emptyDailyMetric, sold: emptyDailyMetric, confirmed_transactions: emptyDailyMetric },

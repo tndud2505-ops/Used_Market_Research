@@ -1,4 +1,5 @@
 import { decodeSearchCursor, encodeSearchCursor } from "../aws-runner/search-cursor.mjs";
+import { RAM_MEMORY_USAGES, RAM_SPEEDS_MT_S } from '../market/logic/ram-listing-facets.mjs';
 
 const SORTS = new Set(["recent", "price_asc", "price_desc"]);
 const CURRENCIES = new Set(["KRW", "USD"]);
@@ -15,6 +16,8 @@ const PUBLIC_PC_FACET_KEYS = new Set([
 ]);
 const MAX_CATALOG_SCOPE_VALUES = 60;
 const LISTING_FACET_VALUES = Object.freeze({
+  memory_usage: { category: "RAM", values: new Set(RAM_MEMORY_USAGES) },
+  speed_mt_s: { category: "RAM", values: new Set(RAM_SPEEDS_MT_S) },
   product_kind: { category: "SSD", values: new Set(["M2_NVME", "SATA_2_5", "M2_SATA", "EXTERNAL", "OTHER_UNKNOWN"]) },
   placement: { category: "HDD", values: new Set(["INTERNAL", "EXTERNAL", "UNKNOWN"]) },
   form_factor: { category: "PSU", values: new Set(["ATX", "SFX", "SFX-L"]) }
@@ -27,7 +30,6 @@ const SOURCE_URL_ID_PATTERNS = Object.freeze({
   hellomarket: [/\/item\/(\d+)(?:[/?#]|$)/iu],
   danawa: [/[?&](?:seq|saleSeq)=([a-z0-9_-]+)(?:[&#]|$)/iu],
   rethinkmall: [/[?&]goodsNo=([a-z0-9_-]+)(?:[&#]|$)/iu],
-  coolenjoy: [/[?&](?:wr_id|no)=(\d+)(?:[&#]|$)/iu],
   carrot: [/\/articles?\/(\d+)(?:[/?#]|$)/iu]
 });
 

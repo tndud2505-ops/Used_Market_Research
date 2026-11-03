@@ -7,6 +7,7 @@ import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { statfsSync, existsSync, readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { saveDanawaResponseEvidence } from './danawa-response-evidence.mjs';
 import {
   buildCollectionRequest,
   buildLivePayload,
@@ -19,7 +20,8 @@ import {
   requestedSites,
   requestedSort,
   requestedViewSites,
-  sourceCandidateLimit
+  sourceCandidateLimit,
+  getEbayAccessToken
 } from "../cloudflare/live-search.mjs";
 import { decodeSearchCursor, encodeSearchCursor } from "./search-cursor.mjs";
 import { collectionIdentity, SearchIndex } from "./search-index.mjs";
@@ -28,10 +30,15 @@ import { stabilizeIncrementalPcProjections } from "./pc-projection-republish-pol
 import { parsePriceStatsRequest, priceStatsResponse, priceHistoryResponse } from "./pc-price-stats-http.mjs";
 import { pcPriceReadinessProblem } from '../market/logic/pc-price-readiness.mjs';
 import { createLifecycleStatusCache, createLifecycleQueueBootstrap } from './lifecycle-status-cache.mjs';
+import { runLifecycleBatch, pacedLifecycleFetch, lifecycleRecheckEnabled } from './lifecycle-batch.mjs';
+import { reconcileSearchStatusObservations } from './search-status-observations.mjs';
+import { recordBunjangSearchWindows, recordDanawaQueryWindows } from './lifecycle-queue.mjs';
 import { schedulerReadDeferral } from "./pc-scheduler-admission.mjs";
 import { createCollectionDiagnostics, collectionError, schedulerWatchdogMs } from './pc-collection-diagnostics.mjs';
 import { PcShadowPipeline } from "./pc-shadow-pipeline.mjs";
-import { explicitSoldText, structuredSoldEvidenceFromHtml, joongnaListingUrl } from "../market/logic/listing-lifecycle.mjs";
+import { explicitSoldText, structuredSoldEvidenceFromHtml, joongnaListingUrl, joongnaStatusStructureTokens,
+  joongnaReservationBinding, joongnaReservedEvidenceFromBinding, ebayItemLifecycle,
+  joongnaProductUnavailableReason } from "../market/logic/listing-lifecycle.mjs";
 import { bunjangProductIdFromListing, parseBunjangDetailLifecycle, bunjangDetailObservationItem } from "../market/logic/bunjang-lifecycle.mjs";
 import {
   pcCatalogResponse,
@@ -63,7 +70,7 @@ import {
   filterIncrementalListings
 } from "../collector/logic/pc-source-adapters.mjs";
 import { ebayTargetForCategory } from "../collector/logic/pc-specialist-targets.mjs";
-import { collectDanawaSearchListings, collectDanawaSearchTargetBatch, createDanawaPacedFetch } from '../collector/logic/danawa-search.mjs';
+import { collectDanawaSearchListings, collectDanawaSearchTargetBatch, createDanawaPacedFetch, danawaPartialItems } from '../collector/logic/danawa-search.mjs';
 
 const PORT = Number.parseInt(process.env.RUNNER_PORT || "8787", 10);
 const RUNNER_TOKEN = process.env.CLOUDFLARE_RUNNER_TOKEN || process.env.RUNNER_TOKEN || "";
@@ -225,15 +232,11 @@ const EFFECTIVE_PC_SOURCE_GOVERNANCE = Object.freeze(Object.fromEntries(PC_SOURC
     : operatorAttestedSourceGovernance(source)
 ])));
 const PC_SPECIALIST_SEARCH_URLS = Object.freeze({
-  coolenjoy: "https://coolenjoy.net/bbs/mart2?sfl=wr_subject&stx={query}&sop=and",
   ...jsonEnvironment("PC_SPECIALIST_SEARCH_URLS_JSON")
 });
-const PC_SPECIALIST_SEARCH_HOSTS = Object.freeze({
-  coolenjoy: new Set(["coolenjoy.net", "www.coolenjoy.net"])
-});
+const PC_SPECIALIST_SEARCH_HOSTS = Object.freeze({});
 const PC_SPECIALIST_PUBLIC_QUERY_OVERRIDES = Object.freeze({});
 const PC_SOURCE_TARGET_PACING_MS = Object.freeze({
-  coolenjoy: 200,
   ebay: 300,
   // RethinkMall starts returning 429s when a 64-target batch is paced below
   // roughly a minute. Keep the normal public route but leave more room
@@ -720,6 +723,7 @@ async function publishPcProductStats() {
 
 async function collectJob(jobName) {
   if (jobName === "bunjang-lifecycle-recheck") {
+    if (!lifecycleRecheckEnabled('bunjang')) throw new Error('BUNJANG_LIFECYCLE_RECHECK_DISABLED');
     if (!pcLedger || !pcPipeline) throw new Error("PC_LEDGER_UNAVAILABLE");
     if (pcSchedulerActive || pcPublicationActive) throw new Error("PC_SCHEDULER_BUSY");
     const source = pcLedger.getSource("bunjang");
@@ -927,7 +931,8 @@ function computePcOperationalReadiness() {
     if (!runtimeEnabled) reasons.push("SOURCE_RUNTIME_NOT_ENABLED");
     if (!canaryEvidence) reasons.push(activation.reason || "SOURCE_CANARY_EVIDENCE_MISSING");
     if (!recentCommittedCrawl) reasons.push("SOURCE_COMMITTED_CRAWL_NOT_RECENT");
-    if (targetCoverage?.coverage_ready !== true) reasons.push("SOURCE_TARGET_COVERAGE_STALE");
+    const targetCoverageReady = targetCoverage?.coverage_ready === true;
+    if (!targetCoverageReady) reasons.push("SOURCE_TARGET_COVERAGE_STALE");
     return {
       source_key: source.key,
       policy_status: persisted?.policy_status || source.policy_status,
@@ -943,7 +948,7 @@ function computePcOperationalReadiness() {
       continuous_30_day_coverage: continuousCoverage,
       coverage_warning: continuousCoverage ? null : "SOURCE_30_DAY_COVERAGE_INSUFFICIENT",
       target_coverage: targetCoverage || null,
-      target_coverage_ready: targetCoverage?.coverage_ready === true,
+      target_coverage_ready: targetCoverageReady,
       activation_basis: governance?.governance_origin === "REGISTRY_OPERATOR_ATTESTATION"
         ? "OPERATOR_ATTESTED_DIRECT_PERMISSION"
         : "CONFIGURED_GOVERNANCE_AND_CANARY",
@@ -993,8 +998,8 @@ function computePcOperationalReadiness() {
       && allSourcesReady
       && reviewRequiredActiveSources.length === 0),
     rollback_projection_ready: rollbackProjectionReady,
-    bunjang_lifecycle_recheck: lifecycleStatus.bunjang,
-    joonggonara_lifecycle_recheck: lifecycleStatus.joonggonara,
+    bunjang_lifecycle_recheck: { ...lifecycleStatus.bunjang, enabled: lifecycleRecheckEnabled('bunjang'), disabled_reason: 'OPERATOR_REQUEST' },
+    joonggonara_lifecycle_recheck: { ...lifecycleStatus.joonggonara, enabled: lifecycleRecheckEnabled('joonggonara') },
     publication_last_success_at: pcPublicationLastSucceededAt,
     publication_recent: publicationRecent
   };
@@ -1368,6 +1373,7 @@ async function collectSpecialistSource(sourceKey, target, parentSignal) {
     return collectDanawaSearchListings({
       query: target.query_text,
       categoryCode: target.category_code,
+      onUnrecognizedResponse: evidence => saveDanawaResponseEvidence(INDEX_PATH, evidence),
       fetchImpl: (input, init = {}) => fetchDanawaPublicWithPacing(input, {
         ...init,
         signal: boundedFetchSignal(parentSignal, 20_000)
@@ -1399,6 +1405,67 @@ async function collectSpecialistSource(sourceKey, target, parentSignal) {
   };
 }
 
+function normalizeCollectedSourceItems(sourceKey, items) {
+  return items.map((item) => {
+    const sourceListingId = String(item.source_listing_id || item.item_id || item.id || item.url || "").trim();
+    const publicItemId = String(item.item_id || item.id || "").startsWith(`${sourceKey}:`)
+      ? String(item.item_id || item.id)
+      : `${sourceKey}:${sourceListingId}`;
+    const numericPrice = item.price === null || item.price === undefined ? null : Number(item.price);
+    return {
+      ...item,
+      id: publicItemId,
+      item_id: publicItemId,
+      source_listing_id: sourceListingId,
+      price: Number.isSafeInteger(numericPrice) && numericPrice >= 0 ? numericPrice : null,
+      currency: String(item.currency || (sourceKey === "ebay" ? "USD" : "KRW")).toUpperCase(),
+      status: String(item.status || item.lifecycle_status || "UNAVAILABLE_UNKNOWN").toUpperCase(),
+      raw_payload: item.raw_payload && typeof item.raw_payload === "object"
+        ? item.raw_payload
+        : { ...item, source_listing_id: sourceListingId }
+    };
+  });
+}
+
+// Bounded evidence of how Joonggonara marks reservations: enum codes and page
+// counts per current verdict only. No body text, seller, URL or listing ID.
+function recordStatusStructure(receipt, body, verdict, sourceListingId) {
+  const shape = joongnaStatusStructureTokens(body);
+  const group = shape.reservedLabel ? `${verdict}+label` : verdict;
+  const summary = receipt.status_structure ||= { pages: {}, tokens: {}, distinct: 0, dropped_tokens: 0 };
+  summary.pages[group] = (summary.pages[group] || 0) + 1;
+  // Pages answering an internal 422 without product data may be removed listings.
+  if (shape.tokens.includes('status=422') && !shape.tokens.some(token => token.startsWith('productStatus'))) {
+    const missing = summary.product_data_missing ||= { count: 0, sample_listing_ids: [] };
+    missing.count += 1;
+    if (missing.sample_listing_ids.length < 3) missing.sample_listing_ids.push(String(sourceListingId || '').slice(0, 120));
+  }
+  for (const token of shape.tokens) {
+    const key = `${group}|${token}`;
+    if (Object.hasOwn(summary.tokens, key)) summary.tokens[key] += 1;
+    else if (summary.distinct < 160) { summary.tokens[key] = 1; summary.distinct += 1; }
+    else summary.dropped_tokens += 1;
+  }
+}
+
+function mergeRawStatusSummaries(summaries) {
+  const present = summaries.filter(summary => summary && typeof summary === 'object');
+  if (!present.length) return null;
+  const merged = { rows: 0, state: {}, status_fields: {}, keys: [] };
+  const keys = new Set();
+  for (const summary of present) {
+    merged.rows += Number(summary.rows) || 0;
+    for (const [field, target] of [['state', merged.state], ['status_fields', merged.status_fields]]) {
+      for (const [key, count] of Object.entries(summary[field] || {})) {
+        if (Object.hasOwn(target, key) || Object.keys(target).length < 60) target[key] = (target[key] || 0) + (Number(count) || 0);
+      }
+    }
+    for (const key of summary.keys || []) if (keys.size < 80) keys.add(key);
+  }
+  merged.keys = [...keys].sort();
+  return merged;
+}
+
 function listingIdentityIsPresent(html, listing) {
   const haystack = String(html || "").replace(/<[^>]*>/gu, " ").replace(/\s+/gu, " ").toLowerCase();
   const sourceId = String(listing.source_listing_id || "").trim().toLowerCase();
@@ -1407,23 +1474,105 @@ function listingIdentityIsPresent(html, listing) {
   return titleTokens.slice(0, 5).filter((token) => haystack.includes(token)).length >= Math.min(2, titleTokens.length || 2);
 }
 
-async function recheckKnownListings(sourceKey, checkedAt, parentSignal, progress) {
-  if (sourceKey === "ebay" || sourceKey === "danawa") return [];
+// eBay Browse getItem for visible offers that no scheduled search has confirmed
+// for a day. getItems (batch) is not granted to this key. The Browse quota of
+// 5,000 calls/day is shared with scheduled search (about 1,200/day, at most
+// 100/run), so hourly runs check at most 100. An ended offer answers
+// OUT_OF_STOCK or a past end date; it is hidden as unavailable, never SOLD.
+const EBAY_STATUS_CHECKS_PER_RUN = 100;
+const EBAY_ACTIVE_RECHECK_MS = 72 * 60 * 60 * 1000;
+async function recheckEbayListings(parentSignal) {
+  if (Date.parse(pcLedger.getLifecycleRun('ebay')?.backoff_until || '') > Date.now()) return [];
+  const startedAt = Date.now();
+  const receipt = { started_at: new Date(startedAt).toISOString(), selected: 0, attempted: 0, verified: 0,
+    active: 0, unavailable: 0, stop_reason: null, unverified_outcomes: {} };
+  const due = pcLedger.db.prepare(`SELECT q.source_listing_id, s.price_value, s.currency, r.raw_json, r.title, r.description
+      FROM pc_lifecycle_queue q JOIN listing_snapshots s ON s.id = q.snapshot_id JOIN raw_listings r ON r.id = s.raw_listing_id
+     WHERE q.source_id = 'ebay' AND q.lifecycle_status = 'ACTIVE' AND q.source_listing_id GLOB 'v1|[0-9]*|0'
+       AND q.last_checked_at <= ? AND q.last_checked_at >= ? AND q.next_attempt_at <= ?
+       AND EXISTS (SELECT 1 FROM listings l WHERE l.item_id = 'ebay:' || substr(q.source_listing_id, 4, instr(substr(q.source_listing_id, 4), '|') - 1)
+         AND l.active = 1 AND l.pc_lifecycle_status = 'ACTIVE' AND l.pc_price_eligible = 1)
+     ORDER BY q.last_checked_at LIMIT ?`).all(new Date(startedAt - 24 * 60 * 60 * 1000).toISOString(),
+    new Date(startedAt - 14 * 24 * 60 * 60 * 1000).toISOString(), new Date(startedAt).toISOString(), EBAY_STATUS_CHECKS_PER_RUN);
+  receipt.selected = due.length;
+  const changed = [];
+  let backoffUntil = null;
+  let checkError = null;
+  try {
+    const token = due.length ? await getEbayAccessToken() : null;
+    const deadline = startedAt + 5 * 60 * 1000;
+    for (const listing of due) {
+      throwIfAborted(parentSignal);
+      if (Date.now() >= deadline) { receipt.stop_reason = 'TIME_BUDGET'; break; }
+      receipt.attempted += 1;
+      let outcome = 'UNVERIFIED', delayMs = 60 * 60 * 1000, status = null;
+      pcLedger.deferLifecycleAttempt('ebay', listing.source_listing_id, { outcome: 'ATTEMPTING' });
+      try {
+        const response = await fetch(`https://api.ebay.com/buy/browse/v1/item/${encodeURIComponent(listing.source_listing_id)}`, {
+          headers: { accept: 'application/json', authorization: `Bearer ${token}`, 'x-ebay-c-marketplace-id': 'EBAY_US' },
+          signal: boundedFetchSignal(parentSignal)
+        });
+        if ([401, 403, 429].includes(response.status)) {
+          outcome = `HTTP_${response.status}`; receipt.stop_reason = outcome;
+          delayMs = 6 * 60 * 60 * 1000; backoffUntil = new Date(Date.now() + delayMs).toISOString();
+        } else if (response.status === 404) status = 'UNAVAILABLE';
+        else if (response.ok) { status = ebayItemLifecycle(await response.json(), listing.source_listing_id); if (!status) outcome = 'UNRECOGNIZED_ITEM'; }
+        else outcome = `HTTP_${response.status}`;
+      } catch (error) { throwIfAborted(parentSignal); outcome = 'NETWORK_ERROR'; }
+      if (status) {
+        let raw;
+        try { raw = JSON.parse(listing.raw_json); } catch { raw = {}; }
+        const active = status === 'ACTIVE';
+        const result = pcLedger.recordObservation({
+          sourceId: 'ebay', sourceListingId: listing.source_listing_id, observedAt: new Date().toISOString(),
+          title: listing.title, description: listing.description, rawPayload: raw,
+          price: listing.price_value, currency: listing.currency,
+          status: active ? 'ACTIVE' : 'UNAVAILABLE_UNKNOWN',
+          statusEvidence: { type: 'STRUCTURED_STATUS', value: active ? 'ACTIVE' : 'EBAY_ENDED_OR_OUT_OF_STOCK' },
+          availability: active ? 'AVAILABLE' : 'UNAVAILABLE'
+        });
+        receipt.verified += 1;
+        receipt[active ? 'active' : 'unavailable'] += 1;
+        outcome = 'VERIFIED';
+        delayMs = active ? EBAY_ACTIVE_RECHECK_MS : 24 * 60 * 60 * 1000;
+        if (result?.snapshotCreated) {
+          const projection = pcLedger.getPublicProjection('ebay', listing.source_listing_id);
+          if (projection) changed.push(projection);
+        }
+      } else receipt.unverified_outcomes[outcome] = (receipt.unverified_outcomes[outcome] || 0) + 1;
+      pcLedger.deferLifecycleAttempt('ebay', listing.source_listing_id, { outcome, delayMs });
+      if (receipt.stop_reason) break;
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+  } catch (error) {
+    receipt.stop_reason ||= parentSignal?.aborted ? 'ABORTED' : 'ERROR';
+    if (parentSignal?.aborted) checkError = error;
+  } finally {
+    receipt.finished_at = new Date().toISOString();
+    pcLedger.recordLifecycleRun('ebay', receipt, backoffUntil);
+    console.log(JSON.stringify({ event: 'pc_ebay_status_check_finished', source_id: 'ebay', ...receipt }));
+  }
+  // Observations already committed must reach the index and mirror even when
+  // the scheduler aborts the remaining checks.
+  const publicProjections = stabilizeIncrementalPcProjections(changed);
+  for (const projection of publicProjections) {
+    searchIndex?.applyLifecycleProjection(projection);
+    await yieldToEventLoop();
+  }
+  if (publicProjections.length > 0) await importToD1BestEffort(publicProjections,
+    parentSignal?.aborted ? AbortSignal.timeout(15000) : parentSignal);
+  if (checkError) throw checkError;
+  return publicProjections;
+}
+
+async function recheckKnownListings(sourceKey, checkedAt, parentSignal, progress, deadline = null) {
+  if (!lifecycleRecheckEnabled(sourceKey)) return [];
   if (Date.parse(pcLedger.getLifecycleRun(sourceKey)?.backoff_until || '') > Date.now()) return [];
   const changedProjections = [];
   const receipt = { started_at: new Date().toISOString(), selected: 0, attempted: 0, verified: 0,
-    sold: 0, deferred: 0, stop_reason: null };
+    sold: 0, deferred: 0, stop_reason: null, verified_statuses: {}, missing_response_checks: 0, unverified_outcomes: {}, identity_diagnostics: [] };
   let backoffUntil = null;
   let recheckError = null;
-  const captureProjection = (sourceListingId, result) => {
-    receipt.verified += 1;
-    if (progress) progress.recheck_verified = receipt.verified;
-    if (result?.status === 'SOLD' && result?.snapshotCreated) receipt.sold += 1;
-    if (result?.snapshotCreated !== true) return;
-    const projection = pcLedger.getPublicProjection(sourceKey, sourceListingId);
-    if (!projection) return;
-    changedProjections.push(projection);
-  };
   let due;
   try { due = pcLedger.dueRechecks({
     sourceId: sourceKey,
@@ -1435,14 +1584,32 @@ async function recheckKnownListings(sourceKey, checkedAt, parentSignal, progress
     return [];
   }
   receipt.selected = due.length;
-  const recheckDeadline = Date.now() + 8 * 60 * 1000;
-  try {
-  for (const listing of due) {
-    if (Date.now() >= recheckDeadline) { receipt.stop_reason = 'TIME_BUDGET'; break; }
+  const recheckDeadline = deadline ?? Date.now() + 8 * 60 * 1000;
+  const canStart = () => {
     throwIfAborted(parentSignal);
+    if (receipt.stop_reason) return false;
+    if (Date.now() >= recheckDeadline) { receipt.stop_reason = 'TIME_BUDGET'; return false; }
+    return true;
+  };
+  const fetchDetail = sourceKey === 'bunjang'
+    ? pacedLifecycleFetch(fetch, { intervalMs: 200, canStart }) : fetch;
+  try {
+  await runLifecycleBatch(due, { concurrency: 1, canStart, processItem: async listing => {
     receipt.attempted += 1;
     if (progress) progress.recheck_attempted = receipt.attempted;
-    const verifiedBefore = receipt.verified;
+    let verified = false;
+    const captureProjection = (sourceListingId, result, explicitStatus = true) => {
+      verified = true;
+      receipt.verified += 1;
+      if (!explicitStatus) receipt.missing_response_checks += 1;
+      if (explicitStatus && ['ACTIVE','RESERVED','SOLD','DELETED','UNAVAILABLE_UNKNOWN','BLOCKED_OR_PRIVATE'].includes(result?.status))
+        receipt.verified_statuses[result.status] = (receipt.verified_statuses[result.status] || 0) + 1;
+      if (progress) progress.recheck_verified = receipt.verified;
+      if (result?.status === 'SOLD' && result?.snapshotCreated) receipt.sold += 1;
+      if (result?.snapshotCreated !== true) return;
+      const projection = pcLedger.getPublicProjection(sourceKey, sourceListingId);
+      if (projection) changedProjections.push(projection);
+    };
     let outcome = 'UNVERIFIED', retryMs = 60 * 60 * 1000;
     // Lease before I/O: a process interruption cannot strand the same oldest row at the head.
     pcLedger.deferLifecycleAttempt(sourceKey, listing.source_listing_id, { outcome: 'ATTEMPTING' });
@@ -1454,18 +1621,22 @@ async function recheckKnownListings(sourceKey, checkedAt, parentSignal, progress
       ? joongnaListingUrl({url:rawUrl,sourceListingId:listing.source_listing_id}) || '' : rawUrl;
     if (sourceKey === "bunjang") {
       const pid = bunjangProductIdFromListing({ url, sourceListingId: listing.source_listing_id });
-      if (!pid) { outcome = 'INVALID_IDENTITY'; retryMs = 24 * 60 * 60 * 1000; continue; }
+      if (!pid) { outcome = 'INVALID_IDENTITY'; retryMs = 24 * 60 * 60 * 1000; return; }
       const canonicalUrl = `https://m.bunjang.co.kr/products/${pid}`;
-      await new Promise((resolve) => setTimeout(resolve, 200));
       let response;
       try {
-        response = await fetch(`https://api.bunjang.co.kr/api/pms/v1/products/${pid}/detail/web`, {
+        response = await fetchDetail(`https://api.bunjang.co.kr/api/pms/v1/products/${pid}/detail/web`, {
           headers: { accept: "application/json" }, signal: boundedFetchSignal(parentSignal)
         });
-      } catch {
+      } catch (error) {
         throwIfAborted(parentSignal);
-        outcome = 'NETWORK_ERROR'; receipt.stop_reason = outcome;
-        break;
+        if (error.code === 'LIFECYCLE_ADMISSION_STOPPED') { outcome = 'DEFERRED_STOP'; return; }
+        outcome = 'NETWORK_ERROR'; receipt.stop_reason ||= outcome;
+        return;
+      }
+      if ([401, 403, 429].includes(response.status)) {
+        outcome = `HTTP_${response.status}`; receipt.stop_reason = outcome;
+        retryMs = 6 * 60 * 60 * 1000; backoffUntil = new Date(Date.now() + retryMs).toISOString(); return;
       }
       const payload = await response.json().catch(() => { throwIfAborted(parentSignal); return null; });
       const unavailableStatus = ({
@@ -1476,40 +1647,36 @@ async function recheckKnownListings(sourceKey, checkedAt, parentSignal, progress
       })[payload?.errorCode];
       if (unavailableStatus) {
         captureProjection(listing.source_listing_id, pcLedger.recordObservation({
-          sourceId: sourceKey, sourceListingId: listing.source_listing_id, observedAt: checkedAt,
+          sourceId: sourceKey, sourceListingId: listing.source_listing_id, observedAt: new Date().toISOString(),
           title: listing.title, description: listing.description, rawPayload: { ...raw, url: canonicalUrl },
           price: listing.price_value, currency: listing.currency, status: unavailableStatus,
           statusEvidence: { type: "STRUCTURED_STATUS", value: unavailableStatus },
           availability: unavailableStatus === "BLOCKED_OR_PRIVATE" ? "BLOCKED_OR_PRIVATE" : "UNAVAILABLE"
         }));
-        continue;
-      }
-      if ([401, 403, 429].includes(response.status)) {
-        outcome = `HTTP_${response.status}`; receipt.stop_reason = outcome;
-        retryMs = 6 * 60 * 60 * 1000; backoffUntil = new Date(Date.now() + retryMs).toISOString(); break;
+        return;
       }
       if (response.status === 404 || response.status === 410) {
         captureProjection(listing.source_listing_id, pcLedger.recordMissingCheck({
-          sourceId: sourceKey, sourceListingId: listing.source_listing_id, checkedAt
-        }));
-        continue;
+          sourceId: sourceKey, sourceListingId: listing.source_listing_id, checkedAt: new Date().toISOString()
+        }), false);
+        return;
       }
-      if (!response.ok) { outcome = `HTTP_${response.status}`; continue; }
+      if (!response.ok) { outcome = `HTTP_${response.status}`; return; }
       let detail;
       try { detail = parseBunjangDetailLifecycle(payload, pid); }
       catch (error) {
         console.warn("Bunjang detail recheck stopped", error.message);
-        outcome = 'INVALID_DETAIL'; receipt.stop_reason = outcome;
-        break;
+        outcome = 'INVALID_DETAIL'; receipt.stop_reason ||= outcome;
+        return;
       }
-      if (detail.status === "UNAVAILABLE_UNKNOWN") { outcome = 'UNKNOWN_STATUS'; continue; }
+      if (detail.status === "UNAVAILABLE_UNKNOWN") { outcome = 'UNKNOWN_STATUS'; return; }
       const projection = pcPipeline.recordItem(
-        bunjangDetailObservationItem(listing, raw, detail, canonicalUrl), checkedAt
+        bunjangDetailObservationItem(listing, raw, detail, canonicalUrl), new Date().toISOString()
       );
       captureProjection(listing.source_listing_id, { snapshotCreated: projection._pc_snapshot_created, status: detail.status });
-      continue;
+      return;
     }
-    if (!/^https?:\/\//iu.test(url)) { outcome = 'INVALID_URL'; retryMs = 24 * 60 * 60 * 1000; continue; }
+    if (!/^https?:\/\//iu.test(url)) { outcome = 'INVALID_URL'; retryMs = 24 * 60 * 60 * 1000; return; }
     let response;
     try {
       response = await fetch(url, {
@@ -1519,44 +1686,97 @@ async function recheckKnownListings(sourceKey, checkedAt, parentSignal, progress
     } catch (error) {
       throwIfAborted(parentSignal);
       outcome = 'NETWORK_ERROR';
-      continue;
+      return;
     }
     if (response.status === 404 || response.status === 410) {
-      const result = pcLedger.recordMissingCheck({ sourceId: sourceKey, sourceListingId: listing.source_listing_id, checkedAt });
+      const result = pcLedger.recordMissingCheck({ sourceId: sourceKey, sourceListingId: listing.source_listing_id, checkedAt: new Date().toISOString() });
       captureProjection(listing.source_listing_id, result);
-      continue;
+      return;
     }
     if ([401, 403, 429].includes(response.status)) {
       outcome = `HTTP_${response.status}`; receipt.stop_reason = outcome;
-      retryMs = 6 * 60 * 60 * 1000; backoffUntil = new Date(Date.now() + retryMs).toISOString(); break;
+      retryMs = 6 * 60 * 60 * 1000; backoffUntil = new Date(Date.now() + retryMs).toISOString(); return;
     }
-    if (!response.ok) { outcome = `HTTP_${response.status}`; continue; }
+    if (!response.ok) { outcome = `HTTP_${response.status}`; return; }
     const body = (await response.text()).slice(0, 1_000_000);
     if (!listingIdentityIsPresent(body, listing)) {
       outcome = 'IDENTITY_UNVERIFIED';
-      continue;
+      if (receipt.identity_diagnostics.length < 3) {
+        // Shape/boolean evidence only; do not persist the response body or seller text.
+        const sourceId = String(listing.source_listing_id || '').toLowerCase();
+        const lowerBody = body.toLowerCase();
+        const tokens = String(listing.title || '').toLowerCase().match(/[a-z0-9가-힣]{3,}/gu) || [];
+        receipt.identity_diagnostics.push({
+          source_listing_id: listing.source_listing_id,
+          http_status: response.status, redirected: response.redirected,
+          has_expected_path: lowerBody.includes(new URL(url).pathname.toLowerCase()),
+          has_source_id: sourceId.length >= 4 && lowerBody.includes(sourceId),
+          title_token_matches: tokens.slice(0, 5).filter(token => lowerBody.includes(token)).length,
+          has_next_data: /id=["']__NEXT_DATA__["']/u.test(body),
+          has_json_ld: /type=["']application\/ld\+json["']/iu.test(body)
+        });
+      }
+      return;
+    }
+    // A product query that failed on the page leaves no product data. A stated
+    // reason (withdrawn seller, deleted) ends the listing at once; an unexplained
+    // one counts as a miss like a 404. Neither is a sale.
+    const unavailableReason = sourceKey === 'joonggonara' ? joongnaProductUnavailableReason(body) : null;
+    if (unavailableReason) {
+      const reasons = receipt.unavailable_reasons ||= {};
+      reasons[unavailableReason] = (reasons[unavailableReason] || 0) + 1;
+      try { recordStatusStructure(receipt, body, 'ACTIVE', listing.source_listing_id); } catch {}
+      if (unavailableReason === 'UNEXPLAINED') {
+        captureProjection(listing.source_listing_id, pcLedger.recordMissingCheck({
+          sourceId: sourceKey, sourceListingId: listing.source_listing_id, checkedAt: new Date().toISOString() }), false);
+        return;
+      }
+      captureProjection(listing.source_listing_id, pcLedger.recordObservation({
+        sourceId: sourceKey, sourceListingId: listing.source_listing_id, observedAt: new Date().toISOString(),
+        title: listing.title, description: listing.description, rawPayload: raw,
+        price: listing.price_value, currency: listing.currency, status: 'UNAVAILABLE_UNKNOWN',
+        statusEvidence: { type: 'STRUCTURED_STATUS', value: `PRODUCT_UNAVAILABLE:${unavailableReason}` },
+        availability: 'UNAVAILABLE'
+      }));
+      return;
     }
     const soldEvidence = structuredSoldEvidenceFromHtml(body, { ...listing, url });
+    // Reservation must belong to this product: bind by its ID from the page URL.
+    const reservation = !soldEvidence && sourceKey === 'joonggonara' ? joongnaReservationBinding(body, url) : null;
+    const reservedEvidence = joongnaReservedEvidenceFromBinding(reservation);
+    if (reservation && reservation.binding !== 'NONE') {
+      const bindings = receipt.reservation_binding ||= {};
+      bindings[reservation.binding] = (bindings[reservation.binding] || 0) + 1;
+      // ID-like key names only (never values) show where an unbound page names its product.
+      const keys = receipt.reservation_unbound_keys ||= {};
+      for (const key of reservation.id_keys || []) if (keys[key] || Object.keys(keys).length < 30) keys[key] = (keys[key] || 0) + 1;
+    }
+    // Diagnostics must never block the verified status write below.
+    if (sourceKey === 'joonggonara') try { recordStatusStructure(receipt, body, soldEvidence ? 'SOLD' : reservedEvidence ? 'RESERVED' : 'ACTIVE', listing.source_listing_id); } catch {}
     const result = pcLedger.recordObservation({
-      sourceId: sourceKey, sourceListingId: listing.source_listing_id, observedAt: checkedAt,
+      sourceId: sourceKey, sourceListingId: listing.source_listing_id, observedAt: new Date().toISOString(),
       title: listing.title, description: listing.description, rawPayload: raw,
       price: listing.price_value, currency: listing.currency,
-      status: soldEvidence ? "SOLD" : "ACTIVE",
-      statusEvidence: soldEvidence
-        ? soldEvidence
-        : { type: "STRUCTURED_STATUS", value: listing.lifecycle_status },
+      status: soldEvidence ? "SOLD" : reservedEvidence ? "RESERVED" : "ACTIVE",
+      statusEvidence: soldEvidence || reservedEvidence
+        || { type: "STRUCTURED_STATUS", value: listing.lifecycle_status === "RESERVED" ? "ACTIVE" : listing.lifecycle_status },
       availability: soldEvidence ? "SOLD_TERMINAL" : "AVAILABLE"
     });
     captureProjection(listing.source_listing_id, result);
+    } catch (error) {
+      receipt.stop_reason ||= parentSignal?.aborted ? 'ABORTED' : 'ERROR';
+      throw error;
     } finally {
-      const verified = receipt.verified > verifiedBefore;
-      if (!verified) receipt.deferred += 1;
+      if (!verified) {
+        receipt.deferred += 1;
+        receipt.unverified_outcomes[outcome] = (receipt.unverified_outcomes[outcome] || 0) + 1;
+      }
       pcLedger.deferLifecycleAttempt(sourceKey, listing.source_listing_id, {
         outcome: verified ? 'VERIFIED' : outcome, delayMs: verified ? 6 * 60 * 60 * 1000 : retryMs
       });
       await yieldToEventLoop();
     }
-  }
+  } });
   } catch (error) { receipt.stop_reason = parentSignal?.aborted ? 'ABORTED' : 'ERROR'; recheckError = error; }
   finally {
     receipt.finished_at = new Date().toISOString();
@@ -1614,7 +1834,13 @@ function pcSourceAdapter(sourceKey, diagnostic) {
             collectionQuery, "recent", { min: null, max: null });
         const items = Array.isArray(collected) ? collected : collected.items;
         const diagnostics = Array.isArray(collected?.diagnostics) ? collected.diagnostics : [];
-        return { target, items, diagnostics, request_count: Math.max(1, diagnostics.length) };
+        const statusObservations = !items?.stale_cache && !items?.source_cache_hit && !items?.partial_error
+          ? items?.status_observations || [] : [];
+        const searchWindows = !items?.stale_cache && !items?.source_cache_hit && !items?.partial_error
+          ? items?.search_windows || [] : [];
+        const searchSightings = !items?.stale_cache && !items?.source_cache_hit ? (items.status_observations || []) : [];
+        const rawStatusSummary = !items?.stale_cache && !items?.source_cache_hit ? items?.raw_status_summary || null : null;
+        return { target, items, diagnostics, statusObservations, searchWindows, searchSightings, rawStatusSummary, request_count: Math.max(1, diagnostics.length) };
       };
       const collectTarget = async target => {
         if (runningMetrics) runningMetrics.request_count += 1;
@@ -1675,7 +1901,8 @@ function pcSourceAdapter(sourceKey, diagnostic) {
         captcha_count: failureMessages.filter((message) => /captcha/iu.test(message)).length,
         failure_messages: failureMessages.slice(0, 12)
       };
-      if (!successful.length) {
+      const partialItems = sourceKey === 'danawa' ? danawaPartialItems(failed) : [];
+      if (!successful.length && !partialItems.length) {
         const error = new Error(`ALL_PC_QUERIES_FAILED:${sourceKey}`);
         error.collection_metrics = {
           ...collectionMetrics,
@@ -1688,26 +1915,8 @@ function pcSourceAdapter(sourceKey, diagnostic) {
         };
         throw error;
       }
-      const items = dedupeCollectedItems(successful.flatMap((result) => result.value.items || []))
-        .map((item) => {
-          const sourceListingId = String(item.source_listing_id || item.item_id || item.id || item.url || "").trim();
-          const publicItemId = String(item.item_id || item.id || "").startsWith(`${sourceKey}:`)
-            ? String(item.item_id || item.id)
-            : `${sourceKey}:${sourceListingId}`;
-          const numericPrice = item.price === null || item.price === undefined ? null : Number(item.price);
-          return {
-            ...item,
-            id: publicItemId,
-            item_id: publicItemId,
-            source_listing_id: sourceListingId,
-            price: Number.isSafeInteger(numericPrice) && numericPrice >= 0 ? numericPrice : null,
-            currency: String(item.currency || (sourceKey === "ebay" ? "USD" : "KRW")).toUpperCase(),
-            status: String(item.status || item.lifecycle_status || "UNAVAILABLE_UNKNOWN").toUpperCase(),
-            raw_payload: item.raw_payload && typeof item.raw_payload === "object"
-              ? item.raw_payload
-              : { ...item, source_listing_id: sourceListingId }
-          };
-        });
+      const items = normalizeCollectedSourceItems(sourceKey,
+        dedupeCollectedItems([...successful.flatMap((result) => result.value.items || []), ...partialItems]));
       if (sourceKey === "hellomarket" && PC_HELLOMARKET_DETAIL_LIMIT > 0) {
         await enrichHelloMarketDetails(items, { maxItems: PC_HELLOMARKET_DETAIL_LIMIT });
       }
@@ -1718,6 +1927,19 @@ function pcSourceAdapter(sourceKey, diagnostic) {
         mode: "incremental",
         collected_at: input.now,
         items: incremental.items,
+        search_status_observations: successful.flatMap(result => result.value.statusObservations || []),
+        search_windows: successful.flatMap(result => result.value.searchWindows || []),
+        search_sightings: successful.flatMap(result => result.value.searchSightings || []),
+        search_raw_status_summary: mergeRawStatusSummaries(successful.map(result => result.value.rawStatusSummary)),
+        // Each successful Danawa search is one result page. Model searches are
+        // compared with their previous run; every returned offer counts as seen.
+        danawa_query_windows: sourceKey === 'danawa' ? successful
+          .filter(result => Number.isInteger(result.value.diagnostics?.[0]?.card_count))
+          .map(result => ({ query: result.value.target.query_text, model: Boolean(result.value.target.canonical_product_id),
+            card_count: result.value.diagnostics[0].card_count,
+            ids: (result.value.items || []).map(item => String(item.source_listing_id || '')) })) : [],
+        danawa_seen_ids: sourceKey === 'danawa'
+          ? [...successful.flatMap(result => result.value.items || []), ...partialItems].map(item => String(item.source_listing_id || '')) : [],
         next_cursor: incremental.next_cursor,
         exhausted: false,
         target_results: settled.map((result, index) => ({
@@ -1734,6 +1956,7 @@ function pcSourceAdapter(sourceKey, diagnostic) {
       };
     },
     async recheck(input) {
+      if (!lifecycleRecheckEnabled(sourceKey)) throw new Error(`LIFECYCLE_RECHECK_DISABLED:${sourceKey}`);
       const response = await fetch(input.url, {
         headers: { accept: "text/html,application/xhtml+xml,application/json" },
         signal: boundedFetchSignal(input.signal)
@@ -1874,8 +2097,41 @@ async function runPcSourceSchedulerTick() {
           startedAt: result.run_at,
           adapterVersion: "existing-site-wrapper-v1"
         });
+        const reservedHoldsBefore = pcPipeline.reservedSearchHolds || 0;
         const recorded = await phase('record_items', () => recordPcItemsIncrementally(result.result.items, result.run_at, progress));
-        const publicProjections = await phase('prepare_projections', () => stabilizeIncrementalPcProjections(recorded));
+        const lifecycleDeadline = ['bunjang', 'joonggonara'].includes(result.source_key)
+          ? Date.now() + 8 * 60 * 1000 : null;
+        const searchStatuses = await phase('search_status_reuse', () => reconcileSearchStatusObservations({
+          source: result.source_key, observations: result.result.search_status_observations,
+          normalItems: result.result.items, db: pcLedger.db,
+          recordItem: (item, at) => pcPipeline.recordItem(item, at),
+          observedAfter: Date.parse(result.run_at),
+          deadline: lifecycleDeadline, canContinue: () => !tickSignal.aborted,
+          yieldControl: yieldToEventLoop
+        }));
+        diagnostic.emit('pc_search_status_reuse', { source_id: result.source_key, crawl_run_id: runId,
+          ...searchStatuses.receipt,
+          reserved_search_holds: (pcPipeline.reservedSearchHolds || 0) - reservedHoldsBefore,
+          ...(result.result.search_raw_status_summary ? { raw_status_summary: result.result.search_raw_status_summary } : {}) });
+        // Comparing already fetched search pages adds no request. It hides
+        // listings that vanished inside the comparable range; detail stays off.
+        if (result.source_key === 'bunjang') {
+          const receipt = recordBunjangSearchWindows(pcLedger.db, {
+            windows: result.result.search_windows, observations: result.result.search_sightings,
+            observedAfter: Date.parse(result.run_at)
+          });
+          diagnostic.emit('pc_bunjang_missing_candidates', { source_id: 'bunjang', crawl_run_id: runId, ...receipt });
+        }
+        if (result.source_key === 'danawa') {
+          const receipt = recordDanawaQueryWindows(pcLedger.db, {
+            windows: (result.result.danawa_query_windows || []).map(window => ({ ...window, observed_at: result.run_at })),
+            seenIds: result.result.danawa_seen_ids || [],
+            observedAfter: Date.parse(result.run_at)
+          });
+          diagnostic.emit('pc_danawa_missing_candidates', { source_id: 'danawa', crawl_run_id: runId, ...receipt });
+        }
+        const allRecorded = [...recorded, ...searchStatuses.projections];
+        const publicProjections = await phase('prepare_projections', () => stabilizeIncrementalPcProjections(allRecorded));
         const changedCount = recorded.filter((item) => item._pc_snapshot_created === true).length;
         await phase('target_runtime', () => {
         for (const target of Array.isArray(result.result.target_results) ? result.result.target_results : []) {
@@ -1896,7 +2152,11 @@ async function runPcSourceSchedulerTick() {
         if (d1ImportResult?.deferred) {
           tickErrors.push(`${result.source_key}:D1_DAILY_ROW_WRITE_LIMIT`);
         }
-        await phase('lifecycle_recheck', () => recheckKnownListings(result.source_key, result.run_at, tickSignal, progress));
+        if (lifecycleRecheckEnabled(result.source_key)) {
+          await phase('lifecycle_recheck', () => recheckKnownListings(result.source_key, result.run_at, tickSignal, progress, lifecycleDeadline));
+        } else if (result.source_key === 'ebay') {
+          await phase('ebay_status_check', () => recheckEbayListings(tickSignal));
+        }
         const partialFailure = result.status === "partial_success";
         pcLedger.finishCrawlRun({
           crawlRunId: runId,

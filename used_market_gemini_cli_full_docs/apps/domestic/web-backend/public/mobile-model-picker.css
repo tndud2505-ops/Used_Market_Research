@@ -1,0 +1,134 @@
+/* Mobile picker chrome shares the existing desktop controls and model data. */
+.model-picker-mobile { display:none; }
+.model-picker-heading-actions { display:flex; align-items:center; gap:12px; }
+
+@media (max-width:760px) {
+  body.ui-a.pc-tools :is(#analysis-model-dialog,#builder-model-dialog) {
+    position:fixed; inset:0; box-sizing:border-box; width:100%; height:100dvh;
+    min-width:0; max-width:none; max-height:none; margin:0; padding:0;
+    border:0; border-radius:0; background:#fff; overflow:hidden; box-shadow:none;
+  }
+  body.ui-a.pc-tools :is(#analysis-model-dialog,#builder-model-dialog)[open] { display:flex; flex-direction:column; }
+  body.ui-a.pc-tools :is(#analysis-model-dialog,#builder-model-dialog) > * { flex-shrink:0; min-width:0; }
+  body.ui-a.pc-tools :is(#analysis-model-dialog,#builder-model-dialog) .model-picker-mobile:not([hidden]) { display:block; }
+  body.ui-a.pc-tools :is(#analysis-model-dialog,#builder-model-dialog) .up-dialog-heading {
+    min-height:64px; margin:0; padding:max(8px,env(safe-area-inset-top)) 16px 8px;
+    gap:8px; border-bottom:1px solid var(--line); box-sizing:border-box;
+  }
+  body.ui-a.pc-tools :is(#analysis-model-dialog,#builder-model-dialog) .up-dialog-heading h2 {
+    min-width:0; font-size:18px; line-height:24px; font-weight:700; letter-spacing:-.3px;
+  }
+  body.ui-a.pc-tools :is(#analysis-model-dialog,#builder-model-dialog) .model-picker-heading-actions { gap:8px; }
+  body.ui-a.pc-tools :is(#analysis-model-dialog,#builder-model-dialog) .model-picker-heading-actions button {
+    min-height:44px; padding:0 8px; border:0; border-radius:0; background:none; font-size:14px;
+  }
+  body.ui-a.pc-tools :is(#analysis-model-dialog,#builder-model-dialog) [data-action=reset-filters] { color:var(--accent-strong); }
+  body.ui-a.pc-tools :is(#analysis-model-dialog,#builder-model-dialog) .model-picker-close { min-width:44px; width:44px; position:relative; }
+  body.ui-a.pc-tools :is(#analysis-model-dialog,#builder-model-dialog) .model-picker-close span { display:none; }
+  body.ui-a.pc-tools :is(#analysis-model-dialog,#builder-model-dialog) .model-picker-close::before,
+  body.ui-a.pc-tools :is(#analysis-model-dialog,#builder-model-dialog) .model-picker-close::after {
+    content:''; position:absolute; top:21px; left:11px; width:22px; height:2px; background:var(--ink); transform:rotate(45deg);
+  }
+  body.ui-a.pc-tools :is(#analysis-model-dialog,#builder-model-dialog) .model-picker-close::after { transform:rotate(-45deg); }
+  body.ui-a.pc-tools :is(#analysis-model-dialog,#builder-model-dialog) :is(#analysis-categories,#builder-categories,#model-filter-tabs) {
+    display:flex; flex-wrap:nowrap; align-items:stretch; gap:0; min-height:44px; margin:0; padding:0 8px;
+    border:0; border-bottom:1px solid var(--line); border-radius:0; overflow-x:auto; overflow-y:hidden;
+    scrollbar-width:none; background:#fff;
+  }
+  body.ui-a.pc-tools :is(#analysis-model-dialog,#builder-model-dialog) :is(#analysis-categories,#builder-categories,#model-filter-tabs)::-webkit-scrollbar { display:none; }
+  body.ui-a.pc-tools :is(#analysis-model-dialog,#builder-model-dialog) :is(#analysis-categories,#builder-categories,#model-filter-tabs) button {
+    flex:0 0 auto; min-height:44px; margin:0; padding:10px 12px; border:0; border-bottom:2px solid transparent;
+    border-radius:0; background:none; color:var(--ink); font-size:14px; line-height:22px; white-space:nowrap;
+  }
+  body.ui-a.pc-tools :is(#analysis-model-dialog,#builder-model-dialog) :is(#analysis-categories,#builder-categories) button[aria-pressed=true],
+  body.ui-a.pc-tools :is(#analysis-model-dialog,#builder-model-dialog) #model-filter-tabs button[aria-selected=true] {
+    color:var(--accent-strong); border-bottom-color:var(--accent-strong); font-weight:700;
+  }
+  body.ui-a.pc-tools :is(#analysis-model-dialog,#builder-model-dialog) #model-controls { margin:0; padding:12px 16px; border:0; }
+  body.ui-a.pc-tools :is(#analysis-model-dialog,#builder-model-dialog) .tools-controls { display:block; margin:0; }
+  body.ui-a.pc-tools :is(#analysis-model-dialog,#builder-model-dialog) .tools-controls > :not(.tools-search),
+  body.ui-a.pc-tools :is(#analysis-model-dialog,#builder-model-dialog) #model-controls .tools-scope-note { display:none; }
+  body.ui-a.pc-tools :is(#analysis-model-dialog,#builder-model-dialog) .tools-search { display:block; min-width:0; max-width:none; }
+  body.ui-a.pc-tools :is(#analysis-model-dialog,#builder-model-dialog) .tools-search input {
+    box-sizing:border-box; display:block; width:100%; height:44px; min-height:44px; margin:0; padding:10px 12px;
+    border:0; border-radius:6px; background:#f1f3f5; color:var(--ink); font-size:16px; line-height:24px;
+  }
+  body.ui-a.pc-tools :is(#analysis-model-dialog,#builder-model-dialog) #model-filter-context {
+    margin:0; padding:8px 16px; border-bottom:1px solid var(--line); color:var(--ink-soft);
+    font-size:12px; line-height:18px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+  body.ui-a.pc-tools :is(#analysis-model-dialog,#builder-model-dialog) #model-picker-scroll {
+    flex:1 1 0; min-height:0; overflow-y:auto; overflow-x:hidden; overscroll-behavior-y:contain;
+    scrollbar-width:thin; -webkit-overflow-scrolling:touch;
+  }
+  body.ui-a.pc-tools :is(#analysis-model-dialog,#builder-model-dialog) #model-table {
+    max-height:none; overflow:visible; margin:0; padding:0 16px; border:0; border-radius:0; box-sizing:border-box;
+  }
+  body.ui-a.pc-tools :is(#analysis-model-dialog,#builder-model-dialog) #model-table[hidden] { display:none; }
+  body.ui-a.pc-tools :is(#analysis-model-dialog,#builder-model-dialog) #model-table :is(table,tbody) { display:block; width:100%; min-width:0; }
+  body.ui-a.pc-tools :is(#analysis-model-dialog,#builder-model-dialog) #model-table thead {
+    position:absolute; width:1px; height:1px; padding:0; overflow:hidden; clip-path:inset(50%);
+  }
+  body.ui-a.pc-tools :is(#analysis-model-dialog,#builder-model-dialog) #model-table tbody tr {
+    position:relative; display:grid; grid-template-columns:minmax(0,1fr) auto 44px; align-items:center;
+    min-height:52px; gap:0 8px; margin:0; padding:4px 0; border-bottom:1px solid var(--line); background:none;
+  }
+  body.ui-a.pc-tools :is(#analysis-model-dialog,#builder-model-dialog) #model-table td {
+    position:static; min-width:0; width:auto; padding:0; border:0; background:none; height:auto; font-size:13px;
+  }
+  body.ui-a.pc-tools :is(#analysis-model-dialog,#builder-model-dialog) #model-table td.model-name { grid-column:1; grid-row:1; font-size:14px; }
+  body.ui-a.pc-tools :is(#analysis-model-dialog,#builder-model-dialog) #model-table .model-name-link {
+    display:flex; align-items:center; min-height:44px; width:100%; padding:0; border:0; border-radius:0;
+    background:none; color:var(--ink); text-align:left; font-size:14px; font-weight:500; line-height:21px; text-decoration:none;
+  }
+  body.ui-a.pc-tools :is(#analysis-model-dialog,#builder-model-dialog) #model-table .model-picker-desktop-name { display:none; }
+  body.ui-a.pc-tools :is(#analysis-model-dialog,#builder-model-dialog) #model-table :is(td.analysis-model-price,td.series-active) {
+    display:block; grid-column:2; grid-row:1; max-width:120px; margin:0; padding:0; text-align:right;
+    color:var(--ink); font-size:13px; font-weight:500; line-height:20px; white-space:normal; overflow-wrap:anywhere;
+  }
+  body.ui-a.pc-tools :is(#analysis-model-dialog,#builder-model-dialog) #model-table .price::before { display:none; }
+  /* Keep secondary prices, sample dates and qualifiers available to assistive technology. */
+  body.ui-a.pc-tools :is(#analysis-model-dialog,#builder-model-dialog) #model-table :is(.analysis-model-coverage,.series-sold,.danawa-price) {
+    display:block; position:absolute; width:1px; height:1px; margin:-1px; padding:0; overflow:hidden; clip-path:inset(50%); white-space:nowrap;
+  }
+  body.ui-a.pc-tools :is(#analysis-model-dialog,#builder-model-dialog) #model-table td:last-child:not([colspan]) { grid-column:3; grid-row:1; padding:0; }
+  body.ui-a.pc-tools :is(#analysis-model-dialog,#builder-model-dialog) #model-table td:last-child > :not(.tools-pick-model) {
+    display:block; position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%);
+  }
+  body.ui-a.pc-tools :is(#analysis-model-dialog,#builder-model-dialog) #model-table td:last-child > :not(.tools-pick-model):focus-visible {
+    position:relative; width:auto; height:auto; clip-path:none;
+  }
+  body.ui-a.pc-tools :is(#analysis-model-dialog,#builder-model-dialog) #model-table td:last-child > .tools-pick-model {
+    display:grid; place-items:center; width:44px; min-width:44px; min-height:44px; margin:0; padding:0;
+    border:0; border-radius:0; background:none; color:transparent; font-size:0;
+  }
+  body.ui-a.pc-tools :is(#analysis-model-dialog,#builder-model-dialog) #model-table .tools-pick-model::after {
+    width:21px; height:21px; border-radius:50%; line-height:21px;
+  }
+  body.ui-a.pc-tools :is(#analysis-model-dialog,#builder-model-dialog) #model-table td[colspan] { grid-column:1/-1; padding:16px 0; font-size:14px; }
+  body.ui-a.pc-tools :is(#analysis-model-dialog,#builder-model-dialog) #model-price-status { margin:0; padding:10px 16px; font-size:12px; line-height:18px; }
+  body.ui-a.pc-tools :is(#analysis-model-dialog,#builder-model-dialog) #model-picker-scroll[data-picker-view=facet] #model-price-status { display:none; }
+  body.ui-a.pc-tools :is(#analysis-model-dialog,#builder-model-dialog) #model-picker-scope { margin:0; padding:12px 16px; color:var(--muted); font-size:12px; line-height:18px; }
+  body.ui-a.pc-tools :is(#analysis-model-dialog,#builder-model-dialog) .model-picker-option {
+    display:flex; align-items:center; justify-content:space-between; gap:16px; min-height:52px;
+    margin:0 16px; padding:4px 0; border-bottom:1px solid var(--line); font-size:14px; line-height:22px; cursor:pointer;
+  }
+  body.ui-a.pc-tools :is(#analysis-model-dialog,#builder-model-dialog) .model-picker-option input {
+    flex:none; width:22px; height:22px; margin:11px; accent-color:var(--accent-strong); cursor:pointer;
+  }
+  body.ui-a.pc-tools :is(#analysis-model-dialog,#builder-model-dialog) #model-pages {
+    display:grid; grid-template-columns:minmax(0,1fr) auto minmax(0,1fr); align-items:center; gap:16px;
+    min-height:calc(48px + env(safe-area-inset-bottom,0px)); box-sizing:border-box; margin:0; padding:2px 16px max(2px,env(safe-area-inset-bottom));
+    border-top:1px solid var(--line); background:#fff;
+  }
+  body.ui-a.pc-tools :is(#analysis-model-dialog,#builder-model-dialog) #model-pages[data-picker-view=facet] { display:none; }
+  body.ui-a.pc-tools :is(#analysis-model-dialog,#builder-model-dialog) #model-pages .model-page-number { display:none; }
+  body.ui-a.pc-tools :is(#analysis-model-dialog,#builder-model-dialog) #model-pages button {
+    min-height:44px; padding:8px 12px; border:1px solid var(--line-strong); border-radius:5px; font-size:0;
+  }
+  body.ui-a.pc-tools :is(#analysis-model-dialog,#builder-model-dialog) #model-pages button::after { font-size:14px; }
+  body.ui-a.pc-tools :is(#analysis-model-dialog,#builder-model-dialog) #model-pages .model-page-prev::after { content:'이전'; }
+  body.ui-a.pc-tools :is(#analysis-model-dialog,#builder-model-dialog) #model-pages .model-page-next { color:white; background:var(--accent-strong); border-color:var(--accent-strong); }
+  body.ui-a.pc-tools :is(#analysis-model-dialog,#builder-model-dialog) #model-pages .model-page-next::after { content:'다음'; }
+  body.ui-a.pc-tools :is(#analysis-model-dialog,#builder-model-dialog) #model-pages .model-page-position { font-size:14px; color:var(--ink); font-variant-numeric:tabular-nums; }
+}

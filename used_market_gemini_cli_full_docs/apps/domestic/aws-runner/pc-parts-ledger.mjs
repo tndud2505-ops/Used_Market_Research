@@ -12,6 +12,10 @@ const HOUR_MS = 60 * 60 * 1000;
 const HOURLY_COLLECTION_GUARD_MS = 55 * 60 * 1000;
 const MAX_TARGET_FAILURE_RETRY_MS = 8 * HOURLY_COLLECTION_GUARD_MS;
 const DAY_MS = 24 * HOUR_MS;
+const DANAWA_CATEGORY_INTERVAL_MS = 6 * HOUR_MS;
+// A Danawa query whose page structure has been rejected this many times in a
+// row is retried weekly instead of every few hours (it stays a failure).
+const DANAWA_PERSISTENT_STRUCTURAL_FAILURES = 6;
 const SOLD_EVIDENCE_TYPES = new Set(["STRUCTURED_STATUS", "OFFICIAL_API", "EXPLICIT_TEXT"]);
 const LIFECYCLE_STATUSES = new Set([
   "ACTIVE", "RESERVED", "SOLD", "DELETED", "EXPIRED",
@@ -1380,9 +1384,12 @@ export class PcPartsLedger {
       const targetIntervalMs = Math.max(55, Number(row.minimum_interval_minutes) || 55) * 60 * 1_000;
       const effectiveIntervalMs = Math.max(globalIntervalMs, targetIntervalMs);
       const failureCount = Math.max(0, Number(row.failure_count || 0));
+      const structuralFailure = source.toLowerCase() === 'danawa'
+        && /MARKUP_UNRECOGNIZED|NO_CARDS_UNVERIFIED/u.test(row.last_error || '');
       const retryIntervalMs = failureCount > 0
-        ? Math.min(effectiveIntervalMs, MAX_TARGET_FAILURE_RETRY_MS,
-          HOURLY_COLLECTION_GUARD_MS * (2 ** Math.min(3, failureCount - 1)))
+        ? structuralFailure && failureCount >= DANAWA_PERSISTENT_STRUCTURAL_FAILURES ? 7 * DAY_MS
+          : Math.min(structuralFailure ? MAX_TARGET_FAILURE_RETRY_MS : effectiveIntervalMs, MAX_TARGET_FAILURE_RETRY_MS,
+            HOURLY_COLLECTION_GUARD_MS * (2 ** Math.min(3, failureCount - 1)))
         : effectiveIntervalMs;
       if (!row.last_started_at) return { row, effectiveIntervalMs, neverStarted: true, dueAtMs: Number.NEGATIVE_INFINITY };
       const lastStartedMs = Date.parse(row.last_started_at);
@@ -1404,8 +1411,39 @@ export class PcPartsLedger {
     // Interleave the two existing due queues; never make a not-yet-due target
     // eligible or increase the source's request allowance.
     if (source.toLowerCase() === 'danawa') {
-      const models = due.filter(row => row.cadence_class === 'DAILY_MASTER');
-      const categories = due.filter(row => row.cadence_class !== 'DAILY_MASTER');
+      const version = this.getActivePipelineVersion();
+      const recentlyListed = new Set(this.db.prepare(`SELECT DISTINCT n.canonical_product_id
+        FROM raw_listings r
+        JOIN listing_snapshots s ON s.id = (
+          SELECT latest.id FROM listing_snapshots latest
+          WHERE latest.source_id = r.source_id AND latest.source_listing_id = r.source_listing_id
+          ORDER BY latest.observed_at DESC, latest.id DESC LIMIT 1)
+        JOIN normalized_listings n ON n.snapshot_id = s.id
+          AND n.normalization_version = ? AND n.parser_version = ? AND n.rule_version = ? AND n.filter_version = ?
+        WHERE r.source_id = ? AND r.last_seen_at >= ? AND s.lifecycle_status = 'ACTIVE'
+          AND n.statistics_eligible = 1 AND n.canonical_product_id IS NOT NULL`).all(
+        version?.normalization_version || 1, version?.parser_version || 'pc-parser-v1',
+        version?.rule_version || 'pc-rules-v1', version?.filter_version || 'pc-filter-v1', source,
+        new Date(asOfMs - 30 * DAY_MS).toISOString()).map(row => row.canonical_product_id));
+      const staleFirst = (a, b) => (Date.parse(a.last_succeeded_at || '') || 0) - (Date.parse(b.last_succeeded_at || '') || 0)
+        || (Date.parse(a.last_started_at || '') || 0) - (Date.parse(b.last_started_at || '') || 0)
+        || Number(a.target_order || 0) - Number(b.target_order || 0)
+        || String(a.target_id).localeCompare(String(b.target_id));
+      const modelTargets = due.filter(row => row.cadence_class === 'DAILY_MASTER');
+      const listed = modelTargets.filter(row => recentlyListed.has(row.canonical_product_id)).sort(staleFirst);
+      const discovery = modelTargets.filter(row => !recentlyListed.has(row.canonical_product_id)).sort(staleFirst);
+      // Models with recent Danawa listings get three of every four model slots;
+      // discovery keeps the third. Empty queues donate their slots; no new
+      // state or request allowance is needed.
+      const models = [];
+      for (let li = 0, di = 0; li < listed.length || di < discovery.length;) {
+        for (let k = 0; k < 3 && li < listed.length; k++) models.push(listed[li++]);
+        if (di < discovery.length) models.push(discovery[di++]);
+      }
+      // Broad category queries change slowly on Danawa's used search; refresh
+      // them every six hours so most of the fixed request budget refreshes models.
+      const categories = due.filter(row => row.cadence_class !== 'DAILY_MASTER'
+        && !(Date.parse(row.last_started_at || '') > asOfMs - DANAWA_CATEGORY_INTERVAL_MS));
       const fair = [];
       for (let i=0;i<Math.max(models.length,categories.length);i++) {
         if(models[i]) fair.push(models[i]);
@@ -1781,9 +1819,12 @@ export class PcPartsLedger {
   }
 
   remainingSourceRequestBudget(sourceId, hourlyLimit, asOf = new Date(this.now()).toISOString()) {
-    const since = new Date(Date.parse(asOf) - HOUR_MS).toISOString();
+    // Each scheduled hourly run may use the hourly limit. Count runs by start
+    // time within the hourly guard: counting by finish time inside a full hour
+    // made every other hourly slot see a spent budget and skip.
+    const since = new Date(Date.parse(asOf) - HOURLY_COLLECTION_GUARD_MS).toISOString();
     const used = this.db.prepare(`SELECT COALESCE(SUM(CASE WHEN run_status='RUNNING' THEN ? ELSE request_count END),0) n
-      FROM crawl_runs WHERE source_id=? AND (run_status='RUNNING' OR COALESCE(finished_at,started_at)>?)`)
+      FROM crawl_runs WHERE source_id=? AND (run_status='RUNNING' OR started_at>?)`)
       .get(hourlyLimit,sourceId,since).n;
     return Math.max(0, hourlyLimit - Number(used));
   }
@@ -2014,11 +2055,12 @@ export class PcPartsLedger {
 
       const previous = this.latestSnapshot(sourceId, sourceListingId);
       const ensureRequestedNormalization = (snapshotId) => {
-        if (!input.normalized) return;
+        if (!input.normalized) return false;
         const normalizationVersion = Number(input.normalized.normalizationVersion || 1);
         const exists = this.db.prepare(`SELECT 1 FROM normalized_listings
           WHERE snapshot_id = ? AND normalization_version = ?`).get(snapshotId, normalizationVersion);
         if (!exists) this.insertNormalization(snapshotId, input.normalized, price, currency, input.versions || {});
+        return !exists;
       };
       if (previous?.lifecycle_status === "SOLD" && status !== "SOLD") {
         const evidenceType = cleanText(input.statusEvidence?.type, 40).toUpperCase();
@@ -2038,9 +2080,9 @@ export class PcPartsLedger {
         const changedClassificationText = previousText
           && (previousText.title !== safeTitle || (previousText.description || '') !== (safeDescription || ''));
         if (!lateTransaction && !changedClassificationText) {
-          ensureRequestedNormalization(previous.id);
+          const normalizationCreated = ensureRequestedNormalization(previous.id);
           this.recordSnapshotObservation(previous.id, observedAt);
-          return { rawListingId: raw.id, snapshotId: previous.id, snapshotCreated: false, status: "SOLD", soldLastAskPrice: previous.sold_last_ask_price };
+          return { rawListingId: raw.id, snapshotId: previous.id, snapshotCreated: false, normalizationCreated, status: "SOLD", soldLastAskPrice: previous.sold_last_ask_price };
         }
       }
       let soldLastAskPrice = previous?.lifecycle_status === "SOLD" ? previous.sold_last_ask_price : null;
@@ -2055,9 +2097,9 @@ export class PcPartsLedger {
       }
       const stateHash = hash({ payloadHash, status, availability, price, currency, soldLastAskPrice, transactionPrice });
       if (previous?.state_hash === stateHash) {
-        ensureRequestedNormalization(previous.id);
+        const normalizationCreated = ensureRequestedNormalization(previous.id);
         this.recordSnapshotObservation(previous.id, observedAt);
-        return { rawListingId: raw.id, snapshotId: previous.id, snapshotCreated: false, status, soldLastAskPrice };
+        return { rawListingId: raw.id, snapshotId: previous.id, snapshotCreated: false, normalizationCreated, status, soldLastAskPrice };
       }
       const inserted = this.db.prepare(`
         INSERT INTO listing_snapshots(raw_listing_id, source_id, source_listing_id, observed_at, state_hash, lifecycle_status, availability, price_value, currency, sold_last_ask_price, transaction_price, status_evidence_json, transaction_evidence_json, created_at)
@@ -2127,6 +2169,10 @@ export class PcPartsLedger {
     if (!lifecycleQueueReady(this.db)) throw new Error('LIFECYCLE_QUEUE_INITIALIZING');
     const cutoff = iso(checkedBefore || new Date(this.now() - 6 * HOUR_MS));
     const boundedLimit = Math.min(sourceId === "bunjang" ? 1500 : 600, Math.max(1, Number(limit) || 20));
+    const operationalCutoff = new Date(Date.parse(iso(asOf)) - 24 * HOUR_MS).toISOString();
+    // Joonggonara search rows never carry a reservation, so a page-verified
+    // RESERVED held by hourly searches keeps a fresh last_checked_at. Its due
+    // time follows the last product-page attempt instead.
     return this.db.prepare(`
       SELECT s.source_id, s.source_listing_id, s.lifecycle_status, s.price_value, s.currency,
              r.raw_json, r.title, r.description, r.seller_ref_masked, r.last_checked_at
@@ -2135,14 +2181,21 @@ export class PcPartsLedger {
         JOIN raw_listings r ON r.id = s.raw_listing_id
        WHERE q.source_id = ? AND (q.lifecycle_status IN ('ACTIVE', 'RESERVED')
          OR (q.source_id = 'bunjang' AND q.lifecycle_status = 'UNAVAILABLE_UNKNOWN'))
-         AND q.last_checked_at <= ? AND q.next_attempt_at <= ?
+         AND (q.last_checked_at <= ? OR (q.source_id = 'joonggonara' AND q.lifecycle_status = 'RESERVED'
+           AND COALESCE(q.last_attempt_at, '') <= ?))
+         AND q.next_attempt_at <= ?
+         AND (q.source_id <> 'bunjang' OR EXISTS (
+           SELECT 1 FROM pc_bunjang_missing_candidates c WHERE c.source_listing_id=q.source_listing_id
+             AND c.missing_at>q.last_checked_at AND c.expires_at>?))
          AND NOT EXISTS(SELECT 1 FROM pc_lifecycle_runs run WHERE run.source_id=q.source_id AND run.backoff_until > ?)
-       ORDER BY CASE WHEN q.last_checked_at <= ? THEN 0 ELSE 1 END,
+       ORDER BY CASE WHEN q.last_checked_at <= ? OR (q.source_id = 'joonggonara' AND q.lifecycle_status = 'RESERVED'
+                  AND COALESCE(q.last_attempt_at, '') <= ?) THEN 0 ELSE 1 END,
+                CASE WHEN q.source_id = 'bunjang' THEN q.last_checked_at END,
                 q.next_attempt_at, CASE WHEN r.missing_check_count > 0 THEN 0 ELSE 1 END,
                 r.last_checked_at, s.source_listing_id
        LIMIT ?
-    `).all(requireValue(sourceId, "sourceId"), cutoff, iso(asOf), iso(asOf),
-      new Date(Date.parse(iso(asOf)) - 24 * HOUR_MS).toISOString(), boundedLimit);
+    `).all(requireValue(sourceId, "sourceId"), cutoff, cutoff, iso(asOf), iso(asOf), iso(asOf),
+      operationalCutoff, operationalCutoff, boundedLimit);
   }
 
   lifecycleRecheckStatus({ sourceId, asOf } = {}) {
@@ -2165,10 +2218,18 @@ export class PcPartsLedger {
     const run = this.db.prepare('SELECT * FROM pc_lifecycle_runs WHERE source_id=?').get(resolvedSourceId);
     const oldest = String(row.oldest_last_checked_at || '');
     const oldestMs = Date.parse(oldest);
+    const candidateCount = resolvedSourceId === 'bunjang' ? Number(this.db.prepare(`SELECT count(*) n
+      FROM pc_bunjang_missing_candidates c JOIN pc_lifecycle_queue q
+      ON q.source_id='bunjang' AND q.source_listing_id=c.source_listing_id
+      WHERE q.lifecycle_status IN ('ACTIVE','RESERVED','UNAVAILABLE_UNKNOWN')
+      AND q.last_checked_at<=? AND c.missing_at>q.last_checked_at AND c.expires_at>?`)
+      .get(cutoff, now.toISOString()).n) : Number(row.due_count || 0);
     return {
       source_id: resolvedSourceId,
+      candidate_policy: resolvedSourceId === 'bunjang' ? 'COMPARABLE_SEARCH_DISAPPEARANCE' : 'LAST_CHECKED_AGE',
+      unconfirmed_due_count: Number(row.due_count || 0),
       due_after_hours: 6,
-      due_count: Number(row.due_count || 0),
+      due_count: candidateCount,
       deferred_count: Number(row.deferred_count || 0),
       backoff_until: run?.backoff_until || null,
       last_run: run ? JSON.parse(run.receipt_json) : null,
@@ -2392,6 +2453,8 @@ export class PcPartsLedger {
   }
 
   eligibleRows({ canonicalProductId, marketPool, condition, currency, from, asOf, normalizationVersion, parserVersion, ruleVersion, filterVersion, sourceIds = [], dailyObservations = false }) {
+    // Find newer states of this identity before checking observation dates.
+    // A date-first join scans the whole marketplace for every candidate day.
     const pools = underlyingMarketPools(marketPool);
     const allowedSourceIds = [...new Set((Array.isArray(sourceIds) ? sourceIds : [])
       .map((sourceId) => cleanText(sourceId, 100)).filter(Boolean))].sort();
@@ -2402,8 +2465,8 @@ export class PcPartsLedger {
       SELECT s.*, ${dailyObservations ? `(SELECT json_group_array(d.observation_day)
         FROM listing_snapshot_observation_days d
         WHERE d.snapshot_id = s.id AND d.observation_day >= ? AND d.observed_at <= ?
-          AND NOT EXISTS (SELECT 1 FROM listing_snapshots newer
-            JOIN listing_snapshot_observation_days nd ON nd.snapshot_id = newer.id
+          AND NOT EXISTS (SELECT 1 FROM listing_snapshots newer INDEXED BY idx_listing_snapshots_canonical_identity
+            CROSS JOIN listing_snapshot_observation_days nd ON nd.snapshot_id = newer.id
             WHERE pc_source_listing_identity(newer.source_id, newer.source_listing_id)
                 = pc_source_listing_identity(s.source_id, s.source_listing_id)
               AND nd.observation_day = d.observation_day AND nd.observed_at <= ?
