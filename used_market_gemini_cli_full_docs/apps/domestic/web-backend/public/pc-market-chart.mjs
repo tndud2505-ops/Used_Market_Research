@@ -61,7 +61,7 @@ export function movingAverage(points, period = 20) {
   });
 }
 
-export function buildMarketView(series, dates, count, offset, width, height, { averagePeriod = 0, showSamples = false, axisLeft = false, pricePadding = 0.07, minimumPricePadding = 0.005 } = {}) {
+export function buildMarketView(series, dates, count, offset, width, height, { averagePeriod = 0, showSamples = false, axisLeft = false, pricePadding = 0.07, minimumPricePadding = 0.005, priceScale = 1 } = {}) {
   const shownCount = clamp(Math.round(count), 1, dates.length);
   const maxOffset = Math.max(0, dates.length - shownCount);
   const end = dates.length - clamp(Math.round(offset), 0, maxOffset);
@@ -86,7 +86,13 @@ export function buildMarketView(series, dates, count, offset, width, height, { a
   const maxSamples = Math.max(1,...sampleTotals), sampleY = value => sampleBottom-value/maxSamples*sampleHeight;
   const min = Math.min(...values), max = Math.max(...values);
   const margin = Math.max((max - min) * pricePadding, max * minimumPricePadding, series[0]?.currency === 'USD' ? 0.01 : 1);
-  const scaleMin = Math.max(0, min - margin), scaleMax = max + margin, range = scaleMax - scaleMin;
+  let scaleMin = Math.max(0, min - margin), scaleMax = max + margin;
+  // A dragged price axis widens or narrows the automatic range around its middle.
+  if (Number.isFinite(priceScale) && priceScale > 0 && priceScale !== 1) {
+    const center = (scaleMin + scaleMax) / 2, half = (scaleMax - scaleMin) / 2 * priceScale;
+    scaleMin = Math.max(0, center - half); scaleMax = center + half;
+  }
+  const range = scaleMax - scaleMin;
   const y = value => pad.top + (scaleMax - value) / range * plotHeight;
   const step = plotWidth / Math.max(1, shownDates.length);
   const dateIndices = new Map(shownDates.map((date,index)=>[date,index]));
@@ -108,7 +114,7 @@ export function buildMarketView(series, dates, count, offset, width, height, { a
 
 export function drawMarketChart(container, input, options = {}) {
   const { label = '가격 추이', currency = 'KRW', identity = '', averagePeriod = 0, showSamples = false,
-    showLegend = true, noteText = '', showNote = true, showGapKey = false, dockedReadout = false, cornerReadout = false, axisLeft = false, readoutInput,
+    showLegend = true, noteText = '', showNote = true, showGapKey = false, showUnit = true, dockedReadout = false, cornerReadout = false, axisLeft = false, readoutInput,
     onLoadEarlier, canLoadEarlier = false, loadingEarlier = false, onViewChange,
     externalReadout = false, onReadout, readoutContainer, wheelZoom = false, connectGaps = true, pricePadding = 0.07, minimumPricePadding = 0.005 } = options;
   const currentView=views.get(container);
@@ -182,7 +188,7 @@ export function drawMarketChart(container, input, options = {}) {
   const expandIcon=svgNode('svg',{class:'market-chart-expand-icon',viewBox:'0 0 24 24',width:16,height:16,'aria-hidden':'true',focusable:'false'});
   const expandPath=svgNode('path',{fill:'none',stroke:'currentColor','stroke-width':1.8,'stroke-linecap':'round','stroke-linejoin':'round'});expandIcon.append(expandPath);expandButton.append(expandIcon);
   stage.append(svg,...(dockedReadout||externalReadout?[]:[readout])); container.append(...(showLegend?[summary]:[]),...(dockedReadout&&!externalReadout?[readout]:[]), stage,expandButton,...(showNote?[note]:[]));
-  let geometry, width, height, drag = null, activeIndex = dates.length - 1, frame, hoverFrame, hoverPointer, pinch = null, shownDate=null;
+  let geometry, width, height, drag = null, axisDrag = null, activeIndex = dates.length - 1, frame, hoverFrame, hoverPointer, pinch = null, shownDate=null;
   const pointers = new Map();
   const finishInteraction=()=>{
     view.interacting=pointers.size>0;
@@ -269,7 +275,7 @@ export function drawMarketChart(container, input, options = {}) {
     if (width < 120 || height < 100) return;
     svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
     svg.setAttribute('aria-label',`${label}. ${touchOnly()?'핀치: 확대·축소':`${wheelZoom?'휠':'Ctrl+휠'}·핀치: 확대·축소, 더블클릭·Home: 전체 보기`}, 드래그: 좌우 이동, 좌우 키: 날짜, Escape: 선택 해제`);
-    geometry = buildMarketView(visible(), dates, view.count, view.offset, width, height, {averagePeriod,showSamples,axisLeft,pricePadding,minimumPricePadding});
+    geometry = buildMarketView(visible(), dates, view.count, view.offset, width, height, {averagePeriod,showSamples,axisLeft,pricePadding,minimumPricePadding,priceScale:view.yScale||1});
     svg.dataset.visibleCount = String(view.count); svg.dataset.offset = String(view.offset);
     if(geometry){svg.dataset.scaleMin=String(geometry.scaleMin);svg.dataset.scaleMax=String(geometry.scaleMax);}
     plot.replaceChildren(); clearCursor();
@@ -281,7 +287,7 @@ export function drawMarketChart(container, input, options = {}) {
     const edge = pad.left + plotWidth;
     if(geometry.emptyViewport)plot.append(svgNode('text',{x:pad.left+plotWidth/2,y:pad.top+plotHeight/2,'text-anchor':'middle'},'이 구간에는 가격 기록이 없습니다'));
     const axisX=axisLeft?pad.left-(compactAxis?6:12):edge+10,axisAnchor=axisLeft?'end':'start';
-    plot.append(svgNode('text', {x:pad.left, y:14, class:'market-axis market-axis-unit','text-anchor':'start'}, currency === 'USD' ? '단위: USD' : '단위: 원'));
+    if (showUnit) plot.append(svgNode('text', {x:pad.left, y:14, class:'market-axis market-axis-unit','text-anchor':'start'}, currency === 'USD' ? '단위: USD' : '단위: 원'));
     for (const tick of priceTicks) {
       plot.append(svgNode('line', {x1:pad.left, x2:edge, y1:tick.y, y2:tick.y, class:'market-grid'}));
       plot.append(svgNode('text', {x:axisX, y:tick.y+4, class:`market-axis market-axis-price${compactAxis?' market-axis-price-compact':''}`,'text-anchor':axisAnchor, 'data-price-y':tick.y}, compactAxis?compactPriceTick(tick.value,currency):currency === 'USD' ? `$${tick.value.toFixed(2)}` : Math.round(tick.value).toLocaleString('ko-KR')));
@@ -341,7 +347,7 @@ export function drawMarketChart(container, input, options = {}) {
     view.count=clamp(view.userRange ? view.count : wheelZoom ? dates.length : responsiveDateCount(stage.clientWidth, view.spacing),Math.min(5,dates.length),dates.length);
     view.offset=clamp(view.offset,0,dates.length-view.count);paintNow();
   }); };
-  const reset = () => { view.userRange=false;view.spacing=18;view.count=wheelZoom?dates.length:Math.min(dates.length,responsiveDateCount(stage.clientWidth));view.offset=0;view.pinned=null;paint(); };
+  const reset = () => { view.userRange=false;view.spacing=18;view.count=wheelZoom?dates.length:Math.min(dates.length,responsiveDateCount(stage.clientWidth));view.offset=0;view.pinned=null;view.yScale=1;paint(); };
   const pan = offset => {
     const next=clamp(Math.round(offset),0,dates.length-view.count);
     if(next!==view.offset){view.userRange=true;view.offset=next;view.endDate=dates[dates.length-next-1];view.pinned=null;paint();}
@@ -390,6 +396,9 @@ export function drawMarketChart(container, input, options = {}) {
     const bounds=svg.getBoundingClientRect();
     return {x:(event.clientX-bounds.left)*width/bounds.width,y:(event.clientY-bounds.top)*height/bounds.height};
   };
+  // The price-label column: drag up/down to stretch or compress, double-click to fit again.
+  const onPriceAxis = point => Boolean(geometry) && point.y >= geometry.pad.top && point.y <= geometry.pad.top + geometry.plotHeight
+    && (axisLeft ? point.x < geometry.pad.left : point.x > geometry.pad.left + geometry.plotWidth);
   const pointAtPointer = event => {
     if (!geometry) return null;
     const bounds = svg.getBoundingClientRect(), scaleX = bounds.width/width, scaleY = bounds.height/height;
@@ -423,6 +432,10 @@ export function drawMarketChart(container, input, options = {}) {
   svg.addEventListener('pointerdown', event => {
     if (!geometry || event.button!==0 || pointers.size>=2) return;
     const point=pointerPosition(event);
+    if (pointers.size===0 && onPriceAxis(point)) {
+      cancelHover();axisDrag={id:event.pointerId,y:point.y,scale:view.yScale||1};view.interacting=true;
+      svg.setPointerCapture(event.pointerId);event.preventDefault();return;
+    }
     if(point.x<geometry.pad.left||point.x>geometry.pad.left+geometry.plotWidth||point.y<geometry.pad.top||point.y>(showSamples?geometry.sampleBottom:geometry.pad.top+geometry.plotHeight))return;
     cancelHover();
     pointers.set(event.pointerId,point);
@@ -436,6 +449,10 @@ export function drawMarketChart(container, input, options = {}) {
   svg.addEventListener('pointermove', event => {
     if (!geometry) return;
     const point=pointerPosition(event);
+    if (axisDrag && axisDrag.id===event.pointerId) {
+      view.yScale=clamp(axisDrag.scale*Math.exp((point.y-axisDrag.y)*.006),.35,8);paint();return;
+    }
+    if (event.pointerType==='mouse' && !drag) svg.style.cursor=onPriceAxis(point)?'ns-resize':'';
     if(pointers.has(event.pointerId))pointers.set(event.pointerId,point);
     if(pinch && pointers.size===2) {
       const [a,b]=[...pointers.values()],distance=Math.hypot(a.x-b.x,a.y-b.y);
@@ -472,6 +489,9 @@ export function drawMarketChart(container, input, options = {}) {
     finishInteraction();
   };
   svg.addEventListener('pointerup', event => {
+    if (axisDrag && axisDrag.id===event.pointerId) {
+      axisDrag=null;if(svg.hasPointerCapture(event.pointerId))svg.releasePointerCapture(event.pointerId);finishInteraction();return;
+    }
     if (!pinch && drag?.id===event.pointerId && !drag.moved && !drag.cancelTap) {
       const point=pointAtPointer(event);
       view.pinned=(cornerReadout&&view.pinned)||(externalReadout&&view.pinned===point?.date)?null:point?.date||null;view.anchorValue=point?.value;
@@ -479,9 +499,9 @@ export function drawMarketChart(container, input, options = {}) {
     }
     releasePointer(event);
   });
-  const cancelPointer=event=>{cancelHover();releasePointer(event);};
+  const cancelPointer=event=>{cancelHover();if(axisDrag?.id===event.pointerId){axisDrag=null;finishInteraction();return;}releasePointer(event);};
   svg.addEventListener('pointercancel',cancelPointer);svg.addEventListener('lostpointercapture',cancelPointer);
-  svg.addEventListener('dblclick',()=>{if(!touchOnly())reset();});
+  svg.addEventListener('dblclick',event=>{if(onPriceAxis(pointerPosition(event))){view.yScale=1;paint();return;}if(!touchOnly())reset();});
   svg.addEventListener('keydown',event=>{
     if(touchOnly()&&['+','=','-','Home'].includes(event.key))return;
     if(!['ArrowLeft','ArrowRight','+','=','-','Home','Escape'].includes(event.key))return;event.preventDefault();

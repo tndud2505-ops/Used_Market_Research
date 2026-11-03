@@ -5,6 +5,12 @@ import path from "node:path";
 import vm from "node:vm";
 import { coherentStats, metricValue as representative, metricPresentation, shiftDate } from '../web-backend/public/pc-tools-core.mjs';
 import { listingPriceWarning } from '../web-backend/public/listing-price-warning.mjs';
+import { listingCompositionLabel } from '../web-backend/public/listing-composition.mjs';
+
+assert.equal(listingCompositionLabel({ listing_kind: 'SINGLE_COMPONENT' }), '단품');
+assert.equal(listingCompositionLabel({ listing_kind: 'FULL_SYSTEM' }), '완제품');
+assert.equal(listingCompositionLabel({ listing_kind: 'COMPONENT_BUNDLE' }), '묶음');
+assert.equal(listingCompositionLabel({ listing_kind: 'SAME_PRODUCT_LOT' }), '묶음');
 
 {
   const listing = { canonical_product_id: 'gpu:nvidia:rtx-5070-ti', currency: 'KRW', condition_code: 'USED_WORKING',
@@ -86,7 +92,7 @@ assert.match(builderHtml, /id="adfit-banner" data-placement="bottom" aria-label=
 assert.equal(toolsScript.includes("el('tfoot')"), true, 'totals share the component table footer');
 assert.equal(toolsScript.includes("'원문 검색'"), false,
   "the model name link must not repeat a separate original-search label");
-requireText(toolsScript, "[['', '국내 비교']", "analysis must label the domestic comparison scope");
+requireText(toolsScript, "[['', '전체 비교']", "analysis must label the all-site comparison scope");
 requireText(toolsScript, "state.range.to === state.range.latest ? '' : state.range.to",
   "today must use the latest price publication without an explicit as_of contract");
 const requestedPriceAsOfSource = toolsScript.match(/function requestedPriceAsOf\(\) \{[^}]+\}/u)?.[0];
@@ -230,6 +236,8 @@ requireText(styles, "--filter-column-width", "the filter column width must be ad
 requireText(script, 'scope === "UNIT" ? "개당가격"', "RAM quantity/price-scope labels are required");
 requireText(script, 'quantity > 1 ? "일괄가격"', "RAM lot pricing must stay separate from unit pricing");
 requireText(script, "listingIsDisplayable", "listing rows must apply integrity eligibility");
+requireText(html, 'id="listing-composition"', 'composition must be selectable on the listing surface');
+requireText(script, "params.set('sale_composition', state.listingComposition || 'SINGLE')", 'composition filtering belongs to the server query');
 requireText(script, 'listing?.price_eligible === false', "ineligible listings must not be comparable offers");
 requireText(script, 'condition !== "USED_WORKING"', "broken or untested listings must be excluded");
 requireText(script, '["AMBIGUOUS", "UNKNOWN"]', "ambiguous price scope must not look valid");
@@ -266,6 +274,9 @@ const declarations = [...script.matchAll(/^(?:async )?function \w+\([\s\S]*?^\}/
   .map((match) => match[0]).join("\n");
 const context = vm.createContext({ Intl, URLSearchParams, AbortController, clearTimeout });
 vm.runInContext(declarations, context);
+assert.equal(context.listingIsDisplayable({ listing_kind: 'FULL_SYSTEM', condition_code: 'USED_WORKING', price_eligible: false }), true);
+assert.equal(context.listingIsDisplayable({ listing_kind: 'COMPONENT_BUNDLE', condition_code: 'USED_WORKING', price_eligible: false }), true);
+assert.equal(context.listingIsDisplayable({ listing_kind: 'SINGLE_COMPONENT', price_eligible: false }), false);
 assert.equal(context.metricValue({ mean: 150 }, ["mean"], "USD").currency, "USD",
   "a source metric without a nested currency must inherit its market currency");
 assert.equal(context.metricValue({ mean: null }, ["mean"], "USD"), null,

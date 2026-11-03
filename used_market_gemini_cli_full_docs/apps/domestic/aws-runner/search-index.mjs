@@ -4,6 +4,8 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import {
   comparePcListingRows,
+  currentPcListingComposition,
+  pcListingAssociatedProductIds,
   dedupePcListingRows,
   pcListingStatisticsCoverage
 } from "../cloudflare/pc-listings-contract.mjs";
@@ -174,6 +176,10 @@ function pcProjection(item = {}) {
     category_code: cleanText(item.pc_category_code || item.category_code, 80) || null,
     market_segment: cleanText(item.market_segment, 80) || "UNKNOWN",
     listing_type: cleanText(item.listing_type, 80) || "UNKNOWN",
+    // Search associations only. Never project a bundle total as a part price.
+    components: [...new Set((Array.isArray(item.components) ? item.components : Array.isArray(item.items) ? item.items : [])
+      .map(component => cleanText(typeof component === 'string' ? component : component?.canonical_product_id || component?.canonicalProductId, 200))
+      .filter(Boolean))],
     condition_group: cleanText(item.condition_group, 80) || "UNKNOWN",
     spec_group_id: cleanText(item.spec_group_id, 300) || null,
     classification_confidence: Number.isFinite(Number(item.classification_confidence)) ? Number(item.classification_confidence) : 0,
@@ -300,6 +306,7 @@ function publicItem(row) {
     category_code: pc.category_code || null,
     market_segment: pc.market_segment || "UNKNOWN",
     listing_type: pc.listing_type || "UNKNOWN",
+    components: Array.isArray(pc.components) ? pc.components : [],
     condition_group: pc.condition_group || "UNKNOWN",
     spec_group_id: pc.spec_group_id || null,
     classification_confidence: pc.classification_confidence || 0,
@@ -1161,35 +1168,46 @@ export class SearchIndex {
     const sort = new Set(["recent", "price_asc", "price_desc"]).has(options.sort) ? options.sort : "recent";
     const limit = Math.min(100, Math.max(1, Number(options.limit) || 30));
     const asOf = cleanText(options.asOf, 80) || iso(this.now());
+    const saleComposition = cleanText(options.saleComposition, 30).toUpperCase();
+    if (saleComposition && !['ALL', 'SINGLE', 'COMPLETE_PC', 'BUNDLE'].includes(saleComposition)) {
+      throw new TypeError('unsupported sale_composition filter');
+    }
+    const compositeSql = "pc_listing_kind IN ('FULL_SYSTEM', 'COMPONENT_BUNDLE')";
     const where = [
       "active = 1",
       "last_checked_at <= ?",
       this.currentVisibilitySql('listings'),
       "price_value IS NOT NULL",
       "price_value > 0",
-      "pc_canonical_product_id IS NOT NULL",
-      "(pc_category_code IN ('CPU', 'GPU', 'RAM', 'MOTHERBOARD', 'SSD', 'HDD', 'PSU') OR pc_category_code IS NULL)",
-      "pc_listing_kind IN ('SINGLE_COMPONENT', 'SAME_PRODUCT_LOT')",
       "pc_lifecycle_status = 'ACTIVE'",
-      "pc_price_eligible = 1",
       "pc_condition_code = 'USED_WORKING'",
-      "pc_quantity >= 1",
-      "pc_price_scope IN ('TOTAL', 'UNIT')",
       "((pc_market_pool IN ('KR_C2C_USED', 'KR_DEALER_USED', 'KR_REFURB_RETAIL') AND currency = 'KRW') OR (pc_market_pool = 'OVERSEAS_USED' AND currency = 'USD'))"
     ];
     const params = [asOf, ...this.currentVisibilityCutoffs()];
-    if (canonicalProductId) {
-      where.push("pc_canonical_product_id = ?");
-      params.push(canonicalProductId);
-    } else if (canonicalProductIds?.length === 1) {
-      where.push("pc_canonical_product_id = ?");
-      params.push(canonicalProductIds[0]);
-    } else if (canonicalProductIds) {
-      where.push("pc_canonical_product_id IN (SELECT value FROM json_each(?))");
-      params.push(JSON.stringify(canonicalProductIds));
+    const componentScope = [];
+    const componentParams = [];
+    const composedScope = [];
+    const composedParams = [];
+    const associatedIds = canonicalProductId ? [canonicalProductId] : canonicalProductIds;
+    if (associatedIds?.length === 1) {
+      componentScope.push('pc_canonical_product_id = ?');
+      componentParams.push(associatedIds[0]);
+    } else if (associatedIds) {
+      componentScope.push('pc_canonical_product_id IN (SELECT value FROM json_each(?))');
+      componentParams.push(JSON.stringify(associatedIds));
     } else if (categoryCode) {
-      where.push("pc_category_code = ?");
-      params.push(categoryCode);
+      componentScope.push('pc_category_code = ?');
+      componentParams.push(categoryCode);
+    }
+    if (associatedIds) {
+      composedScope.push(`(pc_canonical_product_id IN (SELECT value FROM json_each(?)) OR EXISTS
+        (SELECT 1 FROM json_each(pc_metadata_json, '$.components') component
+          WHERE component.value IN (SELECT value FROM json_each(?))))`);
+      composedParams.push(JSON.stringify(associatedIds), JSON.stringify(associatedIds));
+    } else if (categoryCode) {
+      composedScope.push(`(pc_category_code = ? OR EXISTS
+        (SELECT 1 FROM json_each(pc_metadata_json, '$.components') component WHERE component.value LIKE ?))`);
+      composedParams.push(categoryCode, `${categoryCode.toLowerCase()}:%`);
     }
     if (manufacturer) {
       where.push("(pc_canonical_manufacturer = ? OR pc_board_manufacturer = ?)");
@@ -1234,21 +1252,38 @@ export class SearchIndex {
       params.push(...PC_DIRECTORY_PUBLICATION_SOURCE_KEYS);
     }
     const after = options.after && typeof options.after === "object" ? options.after : null;
-    // Bound model/category reads before fetching wide listing rows. Without
-    // this, SQLite can scan every product for a site just to filter one category.
-    // Predicates, exact totals and canonical identity selection are unchanged.
+    // Keep the established product/category index predicate untouched. Only
+    // explicit composed browsing adds a separate, disjoint candidate stream.
     const scopeIndex = canonicalProductId || canonicalProductIds
       ? ' INDEXED BY idx_listings_pc_product_recent'
       : categoryCode ? ' INDEXED BY idx_listings_pc_scope_recent' : '';
-    const candidates = this.db.prepare(`SELECT item_id, site, url, price_value, posted_at, last_checked_at, pc_canonical_product_id${hasRamListingFilters ? ', title' : ''},
+    const columns = `item_id, site, url, price_value, posted_at, last_checked_at, pc_canonical_product_id,
+      title, description, pc_metadata_json,
       json_type(pc_metadata_json, '$.statistics_eligible') = 'true' AS statistics_eligible,
-      json_extract(pc_metadata_json, '$.statistics_exclusion_reasons') AS statistics_exclusion_reasons
-      FROM listings${scopeIndex}
-      WHERE ${where.join(" AND ")}`).iterate(...params);
+      json_extract(pc_metadata_json, '$.statistics_exclusion_reasons') AS statistics_exclusion_reasons`;
+    const componentWhere = [...where, 'pc_canonical_product_id IS NOT NULL',
+      "(pc_category_code IN ('CPU', 'GPU', 'RAM', 'MOTHERBOARD', 'SSD', 'HDD', 'PSU') OR pc_category_code IS NULL)",
+      "pc_listing_kind IN ('SINGLE_COMPONENT', 'SAME_PRODUCT_LOT')", 'pc_price_eligible = 1',
+      'pc_quantity >= 1', "pc_price_scope IN ('TOTAL', 'UNIT')", ...componentScope];
+    const componentCandidates = this.db.prepare(`SELECT ${columns} FROM listings${scopeIndex}
+      WHERE ${componentWhere.join(' AND ')}`).iterate(...params, ...componentParams);
+    const composedCandidates = ['ALL', 'COMPLETE_PC', 'BUNDLE'].includes(saleComposition)
+      ? this.db.prepare(`SELECT ${columns} FROM listings WHERE ${[...where, compositeSql, ...composedScope].join(' AND ')}`)
+        .iterate(...params, ...composedParams) : [];
+    const candidates = (function* () { yield* componentCandidates; yield* composedCandidates; })();
     let latestObservedAt = "";
     const rows = dedupePcListingRows((function* () {
       for (const row of candidates) {
         if (hasRamListingFilters && !matchesRamListingFacets(row.title, listingFacets)) continue;
+        const metadata = jsonObject(row.pc_metadata_json);
+        const projected = currentPcListingComposition({ ...metadata, title: row.title,
+          description: row.description, price: row.price_value, site: row.site });
+        if (projected.lifecycle_status === 'SOLD') continue;
+        if (saleComposition && saleComposition !== 'ALL' && projected.sale_composition !== saleComposition) continue;
+        row.sale_composition = projected.sale_composition;
+        row.statistics_eligible = projected.statistics_eligible === true ? 1 : 0;
+        row.statistics_exclusion_reasons = JSON.stringify(projected.statistics_exclusion_reasons || []);
+        row.associated_product_ids = pcListingAssociatedProductIds({ ...metadata, canonical_product_id: row.pc_canonical_product_id });
         if (String(row.last_checked_at) > latestObservedAt) latestObservedAt = String(row.last_checked_at);
         yield row;
       }
@@ -1295,8 +1330,7 @@ export class SearchIndex {
     const modelCounts = {};
     if (!after?.item_id) {
       for (const row of rows) {
-        const id = row.pc_canonical_product_id;
-        if (id) modelCounts[id] = (modelCounts[id] || 0) + 1;
+        for (const id of row.associated_product_ids) modelCounts[id] = (modelCounts[id] || 0) + 1;
       }
     }
     const statisticsCoverage = pcListingStatisticsCoverage(rows.map(row => ({
@@ -1305,7 +1339,7 @@ export class SearchIndex {
     })), rows.length);
     const readPageItem = this.db.prepare('SELECT * FROM listings WHERE item_id = ?');
     return {
-      items: page.map(row => publicItem(readPageItem.get(row.item_id))),
+      items: page.map(row => currentPcListingComposition(publicItem(readPageItem.get(row.item_id)))),
       total: rows.length,
       asOf,
       latestObservedAt: latestObservedAt || null,

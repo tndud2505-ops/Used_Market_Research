@@ -243,6 +243,7 @@ export function createServer(
       manufacturer: string | null;
       boardManufacturer: string | null;
       listingFacets: Record<string, string[]>;
+      saleComposition?: string | null;
       sites: string[];
       sort: string;
       minPrice: number | null;
@@ -527,6 +528,7 @@ export function createServer(
           manufacturer: listingQuery.manufacturer || null,
           boardManufacturer: listingQuery.boardManufacturer || null,
           listingFacets: listingQuery.listingFacets,
+          saleComposition: listingQuery.saleComposition,
           sites: listingQuery.sites,
           sort: listingQuery.sort,
           minPrice: listingQuery.minPrice,

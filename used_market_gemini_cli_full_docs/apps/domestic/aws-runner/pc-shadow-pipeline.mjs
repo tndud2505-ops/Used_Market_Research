@@ -20,16 +20,18 @@ function sourceListingId(item) {
   return identifier.startsWith(prefix) ? identifier.slice(prefix.length) : identifier || String(item.url || "").trim();
 }
 
-function lifecycle(item) {
+function lifecycle(item, classified) {
   const supplied = item.lifecycle_status ?? item.status;
   const raw = String(supplied || "").trim().toUpperCase();
-  if (["ACTIVE", "RESERVED", "DELETED", "EXPIRED", "UNAVAILABLE_UNKNOWN", "BLOCKED_OR_PRIVATE"].includes(raw)) {
+  if (["SOLD", "RESERVED", "DELETED", "EXPIRED", "UNAVAILABLE_UNKNOWN", "BLOCKED_OR_PRIVATE"].includes(raw)) {
     return { status: raw, evidence: { type: "STRUCTURED_STATUS", value: raw } };
   }
-  if (raw === "SOLD") return { status: "SOLD", evidence: { type: "STRUCTURED_STATUS", value: "SOLD" } };
   const lifecycleText = `${item.title || ""} ${item.description || ""}`;
-  const explicit = explicitSoldText(lifecycleText);
+  // A generic search-row ACTIVE must not hide explicit whole-listing sold text.
+  // The classifier also distinguishes a sold component from a remaining bundle.
+  const explicit = classified.lifecycle_status === "SOLD" ? explicitSoldText(lifecycleText) : null;
   if (explicit) return { status: "SOLD", evidence: { type: "EXPLICIT_TEXT", value: explicit } };
+  if (raw === "ACTIVE") return { status: "ACTIVE", evidence: { type: "STRUCTURED_STATUS", value: "ACTIVE" } };
   return { status: "UNAVAILABLE_UNKNOWN", evidence: { type: "STATUS_NOT_SUPPLIED", value: "UNAVAILABLE_UNKNOWN" } };
 }
 
@@ -83,6 +85,22 @@ function cpuProductMatchesClassification(classified, product) {
   const classifiedModel = cpuModelToken(classified.canonical_model);
   const productModel = cpuModelToken(product.spec.cpu_model);
   return !classifiedModel || !productModel || classifiedModel === productModel;
+}
+
+function gpuModelKey(value) {
+  return String(value || "").normalize("NFKC").toUpperCase().replace(/[^A-Z0-9]/gu, "");
+}
+
+function gpuProductMatchesClassification(classified, product) {
+  if (classified?.category_code !== "GPU" || !classified.canonical_model || !product) return true;
+  const classifiedModel = gpuModelKey(classified.canonical_model);
+  const productModel = gpuModelKey(product.spec?.gpu_model);
+  if (classifiedModel === productModel) return true;
+  // An approved text alias can refine an incomplete classifier model (RX 7900
+  // to RX 7900 GRE), but cannot replace an exact model already in the master.
+  return productModel.startsWith(classifiedModel) && /^[A-Z]+$/u.test(productModel.slice(classifiedModel.length))
+    && !PC_PRODUCT_MASTER_V2.some(candidate => candidate.category === 'GPU'
+      && gpuModelKey(candidate.spec?.gpu_model) === classifiedModel);
 }
 
 function componentItemsWithExplicitPrices(value, components) {
@@ -353,6 +371,18 @@ export class PcShadowPipeline {
           canonical_product_id: cpuCandidates[0].id, master_version: PC_PRODUCT_MASTER_V2_VERSION };
       }
     }
+    if (classified.category_code === 'GPU' && classified.canonical_model) {
+      // A performance comparison in the body cannot replace the classified sale GPU.
+      const compatible = candidate => candidate?.matched && gpuProductMatchesClassification(classified,
+        this.ledger.getCanonicalProduct(candidate.canonical_product_id, candidate.master_version));
+      alias = compatible(exactAlias) ? exactAlias : compatible(textAlias) ? textAlias : null;
+      if (!alias && !exactAlias?.forbidden && !textAlias?.forbidden) {
+        const gpuCandidates = PC_PRODUCT_MASTER_V2.filter(candidate => candidate.category === 'GPU'
+          && gpuModelKey(candidate.spec?.gpu_model) === gpuModelKey(classified.canonical_model));
+        if (gpuCandidates.length === 1) alias = { matched: true, forbidden: false,
+          canonical_product_id: gpuCandidates[0].id, master_version: PC_PRODUCT_MASTER_V2_VERSION };
+      }
+    }
     const aliasMatched = Boolean(alias?.matched && !alias?.forbidden);
     const facetClassification = ["SSD", "HDD", "PSU"].includes(classified.category_code) ? publicClassified : classified;
     // RAM aliases may contain a kit's total capacity. Its statistics identity must
@@ -368,7 +398,7 @@ export class PcShadowPipeline {
       : aliasMatched
         ? this.ledger.getCanonicalProduct(alias.canonical_product_id, alias.master_version)
         : facetProduct ? this.ledger.getCanonicalProduct(facetProduct.id, PC_PRODUCT_MASTER_V2_VERSION) : null;
-    if (!cpuProductMatchesClassification(classified, product)) product = null;
+    if (!cpuProductMatchesClassification(classified, product) || !gpuProductMatchesClassification(classified, product)) product = null;
     // Laptop/workstation GPU names must not regain a desktop identity through
     // alias lookup after public classification has rejected that identity.
     if (classified.category_code === 'GPU' && marketSegment !== 'CONSUMER_DESKTOP') product = null;
@@ -384,7 +414,7 @@ export class PcShadowPipeline {
     const prices = quantityValid && priceScopeValid
       ? comparablePrices(price, classified.quantity, classified.price_scope)
       : { unitPrice: null, totalPrice: null };
-    let state = lifecycle(item);
+    let state = lifecycle(item, classified);
     // Joonggonara search rows only carry a selling code. A reservation verified
     // on the product page stays until the next page recheck decides otherwise.
     if (source.key === "joonggonara" && state.status === "ACTIVE") {

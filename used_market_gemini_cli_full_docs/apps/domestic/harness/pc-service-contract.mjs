@@ -36,6 +36,7 @@ import {
 import { verifyStoredStatsOnAws } from '../aws-runner/pc-stats-readback.mjs';
 import {
   comparePcListingRows,
+  currentPcListingComposition,
   decodePcListingsCursor,
   dedupePcListingRows,
   encodePcListingsCursor,
@@ -198,6 +199,26 @@ const ramD1Fallback = await browsePcListingsD1(new Request(
 ), { DB: { prepare() { throw new Error('RAM fallback must not perform an unfiltered read'); } } });
 assert.equal(ramD1Fallback.status, 503);
 assert.equal((await ramD1Fallback.json()).error, 'RAM_LISTING_FILTERS_REQUIRE_RUNNER');
+const compositionRequest = parsePcListingsRequest('https://used-pick.test/api/pc/listings?sale_composition=SINGLE');
+assert.equal(compositionRequest.saleComposition, 'SINGLE');
+const soldReadFixture = { title: 'rx580 2048sp 8g (판매완료)', listing_kind: 'SINGLE_COMPONENT', lifecycle_status: 'ACTIVE',
+  canonical_product_id: 'gpu:amd:rx-580', statistics_eligible: true };
+assert.equal(currentPcListingComposition(soldReadFixture).lifecycle_status, 'SOLD');
+assert.equal(currentPcListingComposition(soldReadFixture).statistics_eligible, false);
+for (const title of ['RX580 판매완료 아님', 'RX580 판매완료 시 삭제', 'RX580 10개 중 3개 판매완료']) {
+  assert.equal(currentPcListingComposition({ ...soldReadFixture, title }).lifecycle_status, 'ACTIVE');
+}
+assert.throws(() => parsePcListingsRequest('https://used-pick.test/api/pc/listings?sale_composition=PARTIAL'), /sale_composition/);
+const compositionCursor = encodePcListingsCursor(compositionRequest, {
+  asOf: '2026-08-29T00:00:00.000Z', after: { item_id: 'danawa:single' }
+}, 'composition-fixture-secret');
+assert.throws(() => decodePcListingsCursor({ ...compositionRequest, saleComposition: 'BUNDLE', cursor: compositionCursor },
+  'composition-fixture-secret'), /cursor|query/iu);
+const compositionFallback = await browsePcListingsD1(new Request(
+  'https://used-pick.test/api/pc/listings?sale_composition=SINGLE'
+), { DB: { prepare() { throw new Error('D1 must not return unfiltered composition pages'); } } });
+assert.equal(compositionFallback.status, 503);
+assert.equal((await compositionFallback.json()).error, 'SALE_COMPOSITION_FILTER_REQUIRES_RUNNER');
 assert.throws(
   () => parsePcListingsRequest("https://used-pick.test/api/pc/listings?category_code=SSD&product_kind=NOT_REAL", { allowedSites: [] }),
   /unsupported product_kind/u
@@ -782,6 +803,71 @@ const items = [
   market_pool: "KR_C2C_USED", price_eligible: true, statistics_eligible: true,
   statistics_exclusion_reasons: [], exclusion_reasons: []
 }));
+
+// Composition is evaluated before counts, dedupe and keyset selection. A stale
+// laptop association remains searchable, without pretending it is a desktop GPU.
+{
+  const compositionIndex = new SearchIndex({ filePath: ':memory:', now: () => now });
+  const model = 'gpu:nvidia:rtx-5090';
+  const fixture = (id, title, price, extra = {}) => ({ ...items[0], id: `danawa:composition-${id}`,
+    item_id: `danawa:composition-${id}`, site: 'danawa', title, price,
+    url: `https://dmall.danawa.com/v3/?controller=sale&methods=blog&seq=composition-${id}`,
+    canonical_product_id: model, ...extra });
+  compositionIndex.upsertPublicProjections([
+    fixture('single-a', 'RTX 5090 그래픽카드', 6_000_000),
+    fixture('laptop', '레노버 LEGION Pro 7 16IAX10 U9 5090 Edition W11 (SSD 1TB)', 7_450_000),
+    fixture('single-b', 'RTX 5090 단품 팝니다', 8_000_000),
+    fixture('sold', 'RTX 5090 판매완료', 5_000_000),
+    fixture('sold-partial', 'RTX 5090 그래픽카드', 7_000_000, { description: '10개 중 3개 판매완료, 7개 남았습니다.' }),
+    fixture('bundle', 'RTX 5090 + 라이젠 9950X 묶음 판매', 9_000_000, {
+      canonical_product_id: null, listing_kind: 'COMPONENT_BUNDLE', price_eligible: false,
+      category_code: 'UNSUPPORTED_CATEGORY', quantity: null, price_scope: 'AMBIGUOUS',
+      components: [{ canonicalProductId: model }, { canonicalProductId: 'cpu:amd:ryzen-9-9950x' }] }),
+    fixture('unrelated', 'RTX 3080 + 라이젠 5600 묶음 판매', 1_000_000, {
+      canonical_product_id: null, listing_kind: 'COMPONENT_BUNDLE', price_eligible: false,
+      category_code: 'UNSUPPORTED_CATEGORY', components: ['gpu:nvidia:rtx-3080', 'cpu:amd:ryzen-5-5600'] })
+  ], { observedAt: '2026-08-29T00:00:00.000Z' });
+  const stored = compositionIndex.db.prepare('SELECT item_id, pc_metadata_json FROM listings ORDER BY item_id').all();
+  const scope = { canonicalProductId: model, sites: ['danawa'], sort: 'price_asc', currency: 'KRW', limit: 1,
+    asOf: '2026-08-29T00:00:01.000Z', saleComposition: 'ALL' };
+  const all = compositionIndex.browsePcListings(scope);
+  assert.equal(all.total, 5, 'stored ACTIVE with explicit whole-listing sold text is excluded before counts');
+  assert.equal(all.sourceTotals.danawa, 5);
+  assert.equal(all.modelCounts[model], 5);
+  assert.equal(all.statisticsCoverage.eligible_count, 3);
+  const singleQueries = [];
+  const prepare = compositionIndex.db.prepare;
+  compositionIndex.db.prepare = function (sql) { singleQueries.push(sql); return prepare.call(this, sql); };
+  let single;
+  try { single = compositionIndex.browsePcListings({ ...scope, saleComposition: 'SINGLE' }); }
+  finally { compositionIndex.db.prepare = prepare; }
+  assert.ok(singleQueries.some(sql => sql.includes('INDEXED BY idx_listings_pc_product_recent')
+    && sql.includes('pc_canonical_product_id = ?')), 'ordinary single reads retain the indexed exact-product predicate');
+  assert.equal(singleQueries.some(sql => sql.includes("'$.components'")), false,
+    'ordinary single reads must not scan the separate composed association stream');
+  assert.equal(single.total, 3);
+  assert.equal(single.sourceTotals.danawa, 3);
+  assert.equal(single.modelCounts[model], 3);
+  const next = compositionIndex.browsePcListings({ ...scope, saleComposition: 'SINGLE', after: single.nextAfter });
+  assert.deepEqual(next.items.map(item => item.item_id), ['danawa:composition-sold-partial']);
+  assert.equal(next.total, 3);
+  const last = compositionIndex.browsePcListings({ ...scope, saleComposition: 'SINGLE', after: next.nextAfter });
+  assert.deepEqual(last.items.map(item => item.item_id), ['danawa:composition-single-b']);
+  assert.equal(last.nextAfter, null);
+  for (const [saleComposition, expected] of [['COMPLETE_PC', 'laptop'], ['BUNDLE', 'bundle']]) {
+    const page = compositionIndex.browsePcListings({ ...scope, saleComposition });
+    assert.equal(page.total, 1);
+    assert.equal(page.items[0].item_id, `danawa:composition-${expected}`);
+    assert.equal(page.items[0].sale_composition, saleComposition);
+    assert.equal(page.items[0].canonical_product_id, null);
+    assert.equal(page.items[0].statistics_eligible, false);
+    assert.equal(page.items[0].reference_price, null);
+    assert.equal(page.statisticsCoverage.eligible_count, 0);
+  }
+  assert.deepEqual(compositionIndex.db.prepare('SELECT item_id, pc_metadata_json FROM listings ORDER BY item_id').all(), stored,
+    'composition reads must not rewrite observations or stored product identities');
+  compositionIndex.close();
+}
 
 // Read-time RAM facets preserve stored identities and filter the entire scope
 // before counting, deduplicating or choosing the next globally sorted page.

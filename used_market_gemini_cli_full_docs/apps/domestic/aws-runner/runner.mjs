@@ -2723,6 +2723,7 @@ const server = http.createServer(async (req, res) => {
             canonical_product_id: query.canonicalProductId || null,
             catalog_scope: query.catalogScope || null,
             listing_facets: query.listingFacets || {},
+            sale_composition: query.saleComposition || null,
             matched_model_count: catalogModels?.length ?? null,
             manufacturer: query.manufacturer || null,
             board_manufacturer: query.boardManufacturer || null,

@@ -24,6 +24,43 @@ import { classifyPcPartListing, classifyPcPartListingPublic } from "../market/lo
 import { explicitSoldText, isPartialSaleText, structuredSoldEvidenceFromHtml, joongnaListingUrl } from "../market/logic/listing-lifecycle.mjs";
 import { reviewedPcListingExclusion } from "../market/logic/pc-reviewed-listing-exclusions.mjs";
 
+// Reported cross-product collisions, with nearby valid components retained.
+for (const [title, kind, product] of [
+  ['USED BOX 4 Intel Core i7-14700K NO CPU INCLUDED REPEAT BOX ONLY "SOLO CAJA"', 'BOX_ONLY', null],
+  ['인텔 그래픽카드 arc750 3060급', 'SINGLE_COMPONENT', 'gpu:intel:arc-a750'],
+  ['Intel ARC A750 RTX 3060급 그래픽카드', 'SINGLE_COMPONENT', 'gpu:intel:arc-a750'],
+  ['TP-LINK TX401 10기가비트 랜카드', 'SINGLE_COMPONENT', null],
+  ['TPLINK TX201 2.5G 랜카드', 'SINGLE_COMPONENT', null],
+  ['ACER (SF314-42) 4500U 16G/120GB 14인치 노트북 (윈도우11정품포함)', 'FULL_SYSTEM', null],
+  ['레노버 LEGION Pro 7 16IAX10 U9 5090 Edition W11 (SSD 1TB)', 'FULL_SYSTEM', null],
+  ['Intel Core i7-14700K CPU with original box', 'SINGLE_COMPONENT', 'cpu:intel:i7-14700k'],
+  ['Intel Core i7-14700K CPU not box only', 'SINGLE_COMPONENT', 'cpu:intel:i7-14700k'],
+  ['3060 12g 그래픽카드', 'SINGLE_COMPONENT', 'gpu:nvidia:rtx-3060'],
+  ['RTX3060 급처', 'SINGLE_COMPONENT', 'gpu:nvidia:rtx-3060'],
+  ['RTX3060 급매', 'SINGLE_COMPONENT', 'gpu:nvidia:rtx-3060'],
+  ['Corsair TX450 450W 파워', 'SINGLE_COMPONENT', 'psu:corsair:watts-bucket:le-500'],
+  ['Corsair AX1600i PSU', 'SINGLE_COMPONENT', 'psu:corsair:watts-bucket:gt-1200'],
+  ['노트북에서 분리한 SSD 120GB', 'SINGLE_COMPONENT', 'ssd:unclassified:capacity-bucket:le-256-gb']
+]) {
+  const result = classifyPcPartListingPublic({title, price:100000, currency:'KRW'});
+  assert.equal(result.listing_kind, kind, title);
+  // Unknown manufacturer spelling belongs to the catalogue; validate scope instead.
+  if (title.startsWith('노트북에서')) assert.equal(result.category_code, 'SSD', title);
+  else assert.equal(result.canonical_product_id, product, title);
+  if (!product) assert.equal(result.statistics_eligible, false, title);
+}
+assert.equal(classifyPcPartListingPublic({title:'RTX 3060 그래픽카드',description:'Intel CPU에서 사용, AMD 라데온과 비교',price:300000,currency:'KRW'}).canonical_product_id,
+  'gpu:nvidia:rtx-3060', 'comparison vendors must not override the sale GPU family');
+for (const [title, description, product] of [
+  ['RTX3060 급처', 'RTX 2060보다 빠릅니다', 'gpu:nvidia:rtx-3060'],
+  ['인텔 그래픽카드 ARC580', 'Intel ARC B580 12GB', 'gpu:intel:arc-b580'],
+  ['Intel Core i7-14700K CPU', 'Working CPU, not an empty retail box.', 'cpu:intel:i7-14700k']
+]) assert.equal(classifyPcPartListingPublic({title,description,price:100000,currency:'KRW'}).canonical_product_id, product, title);
+for (const input of [
+  {title:'라이젠 3600 + RX580 CPU 판매완료'},
+  {title:'라이젠 3600 + RX580',description:'CPU 판매완료'}
+]) assert.notEqual(classifyPcPartListingPublic({...input,price:100000,currency:'KRW'}).lifecycle_status, 'SOLD', 'a sold bundle component is not the whole listing');
+
 assert.equal(joongnaListingUrl({url:'https://web.joongna.com/product/[PHONE]',sourceListingId:'joonggonara:https://web.joongna.com/product/171021101'}),'https://web.joongna.com/product/171021101');
 assert.equal(joongnaListingUrl({url:'https://web.joongna.com/product/1234',sourceListingId:'5678'}),null,'conflicting stable identity cannot recheck another listing');
 assert.equal(joongnaListingUrl({url:'https://evil.test/product/1234',sourceListingId:'unknown'}),null);

@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import "./bunjang-lifecycle-contract.mjs";
 import { readFile } from "node:fs/promises";
+import { PcPartsLedger } from "../aws-runner/pc-parts-ledger.mjs";
+import { PcShadowPipeline } from "../aws-runner/pc-shadow-pipeline.mjs";
 
 import { buildLivePayload, collectOne, matchesRequestedKeyword, parseHelloMarketDetailHtml, pcSearchQueryVariants, resetEbayAccessTokenCacheForTests } from "../cloudflare/live-search.mjs";
 import { filterCategoryItems } from "../cloudflare/category-filter.mjs";
@@ -284,6 +286,80 @@ assert.equal(validateSourceActivation("joonggonara", {
 
 assert.equal(explicitSoldText("2개 중 1개 판매완료, 남은 1개 판매"), null);
 assert.equal(explicitSoldText("판매완료"), "판매완료");
+
+const inferenceLedger = new PcPartsLedger({ filePath: ":memory:" });
+inferenceLedger.migrate();
+const inferencePipeline = new PcShadowPipeline({ ledger: inferenceLedger });
+await inferencePipeline.initialize();
+try {
+  const observedAt = "2026-11-03T00:00:00.000Z";
+  const normalizeInference = item => inferencePipeline.normalizeItem({
+    site: "joonggonara", source_listing_id: "inference-fixture", price: 70_000,
+    currency: "KRW", ...item
+  }, observedAt, null, { reclassification: true });
+  const soldItem = { site: "joonggonara", source_listing_id: "rx580-sold-title",
+    title: "RX580 8GB 판매완료", status: "ACTIVE", price: 70_000, currency: "KRW" };
+  const soldProjection = inferencePipeline.recordItem(soldItem, observedAt, { reclassification: true });
+  assert.equal(soldProjection.lifecycle_status, "SOLD", "explicit sold title must reach the public badge before generic ACTIVE");
+  assert.equal(soldProjection.canonical_product_id, "gpu:amd:rx-580");
+  const soldSnapshot = inferenceLedger.latestSnapshot("joonggonara", "rx580-sold-title");
+  assert.deepEqual(JSON.parse(soldSnapshot.status_evidence_json), { type: "EXPLICIT_TEXT", value: "판매완료" },
+    "title inference must retain its text evidence rather than claiming a structured transaction signal");
+  for (const title of ["RX580 판매완료 아님", "RX580 판매완료 표시 오류", "RX580 판매완료되면 삭제",
+    "RX580 sold out 아님", "RX580 2개 중 1개 판매완료, 남은 1개 판매"]) {
+    assert.equal(normalizeInference({ title, status: "ACTIVE" }).state.status, "ACTIVE", title);
+  }
+  for (const status of ["SOLD", "RESERVED", "DELETED", "EXPIRED", "UNAVAILABLE_UNKNOWN", "BLOCKED_OR_PRIVATE"]) {
+    const state = normalizeInference({ title: "RX580 판매완료", lifecycle_status: status, status: "ACTIVE" }).state;
+    assert.deepEqual(state, { status, evidence: { type: "STRUCTURED_STATUS", value: status } },
+      `an explicit lifecycle status must be retained: ${status}`);
+  }
+  assert.equal(normalizeInference({ title: "RX580 판매완료 아님", status: "SOLD" }).state.status, "SOLD",
+    "negative wording cannot erase an authoritative SOLD signal");
+  assert.equal(normalizeInference({ title: "RX580 판매완료" }).state.status, "SOLD");
+  assert.equal(normalizeInference({ title: "RX580 정상 작동" }).state.status, "UNAVAILABLE_UNKNOWN");
+  for (const [title, kind] of [
+    ["라이젠 3600 + RX580 (cpu판매완료)", "COMPONENT_BUNDLE"],
+    ["RX580 / GTX1060 그래픽카드 일괄", "COMPONENT_BUNDLE"],
+    ["RTX3060 그래픽카드 포함 데스크탑 본체", "FULL_SYSTEM"]
+  ]) {
+    const result = normalizeInference({ title, status: "ACTIVE" });
+    assert.equal(result.classified.listing_kind, kind);
+    assert.equal(result.classified.canonical_model, null, title);
+    assert.equal(result.normalized.canonicalProductId, null, "a bundle/system must not gain an invented component identity");
+    assert.equal(result.normalized.statisticsEligible, false);
+    assert.equal(result.state.status, "ACTIVE", "one sold component does not sell the entire remaining bundle");
+  }
+  assert.equal(normalizeInference({ title: "라이젠 3600 + RX580 (cpu판매완료)" }).state.status, "UNAVAILABLE_UNKNOWN");
+  for (const [title, productId] of [
+    ["인텔 arc750 8GB 그래픽카드 RTX3060급", "gpu:intel:arc-a750"],
+    ["ARC A770 16GB 정상 작동", "gpu:intel:arc-a770"],
+    ["RX580 8GB 정상 작동", "gpu:amd:rx-580"],
+    ["RX6600XT 8GB 정상 작동", "gpu:amd:rx-6600-xt"],
+    ["RX7900 GRE 16GB 정상 작동", "gpu:amd:rx-7900-gre"],
+    ["RTX3060 12GB 정상 작동", "gpu:nvidia:rtx-3060"],
+    ["3060 12g", "gpu:nvidia:rtx-3060"],
+    ["RTX3060 Ti 8GB 정상 작동", "gpu:nvidia:rtx-3060-ti"]
+  ]) {
+    const result = normalizeInference({ title, status: "ACTIVE" });
+    assert.equal(result.normalized.canonicalProductId, productId, title);
+    assert.equal(result.normalized.statisticsEligible, true, `valid alias must retain its sample: ${title}`);
+  }
+  // A stale alias set must not let incidental RTX3060 text replace classified ARC A750.
+  inferenceLedger.db.prepare("DELETE FROM product_aliases WHERE canonical_product_id = ?").run("gpu:intel:arc-a750");
+  const arcTitle = "인텔 arc750 8GB 그래픽카드 RTX3060급";
+  assert.equal(inferenceLedger.matchAlias("GPU", "ARC A750"), null);
+  assert.equal(inferenceLedger.matchAliasInText("GPU", arcTitle).canonical_product_id, "gpu:nvidia:rtx-3060");
+  const arcWithoutAlias = normalizeInference({ title: arcTitle, status: "ACTIVE" });
+  assert.equal(arcWithoutAlias.classified.canonical_model, "ARC A750");
+  assert.equal(arcWithoutAlias.normalized.canonicalProductId, "gpu:intel:arc-a750");
+  assert.equal(arcWithoutAlias.normalized.statisticsEligible, true);
+  assert.equal(normalizeInference({ title: "RX6500 그래픽카드", status: "ACTIVE" }).normalized.canonicalProductId, null,
+    "model refinement needs an approved text alias and cannot invent the only available suffix");
+} finally {
+  inferenceLedger.close();
+}
+
 const helloSsdDetail = parseHelloMarketDetailHtml(`<meta name="description" content="삼성 850 PRO 512GB SSD 여러 개 판매합니다."/><meta name="keywords" content="SSD,저장장치"/><meta property="og:image" content="https://ccimg.hellomarket.com/item.jpg"/>`, "https://www.hellomarket.com/item/183908019");
 assert.equal(helloSsdDetail.description, "삼성 850 PRO 512GB SSD 여러 개 판매합니다.");
 assert.equal(helloSsdDetail.keywords, "SSD,저장장치");

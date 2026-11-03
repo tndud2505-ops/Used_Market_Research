@@ -101,7 +101,7 @@ try {
   await ready();
 
   const tabs = await page.locator('#chart-sources option').allTextContents();
-  assert.ok(tabs.includes('국내 비교'));
+  assert.ok(tabs.includes('전체 비교'));
   assert.ok(tabs.includes('중고나라'));
   assert.ok(tabs.includes('번개장터'));
   assert.ok(tabs.includes('eBay (USD)'));

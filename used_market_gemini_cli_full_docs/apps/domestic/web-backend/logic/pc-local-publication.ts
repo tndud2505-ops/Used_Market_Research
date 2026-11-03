@@ -3,7 +3,7 @@ import { homedir, tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 // Shared ESM contract has no TypeScript declaration file.
 // @ts-ignore
-import { pcListingStatisticsCoverage } from '../../../cloudflare/pc-listings-contract.mjs';
+import { currentPcListingComposition, pcListingAssociatedProductIds, pcListingStatisticsCoverage } from '../../../cloudflare/pc-listings-contract.mjs';
 // @ts-ignore — shared runtime ESM helper
 import { deriveRamListingFacets } from '../../../market/logic/ram-listing-facets.mjs';
 
@@ -15,6 +15,7 @@ export interface LocalPcListingQuery {
   manufacturer: string | null;
   boardManufacturer: string | null;
   listingFacets: Record<string, string[]>;
+  saleComposition?: string | null;
   sites: string[];
   sort: string;
   minPrice: number | null;
@@ -192,30 +193,48 @@ export function createLocalPcPublicationReader() {
     const canonicalProductIds = Array.isArray(query.canonicalProductIds)
       ? new Set(query.canonicalProductIds.map(normalize).filter(Boolean))
       : null;
+    const saleComposition = normalize(query.saleComposition).toUpperCase();
+    if (saleComposition && !['ALL', 'SINGLE', 'COMPLETE_PC', 'BUNDLE'].includes(saleComposition)) {
+      throw new TypeError('unsupported sale_composition filter');
+    }
+    const includeComposed = ['ALL', 'COMPLETE_PC', 'BUNDLE'].includes(saleComposition);
+    const associations = new Map<JsonRecord, string[]>();
     let items = allItems.filter((item: JsonRecord) => {
       if (!validMarketScope(item)) return false;
-      if (query.canonicalProductId && !same(item.canonical_product_id, query.canonicalProductId)) return false;
-      if (canonicalProductIds && !canonicalProductIds.has(normalize(item.canonical_product_id))) return false;
+      const composed = ['FULL_SYSTEM', 'COMPONENT_BUNDLE'].includes(item.listing_kind);
+      if (composed && !includeComposed) return false;
+      const ids: string[] = pcListingAssociatedProductIds(item);
+      const matchesProduct = (id: string) => same(item.canonical_product_id, id)
+        || (composed && includeComposed && ids.some(candidate => same(candidate, id)));
+      if (query.canonicalProductId && !matchesProduct(query.canonicalProductId)) return false;
+      if (canonicalProductIds && ![...canonicalProductIds].some(matchesProduct)) return false;
       if (sites.size && !sites.has(normalize(item.site))) return false;
       if (query.marketPool && !same(item.market_pool, query.marketPool)) return false;
       if (query.currency && !same(item.currency, query.currency)) return false;
       if (query.manufacturer && !same(item.canonical_manufacturer || item.manufacturer, query.manufacturer)) return false;
       if (query.boardManufacturer && !same(item.board_manufacturer, query.boardManufacturer)) return false;
       if (!Object.entries(query.listingFacets || {}).every(([key, expected]) => expected.some((value) => same(item[key], value)))) return false;
-      const price = Number(item.price_value);
+      const price = Number(item.price_value ?? item.price);
       if (!Number.isFinite(price) || price <= 0) return false;
       if (query.minPrice !== null && price < query.minPrice) return false;
       if (query.maxPrice !== null && price > query.maxPrice) return false;
       return item.lifecycle_status === undefined || same(item.lifecycle_status, 'ACTIVE');
-    });
-    if (query.sort === 'price_asc') items.sort((left, right) => Number(left.price_value) - Number(right.price_value));
-    else if (query.sort === 'price_desc') items.sort((left, right) => Number(right.price_value) - Number(left.price_value));
+    }).map((item: JsonRecord) => {
+      const presented = currentPcListingComposition(item);
+      associations.set(presented, pcListingAssociatedProductIds(item));
+      return presented;
+    }).filter((item: JsonRecord) => item.lifecycle_status !== 'SOLD'
+      && (!saleComposition || saleComposition === 'ALL' || item.sale_composition === saleComposition));
+    if (query.sort === 'price_asc') items.sort((left, right) => Number(left.price_value ?? left.price) - Number(right.price_value ?? right.price));
+    else if (query.sort === 'price_desc') items.sort((left, right) => Number(right.price_value ?? right.price) - Number(left.price_value ?? left.price));
     else items.sort((left, right) => String(right.updated_at || right.posted_at || '').localeCompare(String(left.updated_at || left.posted_at || '')));
     const total = items.length;
     const modelCounts: Record<string, number> = {};
+    const sourceCounts: Record<string, number> = {};
     for (const item of items) {
-      const id = normalize(item.canonical_product_id);
-      if (id) modelCounts[id] = (modelCounts[id] || 0) + 1;
+      for (const id of associations.get(item) || []) modelCounts[id] = (modelCounts[id] || 0) + 1;
+      const site = normalize(item.site);
+      if (site) sourceCounts[site] = (sourceCounts[site] || 0) + 1;
     }
     const offset = cursorOffset(query.cursor);
     const page = items.slice(offset, offset + query.limit);
@@ -226,6 +245,7 @@ export function createLocalPcPublicationReader() {
       total,
       statistics_coverage: pcListingStatisticsCoverage(items, total),
       model_counts: modelCounts,
+      source_counts: sourceCounts,
       pagination: { has_more: nextOffset < total, next_cursor: nextOffset < total ? `offset:${nextOffset}` : null },
       next_cursor: nextOffset < total ? `offset:${nextOffset}` : null,
       as_of: asOf,

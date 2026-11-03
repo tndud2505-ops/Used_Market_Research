@@ -1,5 +1,44 @@
 import { decodeSearchCursor, encodeSearchCursor } from "../aws-runner/search-cursor.mjs";
 import { RAM_MEMORY_USAGES, RAM_SPEEDS_MT_S } from '../market/logic/ram-listing-facets.mjs';
+import { classifyPcListingPresentation } from '../market/logic/pc-parts-classifier.mjs';
+import { SALE_COMPOSITIONS, listingComposition } from '../web-backend/public/listing-composition.mjs';
+
+// Re-evaluate composition from current evidence, including old rows whose
+// stored classification still describes a standalone component.
+export function currentPcListingComposition(item) {
+  const current = classifyPcListingPresentation(item);
+  const lifecycleStatus = current.lifecycle_status === 'SOLD' ? 'SOLD' : item.lifecycle_status;
+  if (lifecycleStatus === 'SOLD') item = { ...item, statistics_eligible: false, good_listing_eligible: false,
+    statistics_exclusion_reasons: [...new Set([...(item.statistics_exclusion_reasons || []), 'SOLD'])] };
+  const compositeKind = [current.listing_kind, item.listing_kind]
+    .find(kind => ['FULL_SYSTEM', 'COMPONENT_BUNDLE'].includes(kind));
+  const listingKind = compositeKind || item.listing_kind;
+  const composition = listingComposition({ listing_kind: listingKind });
+  if (!compositeKind) return { ...item, lifecycle_status: lifecycleStatus, sale_composition: composition };
+  return {
+    ...item,
+    lifecycle_status: lifecycleStatus,
+    listing_kind: compositeKind,
+    listing_type: compositeKind === 'FULL_SYSTEM' ? 'COMPLETE_PC' : 'BUNDLE',
+    sale_composition: composition,
+    canonical_product_id: null,
+    canonical_display_name: null,
+    canonical_manufacturer: null,
+    chip_manufacturer: null,
+    board_manufacturer: null,
+    spec_group_id: null,
+    statistics_eligible: false,
+    statistics_exclusion_reasons: [...new Set([...(item.statistics_exclusion_reasons || []), compositeKind])],
+    good_listing_eligible: false,
+    reference_price: null
+  };
+}
+
+export function pcListingAssociatedProductIds(item) {
+  return [...new Set([item?.canonical_product_id, ...(Array.isArray(item?.components) ? item.components : [])]
+    .map(component => text(typeof component === 'string' ? component : component?.canonical_product_id || component?.canonicalProductId, 300))
+    .filter(Boolean))];
+}
 
 const SORTS = new Set(["recent", "price_asc", "price_desc"]);
 const CURRENCIES = new Set(["KRW", "USD"]);
@@ -98,6 +137,8 @@ export function parsePcListingsRequest(urlOrRequest, { allowedSites = [] } = {})
   if (requestedSites.some((site) => !allowed.has(site))) throw new TypeError("unsupported site filter");
   const sort = text(url.searchParams.get("sort"), 30) || "recent";
   if (!SORTS.has(sort)) throw new TypeError("sort must be recent, price_asc, or price_desc");
+  const saleComposition = text(url.searchParams.get('sale_composition'), 30).toUpperCase() || null;
+  if (saleComposition && !SALE_COMPOSITIONS.includes(saleComposition)) throw new TypeError('unsupported sale_composition filter');
   let currency = text(url.searchParams.get("currency"), 12).toUpperCase() || null;
   if (currency && !CURRENCIES.has(currency)) throw new TypeError("currency must be KRW or USD");
   const marketPool = text(url.searchParams.get("market_pool"), 80).toUpperCase() || null;
@@ -135,6 +176,7 @@ export function parsePcListingsRequest(urlOrRequest, { allowedSites = [] } = {})
     boardManufacturer,
     sites: requestedSites,
     sort,
+    saleComposition,
     minPrice,
     maxPrice,
     marketPool,
@@ -170,6 +212,7 @@ export function pcListingsIdentity(query) {
     currency: query.currency || ""
   };
   if (query.reconciliationAudit) identity.reconciliation_audit = query.reconciliationAudit;
+  if (query.saleComposition) identity.sale_composition = query.saleComposition;
   return JSON.stringify(identity);
 }
 

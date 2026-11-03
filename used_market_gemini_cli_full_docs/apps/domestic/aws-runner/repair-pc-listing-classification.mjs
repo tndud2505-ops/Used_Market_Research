@@ -7,7 +7,7 @@ import { latestCompletedPricePublication } from './pc-stored-price-publication.m
 import { PcShadowPipeline } from './pc-shadow-pipeline.mjs';
 import { toPcProjectionImportItem } from './republish-pc-projections.mjs';
 import { reconcileExactModelStatistics } from './pc-classification-consistency.mjs';
-import { isAxNetworkCardTitle, isTammuzRx550SsdTitle, isWholeCamcorderTitle, ramSingleSetQuantity } from '../market/logic/pc-parts-classifier.mjs';
+import { isNetworkCardTitle, isTammuzRx550SsdTitle, isWholeCamcorderTitle, ramSingleSetQuantity } from '../market/logic/pc-parts-classifier.mjs';
 
 const digest = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const json = value => JSON.parse(value || '{}');
@@ -19,7 +19,16 @@ const fields = {
 };
 
 function correction(previous, item, pipeline) {
-  const next = pipeline.normalizeItem(item, item.observed_at, null, { reclassification: true }).normalized;
+  let next = pipeline.normalizeItem(item, item.observed_at, null, { reclassification: true }).normalized;
+  // A structured CPU/GPU category cannot turn explicitly empty packaging or
+  // an accessory into the component itself. Re-evaluate only those confirmed
+  // exclusions without category hints; the stored raw input is never changed.
+  if (['BOX_ONLY', 'ACCESSORY_ONLY'].includes(next.listingKind)
+    && !next.priceEligible && !next.statisticsEligible && next.exclusionReasons.includes(next.listingKind)
+    && (next.categoryCode !== 'ACCESSORY' || next.canonicalProductId)) {
+    next = pipeline.normalizeItem({ ...item, requested_category_code: undefined, source_category_code: undefined },
+      item.observed_at, null, { reclassification: true }).normalized;
+  }
   const statistics=reconcileExactModelStatistics(previous,next,item.currency);
   if (previous.canonical_product_id === next.canonicalProductId && previous.listing_kind === next.listingKind
     && previous.quantity === next.quantity && previous.price_scope === next.priceScope
@@ -31,9 +40,9 @@ function correction(previous, item, pipeline) {
   const fullSystemCorrection = next.listingKind === 'FULL_SYSTEM' && next.categoryCode === 'SYSTEM'
     && !next.canonicalProductId && !next.priceEligible && !next.statisticsEligible
     && next.exclusionReasons.includes('FULL_SYSTEM');
-  const accessoryCorrection = next.listingKind === 'ACCESSORY_ONLY' && next.categoryCode === 'ACCESSORY'
+  const accessoryCorrection = ['ACCESSORY_ONLY', 'BOX_ONLY'].includes(next.listingKind) && next.categoryCode === 'ACCESSORY'
     && !next.canonicalProductId && !next.priceEligible && !next.statisticsEligible
-    && next.exclusionReasons.includes('ACCESSORY_ONLY');
+    && next.exclusionReasons.includes(next.listingKind);
   const bundleCorrection = next.listingKind === 'COMPONENT_BUNDLE' && next.categoryCode === 'BUNDLE'
     && !next.canonicalProductId && !next.priceEligible && !next.statisticsEligible
     && next.exclusionReasons.includes('COMPONENT_BUNDLE')
@@ -41,9 +50,12 @@ function correction(previous, item, pipeline) {
     && previous.quantity === next.quantity;
   const clearsComponentIdentity = fullSystemCorrection || accessoryCorrection || bundleCorrection;
   const networkCardCorrection = previous.category_code === 'PSU'
-    && previous.canonical_product_id === 'psu:corsair:watts-bucket:gt-1200'
-    && isAxNetworkCardTitle(item.title) && next.categoryCode === 'EXPANSION_CARD'
-    && next.listingKind === previous.listing_kind && !next.canonicalProductId
+    && previous.canonical_product_id?.startsWith('psu:corsair:watts-bucket:')
+    && isNetworkCardTitle(item.title) && next.categoryCode === 'EXPANSION_CARD'
+    && next.listingKind === previous.listing_kind
+    && ((!next.canonicalProductId && !next.priceEligible)
+      || (next.canonicalProductId?.startsWith('expansion:facet:network:')
+        && next.spec?.directory_node_type === 'BROWSE_FACET' && next.spec?.subtype === 'NETWORK'))
     && !next.statisticsEligible;
   const camcorderCorrection = previous.category_code === 'HDD' && isWholeCamcorderTitle(item.title)
     && next.listingKind === 'NON_PC_ITEM' && next.categoryCode === 'UNKNOWN' && !next.canonicalProductId
@@ -154,6 +166,10 @@ export function buildListingClassificationRepair(db, itemIds, { asOf = new Date(
     updated.evidence = json(changed.after.evidence_json);
     updated.good_listing_eligible = false;
     updated.reference_price = null;
+    // These are search associations, not part prices. Never retain a previous
+    // component ID merely because it was present in the contaminated metadata.
+    updated.components = ['FULL_SYSTEM', 'COMPONENT_BUNDLE'].includes(changed.next.listingKind)
+      && Array.isArray(changed.next.components) ? [...new Set(changed.next.components)] : [];
     const after = { ...before, pc_metadata_json: JSON.stringify(updated),
       pc_canonical_product_id: updated.canonical_product_id,
       pc_category_code: updated.category_code,
@@ -166,15 +182,19 @@ export function buildListingClassificationRepair(db, itemIds, { asOf = new Date(
     }
 
     const sourceListingId = itemId.slice(before.site.length + 1);
+    // eBay Browse's exact raw key represents this numeric listing, not a
+    // prefix search that could also select another listing or variation.
+    const ebaySourceListingId = before.site === 'ebay' && /^\d+$/u.test(sourceListingId)
+      ? `v1|${sourceListingId}|0` : null;
     const rows = db.prepare(`SELECT n.*, s.source_id, s.source_listing_id, s.price_value, s.currency,
         s.observed_at, s.lifecycle_status, r.last_seen_at, r.raw_json, r.title, r.description
       FROM listing_snapshots s JOIN raw_listings r ON r.id=s.raw_listing_id
       JOIN normalized_listings n ON n.snapshot_id=s.id
-      WHERE s.source_id=? AND s.source_listing_id IN (?,?,?,?)
+      WHERE s.source_id=? AND s.source_listing_id IN (?,?,?,?,?)
         AND (s.observed_at>=? OR (s.lifecycle_status IN ('ACTIVE','RESERVED') AND r.last_seen_at>=?))
         AND s.observed_at<=?
         AND n.normalization_version=? AND n.parser_version=? AND n.rule_version=? AND n.filter_version=?
-      ORDER BY n.id`).all(before.site, sourceListingId, before.url, itemId, `${before.site}:${before.url}`, cutoff, cutoff, asOf, active.normalization_version,
+      ORDER BY n.id`).all(before.site, sourceListingId, before.url, itemId, `${before.site}:${before.url}`, ebaySourceListingId, cutoff, cutoff, asOf, active.normalization_version,
         active.parser_version, active.rule_version, active.filter_version);
     for (const row of rows) {
       const original = db.prepare('SELECT * FROM normalized_listings WHERE id=?').get(row.id);
@@ -261,8 +281,9 @@ async function main() {
       const items = plan.listings.map(({ after }) => {
         if (db.prepare('SELECT pc_metadata_json FROM listings WHERE item_id=?').get(after.item_id)?.pc_metadata_json !== after.pc_metadata_json)
           throw new Error('REPAIR_NOT_APPLIED');
-        return toPcProjectionImportItem({ ...after, ...json(after.pc_metadata_json),
-          price: after.price_value, updated_at: after.last_seen_at });
+        const metadata = json(after.pc_metadata_json);
+        return { ...toPcProjectionImportItem({ ...after, ...metadata,
+          price: after.price_value, updated_at: after.last_seen_at }), components: metadata.components || [] };
       });
       for (let offset = 0; offset < items.length; offset += 100) {
         const batch = items.slice(offset, offset + 100);

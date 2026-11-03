@@ -232,6 +232,13 @@ export async function browsePcListingsD1(request, env) {
   let catalogScope;
   try {
     query = parsePcListingsRequest(request, { allowedSites: OPERATIONAL_PC_DIRECTORY_SITES });
+    // D1 has no current-classifier projection. A page-only filter would lose
+    // matches and report the unfiltered total. Use the authoritative runner.
+    if (query.saleComposition) {
+      return Response.json({ status: 'error', error: 'SALE_COMPOSITION_FILTER_REQUIRES_RUNNER' }, {
+        status: 503, headers: { 'cache-control': 'no-store' }
+      });
+    }
     // D1 uses bounded SQL keyset pages; filtering the returned page in memory
     // would silently drop later matches and publish incorrect totals.
     if (['memory_usage', 'speed_mt_s'].some(key => query.listingFacets[key]?.length > 0)) {

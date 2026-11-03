@@ -39,6 +39,7 @@ import {
 } from "./public-product-stats.mjs";
 import { verifyStatsWithRunner } from './pc-stats-runner-verification.mjs';
 import { getPcSource } from "../collector/logic/pc-source-registry.mjs";
+import { handleFxRates } from "./fx-rates.mjs";
 import { resolvePcCanonicalIdV3 } from "../market/data/pc-product-master-v2.mjs";
 import {
   issueMonetizationEventToken,
@@ -1420,6 +1421,10 @@ async function fetchResponse(request, env) {
           recent_collection_runs: await readRecentCollectionRuns(env)
         }
       });
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/fx/usd-krw") {
+      return handleFxRates(request);
     }
 
     if (request.method === "POST" && url.pathname === "/api/monetization/contextual-offer") {

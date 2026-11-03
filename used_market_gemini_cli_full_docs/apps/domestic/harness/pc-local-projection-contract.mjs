@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, existsSync, readdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, existsSync, readdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { once } from 'node:events';
 import { DatabaseSync } from 'node:sqlite';
 import { spawnSync } from 'node:child_process';
 import os from 'node:os';
@@ -57,6 +58,80 @@ try {
   assert.equal(evaluatePcQualityDataset([unknown]).metrics.ram_quantity_price_scope_accuracy, 1);
   const unsafe = { ...unknown, prediction: { category_code: 'RAM', quantity_unknown: true, price_eligible: true } };
   assert.equal(evaluatePcQualityDataset([unsafe]).metrics.ram_quantity_price_scope_accuracy, 0);
+  // Exercise the real native HTTP route and publication reader together.
+  // Full systems retain search associations while their component identity is null.
+  const { createServer } = await import('../dist/web-backend/logic/server.js');
+  const { createLocalPcPublicationReader } = await import('../dist/web-backend/logic/pc-local-publication.js');
+  const model = 'gpu:nvidia:rtx-5090';
+  const fixture = (id, title, price, extra = {}) => ({ item_id: `joonggonara:${id}`, site: 'joonggonara', title,
+    url: `https://web.joongna.com/product/${id}`, price_value: price, currency: 'KRW', market_pool: 'KR_C2C_USED',
+    canonical_product_id: model, canonical_display_name: 'NVIDIA GeForce RTX 5090', category_code: 'GPU',
+    listing_kind: 'SINGLE_COMPONENT', lifecycle_status: 'ACTIVE', statistics_eligible: true, ...extra });
+  const publicationPath = path.join(directory, 'pc-listings-publication.json');
+  const publication = JSON.stringify({ items: [
+    fixture('80001', 'RTX 5090 그래픽카드', 6_000_000),
+    fixture('80002', '레노버 LEGION Pro 7 16IAX10 U9 5090 Edition W11 (SSD 1TB)', 7_450_000),
+    fixture('80003', 'RTX 5090 단품 판매', 8_000_000),
+    fixture('80004', 'RTX 5090 + 라이젠 9950X 묶음 판매', 9_000_000, { canonical_product_id: null,
+      listing_kind: 'COMPONENT_BUNDLE', statistics_eligible: false, price_eligible: false,
+      components: [{ canonicalProductId: model }, { canonical_product_id: 'cpu:amd:ryzen-9-9950x' }] }),
+    fixture('80005', 'RTX 3080 + 라이젠 5600 묶음 판매', 1_000_000, { canonical_product_id: null,
+      listing_kind: 'COMPONENT_BUNDLE', statistics_eligible: false, components: ['gpu:nvidia:rtx-3080'] }),
+    fixture('378201886', 'rx580 2048sp 8g (판매완료)', 70_000, { canonical_product_id: 'gpu:amd:rx-580' })
+  ] });
+  writeFileSync(publicationPath, publication);
+  const previousPublicationPath = process.env.PC_LISTINGS_PUBLICATION_PATH;
+  process.env.PC_LISTINGS_PUBLICATION_PATH = publicationPath;
+  let nativeServer;
+  try {
+    const reader = createLocalPcPublicationReader();
+    nativeServer = createServer(0, { initializeStorage: false, publicApiOnly: true, listPcListings: reader.listPcListings });
+    if (!nativeServer.listening) await once(nativeServer, 'listening');
+    const base = `http://127.0.0.1:${nativeServer.address().port}/api/pc/listings`;
+    const requestPage = async (saleComposition, cursor = '', canonicalProductId = model) => {
+      const params = new URLSearchParams({ canonical_product_id: canonicalProductId, sale_composition: saleComposition,
+        sites: 'joonggonara', sort: 'price_asc', currency: 'KRW', limit: '1' });
+      if (cursor) params.set('cursor', cursor);
+      const response = await fetch(`${base}?${params}`);
+      assert.equal(response.status, 200);
+      return (await response.json()).data;
+    };
+    const all = await requestPage('ALL');
+    assert.equal(all.total, 4);
+    assert.equal(all.model_counts[model], 4, 'selected product count includes associated composites despite null returned identity');
+    assert.equal(all.source_counts.joonggonara, 4);
+    assert.equal(all.statistics_coverage.eligible_count, 2);
+    const single = await requestPage('SINGLE');
+    assert.equal(single.total, 2);
+    assert.equal(single.model_counts[model], 2);
+    assert.equal(single.source_counts.joonggonara, 2);
+    assert.equal(single.items[0].item_id, 'joonggonara:80001');
+    const next = await requestPage('SINGLE', single.pagination.next_cursor);
+    assert.equal(next.items[0].item_id, 'joonggonara:80003');
+    assert.equal(next.total, 2);
+    assert.equal(next.pagination.has_more, false);
+    for (const [composition, id] of [['COMPLETE_PC', '80002'], ['BUNDLE', '80004']]) {
+      const data = await requestPage(composition);
+      assert.equal(data.total, 1);
+      assert.equal(data.model_counts[model], 1);
+      assert.equal(data.items[0].item_id, `joonggonara:${id}`);
+      assert.equal(data.items[0].canonical_product_id, null);
+      assert.equal(data.items[0].canonical_display_name, null);
+      assert.equal(data.items[0].statistics_eligible, false);
+      assert.equal(data.statistics_coverage.eligible_count, 0);
+    }
+    const sold = await requestPage('SINGLE', '', 'gpu:amd:rx-580');
+    assert.equal(sold.total, 0, 'the actual ACTIVE RX580 sold-title example is removed before HTTP counts and paging');
+    assert.deepEqual(sold.items, []);
+    assert.equal(readFileSync(publicationPath, 'utf8'), publication, 'presentation reads must not rewrite the publication');
+  } finally {
+    if (nativeServer) {
+      nativeServer.close();
+      if (nativeServer.listening) await once(nativeServer, 'close');
+    }
+    if (previousPublicationPath === undefined) delete process.env.PC_LISTINGS_PUBLICATION_PATH;
+    else process.env.PC_LISTINGS_PUBLICATION_PATH = previousPublicationPath;
+  }
   console.log(JSON.stringify({ status: 'passed', contract: 'pc-local-projection', backup_verified: true, stale_retired: 1 }));
 } finally {
   index?.close();

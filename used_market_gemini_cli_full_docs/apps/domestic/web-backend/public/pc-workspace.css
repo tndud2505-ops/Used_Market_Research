@@ -333,7 +333,13 @@ body.ui-a.pc-tools #analysis-readout-reset[hidden] { display:none; }
 body[data-page=analysis] .market-chart-foot { display:flex; flex-wrap:wrap; justify-content:space-between; gap:4px 20px; padding-top:6px; }
 body[data-page=analysis] .market-chart-foot p { margin:0; color:var(--muted); font-size:12px; line-height:1.7; }
 body[data-page=analysis] .market-chart-foot p[hidden] { display:none; }
-body[data-page=analysis] .market-chart-foot:not(:has(p:not([hidden]))) { display:none; }
+body[data-page=analysis] .market-chart-foot:not(:has(:is(p,.market-chart-fx):not([hidden]))) { display:none; }
+body[data-page=analysis] .market-chart-fx { display:flex; align-items:center; gap:10px; margin-left:auto; color:var(--muted); font-size:12px; line-height:1.7; font-variant-numeric:tabular-nums; }
+body[data-page=analysis] .market-chart-fx[hidden] { display:none; }
+body.ui-a.pc-tools .market-currency-toggle { display:inline-flex; border:1px solid var(--line); border-radius:4px; overflow:hidden; }
+body.ui-a.pc-tools .market-currency-toggle button { min-height:26px; margin:0; padding:2px 9px; border:0; border-radius:0; background:#fff; color:var(--muted); font-size:12px; cursor:pointer; }
+body.ui-a.pc-tools .market-currency-toggle button + button { border-left:1px solid var(--line); }
+body.ui-a.pc-tools .market-currency-toggle button[aria-pressed=true] { background:var(--surface-soft,#f1f3f5); color:var(--ink); font-weight:650; }
 body[data-page=analysis] .market-price-rail .market-snapshot-item { grid-template-columns:16px minmax(0,1fr); gap:4px 10px; min-height:96px; box-sizing:border-box; padding:14px 0; align-content:start; }
 body[data-page=analysis] .market-price-rail .market-snapshot-marker { display:none; }
 body[data-page=analysis] .market-price-rail .market-snapshot-source { padding-left:0; font-size:13px; line-height:20px; }

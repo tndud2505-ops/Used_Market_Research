@@ -40,7 +40,8 @@ const hpSourceId = 'search_7b233f42d4f77df6e5f56430';
       const row=db.prepare('SELECT * FROM listings WHERE item_id=?').get(`bunjang:${id}`);
       const meta={...JSON.parse(row.pc_metadata_json),category_code:category,canonical_product_id:product,
         listing_kind:'SINGLE_COMPONENT',listing_type:'SINGLE',price_scope:'TOTAL',price_eligible:true,
-        statistics_eligible:true,statistics_exclusion_reasons:[],exclusion_reasons:[]};
+        statistics_eligible:true,statistics_exclusion_reasons:[],exclusion_reasons:[],
+        components:[product,'psu:corsair:watts-bucket:le-500']};
       db.prepare("UPDATE listings SET pc_category_code=?,pc_canonical_product_id=?,pc_listing_kind='SINGLE_COMPONENT',pc_price_scope='TOTAL',pc_price_eligible=1,pc_metadata_json=? WHERE item_id=?").run(category,product,JSON.stringify(meta),row.item_id);
     }
     const raw=JSON.stringify(db.prepare('SELECT * FROM raw_listings').all());
@@ -77,6 +78,14 @@ const hpSourceId = 'search_7b233f42d4f77df6e5f56430';
         assert.equal(entry.after.pc_price_eligible,0,id);
         assert.equal(JSON.parse(entry.after.pc_metadata_json).statistics_eligible,false,id);
         if(kind!=='WANTED') assert.equal(entry.after.pc_canonical_product_id,null,id);
+      }
+      const components=JSON.parse(entry.after.pc_metadata_json).components;
+      assert.ok(!components.includes('psu:corsair:watts-bucket:le-500'),'stale search associations are not copied from metadata');
+      if(id==='minipc') assert.ok(components.includes('cpu:intel:i7-13700'),'the CPU named in the complete PC remains searchable');
+      if(id==='pc') {
+        assert.ok(components.includes('cpu:amd:ryzen-5-7600x'),'a corrected false GPU identity keeps the actual named CPU association');
+        assert.ok(!components.some(id=>['gpu:nvidia:rtx-3060-ti','cpu:intel:i5-7600','cpu:amd:ryzen-5-7600'].includes(id)),
+          'old identity, conflicting vendor and model substrings are not source-validated associations');
       }
       if(id==='bundle') assert.equal(entry.after.pc_price_scope,'BUNDLE');
     }
@@ -444,3 +453,127 @@ try {
     assert.equal(n.quantity,2); assert.equal(n.unitPrice,20000); assert.equal(n.statisticsEligible,true);
   }
 } finally { saleIndex.close(); }
+
+// Exact public originals reported on Nov 3. Raw observations use the published
+// version tuple; eBay's raw key differs from its numeric public listing ID.
+{
+  const reportedIndex = new SearchIndex({filePath:':memory:'});
+  try {
+    const db = reportedIndex.db, ledger = new PcPartsLedger({db}); ledger.migrate();
+    const pipeline = new PcShadowPipeline({ledger}); await pipeline.initialize();
+    db.prepare(`UPDATE pc_pipeline_versions SET normalization_version=19,parser_version='pc-parser-v8',
+      rule_version='pc-rules-v19',filter_version='pc-filter-v7' WHERE version_status='ACTIVE'`).run();
+    const observedAt = '2026-11-03T13:00:00.000Z', asOf = '2026-11-03T14:00:00.000Z';
+    const cpu = 'cpu:intel:i7-14700k', psu = 'psu:corsair:watts-bucket:le-500';
+    const rtx = 'gpu:nvidia:rtx-3060', arc = 'gpu:intel:arc-a750';
+    const network = 'expansion:facet:network:tp-link';
+    const cases = [
+      ['ebay:287268659686','USED BOX 4 Intel Core i7-14700K NO CPU INCLUDED REPEAT BOX ONLY "SOLO CAJA"',21,'CPU',cpu,'BOX_ONLY',null,
+        {currency:'USD',description:'Used',sourceId:'v1|287268659686|0',raw:{requested_category_code:'CPU',source_category_code:'164'}}],
+      ['joonggonara:233677071','TP-LINK TX401 10기가비트 랜카드',30000,'PSU',psu,'SINGLE_COMPONENT',network],
+      ['joonggonara:232427903','TP-LINK 티피링크 TX401 유선랜카드 PCI-e 10Gbps',40000,'PSU',psu,'SINGLE_COMPONENT',network],
+      ['joonggonara:233447966','TPLINK TX201 2.5G 랜카드',10000,'PSU',psu,'SINGLE_COMPONENT',network],
+      ['joonggonara:232373121','10기가비트 랜카드 티피링크 TX401',25000,'PSU',psu,'SINGLE_COMPONENT',null],
+      ['joonggonara:209638789','[TP-LINK] 티피링크 TX201 [유선랜카드/PCI-E/2.5Gbps] 팝니다. - 2.5G 랜카드',10000,'PSU',psu,'SINGLE_COMPONENT',network],
+      ['joonggonara:232178790','ACER (SF314-42) 4500U 16G/120GB 14인치 노트북 (윈도우11정품포함)',230000,'PSU',psu,'FULL_SYSTEM',null,
+        {reasons:['MARKET_SEGMENT_OUT_OF_SCOPE']}],
+      ['joonggonara:232286629','레노버 LEGION Pro 7 16IAX10 U9 5090 Edition W11 (SSD 1TB)',7450000,'GPU','gpu:nvidia:rtx-5090','FULL_SYSTEM',null],
+      ['joonggonara:233105220','인텔 그래픽카드 arc750 3060급',190000,'GPU',rtx,'SINGLE_COMPONENT',arc]
+    ];
+    const seed = ([itemId,title,price,category,product,,,options={}]) => {
+      const [site,publicId] = itemId.split(':'), sourceId = options.sourceId || publicId;
+      const input = {site,item_id:itemId,source_listing_id:sourceId,title,description:options.description ?? null,
+        price,currency:options.currency || 'KRW',lifecycle_status:'ACTIVE',
+        url:site==='ebay'?`https://www.ebay.com/itm/${publicId}`:`https://web.joongna.com/product/${publicId}`,...options.raw};
+      const projection = pipeline.recordItem(input,observedAt);
+      reportedIndex.upsertPublicProjections([projection],{observedAt});
+      const normalization = db.prepare('SELECT id FROM normalized_listings ORDER BY id DESC LIMIT 1').get();
+      const reasons = options.reasons || [], eligible = reasons.length===0 ? 1 : 0;
+      db.prepare(`UPDATE normalized_listings SET category_code=?,canonical_product_id=?,listing_kind='SINGLE_COMPONENT',
+        listing_type='SINGLE',quantity=1,price_scope='TOTAL',price_eligible=1,statistics_eligible=?,exact_product=1,
+        exclusion_reasons_json='[]',statistics_exclusion_reasons_json=? WHERE id=?`)
+        .run(category,product,eligible,JSON.stringify(reasons),normalization.id);
+      db.prepare('DELETE FROM listing_items WHERE normalized_listing_id=? AND item_index<>0').run(normalization.id);
+      db.prepare('UPDATE listing_items SET canonical_product_id=?,quantity=1,unit_price=?,total_price=? WHERE normalized_listing_id=?')
+        .run(product,price,price,normalization.id);
+      const row = db.prepare('SELECT * FROM listings WHERE item_id=?').get(itemId);
+      const metadata = {...JSON.parse(row.pc_metadata_json),category_code:category,canonical_product_id:product,
+        canonical_manufacturer:category==='PSU'?'Corsair':category==='CPU'?'Intel':null,
+        listing_kind:'SINGLE_COMPONENT',listing_type:'SINGLE',quantity:1,price_scope:'TOTAL',price_eligible:true,
+        statistics_eligible:Boolean(eligible),statistics_exclusion_reasons:reasons,exclusion_reasons:[],components:[product]};
+      db.prepare(`UPDATE listings SET pc_category_code=?,pc_canonical_product_id=?,pc_canonical_manufacturer=?,
+        pc_listing_kind='SINGLE_COMPONENT',pc_quantity=1,pc_price_scope='TOTAL',pc_price_eligible=1,pc_metadata_json=? WHERE item_id=?`)
+        .run(category,product,metadata.canonical_manufacturer,JSON.stringify(metadata),itemId);
+      return {itemId,normalizedId:normalization.id};
+    };
+    const targets = cases.map(seed);
+    const neighbors = [
+      ['ebay:820297964192','Intel Core I7-14700K 14th Gen Unlocked Processor LGA1700',290,'CPU',cpu,null,null,{currency:'USD',description:'Used'}],
+      ['joonggonara:233757430','RTX 3060 12GB 그래픽카드',330000,'GPU',rtx],
+      ['joonggonara:real-corsair','Corsair CX450 450W PSU',45000,'PSU',psu],
+      ['ebay:2872686596860',cases[0][1],21,'CPU',cpu,null,null,{currency:'USD',description:'Used',sourceId:'v1|2872686596860|0'}],
+      ['ebay:variation-neighbor',cases[0][1],21,'CPU',cpu,null,null,{currency:'USD',description:'Used',sourceId:'v1|287268659686|1'}]
+    ].map(seed);
+    const dump = table => JSON.stringify(db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all());
+    const sealed = Object.fromEntries(['raw_listings','listing_snapshots','listing_fts'].map(table=>[table,dump(table)]));
+    const neighborState = ({itemId,normalizedId}) => ({
+      listing:db.prepare('SELECT * FROM listings WHERE item_id=?').get(itemId),
+      normalization:db.prepare('SELECT * FROM normalized_listings WHERE id=?').get(normalizedId),
+      children:db.prepare('SELECT * FROM listing_items WHERE normalized_listing_id=? ORDER BY item_index').all(normalizedId)
+    });
+    const untouched = neighbors.map(neighborState), before = dump('listings');
+    const ids = targets.map(target=>target.itemId);
+    const plan = buildListingClassificationRepair(db,ids,{asOf});
+    assert.equal(dump('listings'),before,'reported repair preview writes nothing');
+    assert.equal(plan.listings.length,cases.length); assert.equal(plan.normalizations.length,cases.length);
+    assert.deepEqual(plan.normalizations.map(entry=>entry.before.id),targets.map(target=>target.normalizedId));
+    assert.equal(plan.active.normalization_version,19); assert.equal(plan.active.parser_version,'pc-parser-v8');
+    assert.equal(plan.active.rule_version,'pc-rules-v19'); assert.equal(plan.active.filter_version,'pc-filter-v7');
+    assert.equal(db.prepare('SELECT source_listing_id FROM listing_snapshots WHERE id=?')
+      .get(plan.normalizations[0].before.snapshot_id).source_listing_id,'v1|287268659686|0','exact eBay raw observation participates');
+    // Identity-bearing corrections retain the original condition guard.
+    db.prepare("UPDATE listings SET pc_condition_code='UNKNOWN' WHERE item_id=?").run(cases.at(-1)[0]);
+    assert.throws(()=>buildListingClassificationRepair(db,[cases.at(-1)[0]],{asOf}),/SEMANTICS_CHANGED/);
+    db.prepare("UPDATE listings SET pc_condition_code='USED_WORKING' WHERE item_id=?").run(cases.at(-1)[0]);
+    db.prepare('UPDATE listings SET pc_canonical_product_id=? WHERE item_id=?').run('psu:seasonic:watts-bucket:le-500',cases[1][0]);
+    assert.throws(()=>buildListingClassificationRepair(db,[cases[1][0]],{asOf}),/SEMANTICS_CHANGED/,'network exception remains Corsair-only');
+    db.prepare('UPDATE listings SET pc_canonical_product_id=? WHERE item_id=?').run(psu,cases[1][0]);
+    applyListingClassificationRepair(db,plan);
+    for (const [table,original] of Object.entries(sealed)) assert.equal(dump(table),original,`${table} retains all source evidence and lifecycle`);
+    assert.deepEqual(neighbors.map(neighborState),untouched,'genuine parts, adjacent numeric IDs and other eBay variations stay untouched');
+    for (const [itemId,,,,,kind,product] of cases) {
+      const entry = plan.listings.find(entry=>entry.after.item_id===itemId), after = entry.after;
+      const normalization = plan.normalizations.find(entry=>entry.before.id===targets.find(target=>target.itemId===itemId).normalizedId);
+      assert.deepEqual({...db.prepare('SELECT * FROM listings WHERE item_id=?').get(itemId)},after);
+      assert.equal(after.pc_listing_kind,kind); assert.equal(after.pc_canonical_product_id,product);
+      assert.equal(normalization.after.listing_kind,kind); assert.equal(normalization.after.canonical_product_id,product);
+      const category = kind==='BOX_ONLY'?'ACCESSORY':kind==='FULL_SYSTEM'?'SYSTEM':itemId===cases.at(-1)[0]?'GPU':'EXPANSION_CARD';
+      assert.equal(after.pc_category_code,category); assert.equal(normalization.after.category_code,category);
+      const metadata = JSON.parse(after.pc_metadata_json), prior = JSON.parse(entry.before.pc_metadata_json);
+      assert.deepEqual(metadata.evidence.slice(0,prior.evidence.length),prior.evidence,'original classification evidence remains intact');
+      assert.equal(metadata.statistics_eligible,product===arc); assert.equal(normalization.after.statistics_eligible,product===arc?1:0);
+      assert.equal(normalization.after.exact_product,product===arc?1:0);
+      if(kind==='FULL_SYSTEM') {
+        assert.ok(!metadata.components.includes(psu),'configured systems do not retain a false Corsair component');
+        if(itemId==='joonggonara:232178790') assert.ok(!metadata.components.includes('cpu:amd:ryzen-5-4500'),
+          'the laptop 4500U does not validate the desktop Ryzen 4500 alias');
+        if(itemId==='joonggonara:232286629') assert.ok(metadata.components.includes('gpu:nvidia:rtx-5090'),
+          'the GPU named in LEGION Pro 7 remains a search association, never a component price');
+      }else assert.deepEqual(metadata.components,[],'single components and packaging do not inherit stale composite associations');
+      assert.equal(after.pc_price_eligible,product?1:0,'network facets and the genuine Arc retain search eligibility');
+      for (const key of ['title','description','price_value','currency','pc_quantity','pc_price_scope','pc_condition_code',
+        'pc_market_pool','active','inactive_at','pc_lifecycle_status','first_seen_at','last_seen_at','last_checked_at'])
+        assert.equal(after[key],entry.before[key],`${itemId} preserves ${key}`);
+      for (const key of ['quantity','price_scope','condition_code','market_pool','snapshot_id','normalization_version','parser_version','rule_version','filter_version'])
+        assert.equal(normalization.after[key],normalization.before[key],`${itemId} preserves normalization ${key}`);
+      for (const key of ['quantity','unit_price','total_price']) assert.equal(normalization.afterChild[key],normalization.beforeChild[key]);
+      if (product===arc) assert.equal(metadata.chip_manufacturer,'Intel');
+    }
+    const scopedProducts = new Set([cpu,psu,rtx,arc,network,'gpu:nvidia:rtx-5090']);
+    assert.ok(plan.scopes.every(scope=>scopedProducts.has(scope.canonical_product_id)&&scope.days===30));
+    assert.deepEqual(new Set(plan.scopes.map(scope=>scope.canonical_product_id)),scopedProducts);
+    const again = buildListingClassificationRepair(db,ids,{asOf});
+    assert.equal(again.listings.length,0); assert.equal(again.normalizations.length,0); assert.equal(again.scopes.length,0);
+    console.log('Nov 3 exact scoped repair passed, including eBay v1 identity; neighbors, raw evidence, amounts and lifecycle preserved');
+  } finally { reportedIndex.close(); }
+}

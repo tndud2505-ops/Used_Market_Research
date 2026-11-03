@@ -3,6 +3,7 @@ import { toolQueryMatches } from "./pc-tools-catalog.mjs?v=parts-ux-v4";
 import { readJsonResponse } from "./read-json.mjs?v=lookup-recovery-v1";
 import { createPriceStore } from "./pc-tools-data.mjs?v=domestic-danawa-v1";
 import { listingPriceWarning } from "./listing-price-warning.mjs?v=iqr-disclosure-v1";
+import { SALE_COMPOSITIONS, listingCompositionLabel } from './listing-composition.mjs?v=sale-composition-v1';
 
 const PRODUCT_QUERY_KEYS = new Set([
   "manufacturer", "model", "gpu_model", "board_brand", "usage", "configuration", "socket", "chipset", "form_interface", "capacity", "purpose", "rated_wattage",
@@ -99,6 +100,7 @@ const state = {
   listingTotal: null,
   listingStatisticsCoverage: null,
   listingSort: "recent",
+  listingComposition: "SINGLE",
   productRequest: null,
   modelAvailabilityRequest: null,
   modelAvailabilityScope: "",
@@ -157,6 +159,7 @@ const dom = {
   listingMessage: document.querySelector("#listing-message"),
   backToModels: document.querySelector("#back-to-models"),
   listingSort: document.querySelector("#listing-sort"),
+  listingComposition: document.querySelector('#listing-composition'),
   listingSortTabs: [...document.querySelectorAll(".listing-sort-tab")],
   listingRows: document.querySelector("#listing-rows"),
   listingEmpty: document.querySelector("#listing-empty"),
@@ -1638,6 +1641,7 @@ function buildListingQuery(cursor = "", includeSelectedProduct = true) {
     selectedFacetValues(key).sort().forEach((value) => params.append(key, value));
   });
   if (state.listingSort) params.set("sort", state.listingSort);
+  params.set('sale_composition', state.listingComposition || 'SINGLE');
   const sourceScope = listingSourceScope();
   const sourceIds = sourceScope.map((source) => source.id).filter(Boolean);
   if (sourceIds.length && sourceIds.length < state.sources.length) params.set("sites", sourceIds.join(","));
@@ -1753,9 +1757,11 @@ function listingIdentity(listing) {
 }
 
 function listingIsDisplayable(listing) {
-  if (listing?.price_eligible === false) return false;
+  const composite = ['FULL_SYSTEM', 'COMPONENT_BUNDLE'].includes(listing?.listing_kind);
+  if (!composite && listing?.price_eligible === false) return false;
   const condition = normalizeText(firstDefined(listing?.condition_code, listing?.condition)).toUpperCase();
   if (condition && condition !== "USED_WORKING") return false;
+  if (composite) return true;
   const quantity = Number(firstDefined(listing?.quantity, 1));
   if (!Number.isFinite(quantity) || quantity < 1) return false;
   const scope = normalizeText(listing?.price_scope).toUpperCase();
@@ -1880,10 +1886,12 @@ function renderListings() {
       title.rel = "noopener noreferrer";
     }
     body.append(title);
-    const listingProduct = state.selectedProduct
-      || state.products.find((product) => productId(product) === normalizeText(listing.canonical_product_id));
+    const composite = ['FULL_SYSTEM', 'COMPONENT_BUNDLE'].includes(listing.listing_kind);
+    const listingProduct = composite ? null : (state.selectedProduct
+      || state.products.find((product) => productId(product) === normalizeText(listing.canonical_product_id)));
     const listingCategory = productCategory(listingProduct) || normalizeText(listing.category_code).toUpperCase() || state.categoryCode;
-    const mobileNotes = [];
+    const compositionLabel = listingCompositionLabel(listing);
+    const mobileNotes = [composite ? `${compositionLabel} · 전체가격 · 부품 시세 제외` : compositionLabel];
     let specText = listingProduct ? productSpecText(listingProduct) : "";
     if (listingProduct && productCategory(listingProduct) === "RAM") {
       const capacity = Number(listingProduct.key_specs?.module_capacity_gb);
@@ -1897,6 +1905,8 @@ function renderListings() {
     }
     if (specText && specText !== "—") body.append(createElement("div", "listing-spec", specText));
     const meta = createElement("div", "listing-meta");
+    meta.append(createElement('span', 'listing-composition', composite
+      ? `${compositionLabel} · 전체가격 · 부품 시세 제외` : compositionLabel));
     const canonicalModel = normalizeText(listing.canonical_display_name);
     const canonicalProductId = normalizeText(listing.canonical_product_id);
     const listingNodeType = normalizeText(firstDefined(listing.directory_node_type,
@@ -1932,7 +1942,7 @@ function renderListings() {
     const marketLabel = listingMarketLabel(listing);
     if (marketLabel) meta.append(createElement("span", "listing-market", marketLabel));
     const quantity = Math.max(1, Number(firstDefined(listing?.quantity, 1)) || 1);
-    if (quantity > 1) meta.append(createElement("span", "listing-scope", listingScopeLabel(listing)));
+    if (!composite && quantity > 1) meta.append(createElement("span", "listing-scope", listingScopeLabel(listing)));
     if (meta.childElementCount) body.append(meta);
     const mobileMeta = createElement("div", "mobile-listing-meta");
     const mobileSource = createElement("span", "mobile-listing-source", sourceLabel(sourceId));
@@ -1944,7 +1954,7 @@ function renderListings() {
       time.dateTime = normalizeText(firstDefined(postedAtRaw, observedAtRaw));
       mobileMeta.append(" · ", time);
     }
-    if (quantity > 1 || normalizeText(listing.price_scope).toUpperCase() === "UNIT") mobileNotes.push(listingScopeLabel(listing));
+    if (!composite && (quantity > 1 || normalizeText(listing.price_scope).toUpperCase() === "UNIT")) mobileNotes.push(listingScopeLabel(listing));
     if (listingCategory === "MOTHERBOARD" && listingNodeType !== "PRODUCT") mobileNotes.push("모델 미확인");
     if (listingCategory === "RAM") {
       const usageNote = { LAPTOP: "노트북용", SERVER: "서버용", UNKNOWN: "용도 확인 필요" }[normalizeText(listing.memory_usage).toUpperCase()];
@@ -2124,6 +2134,8 @@ async function loadListings(append = false) {
 
 function resetListingControls() {
   state.listingSort = "recent";
+  state.listingComposition = 'SINGLE';
+  if (dom.listingComposition) dom.listingComposition.value = 'SINGLE';
   syncListingSortTabs();
 }
 
@@ -2147,6 +2159,7 @@ function syncCatalogUrl() {
   const source = [...state.selectedSites][0];
   if (source) url.searchParams.set("sites", source);
   if (state.listingSort !== "recent") url.searchParams.set("sort", state.listingSort);
+  if (state.listingComposition !== 'SINGLE') url.searchParams.set('sale_composition', state.listingComposition);
   window.history.replaceState({}, "", url.pathname + url.search + url.hash);
 }
 
@@ -2178,6 +2191,9 @@ async function loadCatalog() {
     const requestedSource = initialParams.get("sites");
     if (state.sources.some(source => source.id === requestedSource)) state.selectedSites.add(requestedSource);
     if (["recent", "price_asc", "price_desc"].includes(initialParams.get("sort"))) state.listingSort = initialParams.get("sort");
+    const requestedComposition = initialParams.get('sale_composition')?.toUpperCase();
+    if (SALE_COMPOSITIONS.includes(requestedComposition)) state.listingComposition = requestedComposition;
+    if (dom.listingComposition) dom.listingComposition.value = state.listingComposition;
     syncListingSortTabs();
     state.query = initialQuery;
     syncCatalogSearchInput();
@@ -2294,6 +2310,13 @@ dom.listingSortTabs.forEach((button) => {
     syncListingSortTabs();
     reloadListingsForControls();
   });
+});
+dom.listingComposition?.addEventListener('change', () => {
+  const value = dom.listingComposition.value;
+  if (!SALE_COMPOSITIONS.includes(value) || value === state.listingComposition) return;
+  state.listingComposition = value;
+  state.modelAvailabilityScope = '';
+  reloadListingsForControls();
 });
 dom.backToModels.addEventListener("click", () => {
   showAllModels();

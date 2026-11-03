@@ -1,6 +1,6 @@
 import { SERIES, idOf, nameOf, naturalCompare, money, metricValue, soldMeanValue, metricPresentation, listedPriceRange, statsUnavailable, priceRecordIssue, analysisSelectionUrl, groupProducts, scopedStats, sourceStats, priceDateRange, shiftDate, modelPageItems, buildTotals, compactBuild, compatibility, validateBuild, dailySeries, percentChange, buildAnalysisSeries } from './pc-tools-core.mjs?v=shared-price-v2';
 import { readJson, createPriceStore } from './pc-tools-data.mjs?v=picker-fast-v3';
-import { drawMarketChart as drawChart } from './pc-market-chart.mjs?v=compact-tools-v1';
+import { drawMarketChart as drawChart } from './pc-market-chart.mjs?v=fx-ebay-v1';
 import { createAdfitSlots } from './adfit.js?v=adfit-all-v3';
 import { toolBrand, toolFilterSchema, toolFacetValues, toolFacetLabel, filterToolProducts, visibleSelection, toolScopeNote } from './pc-tools-catalog.mjs?v=parts-ux-v4';
 
@@ -109,6 +109,40 @@ function soldFromJoonggonara(data) {
   return data ? { ...data, sold: sourceStats(data, 'joonggonara')?.sold ?? null } : data;
 }
 function soldSiteSelected() { return !state.source || state.source === 'joonggonara'; }
+// eBay asks are converted with each day's USD→KRW reference rate, carried over
+// weekends and holidays. They stay a separate line and never enter domestic averages.
+function fxRateEntry(date) {
+  const rates = state.fx?.rates; if (!rates?.length || !date) return null;
+  let found = null; for (const entry of rates) { if (entry[0] > date) break; found = entry; }
+  return found;
+}
+function chartCurrency() { return state.displayCurrency || (state.source === 'ebay' ? 'USD' : 'KRW'); }
+function convertLine(line, target) {
+  if (!line || line.currency === target) return line;
+  const factor = date => { const rate = fxRateEntry(date)?.[1]; return rate ? (target === 'KRW' ? rate : 1 / rate) : null; };
+  const scale = (value, f) => value == null || f == null ? null : value * f;
+  const points = line.points.map(point => { const f = factor(point.date); return { ...point, value: scale(point.value, f), lower: scale(point.lower, f), upper: scale(point.upper, f) }; });
+  const label = String(line.label || '');
+  return { ...line, currency: target, label: line.id.startsWith('ebay:') && target === 'KRW' ? label.replace(/^eBay/u, 'eBay 환산') : label, points };
+}
+function loadFxRates() {
+  const from = state.range?.from, to = state.range?.latest || state.range?.to, current = state.fx;
+  if (builder || !from || !to || (current && current.from <= from && current.to >= to && current.state !== 'error')) return;
+  state.fx = { from, to, state: 'loading', rates: current?.rates || [] };
+  fetch(`/api/fx/usd-krw?from=${from}&to=${to}`).then(response => response.ok ? response.json() : null).then(body => {
+    const rates = Object.entries(body?.data?.rates || {}).filter(([, value]) => Number.isFinite(value)).sort(([a], [b]) => a.localeCompare(b));
+    state.fx = { from, to, state: rates.length ? 'ready' : 'error', rates: rates.length ? rates : current?.rates || [] };
+    scheduleRepaint();
+  }).catch(() => { state.fx = { from, to, state: 'error', rates: current?.rates || [] }; scheduleRepaint(); });
+}
+function renderFxNote(date, visible) {
+  const box = $('#chart-fx'); if (!box) return;
+  box.hidden = !visible; if (!visible) return;
+  const entry = fxRateEntry(date || state.fx?.rates?.at(-1)?.[0]);
+  $('#chart-fx-rate').textContent = entry ? `환율 ${entry[1].toLocaleString('ko-KR', { maximumFractionDigits: 1 })}원 (${entry[0].slice(5).replace('-', '.')})`
+    : state.fx?.state === 'loading' ? '환율 확인 중' : '환율 정보 없음';
+  for (const button of box.querySelectorAll('[data-action="display-currency"]')) button.setAttribute('aria-pressed', String(button.dataset.currency === chartCurrency()));
+}
 function buildScopeConflict() {
   // Separate fetches may straddle a publication change. Never total different
   // publication/date/currency scopes as if they belonged to one estimate.
@@ -657,6 +691,8 @@ function loadEarlierPrices({retry=false} = {}) {
   state.range=priceDateRange(shiftDate(state.range.to,1-state.days),state.range.to);
   state.historyPending=true;
   const task=store.load([product],state.days,requestedPriceAsOf(),{background:true});
+  if(!state.source)void overseasPrices.load([product],state.days,requestedPriceAsOf(),{background:true});
+  loadFxRates();
   scheduleRepaint();
   void task.finally(()=>{
     if(identity!==`${state.selectedId}:${state.source}:${state.range.to}`)return;
@@ -665,7 +701,7 @@ function loadEarlierPrices({retry=false} = {}) {
 }
 function analysisSources({ latest = false } = {}) {
   const allowedSources = new Set(state.sources.map(source => String(source.source_id || source.id || source.key || '')));
-  const ids = latest ? ['joonggonara','bunjang','danawa','ebay'] : state.source ? [state.source] : [...allowedSources].filter(id => id !== 'ebay');
+  const ids = latest ? ['joonggonara','bunjang','danawa','ebay'] : state.source ? [state.source] : [...allowedSources];
   return ids.filter(id => allowedSources.has(id) && (latest || state.priceSources.has(id))).map(id => {
     const store = id === 'ebay' ? overseasPrices : prices;
     const record = latest ? store?.getAvailable(state.selectedId,60,'') : id === 'ebay' ? overseasPrices?.getAvailable(state.selectedId, state.days, requestedPriceAsOf()) : chartRecord(state.selectedId);
@@ -728,14 +764,14 @@ function renderLatestPrices(series,record,sources = null,date = null) {
 function renderAnalysis() {
   const record = analysisRecord(state.selectedId), base = record?.data;
   const data = sourceStats(scopedStats(base, state.selectedManufacturer), state.source);
-  const currency = base?.methodology?.currency || (state.source === 'ebay' ? 'USD' : 'KRW');
+  const currency = chartCurrency();
   const window = state.range;
   const sourceControls = $('#chart-sources'); sourceControls.replaceChildren();
   const sourceOrder = ['joonggonara', 'bunjang', 'danawa', 'ebay'];
   const availableSources = new Set(state.sources.map(source => String(source.source_id || source.id || source.key || '')));
   const sourceIds = [...sourceOrder.filter(id => availableSources.has(id)),
     ...[...availableSources].filter(id => id && !sourceOrder.includes(id)).sort(naturalCompare)];
-  [['', '국내 비교'], ...sourceIds.map(id => [id, id === 'ebay' ? 'eBay (USD)' : SOURCE_LABELS[id] || id])].forEach(([id, label]) => {
+  [['', '전체 비교'], ...sourceIds.map(id => [id, SOURCE_LABELS[id] || id])].forEach(([id, label]) => {
     const option = el('option', '', label); option.value = id; option.selected = state.source === id; sourceControls.append(option);
   });
   const coverage = $('#chart-coverage'); coverage.replaceChildren(); coverage.hidden = true;
@@ -744,10 +780,12 @@ function renderAnalysis() {
     source: item.id, allowedSourceIds: [item.id], days: item.data?.methodology?.days || state.days, sourceLabels: SOURCE_LABELS,includeSparse:false,
   }).map(line => ({ ...line,
     label: `${SOURCE_LABELS[item.id] || item.id} · ${line.priceBasis === 'listed-minimum' ? '중고 최저 표시가' : line.metricKey === 'sold' ? '판매완료 표시가' : '판매중'}`, currency: item.currency })));
+  for (const [index, line] of availableSeries.entries()) availableSeries[index] = convertLine(line, currency);
   // Sparse asks remain useful reference evidence, but never become representative chart lines.
   const referenceSeries = sources.flatMap(item => buildAnalysisSeries(statsUnavailable(item.data) ? null : item.data, {
     source: item.id, allowedSourceIds: [item.id], days: item.data?.methodology?.days || state.days, sourceLabels: SOURCE_LABELS, includeSparse:true,
   }).map(line => ({ ...line, currency:item.currency })));
+  for (const [index, line] of referenceSeries.entries()) referenceSeries[index] = convertLine(line, currency);
   const soldLine=line=>line.metricKey==='sold'&&line.id.startsWith('joonggonara:');
   const soldAvailable=soldSiteSelected()&&availableSeries.some(soldLine);
   if(!state.priceKindExplicit)state.priceKind=referenceSeries.some(line=>line.metricKey==='active')?'active':soldAvailable?'sold':'active';
@@ -757,10 +795,11 @@ function renderAnalysis() {
   const series=availableSeries.filter(kindLine);
   const chartSeries=series;
   const dates = [...new Set(chartSeries.flatMap(item => item.points.map(point => point.date)))].sort();
-  const latestSources=analysisSources({latest:true}).filter(item=>state.source?item.id===state.source:item.currency===currency);
+  const latestSources=analysisSources({latest:true}).filter(item=>state.source?item.id===state.source:true);
   const latestSeries=latestSources.flatMap(item=>buildAnalysisSeries(statsUnavailable(item.data)?null:item.data,{
     source:item.id,allowedSourceIds:[item.id],days:item.data?.methodology?.days||60,sourceLabels:SOURCE_LABELS,includeSparse:true,
-  }).map(line=>({...line,currency:item.currency})));
+  }).map(line=>convertLine({...line,currency:item.currency},currency)));
+  const showFx=sources.some(item=>item.currency!==currency)||currency!=='KRW';
   let readoutState;
   const updateReadout=({date=null,pinned=false}={})=>{
     const key=`${date||'latest'}:${pinned}`;
@@ -770,6 +809,7 @@ function renderAnalysis() {
     $('#analysis-readout-reset').hidden=!pinned;
     $('#analysis-price-rail').dataset.mode=date?'selected':'latest';
     renderLatestPrices((date?referenceSeries:latestSeries).filter(kindLine),record,kindSources(date?sources:latestSources),date);
+    renderFxNote(date,showFx);
   };
   updateReadout();
   document.querySelectorAll('[data-action="price-kind"]').forEach(button=>{
@@ -808,10 +848,10 @@ function renderAnalysis() {
   renderAnalysisContext(record, data, currency);
   syncMobileAnalysisControls();
   drawChart($('#price-chart'), chartSeries, { label: `${modelName} 가격 추이`, currency, identity: `${state.selectedId}:${state.selectedManufacturer}:${state.source}:${state.priceKind}:${window.to}`,
-    showLegend:false,showNote:false,showGapKey:true,externalReadout:true,axisLeft:true,wheelZoom:true,connectGaps:true,pricePadding:0.23,minimumPricePadding:0.03,
+    showLegend:false,showNote:false,showGapKey:false,showUnit:false,externalReadout:true,axisLeft:true,wheelZoom:true,connectGaps:true,pricePadding:0.23,minimumPricePadding:0.03,
     onReadout:updateReadout,readoutContainer:$('#analysis-price-rail'),
     readoutInput:kindSources(sources).map(item=>referenceSeries.find(line=>line.id===`${item.id}:${state.priceKind}`)||{
-      id:`${item.id}:${state.priceKind}`,label:SOURCE_LABELS[item.id]||item.id,currency:item.currency,metricKey:state.priceKind,points:[],
+      id:`${item.id}:${state.priceKind}`,label:SOURCE_LABELS[item.id]||item.id,currency,metricKey:state.priceKind,points:[],
     }),
     onLoadEarlier:loadEarlierPrices,loadingEarlier:state.historyPending,
     canLoadEarlier:state.days<priceDateRange(window.earliest,window.to).days&&!record?.historyError,
@@ -853,7 +893,9 @@ function refreshPrices() {
   const overseas = !builder && state.source === 'ebay';
   const asOf = requestedPriceAsOf();
   void prices.load(overseas ? [] : targets, builder ? 30 : state.days, asOf);
-  if (!builder) void overseasPrices.load(overseas ? targets : [], state.days, asOf);
+  // The all-site chart also draws the selected model's converted eBay line.
+  if (!builder) void overseasPrices.load(overseas ? targets : !state.source && selected ? [selected] : [], state.days, asOf);
+  loadFxRates();
   if(!builder&&selected){
     // The price rail is always current, independent of a historical chart window.
     void prices.load([selected],60,'',{background:true});
@@ -897,6 +939,9 @@ document.addEventListener('click', event => {
   if(type==='price-kind'){
     if(button.disabled)return;
     state.priceKind=button.dataset.kind==='sold'?'sold':'active';state.priceKindExplicit=true;renderAnalysis();return;
+  }
+  if(type==='display-currency'){
+    state.displayCurrency=button.dataset.currency==='USD'?'USD':'KRW';renderAnalysis();return;
   }
   if(type==='clear-chart-date'){
     $('#price-chart').dispatchEvent(new CustomEvent('chart-clear'));
@@ -1095,7 +1140,7 @@ for (const dialog of document.querySelectorAll('#builder-model-dialog, #analysis
 }
 function syncMobileAnalysisControls() {
   const source = $('#mobile-chart-source-label'), kind = $('#mobile-chart-kind-label');
-  if (source) source.textContent = state.source ? state.source === 'ebay' ? 'eBay (USD)' : SOURCE_LABELS[state.source] || state.source : '국내 비교';
+  if (source) source.textContent = state.source ? SOURCE_LABELS[state.source] || state.source : '전체 비교';
   if (kind) kind.textContent = state.priceKind === 'sold' ? '판매완료' : '판매중';
 }
 
