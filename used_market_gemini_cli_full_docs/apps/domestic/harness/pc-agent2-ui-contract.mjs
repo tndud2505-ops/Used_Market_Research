@@ -79,7 +79,9 @@ try {
 const script = readFileSync(new URL('../web-backend/public/pc-tools.js', import.meta.url), 'utf8');
 assert.match(script, /state\.selectedId = idOf\(currentProducts\(\)\[0\]\);\s+syncAnalysisUrl\(\)/);
 assert.match(script, /const sortData = builder \? payload : analysisData/);
-assert.match(script, /overseasPrices\.load\(overseas \? targets : \[\]/);
+// The whole-market comparison also requests the selected model's eBay series;
+// a domestic-only source or the builder must not trigger that request.
+assert.match(script, /if \(!builder\) void overseasPrices\.load\(overseas \? targets : !state\.source && selected \? \[selected\] : \[\]/);
 assert.match(script, /refreshBuildPriceDetails\(\)/);
 for (const name of ['computer-builder.html', 'price-analysis.html']) {
   const html = readFileSync(new URL(`../web-backend/public/${name}`, import.meta.url), 'utf8');

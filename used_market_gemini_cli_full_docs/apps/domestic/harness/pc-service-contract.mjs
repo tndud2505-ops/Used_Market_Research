@@ -860,6 +860,10 @@ const items = [
     assert.equal(page.items[0].item_id, `danawa:composition-${expected}`);
     assert.equal(page.items[0].sale_composition, saleComposition);
     assert.equal(page.items[0].canonical_product_id, null);
+    assert.equal(page.items[0].price_eligible, false);
+    assert.equal(page.items[0].price, expected === 'laptop' ? 7_450_000 : 9_000_000);
+    assert.equal(page.items[0].currency, 'KRW');
+    assert.equal(page.items[0].price_scope, expected === 'laptop' ? 'TOTAL' : 'AMBIGUOUS');
     assert.equal(page.items[0].statistics_eligible, false);
     assert.equal(page.items[0].reference_price, null);
     assert.equal(page.statisticsCoverage.eligible_count, 0);

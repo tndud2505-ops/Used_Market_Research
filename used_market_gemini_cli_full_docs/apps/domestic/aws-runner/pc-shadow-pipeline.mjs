@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { classifyPcPartListing, classifyPcPartListingPublic, detectPcPartManufacturer, pcPartMarketSegment } from "../market/logic/pc-parts-classifier.mjs";
+import { classifyPcPartListing, classifyPcPartListingPublic, detectPcPartManufacturer, pcPartMarketSegment, pcGpuModelInTitle } from "../market/logic/pc-parts-classifier.mjs";
 import { explicitSoldText } from "../market/logic/listing-lifecycle.mjs";
 import {
   PC_PRODUCT_MASTER_V2,
@@ -317,7 +317,7 @@ export class PcShadowPipeline {
     const source = getPcSource(item.site);
     const textClassified = classifyPcPartListing(item);
     const sourceCategory = trustedSpecialistCategory(item);
-    const sourceCategoryEligible = sourceCategory && !["COMPONENT_BUNDLE", "FULL_SYSTEM", "MONITOR", "NON_PC_ITEM"].includes(textClassified.listing_kind);
+    const sourceCategoryEligible = sourceCategory && !["COMPONENT_BUNDLE", "FULL_SYSTEM", "MONITOR", "NON_PC_ITEM", "BOX_ONLY", "ACCESSORY_ONLY"].includes(textClassified.listing_kind);
     const sourceCategoryManufacturer = sourceCategoryEligible
       ? detectPcPartManufacturer(`${item.title || ""} ${item.description || ""}`, sourceCategory)
       : null;
@@ -512,6 +512,7 @@ export class PcShadowPipeline {
       formFactor: publicClassified.form_factor || null,
       listingKind: classified.listing_kind,
       quantity: classified.quantity,
+      searchComponents: [],
       priceScope: classified.price_scope,
       conditionCode: classified.condition,
       marketPool: listingMarketPool,
@@ -553,6 +554,17 @@ export class PcShadowPipeline {
       }
     };
     if (["COMPONENT_BUNDLE", "FULL_SYSTEM"].includes(classified.listing_kind)) {
+      // A title GPU family is a search association, including for laptops. It
+      // never establishes a standalone desktop part or a component price.
+      const titleGpu = pcGpuModelInTitle(item.title);
+      const gpuProducts = titleGpu ? PC_PRODUCT_MASTER_V2.filter(candidate => candidate.category === 'GPU'
+        && gpuModelKey(candidate.spec?.gpu_model) === gpuModelKey(titleGpu.model)) : [];
+      if (gpuProducts.length === 1) normalized.searchComponents.push({
+        canonical_product_id: gpuProducts[0].id,
+        association_type: "TITLE_GPU_MODEL_FAMILY",
+        search_only: true,
+        matched_text: titleGpu.matchedText.trim()
+      });
       const components = this.ledger.findApprovedProductsInText(`${item.title || ""} ${item.description || ""}`);
       if (components.length >= 2) {
         normalized.items = componentItemsWithExplicitPrices(`${item.title || ""} ${item.description || ""}`, components);
@@ -720,6 +732,7 @@ export class PcShadowPipeline {
       pc_category_code: normalized.publicCategoryCode,
       market_segment: normalized.marketSegment,
       listing_type: normalized.listingType,
+      components: normalized.searchComponents,
       condition_group: normalized.conditionGroup,
       spec_group_id: normalized.specGroupId,
       classification_confidence: normalized.classificationConfidence,

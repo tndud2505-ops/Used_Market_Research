@@ -117,6 +117,9 @@ try {
       assert.equal(data.items[0].item_id, `joonggonara:${id}`);
       assert.equal(data.items[0].canonical_product_id, null);
       assert.equal(data.items[0].canonical_display_name, null);
+      assert.equal(data.items[0].price_eligible, false);
+      assert.equal(data.items[0].price_value, id === '80002' ? 7_450_000 : 9_000_000);
+      assert.equal(data.items[0].currency, 'KRW');
       assert.equal(data.items[0].statistics_eligible, false);
       assert.equal(data.statistics_coverage.eligible_count, 0);
     }

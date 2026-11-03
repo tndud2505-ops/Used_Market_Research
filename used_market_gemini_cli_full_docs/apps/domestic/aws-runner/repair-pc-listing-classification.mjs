@@ -7,7 +7,7 @@ import { latestCompletedPricePublication } from './pc-stored-price-publication.m
 import { PcShadowPipeline } from './pc-shadow-pipeline.mjs';
 import { toPcProjectionImportItem } from './republish-pc-projections.mjs';
 import { reconcileExactModelStatistics } from './pc-classification-consistency.mjs';
-import { isNetworkCardTitle, isTammuzRx550SsdTitle, isWholeCamcorderTitle, ramSingleSetQuantity } from '../market/logic/pc-parts-classifier.mjs';
+import { PUBLIC_PC_PART_CATEGORIES, isNetworkCardTitle, isTammuzRx550SsdTitle, isWholeCamcorderTitle, ramSingleSetQuantity } from '../market/logic/pc-parts-classifier.mjs';
 
 const digest = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const json = value => JSON.parse(value || '{}');
@@ -19,16 +19,7 @@ const fields = {
 };
 
 function correction(previous, item, pipeline) {
-  let next = pipeline.normalizeItem(item, item.observed_at, null, { reclassification: true }).normalized;
-  // A structured CPU/GPU category cannot turn explicitly empty packaging or
-  // an accessory into the component itself. Re-evaluate only those confirmed
-  // exclusions without category hints; the stored raw input is never changed.
-  if (['BOX_ONLY', 'ACCESSORY_ONLY'].includes(next.listingKind)
-    && !next.priceEligible && !next.statisticsEligible && next.exclusionReasons.includes(next.listingKind)
-    && (next.categoryCode !== 'ACCESSORY' || next.canonicalProductId)) {
-    next = pipeline.normalizeItem({ ...item, requested_category_code: undefined, source_category_code: undefined },
-      item.observed_at, null, { reclassification: true }).normalized;
-  }
+  const next = pipeline.normalizeItem(item, item.observed_at, null, { reclassification: true }).normalized;
   const statistics=reconcileExactModelStatistics(previous,next,item.currency);
   if (previous.canonical_product_id === next.canonicalProductId && previous.listing_kind === next.listingKind
     && previous.quantity === next.quantity && previous.price_scope === next.priceScope
@@ -109,7 +100,13 @@ export function buildListingClassificationRepair(db, itemIds, { asOf = new Date(
   const cutoff = new Date(Math.min(Date.parse(asOf), Date.parse(cohort?.as_of || asOf)) - 30 * 86400000).toISOString();
   const normalizations = [], listings = [], scopes = new Map();
   const addScopes = (before, after, currency) => {
-    for (const canonical_product_id of new Set([before.canonical_product_id, after.canonical_product_id])) {
+    // Always repair a previously affected identity, including removal of an
+    // invalid sample. Only add new identities in the pipeline's public/tool
+    // price-statistics categories; search-only network facets have no scope.
+    const products = new Set([before.canonical_product_id]);
+    if (PUBLIC_PC_PART_CATEGORIES.includes(after.category_code) || ['CASE', 'COOLING'].includes(after.category_code))
+      products.add(after.canonical_product_id);
+    for (const canonical_product_id of products) {
       if (!canonical_product_id) continue;
       const pools = currency === 'KRW' && ['KR_C2C_USED', 'KR_DEALER_USED'].includes(before.market_pool)
         ? [before.market_pool, 'KR_DOMESTIC_USED'] : [before.market_pool];
@@ -168,8 +165,11 @@ export function buildListingClassificationRepair(db, itemIds, { asOf = new Date(
     updated.reference_price = null;
     // These are search associations, not part prices. Never retain a previous
     // component ID merely because it was present in the contaminated metadata.
+    const searchComponents = changed.next.searchComponents || [];
     updated.components = ['FULL_SYSTEM', 'COMPONENT_BUNDLE'].includes(changed.next.listingKind)
-      && Array.isArray(changed.next.components) ? [...new Set(changed.next.components)] : [];
+      ? [...new Set(searchComponents.filter(component => component.search_only === true
+        && component.association_type === 'TITLE_GPU_MODEL_FAMILY')
+        .map(component => component.canonical_product_id).filter(Boolean))] : [];
     const after = { ...before, pc_metadata_json: JSON.stringify(updated),
       pc_canonical_product_id: updated.canonical_product_id,
       pc_category_code: updated.category_code,

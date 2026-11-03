@@ -81,9 +81,9 @@ const hpSourceId = 'search_7b233f42d4f77df6e5f56430';
       }
       const components=JSON.parse(entry.after.pc_metadata_json).components;
       assert.ok(!components.includes('psu:corsair:watts-bucket:le-500'),'stale search associations are not copied from metadata');
-      if(id==='minipc') assert.ok(components.includes('cpu:intel:i7-13700'),'the CPU named in the complete PC remains searchable');
+      if(id==='grampro') assert.ok(components.includes('gpu:nvidia:rtx-5050'),'the GPU named in the complete PC remains searchable');
+      if(id==='allinone') assert.ok(components.includes('gpu:nvidia:rtx-3060-ti'),'a named GPU remains a search association without component pricing');
       if(id==='pc') {
-        assert.ok(components.includes('cpu:amd:ryzen-5-7600x'),'a corrected false GPU identity keeps the actual named CPU association');
         assert.ok(!components.some(id=>['gpu:nvidia:rtx-3060-ti','cpu:intel:i5-7600','cpu:amd:ryzen-5-7600'].includes(id)),
           'old identity, conflicting vendor and model substrings are not source-validated associations');
       }
@@ -569,9 +569,15 @@ try {
       for (const key of ['quantity','unit_price','total_price']) assert.equal(normalization.afterChild[key],normalization.beforeChild[key]);
       if (product===arc) assert.equal(metadata.chip_manufacturer,'Intel');
     }
-    const scopedProducts = new Set([cpu,psu,rtx,arc,network,'gpu:nvidia:rtx-5090']);
+    const scopedProducts = new Set([cpu,psu,rtx,arc,'gpu:nvidia:rtx-5090']);
     assert.ok(plan.scopes.every(scope=>scopedProducts.has(scope.canonical_product_id)&&scope.days===30));
     assert.deepEqual(new Set(plan.scopes.map(scope=>scope.canonical_product_id)),scopedProducts);
+    assert.ok(!plan.scopes.some(scope=>scope.canonical_product_id.startsWith('expansion:')),
+      'a new search-only network facet does not request unsupported price statistics');
+    assert.ok(plan.scopes.some(scope=>scope.canonical_product_id===psu),
+      'the previous Corsair identity still needs cleanup when its replacement has no supported statistics');
+    assert.ok(plan.scopes.some(scope=>scope.canonical_product_id==='gpu:nvidia:rtx-5090'),
+      'full-system removal retains the old price scope even though its corrected statistics flag is false');
     const again = buildListingClassificationRepair(db,ids,{asOf});
     assert.equal(again.listings.length,0); assert.equal(again.normalizations.length,0); assert.equal(again.scopes.length,0);
     console.log('Nov 3 exact scoped repair passed, including eBay v1 identity; neighbors, raw evidence, amounts and lifecycle preserved');

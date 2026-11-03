@@ -75,7 +75,7 @@ assert.match(runnerScript, /enrichHelloMarketDetails\(items/u,
   "the scheduled HelloMarket collector must classify public detail text, not search-card titles alone");
 assert.match(installScript, /pc-reviewed-listing-exclusions\.mjs/u,
   "the AWS installer must copy and syntax-check the reviewed listing exclusions module");
-for (const module of ['collector/logic/danawa-search.mjs', 'market/logic/pc-market-pools.mjs']) {
+for (const module of ['collector/logic/danawa-search.mjs', 'market/logic/pc-market-pools.mjs', 'web-backend/public/listing-composition.mjs']) {
   assert.ok(installScript.includes(`install -m 0644 "$SOURCE_ROOT/${module}" "$APP_ROOT/${module}"`), `${module}: deploy required runtime import`);
   assert.ok(installScript.includes(`node --check "$APP_ROOT/${module}"`), `${module}: validate installed module`);
 }

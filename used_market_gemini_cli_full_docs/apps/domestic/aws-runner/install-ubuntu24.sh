@@ -80,6 +80,7 @@ for required_file in \
   market/logic/pc-product-search.mjs \
   market/logic/pc-reviewed-listing-exclusions.mjs \
   market/logic/pc-parts-directory.mjs \
+  web-backend/public/listing-composition.mjs \
   market/data/pc-product-master-v1.mjs \
   market/data/pc-product-master-v2.mjs \
   market/data/browse-flows/index.mjs; do
@@ -194,6 +195,7 @@ node --check "$APP_ROOT/aws-runner/pc-publication-scopes.mjs"
 node --check "$APP_ROOT/aws-runner/collect-pc-release-sample.mjs"
 node --check "$APP_ROOT/market/logic/pc-reviewed-listing-exclusions.mjs"
 node --check "$APP_ROOT/market/logic/pc-parts-directory.mjs"
+node --check "$APP_ROOT/web-backend/public/listing-composition.mjs"
 node --check "$APP_ROOT/market/logic/listing-lifecycle.mjs"
 for browse_flow_file in "$APP_ROOT"/market/data/browse-flows/*.mjs; do
   node --check "$browse_flow_file"
@@ -297,7 +299,7 @@ install -d -o root -g root -m 0755 "$APP_ROOT"
 install -d -o root -g root -m 0755 \
   "$APP_ROOT/aws-runner" "$APP_ROOT/cloudflare" \
   "$APP_ROOT/collector/logic" "$APP_ROOT/market/logic" "$APP_ROOT/market/data" \
-  "$APP_ROOT/market/data/browse-flows"
+  "$APP_ROOT/market/data/browse-flows" "$APP_ROOT/web-backend/public"
 
 if [[ "$SOURCE_ROOT" != "$APP_ROOT" ]]; then
   cp -a "$SOURCE_ROOT/aws-runner/." "$APP_ROOT/aws-runner/"
@@ -319,6 +321,8 @@ if [[ "$SOURCE_ROOT" != "$APP_ROOT" ]]; then
   install -m 0644 "$SOURCE_ROOT/market/logic/pc-product-search.mjs" "$APP_ROOT/market/logic/pc-product-search.mjs"
   install -m 0644 "$SOURCE_ROOT/market/logic/pc-reviewed-listing-exclusions.mjs" "$APP_ROOT/market/logic/pc-reviewed-listing-exclusions.mjs"
   install -m 0644 "$SOURCE_ROOT/market/logic/pc-parts-directory.mjs" "$APP_ROOT/market/logic/pc-parts-directory.mjs"
+  # Shared with the browser; listing composition labels must match the runner filter.
+  install -m 0644 "$SOURCE_ROOT/web-backend/public/listing-composition.mjs" "$APP_ROOT/web-backend/public/listing-composition.mjs"
   install -m 0644 "$SOURCE_ROOT/market/logic/listing-lifecycle.mjs" "$APP_ROOT/market/logic/listing-lifecycle.mjs"
   install -m 0644 "$SOURCE_ROOT/market/logic/bunjang-lifecycle.mjs" "$APP_ROOT/market/logic/bunjang-lifecycle.mjs"
   install -m 0644 "$SOURCE_ROOT/market/data/pc-product-master-v1.mjs" "$APP_ROOT/market/data/pc-product-master-v1.mjs"
@@ -326,9 +330,9 @@ if [[ "$SOURCE_ROOT" != "$APP_ROOT" ]]; then
   cp -a "$SOURCE_ROOT/market/data/browse-flows/." "$APP_ROOT/market/data/browse-flows/"
 fi
 
-chown -R root:root "$APP_ROOT/aws-runner" "$APP_ROOT/cloudflare" "$APP_ROOT/collector" "$APP_ROOT/market"
-find "$APP_ROOT/aws-runner" "$APP_ROOT/cloudflare" "$APP_ROOT/collector" "$APP_ROOT/market" -type d -exec chmod 0755 {} +
-find "$APP_ROOT/aws-runner" "$APP_ROOT/cloudflare" "$APP_ROOT/collector" "$APP_ROOT/market" -type f -exec chmod 0644 {} +
+chown -R root:root "$APP_ROOT/aws-runner" "$APP_ROOT/cloudflare" "$APP_ROOT/collector" "$APP_ROOT/market" "$APP_ROOT/web-backend"
+find "$APP_ROOT/aws-runner" "$APP_ROOT/cloudflare" "$APP_ROOT/collector" "$APP_ROOT/market" "$APP_ROOT/web-backend" -type d -exec chmod 0755 {} +
+find "$APP_ROOT/aws-runner" "$APP_ROOT/cloudflare" "$APP_ROOT/collector" "$APP_ROOT/market" "$APP_ROOT/web-backend" -type f -exec chmod 0644 {} +
 chmod 0755 "$APP_ROOT/aws-runner"/*.sh
 
 validate_release

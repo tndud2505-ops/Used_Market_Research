@@ -297,6 +297,26 @@ try {
     site: "joonggonara", source_listing_id: "inference-fixture", price: 70_000,
     currency: "KRW", ...item
   }, observedAt, null, { reclassification: true });
+  for (const [title, category, sourceCategory, kind, productId] of [
+    ['USED BOX 4 Intel Core i7-14700K NO CPU INCLUDED REPEAT BOX ONLY "SOLO CAJA"', "CPU", "164", "BOX_ONLY", null],
+    ["GeForce rtx 3090 호환 nvlink 4 slot 팝니다.", "GPU", "27386", "ACCESSORY_ONLY", null],
+    ["Intel Core i7-14700K CPU with original box", "CPU", "164", "SINGLE_COMPONENT", "cpu:intel:i7-14700k"],
+    ["RTX 3090 그래픽카드 NVLink 지원", "GPU", "27386", "SINGLE_COMPONENT", "gpu:nvidia:rtx-3090"]
+  ]) {
+    const item = { site: "ebay", title, requested_category_code: category, source_category_code: sourceCategory,
+      status: "ACTIVE", price: 21, currency: "USD" };
+    assert.equal(trustedSpecialistCategory(item), category, "fixture must exercise a trusted source-category override");
+    const result = normalizeInference(item);
+    assert.equal(result.classified.listing_kind, kind, title);
+    assert.equal(result.normalized.categoryCode, productId ? category : "ACCESSORY", title);
+    assert.equal(result.normalized.canonicalProductId, productId, title);
+    assert.equal(result.normalized.statisticsEligible, Boolean(productId), title);
+    if (!productId) {
+      assert.equal(result.normalized.priceEligible, false);
+      assert.equal(result.normalized.evidence.some(evidence => evidence.source === "STRUCTURED_SOURCE_CATEGORY"), false,
+        "positive box/accessory evidence must outrank marketplace category hints");
+    }
+  }
   const soldItem = { site: "joonggonara", source_listing_id: "rx580-sold-title",
     title: "RX580 8GB 판매완료", status: "ACTIVE", price: 70_000, currency: "KRW" };
   const soldProjection = inferencePipeline.recordItem(soldItem, observedAt, { reclassification: true });
@@ -331,6 +351,59 @@ try {
     assert.equal(result.state.status, "ACTIVE", "one sold component does not sell the entire remaining bundle");
   }
   assert.equal(normalizeInference({ title: "라이젠 3600 + RX580 (cpu판매완료)" }).state.status, "UNAVAILABLE_UNKNOWN");
+  for (const item of [
+    { title: "라이젠 3600 + RX580 CPU 판매완료" },
+    { title: "라이젠 3600 + RX580", description: "CPU 판매완료" }
+  ]) assert.equal(normalizeInference({ ...item, status: "ACTIVE" }).state.status, "ACTIVE",
+    "the pipeline must retain the classifier's component-scoped sold decision");
+
+  const composedProjection = (sourceListingId, title, extras = {}) => inferencePipeline.recordItem({
+    site: "joonggonara", source_listing_id: sourceListingId, title, status: "ACTIVE",
+    price: 7_450_000, currency: "KRW", ...extras
+  }, observedAt, { reclassification: true });
+  const desktopTitle = "RTX3060 그래픽카드 포함 데스크탑 본체";
+  const desktopNormalized = normalizeInference({ title: desktopTitle, status: "ACTIVE" }).normalized;
+  assert.equal(desktopNormalized.searchComponents.length, 1, "one verified GPU association is sufficient for composition browsing");
+  assert.equal(desktopNormalized.items, undefined, "a search association must not manufacture a component pricing row");
+  const desktopProjection = composedProjection("one-gpu-desktop", desktopTitle);
+  assert.deepEqual(desktopProjection.components, desktopNormalized.searchComponents);
+  assert.equal(desktopProjection.components[0].canonical_product_id, "gpu:nvidia:rtx-3060");
+  assert.equal(desktopProjection.canonical_product_id, null);
+  assert.equal(desktopProjection.statistics_eligible, false);
+  const legionTitle = "레노버 LEGION Pro 7 16IAX10 U9 5090 Edition W11 (SSD 1TB)";
+  const legionProjection = composedProjection("legion-bare-5090", legionTitle);
+  assert.equal(legionProjection.listing_type, "COMPLETE_PC");
+  assert.equal(legionProjection.canonical_product_id, null, "a mobile GPU family must not become a desktop price identity");
+  assert.equal(legionProjection.price_eligible, false);
+  assert.equal(legionProjection.statistics_eligible, false);
+  assert.deepEqual(legionProjection.components, [{
+    canonical_product_id: "gpu:nvidia:rtx-5090", association_type: "TITLE_GPU_MODEL_FAMILY",
+    search_only: true, matched_text: "5090"
+  }]);
+  assert.equal(Object.hasOwn(legionProjection.components[0], "unitPrice"), false);
+  assert.equal(Object.hasOwn(legionProjection.components[0], "market_segment"), false,
+    "a model-family association makes no claim about the desktop/mobile variant");
+  const explicitLaptop = composedProjection("explicit-mobile-5090", "레노버 LEGION Pro 7 RTX5090 노트북");
+  assert.equal(explicitLaptop.market_segment, "LAPTOP");
+  assert.equal(explicitLaptop.canonical_product_id, null);
+  assert.equal(explicitLaptop.statistics_eligible, false);
+  assert.equal(explicitLaptop.components[0].canonical_product_id, "gpu:nvidia:rtx-5090");
+  const acerTitle = "ACER (SF314-42) 4500U 16G/120GB 14인치 노트북 (윈도우11정품포함)";
+  assert.ok(inferenceLedger.findApprovedProductsInText(acerTitle)
+    .some(component => component.canonical_product_id === "cpu:amd:ryzen-5-4500"), "fixture reproduces the unsafe partial CPU alias");
+  const acerProjection = composedProjection("acer-mobile-cpu", acerTitle, { components: ["cpu:amd:ryzen-5-4500"] });
+  assert.deepEqual(acerProjection.components, [], "unverified or supplied aliases must not leak into search associations");
+  assert.equal(acerProjection.canonical_product_id, null);
+  assert.equal(acerProjection.statistics_eligible, false);
+  const comparisonProjection = composedProjection("comparison-only-gpu", "레노버 LEGION Pro7 RTX5090급 게이밍 노트북");
+  assert.deepEqual(comparisonProjection.components, [], "performance comparisons cannot create GPU associations");
+  const bodyOnlyProjection = composedProjection("body-only-gpu", "레노버 LEGION Pro7 노트북", { description: "RTX5090급 성능" });
+  assert.deepEqual(bodyOnlyProjection.components, [], "description-only models cannot establish the title association");
+  const bundleProjection = composedProjection("bundle-one-gpu", "라이젠 3600 + RX580 CPU 판매완료");
+  assert.equal(bundleProjection.components[0].canonical_product_id, "gpu:amd:rx-580");
+  assert.equal(bundleProjection.lifecycle_status, "ACTIVE");
+  assert.equal(bundleProjection.canonical_product_id, null);
+  assert.equal(bundleProjection.statistics_eligible, false);
   for (const [title, productId] of [
     ["인텔 arc750 8GB 그래픽카드 RTX3060급", "gpu:intel:arc-a750"],
     ["ARC A770 16GB 정상 작동", "gpu:intel:arc-a770"],

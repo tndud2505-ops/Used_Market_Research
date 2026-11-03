@@ -311,6 +311,7 @@ function detectSpecialKind(text, evidence, title = text) {
     && /듀얼\s*스토리지|\b(?:WIN(?:DOWS)?\s*(?:10|11))\b|(?:삼성(?:전자)?|LG)\s+[A-Z]{2,}\d{3,}/iu.test(title)
     && !componentRemovalWording && !/단품|CPU\s*만|호환|지원|PC\s*용|에서\s*사용/iu.test(title);
   const clearDesktopSystem = !cpuComponentWording && !componentRemovalWording
+    && !/(?:CPU|프로세서)\s*(?:단품|만(?=\s*(?:판매|팝니다|$)))/iu.test(title)
     && /(?:^|[^A-Z])PC\s*(?:팝니다|판매(?:합니다)?|팔아요|급처)|(?:데스크탑|데스크톱)\s*(?:본체\s*)?(?:팝니다|판매(?:합니다)?|팔아요|급처)|(?:중고|게임용|사무용|업무용|브랜드)\s*컴퓨터|(?:게임용|사무용|업무용)\s*(?:PC|데스크탑)|미니\s*컴퓨터|HP\s*(?:PRODESK|프로\s*데스크|ELITEDESK|엘리트\s*데스크|PAVILION|파빌리온|일체형)|컴퓨터.{0,30}(?:RYZEN|라이젠|\d{4,5}X(?:3D)?|울트라\s*[3579]?[- ]?\d{3}[A-Z]*|I[3579][ -]?\d{4,5}[A-Z]*)|(?:RYZEN|라이젠|\d{4,5}X(?:3D)?|울트라\s*[3579]?[- ]?\d{3}[A-Z]*|I[3579][ -]?\d{4,5}[A-Z]*).{0,30}(?:데스크탑(?:\s*PC)?|컴퓨터\s*(?:팝니다|판매|급처)?)/iu.test(title);
   const namedGpuPortable = hasGpuModel && PORTABLE_GPU_SYSTEM_PATTERN.test(title)
     && !/(?:탈거|분리|적출|부품|쿨러|팬|키보드|배터리|어댑터|호환|장착\s*테스트|에서\s*사용)/iu.test(title);
@@ -333,14 +334,22 @@ function detectSpecialKind(text, evidence, title = text) {
     && (hasStorageConfiguration || /(?:^|[\s(/,])(?:S|H)\s*\d{1,4}(?:G(?:B)?|T(?:B)?)?(?=$|[\s/),])/iu.test(title))
     && !/단품|CPU\s*만|호환|지원|분리|탈거|적출|사용하던|(?:에서|으로)\s*(?:테스트|사용)/iu.test(title)
     && !/(?:CPU|프로세서)\s*(?:단품|만)\s*(?:판매|팝니다)|(?:분리|탈거|적출)(?:한|품)\s*(?:CPU|프로세서)/iu.test(text);
+  // "데스크탑 본체 i5-11400" and "삼성 데스크탑 I5-11400 판매합니다" name the
+  // desktop before its CPU. Prior use, compatibility and CPU-only wording stay
+  // component sales.
+  const desktopLeadSystem = componentGroups.has('CPU') && !cpuComponentWording && !componentRemovalWording
+    && !separateComponentSale
+    && (/데스크[탑톱]\s*(?<!반)본체|(?:삼성|LG|엘지|HP|DELL|델|레노버|LENOVO|ASUS|에이수스)(?:전자)?\s*데스크[탑톱](?:\s*PC(?!\s*용))?(?:\s+[A-Z]{2,}\d{3,}[A-Z0-9-]*)?[\s(]*(?:I[3579][ -]?\d{4,5}|RYZEN|라이젠)/iu.test(title)
+      || /데스크[탑톱](?!\s*(?:용|부품))[\s(]*(?:I[3579][ -]?\d{4,5}[A-Z]*|RYZEN|라이젠|\d{4,5}X(?:3D)?).{0,30}(?:팝니다|판매(?:합니다)?|팔아요|급처)/iu.test(title))
+    && !/단품|CPU\s*만|반본체|사용하던|(?:에서|으로)\s*(?:테스트|사용)/iu.test(title);
   const fullSystem = explicitSystem || describedSystem || (describedPortableSystem && !separateComponentSale) || namedPortableSystem || namedGpuPortable
     || workstationSystem || describedCompactSystem || compactComputerSale || gramComputerSale || compactPcConfiguration || componentRichSystem || clearDesktopSystem || configuredDesktopSystem
-    || namedConfiguredPortable || configuredLaptop || allInOneSystem;
+    || desktopLeadSystem || namedConfiguredPortable || configuredLaptop || allInOneSystem;
   if (fullSystem) {
     addEvidence(evidence, 'listing_kind', fullSystem.matchedText || [...componentGroups].join('+'), 'FULL_SYSTEM');
     return 'FULL_SYSTEM';
   }
-  const explicitComponentBundle = firstMatch(text, /반본체|CPU\s*\+.*(?:보드|RAM|램)|(?:CPU|메인보드|보드).*(?:묶음|세트)|(?:묶음|세트).*?(?:CPU|메인보드|보드)|(?:\d{4,5}X(?:3D)?|I[3579][ -]?\d{4,5}[A-Z]*)\s*\+\s*[ABHXZ]\d{3}.*(?:RAM|램)|(?:\d{4,5}X(?:3D)?|I[3579][ -]?\d{4,5}[A-Z]*)\s*\+.{0,30}쿨러.{0,30}\+\s*DDR[345]\b|(?:RTX|GTX|RX\s*\d{4}).{0,20}\+.{0,20}(?:\d{4,5}X|I[3579][ -]?\d{4,5}).{0,30}(?:세트|일괄)|\bSSD\b[^+]{0,20}\d+\s*TB\s*\+\s*\d+\s*TB.*일괄|(?:미니\s*PC|MINI\s*PC).{0,50}(?:\+|와|및|포함).{0,50}(?:RTX|GTX|RX\s*\d{4}|그래픽\s*카드)/i);
+  const explicitComponentBundle = firstMatch(text, /반본체|CPU\s*\+.*(?:보드|RAM|램)|(?:CPU|메인보드|보드).*(?:묶음|세트)|(?:묶음|세트).*?(?:CPU|메인보드|보드)|(?:\d{4,5}X(?:3D)?|I[3579][ -]?\d{4,5}[A-Z]*)\s*\+\s*[ABHXZ]\d{3}.*(?:RAM|램)|(?:\d{4,5}X(?:3D)?|I[3579][ -]?\d{4,5}[A-Z]*)\s*\+\s*(?:(?:RTX|GTX|RX)\s*)?[1-9]\d{3}(?:\s*(?:TI|SUPER|XT|S)\b)?(?![\d원])|(?:\d{4,5}X(?:3D)?|I[3579][ -]?\d{4,5}[A-Z]*)\s*\+.{0,30}쿨러.{0,30}\+\s*DDR[345]\b|(?:RTX|GTX|RX\s*\d{4}).{0,20}\+.{0,20}(?:\d{4,5}X|I[3579][ -]?\d{4,5}).{0,30}(?:세트|일괄)|\bSSD\b[^+]{0,20}\d+\s*TB\s*\+\s*\d+\s*TB.*일괄|(?:미니\s*PC|MINI\s*PC).{0,50}(?:\+|와|및|포함).{0,50}(?:RTX|GTX|RX\s*\d{4}|그래픽\s*카드)/i);
   const cpuBoardBundle = componentGroups.has('CPU') && componentGroups.has('MOTHERBOARD');
   const distinctGpuModels = new Set([...title.matchAll(/\b(?:RTX|GTX)\s*\d{3,4}(?:\s*(?:TI|SUPER))?|\bRX\s*\d{3,4}(?:\s*XT[X]?)?/giu)]
     .map((match) => match[0].replace(/\s+/gu, '').toUpperCase()));
@@ -505,6 +514,12 @@ function gpuModel(text, title = '') {
     return { model: `RTX ${bareRtx[1]}${suffix ? ` ${suffix}` : ''}`, matchedText: bareRtx[0] };
   }
   return null;
+}
+
+// A title model can associate a complete product with a component search.
+// This is not evidence that the complete product has a standalone part price.
+export function pcGpuModelInTitle(title) {
+  return gpuModel(normalizedTitle({ title }));
 }
 
 function capacity(text) {

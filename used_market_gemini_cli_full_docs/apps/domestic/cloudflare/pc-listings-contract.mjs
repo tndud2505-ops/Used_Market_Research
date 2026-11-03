@@ -27,6 +27,7 @@ export function currentPcListingComposition(item) {
     chip_manufacturer: null,
     board_manufacturer: null,
     spec_group_id: null,
+    price_eligible: false,
     statistics_eligible: false,
     statistics_exclusion_reasons: [...new Set([...(item.statistics_exclusion_reasons || []), compositeKind])],
     good_listing_eligible: false,
