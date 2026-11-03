@@ -93,6 +93,11 @@ await assert.rejects(collectDanawaSearchListings({query:'CPU',fetchImpl:async()=
   /MARKUP_UNRECOGNIZED/u,'discontinued text alone is insufficient evidence of a non-offer');
 await assert.rejects(collectDanawaSearchListings({query:'CPU',fetchImpl:async()=>new Response(statusHtml.replaceAll('>단종<','>가격문의<'))}),
   /MARKUP_UNRECOGNIZED/u,'other price states must not become verified empty offers');
+const pendingCollected=await collectDanawaSearchListings({query:'CPU',categoryCode:'CPU',fetchImpl:async()=>new Response(statusHtml.replaceAll('>단종<','>가격비교예정<'))});
+assert.deepEqual(pendingCollected.items.map(item=>item.price),[13940,49130,308750],
+  'a zero-mall option awaiting price comparison is a non-offer, like a discontinued one');
+await assert.rejects(collectDanawaSearchListings({query:'CPU',fetchImpl:async()=>new Response(statusHtml.replaceAll('>단종<','>가격비교예정<').replaceAll('>0몰<','>1몰<'))}),
+  /MARKUP_UNRECOGNIZED/u,'awaiting price comparison with a shop still needs a readable price');
 const incompleteModern = modernHtml.replace('349,590원','가격문의');
 const motherboardHtml=readFileSync(new URL('./fixtures/source-pages/danawa-search-modern-motherboard.html',import.meta.url),'utf8');
 assert.equal(modernSearchCards(motherboardHtml).unrecognized,0,'DDR4 motherboard compatibility is not a missing RAM capacity');

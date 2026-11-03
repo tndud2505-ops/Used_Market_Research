@@ -197,7 +197,9 @@ export function modernSearchCards(html, { trace = false } = {}) {
         const amount = value(priceLink).match(/^([\d,]+)\s*원$/u);
         if (hasClass(priceLink,'line-through')) continue;
         const group = priceLink.parent.parent;
-        if (url?.pathname === '/info/' && value(priceLink) === '단종'
+        // A discontinued option or a newly listed option still awaiting price
+        // comparison has no shop. Both are non-offers only with an explicit 0몰.
+        if (url?.pathname === '/info/' && ['단종', '가격비교예정'].includes(value(priceLink))
             && descendants(group).some(node => node.tag === 'span' && value(node) === '0몰')) {
           unavailableOption = true; continue;
         }
