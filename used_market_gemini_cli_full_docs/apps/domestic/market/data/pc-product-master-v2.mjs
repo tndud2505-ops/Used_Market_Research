@@ -58,8 +58,12 @@ const FACET_SCHEMA = {
   },
   MOTHERBOARD: {
     platform_vendor: ["Intel", "AMD"],
-    socket: ["LGA1151", "LGA1200", "LGA1700", "LGA1851", "AM4", "AM5"],
-    chipset: ["H110", "B150", "Z170", "B250", "Z270", "B360", "B365", "Z370", "Z390", "B460", "Z490", "B560", "Z590", "H610", "B660", "Z690", "B760", "Z790", "B860", "Z890", "A320", "B350", "X370", "B450", "X470", "A520", "B550", "X570", "A620", "B650", "X670", "B840", "B850", "X870"],
+    socket: ["LGA1155", "LGA1150", "LGA1151", "LGA1200", "LGA1700", "LGA1851", "AM3+", "FM2+", "AM4", "AM5"],
+    chipset: ["H61", "H67", "P67", "Z68", "B75", "H77", "Z77", "H81", "B85", "H87", "H97", "Z87", "Z97",
+      "H110", "B150", "H170", "Z170", "B250", "H270", "Z270", "H310", "B360", "B365", "H370", "Z370", "Z390",
+      "H410", "B460", "H470", "Z490", "H510", "B560", "H570", "Z590", "H610", "B660", "H670", "Z690", "B760", "Z790",
+      "H810", "B860", "Z890", "970", "990X", "990FX", "A68H", "A78", "A88X",
+      "A320", "B350", "X370", "B450", "X470", "A520", "B550", "X570", "A620", "B650", "X670", "B840", "B850", "X870"],
     form_factor: ["Mini-ITX", "Micro-ATX", "ATX", "E-ATX"],
     memory_generation: ["DDR3", "DDR4", "DDR5"]
   },
@@ -510,6 +514,42 @@ const OTHER_CATEGORY_NODES = [
   browse_facets: { directory_node_type: "BROWSE_FACET", ...facets }
 })));
 
+// A desktop chipset belongs to exactly one CPU socket. Boards without a verified
+// exact model are grouped by manufacturer and chipset so socket and chipset
+// filters can find them. These groups are browse-only and never price nodes.
+export const PC_MOTHERBOARD_CHIPSETS_V3 = Object.freeze([
+  ...["H61", "H67", "P67", "Z68", "B75", "H77", "Z77"].map((chipset) => [chipset, "Intel", "LGA1155"]),
+  ...["H81", "B85", "H87", "H97", "Z87", "Z97"].map((chipset) => [chipset, "Intel", "LGA1150"]),
+  ...["H110", "B150", "H170", "Z170", "B250", "H270", "Z270", "H310", "B360", "B365", "H370", "Z370", "Z390"].map((chipset) => [chipset, "Intel", "LGA1151"]),
+  ...["H410", "B460", "H470", "Z490", "H510", "B560", "H570", "Z590"].map((chipset) => [chipset, "Intel", "LGA1200"]),
+  ...["H610", "B660", "H670", "Z690", "B760", "Z790"].map((chipset) => [chipset, "Intel", "LGA1700"]),
+  ...["H810", "B860", "Z890"].map((chipset) => [chipset, "Intel", "LGA1851"]),
+  ...["970", "990X", "990FX"].map((chipset) => [chipset, "AMD", "AM3+"]),
+  ...["A68H", "A78", "A88X"].map((chipset) => [chipset, "AMD", "FM2+"]),
+  ...["A320", "B350", "X370", "B450", "X470", "A520", "B550", "X570"].map((chipset) => [chipset, "AMD", "AM4"]),
+  ...["A620", "B650", "X670", "B840", "B850", "X870"].map((chipset) => [chipset, "AMD", "AM5"])
+].map((entry) => Object.freeze(entry)));
+
+const MOTHERBOARD_CHIPSET_NODES = PC_MOTHERBOARD_CHIPSETS_V3.flatMap(([chipset, platform, socket]) =>
+  categoryManufacturers("MOTHERBOARD").map((manufacturer) => {
+    const facets = { platform_vendor: platform, socket, chipset };
+    return {
+      ...record({
+        id: `motherboard:chipset:${slug(chipset)}:${slug(manufacturer)}`,
+        name: `${manufacturer} ${chipset} Motherboard`,
+        category: "MOTHERBOARD",
+        group: `motherboard:${platform.toLowerCase()}:${chipset.toLowerCase()}`,
+        manufacturer,
+        brand: "Motherboard",
+        aliases: [`${manufacturer} ${chipset} Motherboard`],
+        spec: facets,
+        browseFacets: facets
+      }),
+      spec: { directory_node_type: "BROWSE_FACET", ...facets },
+      browse_facets: { directory_node_type: "BROWSE_FACET", ...facets }
+    };
+  }));
+
 function verifiedMotherboard({ manufacturer, model, family, platform, socket, chipset, formFactor, ddr, wifi = false,
   edition = null, revision = null, revisionRequired = false, verifiedRevisions = [], sourceUrl, aliases = [] }) {
   return record({
@@ -660,7 +700,8 @@ export const PC_PRODUCT_MASTER_V2 = deepFreeze([
   ...capacityBucketRecords("SSD", PC_SSD_CAPACITY_BUCKETS_V3),
   ...capacityBucketRecords("HDD", PC_HDD_CAPACITY_BUCKETS_V3),
   ...wattsBucketRecords(),
-  ...OTHER_CATEGORY_NODES
+  ...OTHER_CATEGORY_NODES,
+  ...MOTHERBOARD_CHIPSET_NODES
 ]);
 
 const legacySuccessors = {};

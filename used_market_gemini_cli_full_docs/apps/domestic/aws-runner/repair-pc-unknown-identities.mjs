@@ -18,7 +18,7 @@ const evidenceFields = row => Object.fromEntries(['raw_json','title','descriptio
 const projectionKey = (site, url, title, price, currency, oldId, newId) =>
   JSON.stringify([site, url, title, price, currency, oldId, newId]);
 const unknown = id => /^(?:ssd|hdd):other-unclassified:capacity-bucket:/.test(id || '')
-  || /^motherboard:platform:/.test(id || '');
+  || /^motherboard:(?:platform|chipset):/.test(id || '');
 
 // Only promote an unknown identity when all sale/price semantics are unchanged.
 // Independent exclusions remain intact. Only a disproved exact-model reason
@@ -27,15 +27,20 @@ export function identityPromotion(previous, item) {
   if (!unknown(previous.canonical_product_id)) return null;
   const next = classifyPcPartListingPublic(item);
   const product = products.get(next.canonical_product_id);
-  if (!product || unknown(product.id) || product.category !== previous.category_code
+  // A platform-only board group may narrow to its single chipset group. Both
+  // are browse-only, so no price or statistics membership moves with it.
+  const chipsetRefinement = /^motherboard:platform:/.test(previous.canonical_product_id || '')
+    && /^motherboard:chipset:/.test(product?.id || '');
+  if (!product || (unknown(product.id) && !chipsetRefinement) || product.category !== previous.category_code
     || next.listing_kind !== previous.listing_kind || next.condition !== previous.condition_code
     || next.quantity !== previous.quantity || next.price_scope !== previous.price_scope
     || (previous.price_eligible && !next.price_eligible)) return null;
   if (product.category === 'MOTHERBOARD') {
-    if (product.spec.directory_node_type !== 'PRODUCT') return null;
+    if (product.spec.directory_node_type !== (chipsetRefinement ? 'BROWSE_FACET' : 'PRODUCT')) return null;
     const oldProduct = products.get(previous.canonical_product_id);
     if (!oldProduct || oldProduct.manufacturer !== product.manufacturer
-      || oldProduct.spec.platform_vendor !== product.spec.platform_vendor) return null;
+      || oldProduct.spec.platform_vendor !== product.spec.platform_vendor
+      || (oldProduct.spec.chipset && oldProduct.spec.chipset !== product.spec.chipset)) return null;
   } else if (product.id.split(':capacity-bucket:')[1] !== previous.canonical_product_id.split(':capacity-bucket:')[1]) return null;
   return { product, next };
 }
@@ -54,7 +59,11 @@ function metadataPromotion(old, promotion, statistics = null) {
         previous_value: old.canonical_product_id }, ...next.evidence.filter(e => ['manufacturer', 'canonical_model'].includes(e.field))] };
 }
 
-export function buildUnknownIdentityRepair(db, { asOf = new Date().toISOString(), cohortAsOf = asOf } = {}) {
+// scope 'motherboard-chipset' limits a run to platform -> chipset narrowing so
+// unrelated identity promotions (and their price scopes) are not bundled in.
+export function buildUnknownIdentityRepair(db, { asOf = new Date().toISOString(), cohortAsOf = asOf, scope = null } = {}) {
+  if (scope !== null && scope !== 'motherboard-chipset') throw new Error('UNKNOWN_IDENTITY_SCOPE_UNSUPPORTED');
+  const inScope = promotion => scope === null || /^motherboard:chipset:/.test(promotion.product.id);
   const ledger = new PcPartsLedger({ db });
   const active = ledger.getActivePipelineVersion();
   if (!active) throw new Error('ACTIVE_PIPELINE_REQUIRED');
@@ -75,7 +84,8 @@ export function buildUnknownIdentityRepair(db, { asOf = new Date().toISOString()
     WHERE n.normalization_version=? AND n.parser_version=? AND n.rule_version=? AND n.filter_version=?
       AND s.observed_at>=? AND n.category_code IN ('SSD','HDD','MOTHERBOARD')
       AND (n.canonical_product_id LIKE '%:other-unclassified:capacity-bucket:%'
-        OR n.canonical_product_id LIKE 'motherboard:platform:%') ORDER BY n.id`)
+        OR n.canonical_product_id LIKE 'motherboard:platform:%'
+        OR n.canonical_product_id LIKE 'motherboard:chipset:%') ORDER BY n.id`)
     .all(active.normalization_version, active.parser_version, active.rule_version, active.filter_version, cutoff);
   const normalizations = [];
   const scopes = new Map();
@@ -84,7 +94,7 @@ export function buildUnknownIdentityRepair(db, { asOf = new Date().toISOString()
     const item = { ...json(row.raw_json), site: row.source_id, title: row.title,
       description: row.description, price: row.price_value, currency: row.currency };
     const promotion = identityPromotion(row, item);
-    if (!promotion) continue;
+    if (!promotion || !inScope(promotion)) continue;
     const before = db.prepare('SELECT * FROM normalized_listings WHERE id=?').get(row.id);
     const children = db.prepare('SELECT * FROM listing_items WHERE normalized_listing_id=? ORDER BY item_index').all(row.id);
     if (children.length !== 1 || children[0].canonical_product_id !== before.canonical_product_id) continue;
@@ -111,12 +121,13 @@ export function buildUnknownIdentityRepair(db, { asOf = new Date().toISOString()
   const listings = [];
   for (const before of db.prepare(`SELECT * FROM listings WHERE pc_category_code IN ('SSD','HDD','MOTHERBOARD')
     AND (pc_canonical_product_id LIKE '%:other-unclassified:capacity-bucket:%'
-      OR pc_canonical_product_id LIKE 'motherboard:platform:%') ORDER BY item_id`).all()) {
+      OR pc_canonical_product_id LIKE 'motherboard:platform:%'
+      OR pc_canonical_product_id LIKE 'motherboard:chipset:%') ORDER BY item_id`).all()) {
     const old = json(before.pc_metadata_json);
     const promotion = identityPromotion({ ...old, quantity: before.pc_quantity,
       canonical_product_id: before.pc_canonical_product_id, category_code: before.pc_category_code,
       price_eligible: before.pc_price_eligible }, { ...before, price: before.price_value });
-    if (!promotion) continue;
+    if (!promotion || !inScope(promotion)) continue;
     if (!promotedProjections.has(projectionKey(before.site, before.url, before.title,
       before.price_value, before.currency, before.pc_canonical_product_id, promotion.product.id))) continue;
     const statistics=reconcile({...old,category_code:before.pc_category_code,listing_kind:before.pc_listing_kind,
@@ -129,7 +140,7 @@ export function buildUnknownIdentityRepair(db, { asOf = new Date().toISOString()
       pc_metadata_json: JSON.stringify(metadataPromotion(old, promotion,statistics)) };
     listings.push({ before, after });
   }
-  const plan = { format: 1, as_of: asOf, cutoff, active, normalizations, listings, scopes: [...scopes.values()] };
+  const plan = { format: 1, as_of: asOf, cutoff, active, ...(scope ? { scope } : {}), normalizations, listings, scopes: [...scopes.values()] };
   return { ...plan, checksum: digest(plan) };
 }
 
@@ -182,7 +193,8 @@ async function main() {
   const db = new DatabaseSync(process.env.RUNNER_INDEX_PATH, { readOnly: mode !== 'apply' });
   try {
     const cohort = mode === 'plan' ? latestCompletedPricePublication(db) : null;
-    const plan = mode === 'plan' ? buildUnknownIdentityRepair(db, { cohortAsOf: cohort?.as_of }) : JSON.parse(readFileSync(filename, 'utf8'));
+    const plan = mode === 'plan' ? buildUnknownIdentityRepair(db, { cohortAsOf: cohort?.as_of,
+      scope: process.env.PC_UNKNOWN_IDENTITY_SCOPE || null }) : JSON.parse(readFileSync(filename, 'utf8'));
     const { checksum, ...contents } = plan;
     if (checksum !== digest(contents)) throw new Error('REPAIR_CHECKSUM_MISMATCH');
     if (mode === 'plan') writeFileSync(filename, JSON.stringify(plan), { flag: 'wx', mode: 0o600 });

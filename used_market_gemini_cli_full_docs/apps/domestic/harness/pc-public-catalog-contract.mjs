@@ -254,7 +254,27 @@ for (const title of [
   assert.equal(result.statistics_eligible, false);
   assert.ok(result.statistics_exclusion_reasons.includes("EXACT_MODEL_REQUIRED"));
 }
-assert.equal(resolveMotherboardDirectoryNode("ASUS B550 메인보드").product?.id, "motherboard:platform:amd:asus");
+assert.equal(resolveMotherboardDirectoryNode("ASUS B550 메인보드").product?.id, "motherboard:chipset:b550:asus");
+// One chipset fixes the socket; several chipsets or a GPU 970 do not.
+for (const [title, expectedId, socket] of [
+  ["MSI MAG B860 TOMAHAWK wifi 토마호크", "motherboard:chipset:b860:msi", "LGA1851"],
+  ["msi pro z890-a wfi 메인보드", "motherboard:chipset:z890:msi", "LGA1851"],
+  ["GIGABYTE GA-H87M-HD3 메인보드", "motherboard:chipset:h87:gigabyte", "LGA1150"],
+  ["ASUS P8H61-M 메인보드", "motherboard:chipset:h61:asus", "LGA1155"],
+  ["기가바이트 GA-970A-DS3P", "motherboard:chipset:970:gigabyte", "AM3+"],
+  ["기가바이트 A88X 메인보드", "motherboard:chipset:a88x:gigabyte", "FM2+"]
+]) {
+  const node = resolveMotherboardDirectoryNode(title).product;
+  assert.equal(node?.id, expectedId, title);
+  assert.equal(node.spec.socket, socket, title);
+  assert.equal(node.spec.directory_node_type, "BROWSE_FACET", "chipset groups are browse-only");
+  const result = classifyPcPartListingPublic({ title, price: 100_000, currency: "KRW" });
+  assert.equal(result.statistics_eligible, false, `${title} has no verified exact model`);
+}
+assert.equal(resolveMotherboardDirectoryNode("에이수스 B450 B550 호환 메인보드").product?.id, "motherboard:platform:amd:asus");
+assert.equal(resolveMotherboardDirectoryNode("ASUS GTX 970 그래픽 메인보드").product, null);
+assert.ok(publicPcFacetsForApi({ category: "MOTHERBOARD" }).facets.socket.values.some(({ value }) => value === "LGA1851"),
+  "the socket filter offers LGA1851 through chipset groups");
 for (const title of [
   "FOR ASUS TUF GAMING B760M-PLUS WIFI D4 DDR4*4 128GB LGA1700 mATX Motherboard",
   "FOR GIGABYTE A520M K V2 DDR4*2 64GB AMD AM4 Micro ATX Motherboard Test OK",

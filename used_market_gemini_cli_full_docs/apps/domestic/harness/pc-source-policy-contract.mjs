@@ -161,11 +161,14 @@ assert.equal(bunjangTargets.length, marketplaceTargets.length,
   "approved Bunjang receives the same full PC master sweep as other search marketplaces");
 assert.equal(rethinkmallTargets.length, 0,
   "refurbished complete-system retail must not receive standalone PC-parts collection targets");
-assert.ok(dailyMarketplaceTargets.length >= PC_PRODUCT_MASTER_V2.length,
+// Chipset groups sort boards found by the manufacturer query and add no searches.
+const searchedMasterProducts = [...PC_PRODUCT_MASTER_V2, ...publicPcProducts()]
+  .filter((product) => !product.id.startsWith("motherboard:chipset:"));
+assert.ok(dailyMarketplaceTargets.length >= PC_PRODUCT_MASTER_V2.filter((product) => !product.id.startsWith("motherboard:chipset:")).length,
   "every master node must receive at least one daily marketplace query");
 assert.deepEqual(
   [...new Set(dailyMarketplaceTargets.map((target) => target.canonicalProductId))].sort(),
-  [...new Set([...PC_PRODUCT_MASTER_V2, ...publicPcProducts()].map((product) => product.id))].sort(),
+  [...new Set(searchedMasterProducts.map((product) => product.id))].sort(),
   "daily target generation must cover the complete master and every public PC product"
 );
 assert.ok(dailyMarketplaceTargets.every((target) => target.minimumIntervalMinutes === 24 * 60));

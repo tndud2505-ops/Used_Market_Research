@@ -3,6 +3,7 @@ import { SearchIndex } from '../aws-runner/search-index.mjs';
 import { PcPartsLedger } from '../aws-runner/pc-parts-ledger.mjs';
 import { PcShadowPipeline } from '../aws-runner/pc-shadow-pipeline.mjs';
 import { buildUnknownIdentityRepair, applyUnknownIdentityRepair, identityPromotion } from '../aws-runner/repair-pc-unknown-identities.mjs';
+import { classifyPcPartListingPublic } from '../market/logic/pc-parts-classifier.mjs';
 
 const index = new SearchIndex({ filePath: ':memory:' });
 const db = index.db, ledger = new PcPartsLedger({ db });
@@ -34,6 +35,10 @@ for (const [i, title, unknown] of [
 const dump = table => JSON.stringify(db.prepare(`SELECT * FROM ${table}`).all());
 const before = dump('listings'), raw = dump('raw_listings'), snapshots = dump('listing_snapshots'), fts = dump('listing_fts');
 const plan = buildUnknownIdentityRepair(db, { asOf: '2026-10-05T00:00:00.000Z' });
+const chipsetOnly = buildUnknownIdentityRepair(db, { asOf: '2026-10-05T00:00:00.000Z', scope: 'motherboard-chipset' });
+assert.equal(chipsetOnly.listings.length, 0, 'a chipset-only run excludes SSD and exact-model promotions');
+assert.equal(chipsetOnly.scope, 'motherboard-chipset');
+assert.throws(() => buildUnknownIdentityRepair(db, { scope: 'ssd' }), /SCOPE_UNSUPPORTED/);
 assert.equal(plan.normalizations.length, 2); assert.equal(plan.listings.length, 2);
 assert.equal(dump('listings'), before, 'preview does not write');
 const altered = structuredClone(plan); altered.listings[0].after.pc_price_eligible = 0;
@@ -58,5 +63,18 @@ const old = plan.normalizations[0].before;
 assert.equal(identityPromotion(old, { title: 'Micron SSD 2TB', price: 50000 }), null, 'capacity may not change');
 assert.equal(identityPromotion(old, { title: 'Micron Samsung SSD 512GB', price: 50000 }), null, 'conflicting identity stays unknown');
 assert.equal(identityPromotion(old, { title: 'Micron SSD 512GB 고장 부품용', price: 50000 }), null, 'condition may not change');
+const boardItem = { title: 'MSI B650 메인보드', price: 100000, currency: 'KRW' };
+const boardNext = classifyPcPartListingPublic(boardItem);
+const platformBoard = { canonical_product_id: 'motherboard:platform:amd:msi', category_code: 'MOTHERBOARD',
+  listing_kind: boardNext.listing_kind, condition_code: boardNext.condition, quantity: boardNext.quantity,
+  price_scope: boardNext.price_scope, price_eligible: boardNext.price_eligible ? 1 : 0 };
+assert.equal(identityPromotion(platformBoard, boardItem)?.product.id, 'motherboard:chipset:b650:msi',
+  'a platform group narrows to its single chipset group');
+assert.equal(identityPromotion({ ...platformBoard, canonical_product_id: 'motherboard:platform:intel:msi' }, boardItem), null,
+  'a chipset group must keep the platform');
+assert.equal(identityPromotion({ ...platformBoard, canonical_product_id: 'motherboard:platform:amd:asus' }, boardItem), null,
+  'a chipset group must keep the manufacturer');
+assert.equal(identityPromotion({ ...platformBoard, canonical_product_id: 'motherboard:chipset:b650:msi' }, boardItem), null,
+  'a chipset group is not promoted to itself');
 index.close();
 console.log('PC unknown identity repair contract passed');

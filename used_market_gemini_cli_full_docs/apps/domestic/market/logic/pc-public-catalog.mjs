@@ -1,4 +1,5 @@
 import {
+  PC_MOTHERBOARD_CHIPSETS_V3,
   PC_PRODUCT_MASTER_V2,
   PC_PRODUCT_MASTER_V2_VERSION
 } from "../data/pc-product-master-v2.mjs";
@@ -71,10 +72,21 @@ function motherboardMatchText(value) {
   return ` ${normalize(value).toUpperCase().replace(/[^0-9A-Z가-힣]+/gu, " ").replace(/\s+/gu, " ").trim()} `;
 }
 
+const MOTHERBOARD_CHIPSET_BY_NAME = new Map(PC_MOTHERBOARD_CHIPSETS_V3.map(([chipset, platform, socket]) => [chipset, { chipset, platform, socket }]));
+// Board names append M/I/E, a hyphen or a board line (B550M, Z790-P, B650E).
+// ASUS LGA1155/1150 names prefix P8/P9 (P8H61-M). A 970 after GTX/RTX is a GPU.
+const MOTHERBOARD_CHIPSET_PATTERN = new RegExp(`(?<![A-Z0-9])(?:P[89](?=[HBZ]))?(?<!(?:GTX|RTX|GT)\\s?)(${PC_MOTHERBOARD_CHIPSETS_V3
+  .map(([chipset]) => chipset).sort((a, b) => b.length - a.length).join("|")})(?:M|I|E|A)?(?![A-Z0-9])`, "giu");
+
+export function motherboardChipsets(value) {
+  const text = motherboardMatchText(value);
+  return [...new Set([...text.matchAll(MOTHERBOARD_CHIPSET_PATTERN)].map((match) => match[1].toUpperCase()))]
+    .map((chipset) => MOTHERBOARD_CHIPSET_BY_NAME.get(chipset)).filter(Boolean);
+}
+
 function motherboardPlatform(text) {
-  const amd = /\b(?:A320|B350|X370|B450|X470|A520|B550|X570|A620|B650|X670|B840|B850|X870)(?:M|I|E)?\b/iu.test(text);
-  const intel = /\b(?:H110|B150|Z170|B250|Z270|B360|B365|Z370|Z390|B460|Z490|B560|Z590|H610|B660|Z690|B760|Z790|B860|Z890)(?:M|I|E)?\b/iu.test(text);
-  return amd === intel ? null : (amd ? "AMD" : "Intel");
+  const platforms = new Set(motherboardChipsets(text).map((entry) => entry.platform));
+  return platforms.size === 1 ? [...platforms][0] : null;
 }
 
 export function resolveExactMotherboardProduct(value) {
@@ -130,6 +142,13 @@ export function resolveExactMotherboardProduct(value) {
 export function resolveMotherboardDirectoryNode(value) {
   const exact = resolveExactMotherboardProduct(value);
   if (exact.product) return exact;
+  // One chipset fixes the socket. Several chipsets (compatibility lists,
+  // multiple boards) keep the platform-only group.
+  const chipsets = exact.manufacturer ? motherboardChipsets(value) : [];
+  const chipsetNode = chipsets.length === 1
+    ? PUBLIC_PRODUCTS.find((product) => product.id === `motherboard:chipset:${slugForId(chipsets[0].chipset)}:${slugForId(exact.manufacturer)}`) || null
+    : null;
+  if (chipsetNode) return { ...exact, product: chipsetNode, exact_product: false };
   const facet = exact.manufacturer && exact.platform_vendor
     ? PUBLIC_PRODUCTS.find((product) => product.id === `motherboard:platform:${exact.platform_vendor.toLowerCase()}:${slugForId(exact.manufacturer)}`) || null
     : null;
@@ -342,7 +361,9 @@ export function publicPcFacetDefinitions(category) {
 
 export function publicPcCatalogForApi() {
   const categories = PUBLIC_PC_CATEGORY_DEFINITIONS.map((definition) => {
-    const products = PUBLIC_PRODUCTS.filter((product) => product.category === definition.code);
+    // Chipset groups sort unverified boards for filters; they are not models.
+    const products = PUBLIC_PRODUCTS.filter((product) => product.category === definition.code
+      && !product.id.startsWith("motherboard:chipset:"));
     return {
       code: definition.code,
       label: definition.label,

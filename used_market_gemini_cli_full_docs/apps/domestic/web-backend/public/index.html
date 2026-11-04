@@ -32,7 +32,7 @@
     <link rel="stylesheet" href="/styles.css?v=iqr-disclosure-v1" />
     <link rel="stylesheet" href="/pc-tools.css?v=6" />
     <link rel="stylesheet" href="/ui-concept-a.css?v=adfit-all-v3" />
-    <link rel="stylesheet" href="/search-controls.css?v=search-modal-v4" />
+    <link rel="stylesheet" href="/search-controls.css?v=select-chevron-v1" />
     <link rel="stylesheet" href="/adfit-layout.css?v=adfit-all-v3">
     <link rel="stylesheet" href="/site-header-links.css?v=1">
     <link rel="stylesheet" href="/mobile-search.css?v=tab-picker-v1">
@@ -130,6 +130,7 @@
             <button class="reset-filters" id="reset-filters" type="button" hidden>초기화</button>
           </div>
           <div id="model-filter-body">
+            <label class="listing-composition-control" for="listing-composition"><span>판매 구성</span><select id="listing-composition" name="sale_composition"><option value="ALL">전체 구성</option><option value="SINGLE" selected>단품</option><option value="COMPLETE_PC">완제품</option><option value="BUNDLE">묶음</option></select></label>
             <div id="facet-rows"></div>
             <button class="show-matched-models" id="show-matched-models" type="button">검색 결과로 이동</button>
           </div>
@@ -159,7 +160,6 @@
 
           </div>
           <div class="listing-message" id="listing-message" role="status" aria-live="polite" hidden></div>
-          <label class="listing-composition-control" for="listing-composition"><span>판매 구성</span><select id="listing-composition" name="sale_composition"><option value="ALL">전체 구성</option><option value="SINGLE" selected>단품</option><option value="COMPLETE_PC">완제품</option><option value="BUNDLE">묶음</option></select></label>
           <div class="listing-options" id="listing-options">
             <div class="listing-controls" id="listing-controls">
               <div class="listing-sort-tabs" role="group" aria-label="매물 정렬">

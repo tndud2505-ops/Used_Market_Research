@@ -113,7 +113,8 @@ export function pcToolsCatalog(publicCatalog = publicPcCatalogForApi()) {
   }));
   return {
     categories: [...publicCatalog.categories, ...extraCodes.map((code) => ({ code, label: code === "CASE" ? "케이스" : "쿨러", model_count: products.filter((p) => p.category_code === code).length }))],
-    products: [...publicCatalog.products, ...products]
+    // Build tools select exact models; chipset groups only serve listing filters.
+    products: [...publicCatalog.products.filter((p) => !p.canonical_product_id.startsWith("motherboard:chipset:")), ...products]
   };
 }
 
@@ -273,7 +274,10 @@ export function pcCollectionTargetSetV2() {
     }
     return [product.aliases?.[0] || product.name];
   };
+  // Chipset groups only sort listings already found by the manufacturer
+  // motherboard query; they add no marketplace searches.
   const collectionProducts = [...new Map([...PC_PRODUCT_MASTER_V2, ...publicPcProducts()]
+    .filter((product) => !product.id.startsWith("motherboard:chipset:"))
     .map((product) => [product.id, product])).values()];
   const exactTargets = [];
   let exactOrder = categoryTargets.length + generalTargets.length;

@@ -5,7 +5,7 @@ import {
   pcPsuWattsBucketV3,
   pcStorageCapacityBucketV3
 } from "../data/pc-product-master-v2.mjs";
-import { resolveMotherboardDirectoryNode, resolveExactMotherboardProduct } from "./pc-public-catalog.mjs";
+import { motherboardChipsets, resolveMotherboardDirectoryNode, resolveExactMotherboardProduct } from "./pc-public-catalog.mjs";
 
 // These registered desktop families do not contain the older i5/RTX-style tokens.
 // Keep the GPU pattern narrow: integrated Vega 8/11 is not a discrete card.
@@ -1229,7 +1229,7 @@ function publicCanonicalProductId(category, model, text, marketSegment, base = {
 function publicSpecGroupId(category, model, text, marketSegment, base = {}, fields = {}) {
   if (category === 'MOTHERBOARD') {
     const chipset = fields.chipset?.toLowerCase();
-    const platform = /^(?:A320|B350|X370|B450|X470|A520|B550|X570|A620|B650|X670|B840|B850|X870)$/u.test(fields.chipset || '') ? 'amd' : 'intel';
+    const platform = (motherboardChipsets(fields.chipset || '')[0]?.platform || 'Intel').toLowerCase();
     return chipset ? `MOTHERBOARD:SPEC:chipset:${platform}:${chipset}:${marketSegment}` : null;
   }
   const id = publicCanonicalProductId(category, model, text, marketSegment, base, fields);
@@ -1259,12 +1259,12 @@ function publicSpecificFields(category, model, text, base, motherboardProduct = 
     fields.rank_layout = base.rank_layout || null;
   }
   if (category === 'MOTHERBOARD') {
-    const chipsetToken = text.match(/\b([ABHXZ]\d{3})M?\b/iu)?.[1]?.toUpperCase() || null;
+    // A single recognised chipset fixes the socket; several chipsets do not.
+    const chipsets = motherboardChipsets(text);
+    const chipset = chipsets.length === 1 ? chipsets[0] : null;
     fields.socket = text.match(/\b(?:AM4|AM5|LGA\s*\d{4})\b/iu)?.[0]?.replace(/\s+/gu, '').toUpperCase()
-      || (chipsetToken && /^(?:A620|B650|X670|B850|X870)$/u.test(chipsetToken) ? 'AM5'
-        : chipsetToken && /^(?:A520|B350|B450|B550|X370|X470|X570)$/u.test(chipsetToken) ? 'AM4'
-          : chipsetToken && /^(?:H610|B660|Z690|B760|Z790|H810|B860|Z890)$/u.test(chipsetToken) ? 'LGA1700' : null);
-    fields.chipset = chipsetToken;
+      || chipset?.socket || null;
+    fields.chipset = chipset?.chipset || null;
     fields.form_factor = /(?:B[45678]\d{2}M|M-?ATX|MICRO-?ATX)/iu.test(text) ? 'M-ATX' : /ATX/iu.test(text) ? 'ATX' : null;
     fields.exact_model = motherboardProduct?.spec?.official_model || null;
     fields.memory_generation = /DDR5/iu.test(text) ? 'DDR5' : /DDR4/iu.test(text) ? 'DDR4' : /DDR3/iu.test(text) ? 'DDR3' : null;

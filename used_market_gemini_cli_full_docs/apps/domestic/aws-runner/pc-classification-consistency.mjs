@@ -11,9 +11,10 @@ export function reconcileExactModelStatistics(previous, next, currency) {
     .every(([oldKey,newKey])=>previous[oldKey]===next[newKey]);
   const oldProduct = products.get(previous.canonical_product_id), newProduct = products.get(next.canonicalProductId);
   const sameIdentity = previous.canonical_product_id === next.canonicalProductId
-    || (previous.canonical_product_id?.startsWith('motherboard:platform:') && oldProduct && newProduct
+    || (/^motherboard:(?:platform|chipset):/.test(previous.canonical_product_id || '') && oldProduct && newProduct
       && oldProduct.manufacturer === newProduct.manufacturer
-      && oldProduct.spec?.platform_vendor === newProduct.spec?.platform_vendor);
+      && oldProduct.spec?.platform_vendor === newProduct.spec?.platform_vendor
+      && (!oldProduct.spec?.chipset || oldProduct.spec.chipset === newProduct.spec?.chipset));
   const currencyMatches = (['KR_C2C_USED', 'KR_DEALER_USED'].includes(previous.market_pool) && currency === 'KRW')
     || (previous.market_pool === 'OVERSEAS_USED' && currency === 'USD');
   const exactProof=unchanged&&sameIdentity&&currencyMatches&&previous.category_code==='MOTHERBOARD'

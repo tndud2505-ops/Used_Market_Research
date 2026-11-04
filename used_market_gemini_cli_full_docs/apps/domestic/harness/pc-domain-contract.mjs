@@ -1443,7 +1443,7 @@ const z490SocketProjection = pipeline.recordItem({
   title: "컴퓨터 메인보드 ASUS TUF GAMING Z490-PLUS (인텔 10세대 1200소켓)", price: 87_000,
   currency: "KRW", url: "https://web.joongna.com/product/z490-lga1200", status: "ACTIVE"
 }, new Date(now).toISOString());
-assert.equal(z490SocketProjection.canonical_product_id, "motherboard:platform:intel:asus");
+assert.equal(z490SocketProjection.canonical_product_id, "motherboard:chipset:z490:asus");
 const celeron1200SocketProjection = pipeline.recordItem({
   item_id: "joonggonara:celeron-lga1200", site: "joonggonara",
   title: "인텔 셀러론 g5905 코멧레이크S CPU 소켓 1200", price: 30_000,
@@ -1530,7 +1530,7 @@ assert.deepEqual(ramComparablePrices, [
   { price_scope: "UNIT", quantity: 2, unit_price: 45_000, total_price: 90_000 }
 ], "RAM total-lot and per-module prices must normalize to the same comparable unit price");
 const directoryFacetFixtures = [
-  ["MOTHERBOARD", "MSI B650 메인보드", "motherboard:platform:amd:msi", "MSI"],
+  ["MOTHERBOARD", "MSI B650 메인보드", "motherboard:chipset:b650:msi", "MSI"],
   ["SSD", "삼성 980 PRO M.2 NVMe SSD 1TB", "ssd:samsung:capacity-bucket:513-gb-1-tb", "Samsung"],
   ["HDD", "WD Blue HDD 4TB 하드디스크", "hdd:western-digital:capacity-bucket:gt-2-tb-le-4-tb", "Western Digital"],
   ["PSU", "시소닉 VERTEX GX-850 ATX 3.0 파워", "psu:seasonic:watts-bucket:751-850", "Seasonic"],
@@ -1624,7 +1624,7 @@ const structuredMotherboardProjection = pipeline.recordItem({
   price: 100_000, currency: "KRW", url: "https://dmall.danawa.com/v3/?controller=sale&methods=blog&seq=999994",
   status: "ACTIVE"
 }, new Date(now).toISOString());
-assert.equal(structuredMotherboardProjection.canonical_product_id, "motherboard:platform:amd:asrock");
+assert.equal(structuredMotherboardProjection.canonical_product_id, "motherboard:chipset:b550:asrock");
 assert.equal(structuredMotherboardProjection.category_code, "MOTHERBOARD");
 assert.equal(structuredMotherboardProjection.pc_category_code, "MOTHERBOARD",
   "a trusted source category must also control the public listing category when title tokens conflict");

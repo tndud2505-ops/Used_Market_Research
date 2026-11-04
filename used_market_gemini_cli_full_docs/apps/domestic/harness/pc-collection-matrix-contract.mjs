@@ -52,6 +52,12 @@ const koreanGskill = targets.filter(target => target.targetId.endsWith(':domesti
 assert.equal(koreanGskill.length, 27);
 assert.ok(koreanGskill.every(target => target.queryText.startsWith('지스킬 ') && !target.sourceKeys.includes('ebay')));
 for (const product of publicProducts) {
+  // Chipset groups are filled by the manufacturer motherboard query.
+  if (product.id.startsWith("motherboard:chipset:")) {
+    assert.equal(targets.some((target) => target.canonicalProductId === product.id), false,
+      `${product.id} must not add marketplace searches`);
+    continue;
+  }
   assert.ok(targets.some((target) => target.canonicalProductId === product.id),
     `${product.id} must have an exact collection target`);
 }

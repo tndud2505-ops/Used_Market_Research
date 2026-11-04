@@ -242,10 +242,10 @@ function reclassifyPcSnapshotsCore({ ledger, pipeline, versions, versionKey = nu
         if (["ACCESSORY_ONLY", "COMPONENT_BUNDLE", "OPTION_AD", "FULL_SYSTEM"].includes(next.listingKind)) {
           motherboardAudit.accessory_or_bundle_blocked_count += 1;
         }
-        if (previous?.statistics_eligible === 1 && String(previous.canonical_product_id || "").startsWith("motherboard:platform:")) {
+        if (previous?.statistics_eligible === 1 && /^motherboard:(?:platform|chipset):/.test(String(previous.canonical_product_id || ""))) {
           motherboardAudit.previous_facet_statistics_member_count += 1;
         }
-        if (next.statisticsEligible === true && String(next.canonicalProductId || "").startsWith("motherboard:platform:")) {
+        if (next.statisticsEligible === true && /^motherboard:(?:platform|chipset):/.test(String(next.canonicalProductId || ""))) {
           motherboardAudit.next_facet_statistics_member_count += 1;
         }
         if (next.statisticsEligible === true && exactId) motherboardAudit.next_exact_statistics_member_count += 1;
