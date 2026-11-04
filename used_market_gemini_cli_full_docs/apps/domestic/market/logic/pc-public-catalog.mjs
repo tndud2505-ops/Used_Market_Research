@@ -31,7 +31,8 @@ const FACETS = Object.freeze({
     ["memory_usage", "용도"], ["generation", "DDR 세대"], ["module_capacity_gb", "개당 용량"], ["speed_mt_s", "속도"], ["manufacturer", "제조사"]
   ],
   MOTHERBOARD: [
-    ["platform_vendor", "CPU 플랫폼"], ["socket", "CPU 소켓"], ["chipset", "칩셋"], ["manufacturer", "제조사"]
+    ["platform_vendor", "CPU 플랫폼"], ["socket", "CPU 소켓"], ["chipset", "칩셋"],
+    ["board_size", "보드 크기"], ["board_memory", "메모리 규격"], ["manufacturer", "제조사"]
   ],
   SSD: [
     ["product_kind", "제품 종류"], ["capacity_bucket", "용량"], ["manufacturer", "제조사"]
@@ -43,7 +44,8 @@ const FACETS = Object.freeze({
     ["watts_bucket", "정격 출력"], ["form_factor", "크기 규격"], ["manufacturer", "제조사"]
   ]
 });
-const LISTING_ONLY_FACETS = new Set(["product_kind", "placement", "form_factor", "memory_usage", "speed_mt_s"]);
+const LISTING_ONLY_FACETS = new Set(["product_kind", "placement", "form_factor", "memory_usage", "speed_mt_s",
+  "board_size", "board_memory"]);
 
 const PUBLIC_PRODUCTS = Object.freeze([
   ...PC_PRODUCT_MASTER_V2.filter((product) => PUBLIC_PC_CATEGORY_CODES.includes(product.category))
@@ -82,6 +84,68 @@ export function motherboardChipsets(value) {
   const text = motherboardMatchText(value);
   return [...new Set([...text.matchAll(MOTHERBOARD_CHIPSET_PATTERN)].map((match) => match[1].toUpperCase()))]
     .map((chipset) => MOTHERBOARD_CHIPSET_BY_NAME.get(chipset)).filter(Boolean);
+}
+
+// Board size and memory describe a listing, not a price identity: one chipset
+// group mixes ATX/M-ATX boards, and LGA1700 mixes DDR4/DDR5. They only filter
+// listings. Verified exact models use their official specification.
+export const MOTHERBOARD_BOARD_SIZES = Object.freeze(["ATX", "M-ATX", "MINI-ITX", "E-ATX", "UNKNOWN"]);
+export const MOTHERBOARD_BOARD_MEMORY = Object.freeze(["DDR5", "DDR4", "DDR3", "UNKNOWN"]);
+const BOARD_SIZE_LABELS = Object.freeze({ ATX: "ATX", "M-ATX": "M-ATX", "MINI-ITX": "Mini-ITX", "E-ATX": "E-ATX", UNKNOWN: "크기 확인 필요" });
+const BOARD_MEMORY_LABELS = Object.freeze({ DDR5: "DDR5", DDR4: "DDR4", DDR3: "DDR3", UNKNOWN: "규격 확인 필요" });
+// LGA1700 supports DDR4 and DDR5 boards, so it needs explicit title evidence.
+const SOCKET_BOARD_MEMORY = Object.freeze({ LGA1155: "DDR3", LGA1150: "DDR3", "AM3+": "DDR3", "FM2+": "DDR3",
+  LGA1151: "DDR4", LGA1200: "DDR4", AM4: "DDR4", LGA1851: "DDR5", AM5: "DDR5" });
+const BOARD_CHIPSET_NAMES = PC_MOTHERBOARD_CHIPSETS_V3.map(([chipset]) => chipset).sort((a, b) => b.length - a.length).join("|");
+const BOARD_ITX_PATTERN = new RegExp(`MINI[ -]?ITX|(?<![A-Z0-9])ITX(?![A-Z0-9])|(?<![A-Z0-9])(?:P[89])?(?:${BOARD_CHIPSET_NAMES})E?[ -]?I(?![A-Z0-9])`, "u");
+const BOARD_MATX_PATTERN = new RegExp(`M[ -]?ATX|MICRO[ -]?ATX|(?<![A-Z0-9])(?:P[89])?(?:${BOARD_CHIPSET_NAMES})E?C?[ -]?M(?![A-Z0-9])|(?<![A-Z0-9])(?:P[89])?(?:${BOARD_CHIPSET_NAMES})E?C?M(?=[ -]|$)`, "u");
+// A full-size board name: chipset with no M/I suffix followed by a board line.
+const BOARD_ATX_NAME_PATTERN = new RegExp(`(?<![A-Z0-9])(?:${BOARD_CHIPSET_NAMES})E?[ -](?:PLUS|PRO|TOMAHAWK|GAMING|AORUS|HERO|EXTREME|FORMULA|STEEL|TAICHI|CARBON|EDGE|ELITE|MASTER|UD|DS3H|CREATOR|APEX|DARK|TUF|PRIME|[APEF](?![A-Z0-9]))`, "u");
+// Board lines sold only as full-size boards (M-ATX and ITX names are checked first).
+const BOARD_ATX_LINE_PATTERN = /TOMAHAWK|토마호크|MAXIMUS|막시무스|CROSSHAIR|크로스헤어|GODLIKE|갓라이크|SABERTOOTH|세이버투스|(?<![A-Z0-9])HERO(?![A-Z0-9])|히어로|STEEL\s?LEGEND|스틸\s?레전드|(?<![A-Z0-9])EDGE(?![A-Z0-9])|엣지/u;
+let motherboardSpecById = null;
+
+function exactMotherboardSpec(canonicalProductId) {
+  motherboardSpecById ??= new Map(PUBLIC_PRODUCTS
+    .filter((product) => product.category === "MOTHERBOARD" && product.spec?.official_model)
+    .map((product) => [product.id, product.spec]));
+  return motherboardSpecById.get(normalize(canonicalProductId)) || null;
+}
+
+function boardSizeFromText(text) {
+  if (/(?<![A-Z0-9])E[ -]?ATX(?![A-Z0-9])/u.test(text)) return "E-ATX";
+  if (BOARD_ITX_PATTERN.test(text)) return "MINI-ITX";
+  if (BOARD_MATX_PATTERN.test(text)) return "M-ATX";
+  if (/(?<![A-Z0-9-])ATX(?![A-Z0-9])/u.test(text) && !/(?:MICRO|MINI|M|E)[ -]?ATX/u.test(text)) return "ATX";
+  return BOARD_ATX_NAME_PATTERN.test(text) || BOARD_ATX_LINE_PATTERN.test(text) ? "ATX" : "UNKNOWN";
+}
+
+function boardMemoryFromText(text, socket) {
+  const found = [["DDR5", /DDR\s?5|(?<![A-Z0-9])D5(?![A-Z0-9])/u], ["DDR4", /DDR\s?4|(?<![A-Z0-9])D4(?![A-Z0-9])/u],
+    ["DDR3", /DDR\s?3/u]].filter(([, pattern]) => pattern.test(text)).map(([value]) => value);
+  if (found.length === 1) return found[0];
+  if (found.length > 1) return "UNKNOWN";
+  return SOCKET_BOARD_MEMORY[socket] || "UNKNOWN";
+}
+
+export function deriveMotherboardListingFacets(title, canonicalProductId = null) {
+  const spec = exactMotherboardSpec(canonicalProductId);
+  if (spec) {
+    const size = ({ ATX: "ATX", "MICRO-ATX": "M-ATX", "M-ATX": "M-ATX", "MINI-ITX": "MINI-ITX", "E-ATX": "E-ATX" })[normalize(spec.form_factor).toUpperCase()];
+    const memory = normalize(spec.memory_generation).toUpperCase();
+    return { board_size: size || "UNKNOWN", board_memory: MOTHERBOARD_BOARD_MEMORY.includes(memory) ? memory : "UNKNOWN" };
+  }
+  const text = normalize(title).toUpperCase();
+  const chipsets = motherboardChipsets(text);
+  return { board_size: boardSizeFromText(text), board_memory: boardMemoryFromText(text, chipsets.length === 1 ? chipsets[0].socket : null) };
+}
+
+export function matchesMotherboardListingFacets(title, canonicalProductId, filters = {}) {
+  const actual = deriveMotherboardListingFacets(title, canonicalProductId);
+  return ["board_size", "board_memory"].every((key) => {
+    const selected = Array.isArray(filters[key]) ? filters[key] : [];
+    return selected.length === 0 || selected.some((value) => String(value).toUpperCase() === actual[key]);
+  });
 }
 
 function motherboardPlatform(text) {
@@ -237,6 +301,8 @@ function publicFacetValues(product, key) {
     case "placement": return product.category === "HDD" ? ["INTERNAL", "EXTERNAL", "UNKNOWN"] : values(spec.placement);
     case "memory_usage": return product.category === "RAM" ? [...RAM_MEMORY_USAGES] : [];
     case "speed_mt_s": return product.category === "RAM" ? [...RAM_SPEEDS_MT_S] : [];
+    case "board_size": return product.category === "MOTHERBOARD" ? [...MOTHERBOARD_BOARD_SIZES] : [];
+    case "board_memory": return product.category === "MOTHERBOARD" ? [...MOTHERBOARD_BOARD_MEMORY] : [];
     case "form_interface": {
       const forms = values(spec.form_factor);
       const interfaces = values(spec.interface);
@@ -291,6 +357,7 @@ function normalizeFilters(options = {}) {
     manufacturer: ["manufacturer", "brand"], generation: ["generation", "memory_generation"], model: ["model", "exact_model"],
     gpu_model: ["gpu_model"], board_brand: ["board_brand", "board_manufacturer"], usage: ["usage", "market_segment"],
     memory_usage: ["memory_usage"], speed_mt_s: ["speed_mt_s"],
+    board_size: ["board_size"], board_memory: ["board_memory"],
     platform_vendor: ["platform_vendor"], family: ["family"], suffix: ["suffix"],
     configuration: ["configuration", "config"], module_capacity_gb: ["module_capacity_gb", "capacity_per_module_gb"], vram_gb: ["vram_gb", "vram_options_gb"], socket: ["socket"], chipset: ["chipset"], form_factor: ["form_factor"],
     form_interface: ["form_interface"], product_kind: ["product_kind"], placement: ["placement"], capacity: ["capacity", "marketed_capacity_gb"], purpose: ["purpose", "use_class"],
@@ -315,6 +382,8 @@ function productMatchesQuery(product, query) {
 
 function optionLabel(key, value) {
   if (key === "memory_usage") return RAM_USAGE_LABELS[value] || value;
+  if (key === "board_size") return BOARD_SIZE_LABELS[value] || value;
+  if (key === "board_memory") return BOARD_MEMORY_LABELS[value] || value;
   if (key === "speed_mt_s") return value === "UNKNOWN" ? "확인 불가" : `${value} MT/s`;
   if (key === "suffix" && value === "NONE") return "일반";
   if (key === "capacity") {
@@ -382,6 +451,9 @@ export function publicPcCatalogForApi() {
     listing_facet_options: { RAM: {
       memory_usage: RAM_MEMORY_USAGES.map(value => ({ value, label: optionLabel('memory_usage', value) })),
       speed_mt_s: RAM_SPEEDS_MT_S.map(value => ({ value, label: optionLabel('speed_mt_s', value) }))
+    }, MOTHERBOARD: {
+      board_size: MOTHERBOARD_BOARD_SIZES.map(value => ({ value, label: optionLabel('board_size', value) })),
+      board_memory: MOTHERBOARD_BOARD_MEMORY.map(value => ({ value, label: optionLabel('board_memory', value) }))
     } },
     browse_flow: Object.fromEntries(PUBLIC_PC_CATEGORY_CODES.map((code) => [code, { category_code: code, steps: publicPcFacetDefinitions(code) }])),
     products: PUBLIC_PRODUCTS.map((product) => publicProductForApi(product))

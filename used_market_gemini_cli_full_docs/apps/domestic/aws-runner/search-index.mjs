@@ -11,6 +11,7 @@ import {
 } from "../cloudflare/pc-listings-contract.mjs";
 import { assertBackupSpace } from './backup-storage-policy.mjs';
 import { deriveRamListingFacets, matchesRamListingFacets } from '../market/logic/ram-listing-facets.mjs';
+import { matchesMotherboardListingFacets } from '../market/logic/pc-public-catalog.mjs';
 import { PC_DIRECTORY_PUBLICATION_SOURCE_KEYS } from '../collector/logic/pc-source-registry.mjs';
 
 const HOUR_MS = 60 * 60 * 1000;
@@ -1161,6 +1162,8 @@ export class SearchIndex {
     const listingFacets = options.listingFacets && typeof options.listingFacets === "object" ? options.listingFacets : {};
     const hasRamListingFilters = ['memory_usage', 'speed_mt_s']
       .some(key => Array.isArray(listingFacets[key]) && listingFacets[key].length > 0);
+    const hasMotherboardListingFilters = ['board_size', 'board_memory']
+      .some(key => Array.isArray(listingFacets[key]) && listingFacets[key].length > 0);
     const minPrice = options.minPrice !== null && options.minPrice !== undefined && options.minPrice !== ""
       && Number.isFinite(Number(options.minPrice)) ? Number(options.minPrice) : null;
     const maxPrice = options.maxPrice !== null && options.maxPrice !== undefined && options.maxPrice !== ""
@@ -1227,6 +1230,9 @@ export class SearchIndex {
     if (hasRamListingFilters) {
       where.push("(pc_category_code = 'RAM' OR (pc_category_code IS NULL AND pc_canonical_product_id LIKE 'ram:%'))");
     }
+    if (hasMotherboardListingFilters) {
+      where.push("(pc_category_code = 'MOTHERBOARD' OR (pc_category_code IS NULL AND pc_canonical_product_id LIKE 'motherboard:%'))");
+    }
     if (minPrice !== null) {
       where.push("price_value >= ?");
       params.push(minPrice);
@@ -1275,6 +1281,8 @@ export class SearchIndex {
     const rows = dedupePcListingRows((function* () {
       for (const row of candidates) {
         if (hasRamListingFilters && !matchesRamListingFacets(row.title, listingFacets)) continue;
+        if (hasMotherboardListingFilters
+          && !matchesMotherboardListingFacets(row.title, row.pc_canonical_product_id, listingFacets)) continue;
         const metadata = jsonObject(row.pc_metadata_json);
         const projected = currentPcListingComposition({ ...metadata, title: row.title,
           description: row.description, price: row.price_value, site: row.site });

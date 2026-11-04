@@ -12,6 +12,7 @@ const PRODUCT_QUERY_KEYS = new Set([
   "chipset", "capacity_bucket", "interface", "protocol", "pcie_generation", "use_class", "recording_technology",
   "watts_bucket", "atx_spec", "modularity", "efficiency", "product_kind", "subtype", "radiator_mm", "fan_mm", "chassis_class",
   "motherboard_support", "side_panel", "host_interface", "bracket", "media_family", "capability", "placement", "memory_usage", "speed_mt_s",
+  "board_size", "board_memory",
 ]);
 const FALLBACK_BROWSE_FLOWS = Object.freeze({
   CPU: Object.freeze([
@@ -38,6 +39,8 @@ const FALLBACK_BROWSE_FLOWS = Object.freeze({
     Object.freeze({ key: "platform_vendor", label: "CPU 플랫폼" }),
     Object.freeze({ key: "socket", label: "CPU 소켓" }),
     Object.freeze({ key: "chipset", label: "칩셋" }),
+    Object.freeze({ key: "board_size", label: "보드 크기" }),
+    Object.freeze({ key: "board_memory", label: "메모리 규격" }),
     Object.freeze({ key: "manufacturer", label: "제조사" }),
   ]),
   SSD: Object.freeze([
@@ -620,6 +623,10 @@ function productFacetValues(product, key) {
   if (productCategory(product) === 'RAM' && ['memory_usage', 'speed_mt_s'].includes(key)) {
     return toArray((state.catalog?.listing_facet_options || state.catalog?.public_catalog?.listing_facet_options)?.RAM?.[key]).map(option => normalizeText(option.value));
   }
+  // Board size and memory vary within a chipset group; they filter listings only.
+  if (productCategory(product) === 'MOTHERBOARD' && ['board_size', 'board_memory'].includes(key)) {
+    return toArray((state.catalog?.listing_facet_options || state.catalog?.public_catalog?.listing_facet_options)?.MOTHERBOARD?.[key]).map(option => normalizeText(option.value));
+  }
   if (key === "manufacturer") {
     const category = productCategory(product);
     const manufacturer = category === "GPU"
@@ -668,6 +675,10 @@ function compareFacetOptions(left, right) {
 function sortFacetOptions(category, key, options) {
   if (category === 'RAM' && key === 'memory_usage') {
     const order = ['DESKTOP', 'LAPTOP', 'SERVER', 'UNKNOWN'];
+    return [...options].sort((a,b) => order.indexOf(a.value) - order.indexOf(b.value));
+  }
+  if (category === 'MOTHERBOARD' && ['board_size', 'board_memory'].includes(key)) {
+    const order = key === 'board_size' ? ['ATX', 'M-ATX', 'MINI-ITX', 'E-ATX', 'UNKNOWN'] : ['DDR5', 'DDR4', 'DDR3', 'UNKNOWN'];
     return [...options].sort((a,b) => order.indexOf(a.value) - order.indexOf(b.value));
   }
   if (category === 'RAM' && key === 'speed_mt_s') {
@@ -967,7 +978,7 @@ function makeFacetCheckboxRow(definition) {
     checkbox.checked = selectedSet.has(option.value);
     checkbox.addEventListener("change", () => updateFacet(definition.key, option.value, definition.rowKey));
     choice.append(checkbox, createElement("span", "model-facet-option-label", option.label));
-    const listingOnlyFacet = ["product_kind", "placement", "memory_usage", "speed_mt_s"].includes(definition.key)
+    const listingOnlyFacet = ["product_kind", "placement", "memory_usage", "speed_mt_s", "board_size", "board_memory"].includes(definition.key)
       || (state.categoryCode === "PSU" && definition.key === "form_factor");
     if (!listingOnlyFacet && Number.isFinite(Number(option.count))) {
       choice.append(createElement("span", "model-facet-count", `${Number(option.count).toLocaleString("ko-KR")}개`));
@@ -1635,7 +1646,8 @@ function buildListingQuery(cursor = "", includeSelectedProduct = true) {
   const listingFacetKeys = new Set(state.categoryCode === "SSD" ? ["product_kind"]
     : state.categoryCode === "HDD" ? ["placement"]
       : state.categoryCode === "PSU" ? ["form_factor"]
-        : state.categoryCode === "RAM" ? ["memory_usage", "speed_mt_s"] : []);
+        : state.categoryCode === "RAM" ? ["memory_usage", "speed_mt_s"]
+          : state.categoryCode === "MOTHERBOARD" ? ["board_size", "board_memory"] : []);
   Object.keys(state.facets).sort().forEach((key) => {
     if (!PRODUCT_QUERY_KEYS.has(key) || (selectedProduct && !listingFacetKeys.has(key))) return;
     selectedFacetValues(key).sort().forEach((value) => params.append(key, value));

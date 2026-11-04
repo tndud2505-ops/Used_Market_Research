@@ -241,7 +241,7 @@ export async function browsePcListingsD1(request, env) {
     }
     // D1 uses bounded SQL keyset pages; filtering the returned page in memory
     // would silently drop later matches and publish incorrect totals.
-    if (['memory_usage', 'speed_mt_s'].some(key => query.listingFacets[key]?.length > 0)) {
+    if (['memory_usage', 'speed_mt_s', 'board_size', 'board_memory'].some(key => query.listingFacets[key]?.length > 0)) {
       return Response.json({ status: 'error', error: 'RAM_LISTING_FILTERS_REQUIRE_RUNNER' }, {
         status: 503,
         headers: { 'cache-control': 'no-store' }

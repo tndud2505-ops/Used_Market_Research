@@ -11,6 +11,7 @@ import {
   classifyPcPartListingPublic
 } from "../market/logic/pc-parts-classifier.mjs";
 import {
+  deriveMotherboardListingFacets,
   publicPcCatalogForApi,
   publicPcFacetsForApi,
   publicPcModelsForApi,
@@ -671,5 +672,24 @@ for (const title of [
   'i3-6100 CPU 단품 슬림 PC 호환 Windows 11 테스트',
   '인텔 i3-6100 CPU'
 ]) assert.equal(classifyPcPartListingPublic({title,price:7000,currency:'KRW'}).statistics_eligible,true,title);
+
+// Board size and memory filter listings: explicit title evidence first, then
+// the chipset's socket for memory; ambiguous boards stay "UNKNOWN".
+for (const [title, size, memory] of [
+  ["ASUS B860M AYW GAMING WIFI 메인보드", "M-ATX", "DDR5"],
+  ["MSI MAG B860 TOMAHAWK wifi", "ATX", "DDR5"],
+  ["ASUS ROG STRIX Z790-I GAMING WIFI", "MINI-ITX", "UNKNOWN"],
+  ["ASUS PRIME B760M-A D4", "M-ATX", "DDR4"],
+  ["기가바이트 Z790 UD-3 D5 메인보드", "ATX", "DDR5"],
+  ["ASUS P8H61-M LE", "M-ATX", "DDR3"],
+  ["MSI MEG X570 ACE E-ATX", "E-ATX", "DDR4"],
+  ["MSI MAG X870 토마호크 WIFI 메인보드", "ATX", "DDR5"],
+  ["ASUS rog strix z690-e gaming wifi 메인보드", "ATX", "UNKNOWN"],
+  ["MSI MAG B550M MORTAR", "M-ATX", "DDR4"],
+  ["ASUS B550 메인보드", "UNKNOWN", "DDR4"]
+]) assert.deepEqual(deriveMotherboardListingFacets(title), { board_size: size, board_memory: memory }, title);
+assert.deepEqual(deriveMotherboardListingFacets("ignored title", "motherboard:asus:rog-strix-b550-a-gaming"),
+  { board_size: "ATX", board_memory: "DDR4" }, "verified models use the official specification");
+assert.ok(publicPcCatalogForApi().listing_facet_options.MOTHERBOARD.board_size.some(({ value }) => value === "MINI-ITX"));
 
 console.log("PC public catalog contract passed");
