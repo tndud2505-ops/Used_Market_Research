@@ -51,7 +51,7 @@ test('restored UI assets use a fresh cache identity while data and calculation v
   assert.match(script, /pc-tools-data\.mjs\?v=[\w-]+/);
   assert.match(script, /pc-market-chart\.mjs\?v=[\w-]+/);
   assert.match(read('index.html'), /app\.js\?v=[\w-]+/);
-  assert.match(read('index.html'), /search-controls\.css\?v=select-chevron-v1/);
+  assert.match(read('index.html'), /search-controls\.css\?v=model-label-v1/);
   assert.match(read('computer-builder.html'), /pc-tools\.js\?v=[\w-]+/);
   assert.match(read('price-analysis.html'), /pc-tools\.js\?v=[\w-]+/);
 });
