@@ -1,4 +1,7 @@
 export const SALE_COMPOSITIONS = Object.freeze(['ALL', 'SINGLE', 'COMPLETE_PC', 'BUNDLE']);
+// USED PICK lists PC parts. Complete PCs and laptops stay classified (so they
+// never enter part listings or prices) but are not a public browsing choice.
+export const PUBLIC_SALE_COMPOSITIONS = Object.freeze(['SINGLE', 'BUNDLE']);
 
 export function listingComposition(listing) {
   if (SALE_COMPOSITIONS.includes(listing?.sale_composition) && listing.sale_composition !== 'ALL') return listing.sale_composition;

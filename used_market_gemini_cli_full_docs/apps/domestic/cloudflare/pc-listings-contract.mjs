@@ -1,7 +1,7 @@
 import { decodeSearchCursor, encodeSearchCursor } from "../aws-runner/search-cursor.mjs";
 import { RAM_MEMORY_USAGES, RAM_SPEEDS_MT_S } from '../market/logic/ram-listing-facets.mjs';
 import { classifyPcListingPresentation } from '../market/logic/pc-parts-classifier.mjs';
-import { SALE_COMPOSITIONS, listingComposition } from '../web-backend/public/listing-composition.mjs';
+import { PUBLIC_SALE_COMPOSITIONS, listingComposition } from '../web-backend/public/listing-composition.mjs';
 
 // Re-evaluate composition from current evidence, including old rows whose
 // stored classification still describes a standalone component.
@@ -139,7 +139,7 @@ export function parsePcListingsRequest(urlOrRequest, { allowedSites = [] } = {})
   const sort = text(url.searchParams.get("sort"), 30) || "recent";
   if (!SORTS.has(sort)) throw new TypeError("sort must be recent, price_asc, or price_desc");
   const saleComposition = text(url.searchParams.get('sale_composition'), 30).toUpperCase() || null;
-  if (saleComposition && !SALE_COMPOSITIONS.includes(saleComposition)) throw new TypeError('unsupported sale_composition filter');
+  if (saleComposition && !PUBLIC_SALE_COMPOSITIONS.includes(saleComposition)) throw new TypeError('unsupported sale_composition filter');
   let currency = text(url.searchParams.get("currency"), 12).toUpperCase() || null;
   if (currency && !CURRENCIES.has(currency)) throw new TypeError("currency must be KRW or USD");
   const marketPool = text(url.searchParams.get("market_pool"), 80).toUpperCase() || null;

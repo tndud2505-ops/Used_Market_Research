@@ -96,11 +96,11 @@ try {
       assert.equal(response.status, 200);
       return (await response.json()).data;
     };
-    const all = await requestPage('ALL');
-    assert.equal(all.total, 4);
-    assert.equal(all.model_counts[model], 4, 'selected product count includes associated composites despite null returned identity');
-    assert.equal(all.source_counts.joonggonara, 4);
-    assert.equal(all.statistics_coverage.eligible_count, 2);
+    // Complete PCs are not a public browsing choice; single parts and part bundles are.
+    for (const hidden of ['ALL', 'COMPLETE_PC']) {
+      const response = await fetch(`${base}?${new URLSearchParams({ canonical_product_id: model, sale_composition: hidden })}`);
+      assert.equal(response.status, 400, `${hidden} is not a public sale composition`);
+    }
     const single = await requestPage('SINGLE');
     assert.equal(single.total, 2);
     assert.equal(single.model_counts[model], 2);
@@ -110,7 +110,7 @@ try {
     assert.equal(next.items[0].item_id, 'joonggonara:80003');
     assert.equal(next.total, 2);
     assert.equal(next.pagination.has_more, false);
-    for (const [composition, id] of [['COMPLETE_PC', '80002'], ['BUNDLE', '80004']]) {
+    for (const [composition, id] of [['BUNDLE', '80004']]) {
       const data = await requestPage(composition);
       assert.equal(data.total, 1);
       assert.equal(data.model_counts[model], 1);

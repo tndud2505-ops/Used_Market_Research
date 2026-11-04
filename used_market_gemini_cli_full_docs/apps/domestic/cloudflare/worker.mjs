@@ -40,6 +40,7 @@ import {
 import { verifyStatsWithRunner } from './pc-stats-runner-verification.mjs';
 import { getPcSource } from "../collector/logic/pc-source-registry.mjs";
 import { handleFxRates } from "./fx-rates.mjs";
+import { PUBLIC_SALE_COMPOSITIONS } from "../web-backend/public/listing-composition.mjs";
 import { resolvePcCanonicalIdV3 } from "../market/data/pc-product-master-v2.mjs";
 import {
   issueMonetizationEventToken,
@@ -1556,6 +1557,11 @@ async function fetchResponse(request, env) {
       }
     }
     if (request.method === "GET" && url.pathname === "/api/pc/listings") {
+      // Complete PCs and laptops are not a public browsing choice on a parts site.
+      const saleComposition = (url.searchParams.get("sale_composition") || "").trim().toUpperCase();
+      if (saleComposition && !PUBLIC_SALE_COMPOSITIONS.includes(saleComposition)) {
+        return json(400, { status: "error", error: "unsupported sale_composition filter" });
+      }
       try {
         return await fetchThroughPcReadCache(request, env,
           (listingRequest) => readPcListingsFromPreferredStore(listingRequest, env));

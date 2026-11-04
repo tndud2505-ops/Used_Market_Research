@@ -3,7 +3,7 @@ import { toolQueryMatches } from "./pc-tools-catalog.mjs?v=parts-ux-v4";
 import { readJsonResponse } from "./read-json.mjs?v=lookup-recovery-v1";
 import { createPriceStore } from "./pc-tools-data.mjs?v=domestic-danawa-v1";
 import { listingPriceWarning } from "./listing-price-warning.mjs?v=iqr-disclosure-v1";
-import { SALE_COMPOSITIONS, listingCompositionLabel } from './listing-composition.mjs?v=sale-composition-v1';
+import { PUBLIC_SALE_COMPOSITIONS, listingCompositionLabel } from './listing-composition.mjs?v=sale-composition-v2';
 
 const PRODUCT_QUERY_KEYS = new Set([
   "manufacturer", "model", "gpu_model", "board_brand", "usage", "configuration", "socket", "chipset", "form_interface", "capacity", "purpose", "rated_wattage",
@@ -2192,7 +2192,7 @@ async function loadCatalog() {
     if (state.sources.some(source => source.id === requestedSource)) state.selectedSites.add(requestedSource);
     if (["recent", "price_asc", "price_desc"].includes(initialParams.get("sort"))) state.listingSort = initialParams.get("sort");
     const requestedComposition = initialParams.get('sale_composition')?.toUpperCase();
-    if (SALE_COMPOSITIONS.includes(requestedComposition)) state.listingComposition = requestedComposition;
+    if (PUBLIC_SALE_COMPOSITIONS.includes(requestedComposition)) state.listingComposition = requestedComposition;
     if (dom.listingComposition) dom.listingComposition.value = state.listingComposition;
     syncListingSortTabs();
     state.query = initialQuery;
@@ -2313,7 +2313,7 @@ dom.listingSortTabs.forEach((button) => {
 });
 dom.listingComposition?.addEventListener('change', () => {
   const value = dom.listingComposition.value;
-  if (!SALE_COMPOSITIONS.includes(value) || value === state.listingComposition) return;
+  if (!PUBLIC_SALE_COMPOSITIONS.includes(value) || value === state.listingComposition) return;
   state.listingComposition = value;
   state.modelAvailabilityScope = '';
   reloadListingsForControls();

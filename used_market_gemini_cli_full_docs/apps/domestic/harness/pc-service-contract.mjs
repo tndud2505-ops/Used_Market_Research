@@ -209,6 +209,11 @@ for (const title of ['RX580 판매완료 아님', 'RX580 판매완료 시 삭제
   assert.equal(currentPcListingComposition({ ...soldReadFixture, title }).lifecycle_status, 'ACTIVE');
 }
 assert.throws(() => parsePcListingsRequest('https://used-pick.test/api/pc/listings?sale_composition=PARTIAL'), /sale_composition/);
+for (const hidden of ['ALL', 'COMPLETE_PC']) {
+  assert.throws(() => parsePcListingsRequest(`https://used-pick.test/api/pc/listings?sale_composition=${hidden}`), /sale_composition/);
+  const blocked = await worker.fetch(new Request(`https://used-pick.test/api/pc/listings?sale_composition=${hidden}`), {}, {});
+  assert.equal(blocked.status, 400, `the public Worker must not proxy ${hidden} listings`);
+}
 const compositionCursor = encodePcListingsCursor(compositionRequest, {
   asOf: '2026-08-29T00:00:00.000Z', after: { item_id: 'danawa:single' }
 }, 'composition-fixture-secret');
