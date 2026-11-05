@@ -50,6 +50,7 @@ const FALLBACK_BROWSE_FLOWS = Object.freeze({
   ]),
   HDD: Object.freeze([
     Object.freeze({ key: "placement", label: "설치 방식" }),
+    Object.freeze({ key: "form_factor", label: "크기" }),
     Object.freeze({ key: "capacity_bucket", label: "용량" }),
     Object.freeze({ key: "manufacturer", label: "제조사" }),
   ]),
@@ -632,6 +633,9 @@ function productFacetValues(product, key) {
     return toArray((state.catalog?.listing_facet_options || state.catalog?.public_catalog?.listing_facet_options)?.RAM?.[key]).map(option => normalizeText(option.value));
   }
   // Board size and memory vary within a chipset group; they filter listings only.
+  if (productCategory(product) === 'HDD' && key === 'form_factor') {
+    return toArray((state.catalog?.listing_facet_options || state.catalog?.public_catalog?.listing_facet_options)?.HDD?.form_factor).map(option => normalizeText(option.value));
+  }
   if (productCategory(product) === 'MOTHERBOARD' && ['board_size', 'board_memory'].includes(key)) {
     return toArray((state.catalog?.listing_facet_options || state.catalog?.public_catalog?.listing_facet_options)?.MOTHERBOARD?.[key]).map(option => normalizeText(option.value));
   }
@@ -987,7 +991,7 @@ function makeFacetCheckboxRow(definition) {
     checkbox.addEventListener("change", () => updateFacet(definition.key, option.value, definition.rowKey));
     choice.append(checkbox, createElement("span", "model-facet-option-label", option.label));
     const listingOnlyFacet = ["product_kind", "placement", "memory_usage", "speed_mt_s", "board_size", "board_memory"].includes(definition.key)
-      || (state.categoryCode === "PSU" && definition.key === "form_factor");
+      || (["PSU", "HDD"].includes(state.categoryCode) && definition.key === "form_factor");
     if (!listingOnlyFacet && Number.isFinite(Number(option.count))) {
       choice.append(createElement("span", "model-facet-count", `${Number(option.count).toLocaleString("ko-KR")}개`));
     }
@@ -1652,7 +1656,7 @@ function buildListingQuery(cursor = "", includeSelectedProduct = true) {
     if (state.query) params.set("q", state.query);
   }
   const listingFacetKeys = new Set(state.categoryCode === "SSD" ? ["product_kind"]
-    : state.categoryCode === "HDD" ? ["placement"]
+    : state.categoryCode === "HDD" ? ["placement", "form_factor"]
       : state.categoryCode === "PSU" ? ["form_factor"]
         : state.categoryCode === "RAM" ? ["memory_usage", "speed_mt_s"]
           : state.categoryCode === "MOTHERBOARD" ? ["board_size", "board_memory"] : []);

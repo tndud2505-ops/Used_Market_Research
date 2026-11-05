@@ -77,7 +77,8 @@ assert.deepEqual(new Set(models.map((model) => model.canonical_product_id)), new
 ]));
 for (const model of models) for (const field of requiredModelFields) assert.ok(Object.hasOwn(model, field), `model field missing: ${field}`);
 
-const expectedAggregateCounts = { SSD: 161, HDD: 70, PSU: 84 };
+// PSU: 19 makers (7 sorted from the old unknown bucket) x 7 watts buckets.
+const expectedAggregateCounts = { SSD: 161, HDD: 70, PSU: 133 };
 for (const [category, expectedCount] of Object.entries(expectedAggregateCounts)) {
   const aggregateModels = publicPcModelsForApi({ category }).models;
   assert.equal(aggregateModels.length, expectedCount, `${category} public aggregate count`);
@@ -92,7 +93,7 @@ assert.deepEqual(PC_LEGACY_CANONICAL_ID_SUCCESSORS_V3["psu:corsair:rm1000x"],
   ["psu:corsair:watts-bucket:851-1000"]);
 assert.equal(PC_LEGACY_CANONICAL_ID_SUCCESSORS_V3["psu:facet:atx:corsair"].length, 7,
   "ambiguous legacy PSU form-factor IDs must expose every explicit successor instead of inventing one price bucket");
-assert.equal(PC_LEGACY_CANONICAL_ID_SUCCESSORS_V3["psu:facet:atx"].length, 84,
+assert.equal(PC_LEGACY_CANONICAL_ID_SUCCESSORS_V3["psu:facet:atx"].length, 133,
   "the old manufacturer-free PSU form-factor ID must remain an explicit ambiguous legacy scope");
 
 const globalSearchModels = publicPcModelsForApi({ q: "RX 460" }).models;

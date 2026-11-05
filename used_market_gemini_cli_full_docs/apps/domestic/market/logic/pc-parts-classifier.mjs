@@ -203,7 +203,7 @@ function detectSpecialKind(text, evidence, title = text) {
   // A standalone title label expresses intent; purchase history/receipts in
   // ordinary sale descriptions do not. Keep verb matching for body-only intent.
   const wanted = firstMatch(title, /(?:^|[\s([{<])(?:구매|구입)(?=$|\s*[)\]}>.,!?]\s*$)|\[\s*(?:구매|구입)\s*\/\s*(?:개인|업자|업체)\s*\]|(?:구매|구입)\s+(?:합니다|희망합니다|희망|원합니다)(?=$|[\s.,!?])/iu)
-    || firstMatch(text, /(?:\[\s*(?:구매|구입|삽니다|매입)\s*\]|대량\s*매입(?:합니다)?|(?:RTX|GTX|RX\s*\d{3,4}|그래픽\s*카드|\d{4,5}X(?:3D)?).{0,40}(?:삽니다|구합니다|구입합니다|구해요|구합니[다드당]|구매[합힙]니다|구매\s*원해요|매입합니(?:다|가)|사\s*봅니다|구해\s*봅니다|원합니다)|(?:^|[\s([{<])(?:삽니다|구합니다|구입합니다|구해요|구합니[다드당]|매입합니다|구매합니다|구매해요|구매원합니다|구매\s*원해요)(?=$|[\s)\]}>.,!?]))/iu);
+    || firstMatch(text, /(?:\[\s*(?:구매|구입|삽니다|매입)\s*\]|대량\s*매입(?:합니다)?|(?:RTX|GTX|RX\s*\d{3,4}|그래픽\s*카드|\d{4,5}X(?:3D2?)?).{0,40}(?:삽니다|구합니다|구입합니다|구해요|구합니[다드당]|구매[합힙]니다|구매\s*원해요|매입합니(?:다|가)|사\s*봅니다|구해\s*봅니다|원합니다)|(?:^|[\s([{<])(?:삽니다|구합니다|구입합니다|구해요|구합니[다드당]|매입합니다|구매합니다|구매해요|구매원합니다|구매\s*원해요)(?=$|[\s)\]}>.,!?]))/iu);
   if (wanted) {
     addEvidence(evidence, 'listing_kind', wanted.matchedText, 'WANTED');
     return 'WANTED';
@@ -259,7 +259,7 @@ function detectSpecialKind(text, evidence, title = text) {
   }
   const componentGroups = new Set();
   const componentRules = [
-    ['CPU', /(?:\bCPU\b(?!\s*(?:지원|호환|용\b|소켓|쿨러))|라이젠|RYZEN|\bI[3579]\s*(?:[-~]\s*)?\d{4,5}(?:KF|KS|HX|K|F|H|U|T)?(?=\b|CPU)|\b(?:[6-9]\d{3}|1[0-5]\d{3})(?:K[F]?|F|T)\b|\b\d{4,5}X(?:3D)?\b|\bCORE\s*(?:ULTRA\s*)?[3579]\b|(?:CORE\s*)?ULTRA\s*[3579]?\s*\d{3}[A-Z]*|울트라\s*[3579]?\s*\d{3}[A-Z]*)/i],
+    ['CPU', /(?:\bCPU\b(?!\s*(?:지원|호환|용\b|소켓|쿨러))|라이젠|RYZEN|\bI[3579]\s*(?:[-~]\s*)?\d{4,5}(?:KF|KS|HX|K|F|H|U|T)?(?=\b|CPU)|\b(?:[6-9]\d{3}|1[0-5]\d{3})(?:K[F]?|F|T)\b|\b\d{4,5}X(?:3D2?)?\b|\bCORE\s*(?:ULTRA\s*)?[3579]\b|(?:CORE\s*)?ULTRA\s*[3579]?\s*\d{3}[A-Z]*|울트라\s*[3579]?\s*\d{3}[A-Z]*)/i],
     ['GPU', /(?:RTX\s*\d{4}|GTX\s*\d{3,4}|\bGT\s*\d{3,4}|RX\s*\d{3,4}|(?:INTEL\s*)?ARC\s*[AB]\d{3}|\b[5-9]\d{3}\s*XT[X]?\b|\b(?:30[5-9]0|40[5-9]0|50[5-9]0)(?:\s*(?:TI|SUPER))?\b|그래픽\s*카드|그래픽카드|\bGPU\b)/i],
     ['RAM', /(?:\bRAM\b|램|렘|메모리|DDR[345]\s*\d+\s*(?:GB|G)\b)/i],
     ['MOTHERBOARD', /(?:메인\s*보드|메인보드|보드셋|\bM\s*\/\s*B\b|\b[ABHXZ]{1,2}\d{3}[A-Z0-9-]*\b)/i],
@@ -277,7 +277,7 @@ function detectSpecialKind(text, evidence, title = text) {
   if (LEGACY_DISCRETE_GPU_PATTERN.test(title)) componentGroups.add('GPU');
   if (CORE_ULTRA_PATTERN.test(title)) componentGroups.add('CPU');
   if (/\b2\d{2}K(?:F|S)?\b/iu.test(title)) componentGroups.add('CPU');
-  const explicitSystem = firstMatch(title, /게이밍\s*(?:(?<!반)본체|PC|컴퓨터|데스크탑)|조립(?:식|\s*)\s*(?:PC|컴퓨터)|조립컴퓨터|컴퓨터\s*(?<!반)본체|(?:^|\s)PC\s*본체|본체\s*PC|(?:게임용|사무용|업무용)\s*(?<!반)본체|완본체|완제품\s*(?:PC|컴퓨터)|(?:슬림|미니)\s*데스크탑(?!\s*용)|PC\s*케이스.{0,40}(?:RTX|GTX|RX)|(?:삼성|LG)\s*컴퓨터\s+[A-Z]{2,}\d{3,}|\bSFF\b.{0,40}(?:I[3579]|RYZEN)|(?:HP|DELL|LENOVO).{0,50}(?:DESKTOP|SFF|WORKSTATION)|(?:RTX|GTX|RX\s*\d{3,4}|\d{4,5}X(?:3D)?|I[3579][ -]?\d{4,5}[A-Z]*).{0,40}(?<!반)본체|(?:^|\s|\d)(?<!반)본체\s*(?:팝니다|판매|급처)/i);
+  const explicitSystem = firstMatch(title, /게이밍\s*(?:(?<!반)본체|PC|컴퓨터|데스크탑)|조립(?:식|\s*)\s*(?:PC|컴퓨터)|조립컴퓨터|컴퓨터\s*(?<!반)본체|(?:^|\s)PC\s*본체|본체\s*PC|(?:게임용|사무용|업무용)\s*(?<!반)본체|완본체|완제품\s*(?:PC|컴퓨터)|(?:슬림|미니)\s*데스크탑(?!\s*용)|PC\s*케이스.{0,40}(?:RTX|GTX|RX)|(?:삼성|LG)\s*컴퓨터\s+[A-Z]{2,}\d{3,}|\bSFF\b.{0,40}(?:I[3579]|RYZEN)|(?:HP|DELL|LENOVO).{0,50}(?:DESKTOP|SFF|WORKSTATION)|(?:RTX|GTX|RX\s*\d{3,4}|\d{4,5}X(?:3D2?)?|I[3579][ -]?\d{4,5}[A-Z]*).{0,40}(?<!반)본체|(?:^|\s|\d)(?<!반)본체\s*(?:팝니다|판매|급처)/i);
   const systemNoun = /(?:중고\s*)?(?:컴퓨터|컵퓨터)|(?<!용)데스크탑(?!\s*용)|(?:게임용|게이밍)\s*본체|(?<!반)본체|(?:미니|슬림)\s*PC|(?:^|[^A-Z])PC(?:$|[^A-Z])/i.test(title);
   const cpuGpuPair = componentGroups.has('CPU') && componentGroups.has('GPU');
   const describedSystem = (componentGroups.size >= 3 || cpuGpuPair) && systemNoun;
@@ -304,7 +304,7 @@ function detectSpecialKind(text, evidence, title = text) {
     && !separateComponentSale && !/단품|(?:그램|GRAM)(?:\s*(?:프로|PRO))?\s*용/iu.test(title);
   const componentRichSystem = componentGroups.has('CPU') && componentGroups.has('RAM')
     && componentGroups.size >= 4;
-  const cpuComponentWording = /컴퓨터.{0,20}\bCPU\b.{0,20}(?:RYZEN|라이젠|I[3579][ -]?\d{3,5}|\d{4,5}X(?:3D)?)/iu.test(title);
+  const cpuComponentWording = /컴퓨터.{0,20}\bCPU\b.{0,20}(?:RYZEN|라이젠|I[3579][ -]?\d{3,5}|\d{4,5}X(?:3D2?)?)/iu.test(title);
   const componentRemovalWording = componentGroups.size === 1
     && /(?:분리|탈거|적출|장착\s*테스트|테스트\s*후|컴퓨터\s*부품|데스크탑\s*부품)/iu.test(title);
   const compactPcConfiguration = componentGroups.has('CPU')
@@ -313,7 +313,7 @@ function detectSpecialKind(text, evidence, title = text) {
     && !componentRemovalWording && !/단품|CPU\s*만|호환|지원|PC\s*용|에서\s*사용/iu.test(title);
   const clearDesktopSystem = !cpuComponentWording && !componentRemovalWording
     && !/(?:CPU|프로세서)\s*(?:단품|만(?=\s*(?:판매|팝니다|$)))/iu.test(title)
-    && /(?:^|[^A-Z])PC\s*(?:팝니다|판매(?:합니다)?|팔아요|급처)|(?:데스크탑|데스크톱)\s*(?:본체\s*)?(?:팝니다|판매(?:합니다)?|팔아요|급처)|(?:중고|게임용|사무용|업무용|브랜드)\s*컴퓨터|(?:게임용|사무용|업무용)\s*(?:PC|데스크탑)|미니\s*컴퓨터|HP\s*(?:PRODESK|프로\s*데스크|ELITEDESK|엘리트\s*데스크|PAVILION|파빌리온|일체형)|컴퓨터.{0,30}(?:RYZEN|라이젠|\d{4,5}X(?:3D)?|울트라\s*[3579]?[- ]?\d{3}[A-Z]*|I[3579][ -]?\d{4,5}[A-Z]*)|(?:RYZEN|라이젠|\d{4,5}X(?:3D)?|울트라\s*[3579]?[- ]?\d{3}[A-Z]*|I[3579][ -]?\d{4,5}[A-Z]*).{0,30}(?:데스크탑(?:\s*PC)?|컴퓨터\s*(?:팝니다|판매|급처)?)/iu.test(title);
+    && /(?:^|[^A-Z])PC\s*(?:팝니다|판매(?:합니다)?|팔아요|급처)|(?:데스크탑|데스크톱)\s*(?:본체\s*)?(?:팝니다|판매(?:합니다)?|팔아요|급처)|(?:중고|게임용|사무용|업무용|브랜드)\s*컴퓨터|(?:게임용|사무용|업무용)\s*(?:PC|데스크탑)|미니\s*컴퓨터|HP\s*(?:PRODESK|프로\s*데스크|ELITEDESK|엘리트\s*데스크|PAVILION|파빌리온|일체형)|컴퓨터.{0,30}(?:RYZEN|라이젠|\d{4,5}X(?:3D2?)?|울트라\s*[3579]?[- ]?\d{3}[A-Z]*|I[3579][ -]?\d{4,5}[A-Z]*)|(?:RYZEN|라이젠|\d{4,5}X(?:3D2?)?|울트라\s*[3579]?[- ]?\d{3}[A-Z]*|I[3579][ -]?\d{4,5}[A-Z]*).{0,30}(?:데스크탑(?:\s*PC)?|컴퓨터\s*(?:팝니다|판매|급처)?)/iu.test(title);
   const namedGpuPortable = hasGpuModel && PORTABLE_GPU_SYSTEM_PATTERN.test(title)
     && !/(?:탈거|분리|적출|부품|쿨러|팬|키보드|배터리|어댑터|호환|장착\s*테스트|에서\s*사용)/iu.test(title);
   const namedConfiguredPortable = /(?:LG\s*(?:그램|GRAM)|갤럭시\s*북|GALAXY\s*BOOK)/iu.test(title)
@@ -341,7 +341,7 @@ function detectSpecialKind(text, evidence, title = text) {
   const desktopLeadSystem = componentGroups.has('CPU') && !cpuComponentWording && !componentRemovalWording
     && !separateComponentSale
     && (/데스크[탑톱]\s*(?<!반)본체|(?:삼성|LG|엘지|HP|DELL|델|레노버|LENOVO|ASUS|에이수스)(?:전자)?\s*데스크[탑톱](?:\s*PC(?!\s*용))?(?:\s+[A-Z]{2,}\d{3,}[A-Z0-9-]*)?[\s(]*(?:I[3579][ -]?\d{4,5}|RYZEN|라이젠)/iu.test(title)
-      || /데스크[탑톱](?!\s*(?:용|부품))[\s(]*(?:I[3579][ -]?\d{4,5}[A-Z]*|RYZEN|라이젠|\d{4,5}X(?:3D)?).{0,30}(?:팝니다|판매(?:합니다)?|팔아요|급처)/iu.test(title))
+      || /데스크[탑톱](?!\s*(?:용|부품))[\s(]*(?:I[3579][ -]?\d{4,5}[A-Z]*|RYZEN|라이젠|\d{4,5}X(?:3D2?)?).{0,30}(?:팝니다|판매(?:합니다)?|팔아요|급처)/iu.test(title))
     && !/단품|CPU\s*만|반본체|사용하던|(?:에서|으로)\s*(?:테스트|사용)/iu.test(title);
   const fullSystem = explicitSystem || describedSystem || (describedPortableSystem && !separateComponentSale) || namedPortableSystem || namedGpuPortable
     || workstationSystem || describedCompactSystem || compactComputerSale || gramComputerSale || compactPcConfiguration || componentRichSystem || clearDesktopSystem || configuredDesktopSystem
@@ -350,7 +350,7 @@ function detectSpecialKind(text, evidence, title = text) {
     addEvidence(evidence, 'listing_kind', fullSystem.matchedText || [...componentGroups].join('+'), 'FULL_SYSTEM');
     return 'FULL_SYSTEM';
   }
-  const explicitComponentBundle = firstMatch(text, /반본체|CPU\s*\+.*(?:보드|RAM|램)|(?:CPU|메인보드|보드).*(?:묶음|세트)|(?:묶음|세트).*?(?:CPU|메인보드|보드)|(?:\d{4,5}X(?:3D)?|I[3579][ -]?\d{4,5}[A-Z]*)\s*\+\s*[ABHXZ]\d{3}.*(?:RAM|램)|(?:\d{4,5}X(?:3D)?|I[3579][ -]?\d{4,5}[A-Z]*)\s*\+\s*(?:(?:RTX|GTX|RX)\s*)?[1-9]\d{3}(?:\s*(?:TI|SUPER|XT|S)\b)?(?![\d원])|(?:\d{4,5}X(?:3D)?|I[3579][ -]?\d{4,5}[A-Z]*)\s*\+.{0,30}쿨러.{0,30}\+\s*DDR[345]\b|(?:RTX|GTX|RX\s*\d{4}).{0,20}\+.{0,20}(?:\d{4,5}X|I[3579][ -]?\d{4,5}).{0,30}(?:세트|일괄)|\bSSD\b[^+]{0,20}\d+\s*TB\s*\+\s*\d+\s*TB.*일괄|(?:미니\s*PC|MINI\s*PC).{0,50}(?:\+|와|및|포함).{0,50}(?:RTX|GTX|RX\s*\d{4}|그래픽\s*카드)/i);
+  const explicitComponentBundle = firstMatch(text, /반본체|CPU\s*\+.*(?:보드|RAM|램)|(?:CPU|메인보드|보드).*(?:묶음|세트)|(?:묶음|세트).*?(?:CPU|메인보드|보드)|(?:\d{4,5}X(?:3D2?)?|I[3579][ -]?\d{4,5}[A-Z]*)\s*\+\s*[ABHXZ]\d{3}.*(?:RAM|램)|(?:\d{4,5}X(?:3D2?)?|I[3579][ -]?\d{4,5}[A-Z]*)\s*\+\s*(?:(?:RTX|GTX|RX)\s*)?[1-9]\d{3}(?:\s*(?:TI|SUPER|XT|S)\b)?(?![\d원])|(?:\d{4,5}X(?:3D2?)?|I[3579][ -]?\d{4,5}[A-Z]*)\s*\+.{0,30}쿨러.{0,30}\+\s*DDR[345]\b|(?:RTX|GTX|RX\s*\d{4}).{0,20}\+.{0,20}(?:\d{4,5}X|I[3579][ -]?\d{4,5}).{0,30}(?:세트|일괄)|\bSSD\b[^+]{0,20}\d+\s*TB\s*\+\s*\d+\s*TB.*일괄|(?:미니\s*PC|MINI\s*PC).{0,50}(?:\+|와|및|포함).{0,50}(?:RTX|GTX|RX\s*\d{4}|그래픽\s*카드)/i);
   const cpuBoardBundle = componentGroups.has('CPU') && componentGroups.has('MOTHERBOARD');
   const distinctGpuModels = new Set([...title.matchAll(/\b(?:RTX|GTX)\s*\d{3,4}(?:\s*(?:TI|SUPER))?|\bRX\s*\d{3,4}(?:\s*XT[X]?)?/giu)]
     .map((match) => match[0].replace(/\s+/gu, '').toUpperCase()));
@@ -454,7 +454,7 @@ function detectCategory(text, specialKind, evidence, title = '') {
     ['RAM', /(?:DDR[345]|\bRAM\b|메모리|서버램|삼성램|\d+\s*(?:GB|G|기가).*(?:램|두\s*장|\d+장|(?:\d+|한|두|세|네)\s*개))/i],
     ['MOTHERBOARD', /(?:메인\s*보드|메인보드|MOTHERBOARD|\bB[45678]\d{2}M?\b|\b(?:A?X|X)[3-8]\d{2}[A-Z]*\b)/i],
     ['CPU', CORE_ULTRA_PATTERN],
-    ['CPU', /(?:\bCPU\b|라이젠|RYZEN|인텔\s*(?:코어)?|\bI[3579]\s*(?:[-~]\s*)?\d{4,5}(?:KF|KS|HX|K|F|H|U|T)?(?=\b|CPU)|\b\d{4,5}X(?:3D)?\b|\b1[2345]\d{3}K[F]?\b)/i],
+    ['CPU', /(?:\bCPU\b|라이젠|RYZEN|인텔\s*(?:코어)?|\bI[3579]\s*(?:[-~]\s*)?\d{4,5}(?:KF|KS|HX|K|F|H|U|T)?(?=\b|CPU)|\b\d{4,5}X(?:3D2?)?\b|\b1[2345]\d{3}K[F]?\b)/i],
     ['PSU', /(?:\bPSU\b|power\s*supply|파워\s*(?:서플라이)?|\b(?:RM|HX|AX|TX|CX|CV|SF)\d{3,4}(?:X|I|M)?\b|GX-\d{3,4}|ATX\s*3\.0|(?:정격|피크)\s*\d{3,4}\s*W\b|(?:Classic\s*II|클래식\s*2|HYDRO\s*PRO|하이드로\s*프로|LEADEX|리덱스).{0,20}\d{3,4}\s*W?\b|(?:Seasonic|시소닉|Corsair|커세어|FSP|Super\s*Flower|슈퍼플라워|Micronics|마이크로닉스|Cooler\s*Master|쿨러마스터|Thermaltake|써멀테이크|Antec|안텍).{0,30}\d{3,4}\s*W\b)/i],
     ['CASE', /(?:PC\s*케이스|컴퓨터\s*케이스|Fractal\s+Design\s+North|(?:미니|미들|빅|풀)\s*타워|\b(?:MINI|MID|MIDDLE|FULL|BIG)[\s-]*TOWER\b|(?:리안리|LIAN\s*LI|앱코|ABKO|NZXT|프랙탈|FRACTAL|다크플래[쉬시]|DARKFLASH|3RSYS|쓰리알시스|마이크로닉스|MICRONICS|써멀테이크|THERMALTAKE|쿨러마스터|COOLER\s*MASTER|커세어|CORSAIR|팬텍스|PHANTEKS|안텍|ANTEC|HYTE)[^,\n]{0,30}케이스(?!\s*팬))/iu],
     ['EXPANSION_CARD', /(?:확장\s*카드|확장카드|랜\s*카드|랜카드|사운드\s*카드|캡처\s*보드|XG-C100C)/i],
@@ -573,7 +573,10 @@ const CATEGORY_MANUFACTURER_PATTERNS = Object.freeze({
     ["Super Flower", /(?:\bSuper\s*Flower\b|슈퍼플라워|LEADEX|리덱스)/iu], ["Cooler Master", /(?:\bCooler\s*Master\b|쿨러마스터)/iu],
     ["ASUS", /(?:\bASUS\b|에이수스|아수스)/iu], ["MSI", /\bMSI\b/iu],
     ["Thermaltake", /(?:\bThermaltake\b|써멀테이크)/iu], ["be quiet!", /\bbe\s*quiet!?\b/iu],
-    ["Antec", /(?:\bAntec\b|안텍)/iu], ["Micronics", /(?:\bMicronics\b|마이크로닉스|Classic\s*II|클래식\s*2)/iu]
+    ["Antec", /(?:\bAntec\b|안텍)/iu], ["Micronics", /(?:\bMicronics\b|마이크로닉스|Classic\s*II|클래식\s*2)/iu],
+    ["EVGA", /\bEVGA\b/iu], ["Zalman", /(?:\bZalman\b|잘만)/iu], ["GIGABYTE", /(?:\bGIGABYTE\b|기가바이트)/iu],
+    ["NZXT", /\bNZXT\b/iu], ["MAXELITE", /(?:\bMAXELITE\b|맥스\s*엘리트)/iu],
+    ["Energy Optimus", /(?:\bEnergy\s*Optimus\b|에너지\s*옵티머스)/iu], ["ABKO", /(?:\bABKO|앱코|엡코)/iu]
   ],
   COOLING: [
     ["Noctua", /(?:\bNoctua\b|녹투아)/iu], ["Cooler Master", /(?:\bCooler\s*Master\b|쿨러마스터)/iu],
@@ -692,7 +695,7 @@ function detectModel(text, category, specialKind, evidence, quantityResult = {},
     const explicitIntel = text.match(/\bI([3579])\s*(?:[-~]\s*)?(\d{4,5})(?:\s*(KF|KS|HX|K|F|H|U|T))?(?=\b|CPU)/i);
     const generationIntel = text.match(/(?:인텔\s*)?(?:코어\s*)?I([3579])\s*-?\s*\d{1,2}\s*세대\s*(\d{4,5}[A-Z]{0,3})\b/iu);
     const explicitRyzen = text.match(/(?:\b(?:AMD\s*)?RYZEN|라이젠)\s*([3579])?\s*-?\s*(\d{4,5}[A-Z]{0,3})\b/iu);
-    const suffixedDesktop = text.match(/\b(\d{4,5}(?:X3D|KF|KS|XT|K|F|G|X|T))\b/i);
+    const suffixedDesktop = text.match(/\b(\d{4,5}(?:X3D2|X3D|KF|KS|XT|K|F|G|X|T))\b/i);
     if (coreUltra) {
       result = { model: `CORE ULTRA ${coreUltra[1]} ${coreUltra[2].toUpperCase()}`, matchedText: coreUltra[0] };
     } else if (explicitIntel) {

@@ -1,6 +1,6 @@
 import { decodeSearchCursor, encodeSearchCursor } from "../aws-runner/search-cursor.mjs";
 import { RAM_MEMORY_USAGES, RAM_SPEEDS_MT_S } from '../market/logic/ram-listing-facets.mjs';
-import { MOTHERBOARD_BOARD_MEMORY, MOTHERBOARD_BOARD_SIZES } from '../market/logic/pc-public-catalog.mjs';
+import { HDD_SIZES, MOTHERBOARD_BOARD_MEMORY, MOTHERBOARD_BOARD_SIZES } from '../market/logic/pc-public-catalog.mjs';
 import { classifyPcListingPresentation } from '../market/logic/pc-parts-classifier.mjs';
 import { PUBLIC_SALE_COMPOSITIONS, listingComposition } from '../web-backend/public/listing-composition.mjs';
 
@@ -61,7 +61,7 @@ const LISTING_FACET_VALUES = Object.freeze({
   speed_mt_s: { category: "RAM", values: new Set(RAM_SPEEDS_MT_S) },
   product_kind: { category: "SSD", values: new Set(["M2_NVME", "SATA_2_5", "M2_SATA", "EXTERNAL", "OTHER_UNKNOWN"]) },
   placement: { category: "HDD", values: new Set(["INTERNAL", "EXTERNAL", "UNKNOWN"]) },
-  form_factor: { category: "PSU", values: new Set(["ATX", "SFX", "SFX-L"]) },
+  form_factor: { category: ["PSU", "HDD"], values: new Set(["ATX", "SFX", "SFX-L", ...HDD_SIZES]) },
   board_size: { category: "MOTHERBOARD", values: new Set(MOTHERBOARD_BOARD_SIZES) },
   board_memory: { category: "MOTHERBOARD", values: new Set(MOTHERBOARD_BOARD_MEMORY) }
 });
@@ -114,7 +114,7 @@ function listingFacetsFrom(url) {
   const canonicalCategory = text(url.searchParams.get("canonical_product_id"), 300).split(":", 1)[0].toUpperCase();
   const category = categoryCode || canonicalCategory;
   return Object.fromEntries(Object.entries(LISTING_FACET_VALUES).flatMap(([key, definition]) => {
-    if (category !== definition.category) return [];
+    if (![definition.category].flat().includes(category)) return [];
     const selected = [...new Set(url.searchParams.getAll(key)
       .flatMap((value) => value.split(","))
       .map((value) => text(value, 40).toUpperCase())

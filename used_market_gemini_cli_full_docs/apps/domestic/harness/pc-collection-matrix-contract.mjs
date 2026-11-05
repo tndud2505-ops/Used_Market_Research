@@ -8,6 +8,7 @@ import { PC_PART_CATEGORY_CODES } from "../collector/logic/pc-specialist-targets
 import { PC_SOURCE_REGISTRY, listSourceCadenceEvents } from "../collector/logic/pc-source-registry.mjs";
 import { SearchIndex } from "../aws-runner/search-index.mjs";
 import { publicPcProducts } from "../market/logic/pc-public-catalog.mjs";
+import { pcNodeIsListingOnlyV3 } from "../market/data/pc-product-master-v2.mjs";
 
 const targetSet = pcCollectionTargetSetV2();
 const upgradeLedger = new PcPartsLedger();
@@ -54,7 +55,7 @@ assert.ok(koreanGskill.every(target => target.queryText.startsWith('지스킬 ')
 for (const product of publicProducts) {
   // Chipset groups are filled by the manufacturer motherboard query, and
   // unknown-maker case/cooler groups by the category and maker queries.
-  if (product.id.startsWith("motherboard:chipset:") || /^(?:case|cooling):facet:.*:other-unclassified$/u.test(product.id)) {
+  if (pcNodeIsListingOnlyV3(product)) {
     assert.equal(targets.some((target) => target.canonicalProductId === product.id), false,
       `${product.id} must not add marketplace searches`);
     continue;

@@ -2,7 +2,8 @@ import {
   PC_PART_CATEGORY_SEEDS_V2,
   PC_PRODUCT_MASTER_V2,
   PC_PRODUCT_MASTER_V2_VERSION,
-  PC_UNCLASSIFIED_MANUFACTURER_V3
+  PC_UNCLASSIFIED_MANUFACTURER_V3,
+  pcNodeIsListingOnlyV3
 } from "../market/data/pc-product-master-v2.mjs";
 import { pcPartsDirectoryForApiV2 } from "../market/logic/pc-parts-directory.mjs";
 import { pcProductQueryVariants } from "../market/logic/pc-search-query-variants.mjs";
@@ -268,12 +269,10 @@ export function pcCollectionTargetSetV2() {
     }
     return [product.aliases?.[0] || product.name];
   };
-  // Chipset groups only sort listings already found by the manufacturer
-  // motherboard query; they add no marketplace searches.
+  // Listing-only groups (chipsets, unknown-maker case/cooler, sorted PSU
+  // makers) only sort listings found by broader queries.
   const collectionProducts = [...new Map([...PC_PRODUCT_MASTER_V2, ...publicPcProducts()]
-    .filter((product) => !product.id.startsWith("motherboard:chipset:"))
-    // Unknown-maker case/cooler groups hold listings found by other queries.
-    .filter((product) => !(["CASE", "COOLING"].includes(product.category) && product.manufacturer === PC_UNCLASSIFIED_MANUFACTURER_V3))
+    .filter((product) => !pcNodeIsListingOnlyV3(product))
     .map((product) => [product.id, product])).values()];
   const exactTargets = [];
   let exactOrder = categoryTargets.length + generalTargets.length;

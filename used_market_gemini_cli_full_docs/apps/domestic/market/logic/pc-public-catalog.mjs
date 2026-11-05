@@ -41,7 +41,7 @@ const FACETS = Object.freeze({
     ["product_kind", "제품 종류"], ["capacity_bucket", "용량"], ["manufacturer", "제조사"]
   ],
   HDD: [
-    ["placement", "설치 방식"], ["capacity_bucket", "용량"], ["manufacturer", "제조사"]
+    ["placement", "설치 방식"], ["form_factor", "크기"], ["capacity_bucket", "용량"], ["manufacturer", "제조사"]
   ],
   PSU: [
     ["watts_bucket", "정격 출력"], ["form_factor", "크기 규격"], ["manufacturer", "제조사"]
@@ -98,6 +98,7 @@ export function motherboardChipsets(value) {
 // Board size and memory describe a listing, not a price identity: one chipset
 // group mixes ATX/M-ATX boards, and LGA1700 mixes DDR4/DDR5. They only filter
 // listings. Verified exact models use their official specification.
+export const HDD_SIZES = Object.freeze(["3.5-INCH", "2.5-INCH"]);
 export const MOTHERBOARD_BOARD_SIZES = Object.freeze(["ATX", "M-ATX", "MINI-ITX", "E-ATX", "UNKNOWN"]);
 export const MOTHERBOARD_BOARD_MEMORY = Object.freeze(["DDR5", "DDR4", "DDR3", "UNKNOWN"]);
 const BOARD_SIZE_LABELS = Object.freeze({ ATX: "ATX", "M-ATX": "M-ATX", "MINI-ITX": "Mini-ITX", "E-ATX": "E-ATX", UNKNOWN: "크기 확인 필요" });
@@ -305,7 +306,8 @@ function publicFacetValues(product, key) {
     case "vram_gb": return values(spec.vram_gb || spec.vram_options_gb);
     case "socket": return values(spec.socket);
     case "chipset": return values(spec.chipset || first(modelValue(product).match(/\b([ABHXZ]\d{3})M?/iu)?.[1]));
-    case "form_factor": return values(spec.form_factor);
+    // HDD size is read from each listing title (2.5 or 3.5 inch), not the bucket.
+    case "form_factor": return product.category === "HDD" ? [...HDD_SIZES] : values(spec.form_factor);
     case "product_kind": return product.category === "SSD" ? ["M2_NVME", "SATA_2_5", "M2_SATA", "EXTERNAL", "OTHER_UNKNOWN"] : [];
     case "placement": return product.category === "HDD" ? ["INTERNAL", "EXTERNAL", "UNKNOWN"] : values(spec.placement);
     case "memory_usage": return product.category === "RAM" ? [...RAM_MEMORY_USAGES] : [];
@@ -394,6 +396,7 @@ function productMatchesQuery(product, query) {
 function optionLabel(key, value) {
   if (key === "memory_usage") return RAM_USAGE_LABELS[value] || value;
   if (key === "board_size") return BOARD_SIZE_LABELS[value] || value;
+  if (key === "form_factor" && HDD_SIZES.includes(value)) return value === "2.5-INCH" ? "2.5인치" : "3.5인치";
   if (key === "chassis_class") return ({ MINI_TOWER: "미니타워", MID_TOWER: "미들타워", FULL_TOWER: "빅타워" })[value] || value;
   if (key === "subtype") return ({ AIR_CPU: "공랭 CPU 쿨러", AIO: "수랭 (AIO)", CASE_FAN: "케이스 팬" })[value] || value;
   if (key === "board_memory") return BOARD_MEMORY_LABELS[value] || value;
@@ -464,6 +467,8 @@ export function publicPcCatalogForApi() {
     listing_facet_options: { RAM: {
       memory_usage: RAM_MEMORY_USAGES.map(value => ({ value, label: optionLabel('memory_usage', value) })),
       speed_mt_s: RAM_SPEEDS_MT_S.map(value => ({ value, label: optionLabel('speed_mt_s', value) }))
+    }, HDD: {
+      form_factor: HDD_SIZES.map(value => ({ value, label: optionLabel("form_factor", value) }))
     }, MOTHERBOARD: {
       board_size: MOTHERBOARD_BOARD_SIZES.map(value => ({ value, label: optionLabel('board_size', value) })),
       board_memory: MOTHERBOARD_BOARD_MEMORY.map(value => ({ value, label: optionLabel('board_memory', value) }))

@@ -36,7 +36,7 @@ import {
   trustedSpecialistCategory
 } from "../collector/logic/pc-specialist-targets.mjs";
 import { explicitSoldText } from "../market/logic/listing-lifecycle.mjs";
-import { PC_PRODUCT_MASTER_V2 } from "../market/data/pc-product-master-v2.mjs";
+import { PC_PRODUCT_MASTER_V2, pcNodeIsListingOnlyV3 } from "../market/data/pc-product-master-v2.mjs";
 import { publicPcProducts } from "../market/logic/pc-public-catalog.mjs";
 import { pcCollectionTargetSetV2 } from "../cloudflare/pc-directory-http.mjs";
 
@@ -163,10 +163,8 @@ assert.equal(rethinkmallTargets.length, 0,
   "refurbished complete-system retail must not receive standalone PC-parts collection targets");
 // Chipset groups sort boards found by the manufacturer query and add no searches.
 const searchedMasterProducts = [...PC_PRODUCT_MASTER_V2, ...publicPcProducts()]
-  .filter((product) => !product.id.startsWith("motherboard:chipset:")
-    && !/^(?:case|cooling):facet:.*:other-unclassified$/u.test(product.id));
-assert.ok(dailyMarketplaceTargets.length >= PC_PRODUCT_MASTER_V2.filter((product) => !product.id.startsWith("motherboard:chipset:")
-    && !/^(?:case|cooling):facet:.*:other-unclassified$/u.test(product.id)).length,
+  .filter((product) => !pcNodeIsListingOnlyV3(product));
+assert.ok(dailyMarketplaceTargets.length >= PC_PRODUCT_MASTER_V2.filter((product) => !pcNodeIsListingOnlyV3(product)).length,
   "every master node must receive at least one daily marketplace query");
 assert.deepEqual(
   [...new Set(dailyMarketplaceTargets.map((target) => target.canonicalProductId))].sort(),
@@ -182,7 +180,8 @@ for (const sourceKey of OPERATIONAL_PC_DIRECTORY_SITES) {
   assert.deepEqual([...sourceCategories].sort(), [...PC_PART_CATEGORY_CODES].sort(),
     `${sourceKey}: every operational PC source must have a target for every part category`);
 }
-for (const product of publicPcProducts().filter(({ category }) => ["SSD", "HDD", "PSU"].includes(category))) {
+for (const product of publicPcProducts().filter(({ category }) => ["SSD", "HDD", "PSU"].includes(category))
+  .filter((product) => !pcNodeIsListingOnlyV3(product))) {
   for (const sourceKey of OPERATIONAL_PC_DIRECTORY_SITES) {
     assert.ok(collectionTargetSet.targets.some((target) => target.enabled !== false
       && target.canonicalProductId === product.id

@@ -1,5 +1,22 @@
 export const PC_PRODUCT_MASTER_V2_VERSION = 5;
 export const PC_UNCLASSIFIED_MANUFACTURER_V3 = "기타/미분류 제조사";
+// PSU makers found by the general power-supply queries. They sort listings that
+// were previously "unknown maker" and add no marketplace searches of their own.
+export const PC_LISTING_ONLY_PSU_MANUFACTURERS_V3 = Object.freeze(["EVGA", "Zalman", "GIGABYTE", "NZXT", "MAXELITE", "Energy Optimus", "ABKO"]);
+
+// Domestic sources run at their 100-query capacity, so these CPUs (released
+// 2026) are sorted from the general Ryzen queries instead of new searches.
+export const PC_SEARCHLESS_PRODUCT_IDS_V3 = Object.freeze(["cpu:amd:ryzen-7-9850x3d", "cpu:amd:ryzen-9-9950x3d2"]);
+
+// Groups that only sort listings already found by broader queries. They get
+// no marketplace search of their own.
+export function pcNodeIsListingOnlyV3(product) {
+  const id = String(product?.id || "");
+  return id.startsWith("motherboard:chipset:")
+    || PC_SEARCHLESS_PRODUCT_IDS_V3.includes(id)
+    || /^(?:case|cooling):facet:.*:other-unclassified$/u.test(id)
+    || (product?.category === "PSU" && PC_LISTING_ONLY_PSU_MANUFACTURERS_V3.includes(product.manufacturer));
+}
 
 export const PC_GPU_BOARD_MANUFACTURERS_V2 = Object.freeze([
   "NVIDIA", "AMD", "Intel", "ASUS", "Colorful", "EVGA", "Gainward", "GALAX", "GIGABYTE",
@@ -13,7 +30,7 @@ const CATEGORY_SEEDS = [
   ["MOTHERBOARD", "메인보드", ["ASUS", "GIGABYTE", "MSI", "ASRock", "Biostar"], ["ROG", "TUF", "Prime", "AORUS", "MPG", "MAG", "MEG", "Taichi", "Steel Legend"]],
   ["SSD", "SSD", ["Samsung", "SK hynix", "Solidigm", "Crucial", "Western Digital", "SanDisk", "Kingston", "Seagate", "Kioxia", "Micron", "Intel", "ADATA", "TeamGroup", "Transcend", "PNY", "Sabrent", "Lexar", "Toshiba", "Lite-On", "Imation", "Silicon Power", "KLEVV", PC_UNCLASSIFIED_MANUFACTURER_V3], ["SSD"]],
   ["HDD", "HDD", ["Western Digital", "Seagate", "Toshiba", "HGST", "Hitachi", "Samsung", PC_UNCLASSIFIED_MANUFACTURER_V3], ["Blue", "Black", "Red", "Purple", "Gold", "IronWolf", "Barracuda", "Exos", "N300", "X300"]],
-  ["PSU", "파워", ["Seasonic", "Corsair", "FSP", "Super Flower", "Cooler Master", "ASUS", "MSI", "Thermaltake", "be quiet!", "Antec", "Micronics", PC_UNCLASSIFIED_MANUFACTURER_V3], ["Power Supply"]],
+  ["PSU", "파워", ["Seasonic", "Corsair", "FSP", "Super Flower", "Cooler Master", "ASUS", "MSI", "Thermaltake", "be quiet!", "Antec", "Micronics", ...PC_LISTING_ONLY_PSU_MANUFACTURERS_V3, PC_UNCLASSIFIED_MANUFACTURER_V3], ["Power Supply"]],
   ["COOLING", "쿨러", ["Noctua", "Cooler Master", "Thermalright", "DeepCool", "ARCTIC", "Corsair", "NZXT", "be quiet!", "Scythe", "Thermaltake", PC_UNCLASSIFIED_MANUFACTURER_V3], ["Air Cooler", "AIO", "Case Fan", "Custom Loop"]],
   ["CASE", "케이스", ["Corsair", "Cooler Master", "Lian Li", "Fractal Design", "NZXT", "Phanteks", "Thermaltake", "Antec", "3RSYS", "darkFlash", "ABKO", "Micronics", PC_UNCLASSIFIED_MANUFACTURER_V3], ["PC Case"]],
   ["EXPANSION_CARD", "확장카드", ["ASUS", "Creative", "Elgato", "Blackmagic Design", "Intel", "Broadcom", "TP-Link", "QNAP", "HighPoint", "StarTech"], ["Network", "Sound", "Capture", "Storage Controller", "M.2 Carrier", "Thunderbolt"]],
@@ -225,6 +242,8 @@ const INTEL_CPU_GENERATIONS = [
 ];
 
 function suffixOf(model) {
+  // 9950X3D2 is a separate model; its browse suffix is still X3D.
+  if (/X3D2$/u.test(model)) return "X3D";
   return model.match(/(X3D|KF|KS|XT|K|F|G|X)$/u)?.[1] || "NONE";
 }
 
@@ -265,7 +284,8 @@ const AMD_CPU_GENERATIONS = [
   [5000, "AM4", ["Ryzen 5 5500", "Ryzen 5 5600", "Ryzen 5 5600G", "Ryzen 5 5600X", "Ryzen 5 5600X3D", "Ryzen 7 5700", "Ryzen 7 5700G", "Ryzen 7 5700X", "Ryzen 7 5700X3D", "Ryzen 7 5800", "Ryzen 7 5800X", "Ryzen 7 5800X3D", "Ryzen 9 5900X", "Ryzen 9 5950X"]],
   [7000, "AM5", ["Ryzen 5 7500F", "Ryzen 5 7600", "Ryzen 5 7600X", "Ryzen 5 7600X3D", "Ryzen 7 7700", "Ryzen 7 7700X", "Ryzen 7 7800X3D", "Ryzen 9 7900", "Ryzen 9 7900X", "Ryzen 9 7900X3D", "Ryzen 9 7950X", "Ryzen 9 7950X3D"]],
   [8000, "AM5", ["Ryzen 3 8300G", "Ryzen 5 8400F", "Ryzen 5 8500G", "Ryzen 5 8600G", "Ryzen 7 8700F", "Ryzen 7 8700G"]],
-  [9000, "AM5", ["Ryzen 5 9600X", "Ryzen 5 9600X3D", "Ryzen 7 9700X", "Ryzen 7 9800X3D", "Ryzen 9 9900X", "Ryzen 9 9900X3D", "Ryzen 9 9950X", "Ryzen 9 9950X3D"]]
+  [9000, "AM5", ["Ryzen 5 9600X", "Ryzen 5 9600X3D", "Ryzen 7 9700X", "Ryzen 7 9800X3D", "Ryzen 9 9900X", "Ryzen 9 9900X3D", "Ryzen 9 9950X", "Ryzen 9 9950X3D",
+    "Ryzen 7 9850X3D", "Ryzen 9 9950X3D2"]]
 ];
 
 function amdCpuRecords() {
