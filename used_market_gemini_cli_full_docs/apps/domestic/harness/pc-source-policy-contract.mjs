@@ -163,8 +163,10 @@ assert.equal(rethinkmallTargets.length, 0,
   "refurbished complete-system retail must not receive standalone PC-parts collection targets");
 // Chipset groups sort boards found by the manufacturer query and add no searches.
 const searchedMasterProducts = [...PC_PRODUCT_MASTER_V2, ...publicPcProducts()]
-  .filter((product) => !product.id.startsWith("motherboard:chipset:"));
-assert.ok(dailyMarketplaceTargets.length >= PC_PRODUCT_MASTER_V2.filter((product) => !product.id.startsWith("motherboard:chipset:")).length,
+  .filter((product) => !product.id.startsWith("motherboard:chipset:")
+    && !/^(?:case|cooling):facet:.*:other-unclassified$/u.test(product.id));
+assert.ok(dailyMarketplaceTargets.length >= PC_PRODUCT_MASTER_V2.filter((product) => !product.id.startsWith("motherboard:chipset:")
+    && !/^(?:case|cooling):facet:.*:other-unclassified$/u.test(product.id)).length,
   "every master node must receive at least one daily marketplace query");
 assert.deepEqual(
   [...new Set(dailyMarketplaceTargets.map((target) => target.canonicalProductId))].sort(),

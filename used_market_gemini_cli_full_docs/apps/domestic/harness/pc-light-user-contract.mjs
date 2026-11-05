@@ -95,7 +95,7 @@ const published = new Map();
 try {
   for (const [category, title, id] of fixtures) {
     assert.ok(tools.some(p => p.canonical_product_id === id), `${id}: fixture uses a real tool catalog identity`);
-    assert.equal(publicIds.has(id), !['CASE', 'COOLING'].includes(category), 'tool-only categories do not expand marketplace scope');
+    assert.equal(publicIds.has(id), true, 'cases and coolers are public browse categories');
     for (let i = 0; i < 5; i++) {
       const result = pipeline.recordItem({ site: 'joonggonara', source_listing_id: `light-${category}-${i}`, title,
         price: (50_000 + i * 10_000) * (category === 'RAM' ? 2 : 1), currency: 'KRW', status: 'ACTIVE' }, observedAt);

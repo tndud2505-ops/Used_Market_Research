@@ -15,7 +15,7 @@ import {
 } from "./pc-projection-republish-policy.mjs";
 
 const IMPORT_BATCH_SIZE = 400;
-const PUBLIC_PC_CATEGORY_CODES = Object.freeze(["CPU", "GPU", "RAM", "MOTHERBOARD", "SSD", "HDD", "PSU"]);
+const PUBLIC_PC_CATEGORY_CODES = Object.freeze(["CPU", "GPU", "RAM", "MOTHERBOARD", "SSD", "HDD", "PSU", "CASE", "COOLING"]);
 
 function parseJson(value, fallback = {}) {
   try {

@@ -14,8 +14,8 @@ const CATEGORY_SEEDS = [
   ["SSD", "SSD", ["Samsung", "SK hynix", "Solidigm", "Crucial", "Western Digital", "SanDisk", "Kingston", "Seagate", "Kioxia", "Micron", "Intel", "ADATA", "TeamGroup", "Transcend", "PNY", "Sabrent", "Lexar", "Toshiba", "Lite-On", "Imation", "Silicon Power", "KLEVV", PC_UNCLASSIFIED_MANUFACTURER_V3], ["SSD"]],
   ["HDD", "HDD", ["Western Digital", "Seagate", "Toshiba", "HGST", "Hitachi", "Samsung", PC_UNCLASSIFIED_MANUFACTURER_V3], ["Blue", "Black", "Red", "Purple", "Gold", "IronWolf", "Barracuda", "Exos", "N300", "X300"]],
   ["PSU", "파워", ["Seasonic", "Corsair", "FSP", "Super Flower", "Cooler Master", "ASUS", "MSI", "Thermaltake", "be quiet!", "Antec", "Micronics", PC_UNCLASSIFIED_MANUFACTURER_V3], ["Power Supply"]],
-  ["COOLING", "쿨러", ["Noctua", "Cooler Master", "Thermalright", "DeepCool", "ARCTIC", "Corsair", "NZXT", "be quiet!", "Scythe", "Thermaltake"], ["Air Cooler", "AIO", "Case Fan", "Custom Loop"]],
-  ["CASE", "케이스", ["Corsair", "Cooler Master", "Lian Li", "Fractal Design", "NZXT", "Phanteks", "Thermaltake", "Antec", "3RSYS", "darkFlash", "ABKO", "Micronics"], ["PC Case"]],
+  ["COOLING", "쿨러", ["Noctua", "Cooler Master", "Thermalright", "DeepCool", "ARCTIC", "Corsair", "NZXT", "be quiet!", "Scythe", "Thermaltake", PC_UNCLASSIFIED_MANUFACTURER_V3], ["Air Cooler", "AIO", "Case Fan", "Custom Loop"]],
+  ["CASE", "케이스", ["Corsair", "Cooler Master", "Lian Li", "Fractal Design", "NZXT", "Phanteks", "Thermaltake", "Antec", "3RSYS", "darkFlash", "ABKO", "Micronics", PC_UNCLASSIFIED_MANUFACTURER_V3], ["PC Case"]],
   ["EXPANSION_CARD", "확장카드", ["ASUS", "Creative", "Elgato", "Blackmagic Design", "Intel", "Broadcom", "TP-Link", "QNAP", "HighPoint", "StarTech"], ["Network", "Sound", "Capture", "Storage Controller", "M.2 Carrier", "Thunderbolt"]],
   ["ODD", "ODD", ["ASUS", "LG", "Pioneer", "Samsung"], ["DVD", "Blu-ray", "BDXL"]]
 ];

@@ -58,6 +58,14 @@ const FALLBACK_BROWSE_FLOWS = Object.freeze({
     Object.freeze({ key: "form_factor", label: "크기 규격" }),
     Object.freeze({ key: "manufacturer", label: "제조사" }),
   ]),
+  CASE: Object.freeze([
+    Object.freeze({ key: "chassis_class", label: "크기" }),
+    Object.freeze({ key: "manufacturer", label: "제조사" }),
+  ]),
+  COOLING: Object.freeze([
+    Object.freeze({ key: "subtype", label: "종류" }),
+    Object.freeze({ key: "manufacturer", label: "제조사" }),
+  ]),
 });
 const mobileFacetMedia = window.matchMedia("(max-width: 760px)");
 const compactFilterMedia = window.matchMedia("(max-width: 760px)");

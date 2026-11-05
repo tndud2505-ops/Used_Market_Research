@@ -7,7 +7,7 @@ import { pcBrandSearchAliases, pcProductMatchesQuery } from './pc-product-search
 import { RAM_MEMORY_USAGES, RAM_SPEEDS_MT_S, RAM_USAGE_LABELS } from './ram-listing-facets.mjs';
 
 export const PUBLIC_PC_CATEGORY_CODES = Object.freeze([
-  "CPU", "GPU", "RAM", "MOTHERBOARD", "SSD", "HDD", "PSU"
+  "CPU", "GPU", "RAM", "MOTHERBOARD", "SSD", "HDD", "PSU", "CASE", "COOLING"
 ]);
 
 export const PUBLIC_PC_CATEGORY_DEFINITIONS = Object.freeze([
@@ -17,7 +17,10 @@ export const PUBLIC_PC_CATEGORY_DEFINITIONS = Object.freeze([
   { code: "MOTHERBOARD", label: "메인보드", brand_label: "보드 브랜드", order: 3 },
   { code: "SSD", label: "SSD", brand_label: "브랜드", order: 4 },
   { code: "HDD", label: "HDD", brand_label: "브랜드", order: 5 },
-  { code: "PSU", label: "파워서플라이", brand_label: "파워 브랜드", order: 6 }
+  { code: "PSU", label: "파워서플라이", brand_label: "파워 브랜드", order: 6 },
+  // Browse-only: listings by maker and size/type, no price statistics.
+  { code: "CASE", label: "케이스", brand_label: "제조사", order: 7 },
+  { code: "COOLING", label: "쿨러", brand_label: "제조사", order: 8 }
 ]);
 
 const FACETS = Object.freeze({
@@ -42,6 +45,12 @@ const FACETS = Object.freeze({
   ],
   PSU: [
     ["watts_bucket", "정격 출력"], ["form_factor", "크기 규격"], ["manufacturer", "제조사"]
+  ],
+  CASE: [
+    ["chassis_class", "크기"], ["manufacturer", "제조사"]
+  ],
+  COOLING: [
+    ["subtype", "종류"], ["manufacturer", "제조사"]
   ]
 });
 const LISTING_ONLY_FACETS = new Set(["product_kind", "placement", "form_factor", "memory_usage", "speed_mt_s",
@@ -301,6 +310,8 @@ function publicFacetValues(product, key) {
     case "placement": return product.category === "HDD" ? ["INTERNAL", "EXTERNAL", "UNKNOWN"] : values(spec.placement);
     case "memory_usage": return product.category === "RAM" ? [...RAM_MEMORY_USAGES] : [];
     case "speed_mt_s": return product.category === "RAM" ? [...RAM_SPEEDS_MT_S] : [];
+    case "chassis_class": return values(spec.chassis_class);
+    case "subtype": return values(spec.subtype);
     case "board_size": return product.category === "MOTHERBOARD" ? [...MOTHERBOARD_BOARD_SIZES] : [];
     case "board_memory": return product.category === "MOTHERBOARD" ? [...MOTHERBOARD_BOARD_MEMORY] : [];
     case "form_interface": {
@@ -357,7 +368,7 @@ function normalizeFilters(options = {}) {
     manufacturer: ["manufacturer", "brand"], generation: ["generation", "memory_generation"], model: ["model", "exact_model"],
     gpu_model: ["gpu_model"], board_brand: ["board_brand", "board_manufacturer"], usage: ["usage", "market_segment"],
     memory_usage: ["memory_usage"], speed_mt_s: ["speed_mt_s"],
-    board_size: ["board_size"], board_memory: ["board_memory"],
+    board_size: ["board_size"], board_memory: ["board_memory"], chassis_class: ["chassis_class"], subtype: ["subtype"],
     platform_vendor: ["platform_vendor"], family: ["family"], suffix: ["suffix"],
     configuration: ["configuration", "config"], module_capacity_gb: ["module_capacity_gb", "capacity_per_module_gb"], vram_gb: ["vram_gb", "vram_options_gb"], socket: ["socket"], chipset: ["chipset"], form_factor: ["form_factor"],
     form_interface: ["form_interface"], product_kind: ["product_kind"], placement: ["placement"], capacity: ["capacity", "marketed_capacity_gb"], purpose: ["purpose", "use_class"],
@@ -383,6 +394,8 @@ function productMatchesQuery(product, query) {
 function optionLabel(key, value) {
   if (key === "memory_usage") return RAM_USAGE_LABELS[value] || value;
   if (key === "board_size") return BOARD_SIZE_LABELS[value] || value;
+  if (key === "chassis_class") return ({ MINI_TOWER: "미니타워", MID_TOWER: "미들타워", FULL_TOWER: "빅타워" })[value] || value;
+  if (key === "subtype") return ({ AIR_CPU: "공랭 CPU 쿨러", AIO: "수랭 (AIO)", CASE_FAN: "케이스 팬" })[value] || value;
   if (key === "board_memory") return BOARD_MEMORY_LABELS[value] || value;
   if (key === "speed_mt_s") return value === "UNKNOWN" ? "확인 불가" : `${value} MT/s`;
   if (key === "suffix" && value === "NONE") return "일반";

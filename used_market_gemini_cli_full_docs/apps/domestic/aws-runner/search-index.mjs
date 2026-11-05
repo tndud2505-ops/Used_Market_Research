@@ -1268,7 +1268,7 @@ export class SearchIndex {
       json_type(pc_metadata_json, '$.statistics_eligible') = 'true' AS statistics_eligible,
       json_extract(pc_metadata_json, '$.statistics_exclusion_reasons') AS statistics_exclusion_reasons`;
     const componentWhere = [...where, 'pc_canonical_product_id IS NOT NULL',
-      "(pc_category_code IN ('CPU', 'GPU', 'RAM', 'MOTHERBOARD', 'SSD', 'HDD', 'PSU') OR pc_category_code IS NULL)",
+      "(pc_category_code IN ('CPU', 'GPU', 'RAM', 'MOTHERBOARD', 'SSD', 'HDD', 'PSU', 'CASE', 'COOLING') OR pc_category_code IS NULL)",
       "pc_listing_kind IN ('SINGLE_COMPONENT', 'SAME_PRODUCT_LOT')", 'pc_price_eligible = 1',
       'pc_quantity >= 1', "pc_price_scope IN ('TOTAL', 'UNIT')", ...componentScope];
     const componentCandidates = this.db.prepare(`SELECT ${columns} FROM listings${scopeIndex}

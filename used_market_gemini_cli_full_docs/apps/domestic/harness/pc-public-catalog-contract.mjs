@@ -44,12 +44,12 @@ for (const name of ['i5-19600K', 'i5-96000KF']) {
 assert.equal(PC_PRODUCT_MASTER_V2_VERSION, 5);
 assert.equal(catalog.master_version, "public-pc-5");
 const categoryCodes = catalog.categories.map((category) => category.code);
-assert.deepEqual(categoryCodes, ["CPU", "GPU", "RAM", "MOTHERBOARD", "SSD", "HDD", "PSU"]);
+assert.deepEqual(categoryCodes, ["CPU", "GPU", "RAM", "MOTHERBOARD", "SSD", "HDD", "PSU", "CASE", "COOLING"]);
 assert.deepEqual(PUBLIC_PC_PART_CATEGORIES, categoryCodes);
 assert.deepEqual(catalog.categories.map((category) => category.label), [
-  "CPU", "그래픽카드", "RAM", "메인보드", "SSD", "HDD", "파워서플라이"
+  "CPU", "그래픽카드", "RAM", "메인보드", "SSD", "HDD", "파워서플라이", "케이스", "쿨러"
 ]);
-assert.equal(categoryCodes.some((code) => ["CASE", "COOLING", "ODD", "EXPANSION_CARD"].includes(code)), false);
+assert.equal(categoryCodes.some((code) => ["ODD", "EXPANSION_CARD"].includes(code)), false);
 assert.deepEqual(catalog.categories.map((category) => Object.keys(category).filter((key) => ["model_count", "active_count", "sold_30d_count"].includes(key))),
   categoryCodes.map(() => ["model_count", "active_count", "sold_30d_count"]));
 for (const code of categoryCodes) {

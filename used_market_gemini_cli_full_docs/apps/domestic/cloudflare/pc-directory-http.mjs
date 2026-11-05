@@ -102,19 +102,13 @@ export function pcCatalogResponse() {
 }
 
 export function pcToolsCatalog(publicCatalog = publicPcCatalogForApi()) {
-  const extraCodes = ["CASE", "COOLING"];
-  const products = PC_PRODUCT_MASTER_V2.filter((p) => extraCodes.includes(p.category)).map((p) => ({
-    canonical_product_id: p.id,
-    canonical_display_name: p.name,
-    category_code: p.category,
-    brand: p.manufacturer || p.brand || null,
-    key_specs: { ...(p.spec || {}), ...(p.browse_facets || {}) },
-    aliases: [...new Set([...(p.aliases || []), ...pcBrandSearchAliases(p.manufacturer || p.brand)])]
-  }));
+  // Cases and coolers are public browse categories, so the builder uses the
+  // same catalogue. Chipset groups and unknown-maker case/cooler groups only
+  // sort listings; they have no comparison prices to select.
   return {
-    categories: [...publicCatalog.categories, ...extraCodes.map((code) => ({ code, label: code === "CASE" ? "케이스" : "쿨러", model_count: products.filter((p) => p.category_code === code).length }))],
-    // Build tools select exact models; chipset groups only serve listing filters.
-    products: [...publicCatalog.products.filter((p) => !p.canonical_product_id.startsWith("motherboard:chipset:")), ...products]
+    categories: publicCatalog.categories,
+    products: publicCatalog.products.filter((p) => !p.canonical_product_id.startsWith("motherboard:chipset:")
+      && !/^(?:case|cooling):facet:.*:other-unclassified$/u.test(p.canonical_product_id))
   };
 }
 
@@ -278,6 +272,8 @@ export function pcCollectionTargetSetV2() {
   // motherboard query; they add no marketplace searches.
   const collectionProducts = [...new Map([...PC_PRODUCT_MASTER_V2, ...publicPcProducts()]
     .filter((product) => !product.id.startsWith("motherboard:chipset:"))
+    // Unknown-maker case/cooler groups hold listings found by other queries.
+    .filter((product) => !(["CASE", "COOLING"].includes(product.category) && product.manufacturer === PC_UNCLASSIFIED_MANUFACTURER_V3))
     .map((product) => [product.id, product])).values()];
   const exactTargets = [];
   let exactOrder = categoryTargets.length + generalTargets.length;

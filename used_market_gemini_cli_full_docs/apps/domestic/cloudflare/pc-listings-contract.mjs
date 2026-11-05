@@ -46,14 +46,14 @@ const SORTS = new Set(["recent", "price_asc", "price_desc"]);
 const CURRENCIES = new Set(["KRW", "USD"]);
 const MARKET_POOLS = new Set(["KR_C2C_USED", "KR_DEALER_USED", "KR_REFURB_RETAIL", "OVERSEAS_USED"]);
 const DOMESTIC_MARKET_POOLS = new Set(["KR_C2C_USED", "KR_DEALER_USED", "KR_REFURB_RETAIL"]);
-const PUBLIC_PC_CATEGORY_CODES = new Set(["CPU", "GPU", "RAM", "MOTHERBOARD", "SSD", "HDD", "PSU"]);
+const PUBLIC_PC_CATEGORY_CODES = new Set(["CPU", "GPU", "RAM", "MOTHERBOARD", "SSD", "HDD", "PSU", "CASE", "COOLING"]);
 const PUBLIC_PC_FACET_KEYS = new Set([
   "manufacturer", "brand", "model", "exact_model", "gpu_model", "board_brand", "usage", "market_segment",
   "configuration", "config", "platform_vendor", "family", "generation", "memory_generation", "suffix",
   "module_capacity_gb", "capacity_per_module_gb", "vram_gb", "vram_options_gb", "socket", "chipset",
   "form_factor", "form_interface", "product_kind", "placement", "capacity", "marketed_capacity_gb", "capacity_bucket", "purpose", "use_class",
   "interface", "protocol", "rated_wattage", "watts", "watts_bucket", "atx_spec", "atx_or_sfx_version",
-  "efficiency", "modularity"
+  "efficiency", "modularity", "chassis_class", "subtype"
 ]);
 const MAX_CATALOG_SCOPE_VALUES = 60;
 const LISTING_FACET_VALUES = Object.freeze({

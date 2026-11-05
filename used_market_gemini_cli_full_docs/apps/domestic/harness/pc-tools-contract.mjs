@@ -218,7 +218,8 @@ assert.deepEqual(modelPageItems(3, 4), [1, 2, 3, 4]);
 const catalog = pcCatalogResponse();
 assert.ok(catalog.tools_catalog.products.some(p => p.category_code === 'CASE'));
 assert.ok(catalog.tools_catalog.products.some(p => p.category_code === 'COOLING'));
-assert.equal(catalog.categories.some(c => c.code === 'CASE'), false, 'builder extension must not alter current marketplace search scope');
+assert.equal(catalog.categories.some(c => c.code === 'CASE'), true, 'cases are a public browse category');
+assert.equal(catalog.tools_catalog.categories.filter(c => c.code === 'CASE').length, 1, 'the builder must not list cases twice');
 
 const originalFetch = globalThis.fetch;
 let requestedStatsUrl = '';

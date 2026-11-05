@@ -1675,7 +1675,7 @@ async function fetchResponse(request, env) {
       }
       const categoryRoute = url.pathname.match(/^\/categories\/([a-z-]+)$/u);
       if (categoryRoute) {
-        if (!["cpu", "gpu", "ram", "motherboard", "ssd", "hdd", "psu"].includes(categoryRoute[1])) {
+        if (!["cpu", "gpu", "ram", "motherboard", "ssd", "hdd", "psu", "case", "cooling"].includes(categoryRoute[1])) {
           return json(410, { status: "error", error: "Unsupported category route" });
         }
         const assetResponse = await serveAssets(new Request(new URL("/index.html", request.url), request), env);

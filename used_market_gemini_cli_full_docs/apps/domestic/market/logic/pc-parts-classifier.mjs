@@ -1,5 +1,6 @@
 import { explicitSoldText } from "./listing-lifecycle.mjs";
 import {
+  PC_PRODUCT_MASTER_V2,
   PC_UNCLASSIFIED_MANUFACTURER_V3,
   pcAggregateProductIdV3,
   pcPsuWattsBucketV3,
@@ -258,7 +259,7 @@ function detectSpecialKind(text, evidence, title = text) {
   }
   const componentGroups = new Set();
   const componentRules = [
-    ['CPU', /(?:\bCPU\b(?!\s*(?:지원|호환|용\b|소켓))|라이젠|RYZEN|\bI[3579]\s*(?:[-~]\s*)?\d{4,5}(?:KF|KS|HX|K|F|H|U|T)?(?=\b|CPU)|\b(?:[6-9]\d{3}|1[0-5]\d{3})(?:K[F]?|F|T)\b|\b\d{4,5}X(?:3D)?\b|\bCORE\s*(?:ULTRA\s*)?[3579]\b|(?:CORE\s*)?ULTRA\s*[3579]?\s*\d{3}[A-Z]*|울트라\s*[3579]?\s*\d{3}[A-Z]*)/i],
+    ['CPU', /(?:\bCPU\b(?!\s*(?:지원|호환|용\b|소켓|쿨러))|라이젠|RYZEN|\bI[3579]\s*(?:[-~]\s*)?\d{4,5}(?:KF|KS|HX|K|F|H|U|T)?(?=\b|CPU)|\b(?:[6-9]\d{3}|1[0-5]\d{3})(?:K[F]?|F|T)\b|\b\d{4,5}X(?:3D)?\b|\bCORE\s*(?:ULTRA\s*)?[3579]\b|(?:CORE\s*)?ULTRA\s*[3579]?\s*\d{3}[A-Z]*|울트라\s*[3579]?\s*\d{3}[A-Z]*)/i],
     ['GPU', /(?:RTX\s*\d{4}|GTX\s*\d{3,4}|\bGT\s*\d{3,4}|RX\s*\d{3,4}|(?:INTEL\s*)?ARC\s*[AB]\d{3}|\b[5-9]\d{3}\s*XT[X]?\b|\b(?:30[5-9]0|40[5-9]0|50[5-9]0)(?:\s*(?:TI|SUPER))?\b|그래픽\s*카드|그래픽카드|\bGPU\b)/i],
     ['RAM', /(?:\bRAM\b|램|렘|메모리|DDR[345]\s*\d+\s*(?:GB|G)\b)/i],
     ['MOTHERBOARD', /(?:메인\s*보드|메인보드|보드셋|\bM\s*\/\s*B\b|\b[ABHXZ]{1,2}\d{3}[A-Z0-9-]*\b)/i],
@@ -455,7 +456,7 @@ function detectCategory(text, specialKind, evidence, title = '') {
     ['CPU', CORE_ULTRA_PATTERN],
     ['CPU', /(?:\bCPU\b|라이젠|RYZEN|인텔\s*(?:코어)?|\bI[3579]\s*(?:[-~]\s*)?\d{4,5}(?:KF|KS|HX|K|F|H|U|T)?(?=\b|CPU)|\b\d{4,5}X(?:3D)?\b|\b1[2345]\d{3}K[F]?\b)/i],
     ['PSU', /(?:\bPSU\b|power\s*supply|파워\s*(?:서플라이)?|\b(?:RM|HX|AX|TX|CX|CV|SF)\d{3,4}(?:X|I|M)?\b|GX-\d{3,4}|ATX\s*3\.0|(?:정격|피크)\s*\d{3,4}\s*W\b|(?:Classic\s*II|클래식\s*2|HYDRO\s*PRO|하이드로\s*프로|LEADEX|리덱스).{0,20}\d{3,4}\s*W?\b|(?:Seasonic|시소닉|Corsair|커세어|FSP|Super\s*Flower|슈퍼플라워|Micronics|마이크로닉스|Cooler\s*Master|쿨러마스터|Thermaltake|써멀테이크|Antec|안텍).{0,30}\d{3,4}\s*W\b)/i],
-    ['CASE', /(?:PC\s*케이스|컴퓨터\s*케이스|Fractal\s+Design\s+North)/i],
+    ['CASE', /(?:PC\s*케이스|컴퓨터\s*케이스|Fractal\s+Design\s+North|(?:미니|미들|빅|풀)\s*타워|\b(?:MINI|MID|MIDDLE|FULL|BIG)[\s-]*TOWER\b|(?:리안리|LIAN\s*LI|앱코|ABKO|NZXT|프랙탈|FRACTAL|다크플래[쉬시]|DARKFLASH|3RSYS|쓰리알시스|마이크로닉스|MICRONICS|써멀테이크|THERMALTAKE|쿨러마스터|COOLER\s*MASTER|커세어|CORSAIR|팬텍스|PHANTEKS|안텍|ANTEC|HYTE)[^,\n]{0,30}케이스(?!\s*팬))/iu],
     ['EXPANSION_CARD', /(?:확장\s*카드|확장카드|랜\s*카드|랜카드|사운드\s*카드|캡처\s*보드|XG-C100C)/i],
     ['ODD', /(?:\bODD\b|DVD\s*(?:ROM|라이터)?|블루레이\s*드라이브|GP60NB50)/i]
   ];
@@ -577,14 +578,14 @@ const CATEGORY_MANUFACTURER_PATTERNS = Object.freeze({
   COOLING: [
     ["Noctua", /(?:\bNoctua\b|녹투아)/iu], ["Cooler Master", /(?:\bCooler\s*Master\b|쿨러마스터)/iu],
     ["Thermalright", /(?:\bThermalright\b|써멀라이트)/iu], ["DeepCool", /(?:\bDeepCool\b|딥쿨)/iu],
-    ["ARCTIC", /\bARCTIC\b/iu], ["Corsair", /(?:\bCorsair\b|커세어)/iu], ["NZXT", /\bNZXT\b/iu],
+    ["ARCTIC", /(?:\bARCTIC\b|아크틱)/iu], ["Corsair", /(?:\bCorsair\b|커세어)/iu], ["NZXT", /\bNZXT\b/iu],
     ["be quiet!", /\bbe\s*quiet!?\b/iu], ["Scythe", /(?:\bScythe\b|사이즈)/iu], ["Thermaltake", /(?:\bThermaltake\b|써멀테이크)/iu]
   ],
   CASE: [
     ["Corsair", /(?:\bCorsair\b|커세어)/iu], ["Cooler Master", /(?:\bCooler\s*Master\b|쿨러마스터)/iu],
     ["Lian Li", /(?:\bLian\s*Li\b|리안리)/iu], ["Fractal Design", /(?:\bFractal\s*Design\b|프랙탈)/iu],
     ["NZXT", /\bNZXT\b/iu], ["Phanteks", /(?:\bPhanteks\b|팬텍스)/iu], ["Thermaltake", /(?:\bThermaltake\b|써멀테이크)/iu],
-    ["Antec", /(?:\bAntec\b|안텍)/iu], ["3RSYS", /\b3RSYS\b/iu], ["darkFlash", /\bdarkFlash\b/iu],
+    ["Antec", /(?:\bAntec\b|안텍)/iu], ["3RSYS", /(?:\b3RSYS\b|쓰리알시스)/iu], ["darkFlash", /(?:\bdarkFlash\b|다크플래[쉬시])/iu],
     ["ABKO", /(?:\bABKO\b|앱코)/iu], ["Micronics", /(?:\bMicronics\b|마이크로닉스)/iu]
   ],
   EXPANSION_CARD: [
@@ -1115,7 +1116,31 @@ export function classifyPcPartListing(input) {
   return result;
 }
 
-const PUBLIC_CATEGORY_CODES = new Set(['CPU', 'GPU', 'RAM', 'MOTHERBOARD', 'SSD', 'HDD', 'PSU']);
+const PUBLIC_CATEGORY_CODES = new Set(['CPU', 'GPU', 'RAM', 'MOTHERBOARD', 'SSD', 'HDD', 'PSU', 'CASE', 'COOLING']);
+// Cases and coolers are listed by maker and size/type groups. The builder's
+// own comparison rules (pc-shadow-pipeline) keep deciding their statistics.
+const BROWSE_ONLY_CATEGORY_CODES = new Set(['CASE', 'COOLING']);
+let caseCoolingNodeIds = null;
+
+function caseCoolingNodeId(category, manufacturer, facetValue) {
+  caseCoolingNodeIds ??= new Map(PC_PRODUCT_MASTER_V2.filter((product) => BROWSE_ONLY_CATEGORY_CODES.has(product.category))
+    .map((product) => [[product.category, product.manufacturer, product.spec.subtype || product.spec.chassis_class].join('|'), product.id]));
+  return caseCoolingNodeIds.get([category, manufacturer, facetValue].join('|'))
+    || caseCoolingNodeIds.get([category, PC_UNCLASSIFIED_MANUFACTURER_V3, facetValue].join('|')) || null;
+}
+
+function coolingSubtype(text) {
+  if (/\bAIO\b|수\s*[랭냉]|WATER\s*COOL|라디에이터|RADIATOR/iu.test(text)) return 'AIO';
+  if (/케이스\s*팬|CASE\s*FAN|쿨링\s*팬|시스템\s*팬|PWM\s*팬|\d{2,3}\s*MM\s*팬|팬\s*\d+\s*개/iu.test(text)
+    && !/CPU\s*쿨러|공랭|타워\s*쿨러/iu.test(text)) return 'CASE_FAN';
+  return 'AIR_CPU';
+}
+
+function caseChassisClass(text) {
+  if (/빅\s*타워|풀\s*타워|\b(?:BIG|FULL)[\s-]*TOWER\b/iu.test(text)) return 'FULL_TOWER';
+  if (/미니\s*타워|\bMINI[\s-]*TOWER\b|미니\s*ITX|\bITX\b|M-?ATX\s*케이스|\bMATX\b/iu.test(text)) return 'MINI_TOWER';
+  return 'MID_TOWER';
+}
 
 function publicCategoryCode(category, text, listingKind) {
   if (PUBLIC_CATEGORY_CODES.has(category)) return category;
@@ -1211,6 +1236,10 @@ function publicCanonicalProductId(category, model, text, marketSegment, base = {
       capacityGb: fields.marketed_capacity_gb
     });
   }
+  if (BROWSE_ONLY_CATEGORY_CODES.has(category)) {
+    if (marketSegment !== 'CONSUMER_DESKTOP') return null;
+    return caseCoolingNodeId(category, base.manufacturer || PC_UNCLASSIFIED_MANUFACTURER_V3, fields.subtype || fields.chassis_class);
+  }
   if (!PUBLIC_CATEGORY_CODES.has(category) || (!model && category !== 'MOTHERBOARD') || marketSegment !== 'CONSUMER_DESKTOP') return null;
   if (category === 'MOTHERBOARD') return motherboardResolution?.product?.id || null;
   if (category === 'PSU') {
@@ -1238,6 +1267,8 @@ function publicSpecGroupId(category, model, text, marketSegment, base = {}, fiel
 
 function publicSpecificFields(category, model, text, base, motherboardProduct = null, title = '') {
   const fields = {};
+  if (category === 'COOLING') fields.subtype = coolingSubtype(text);
+  if (category === 'CASE') fields.chassis_class = caseChassisClass(text);
   if (category === 'GPU') {
     fields.chip_vendor = publicChipVendor(category, model, text);
     fields.gpu_model = model;
@@ -1369,6 +1400,9 @@ export function classifyPcPartListingPublic(input, options = {}) {
     ...((category === 'PSU' && !fields.rated_wattage) ? ['RATED_WATTAGE_UNCONFIRMED'] : []),
     ...((category === 'PSU' && /(?:케이블\s*(?:없음|누락)|케이블\s*미포함)/iu.test(text)) ? ['INCOMPLETE_CABLE_SET'] : [])
   ]);
+  // A browse-only listing needs a priced sale, not a verified model.
+  const browsePriceEligible = BROWSE_ONLY_CATEGORY_CODES.has(category) && Boolean(canonicalProductId)
+    && base.category_code !== 'UNKNOWN' && (base.exclusion_reasons || []).every((reason) => reason === 'MODEL_AMBIGUOUS');
   const statisticsEligible = category !== 'UNSUPPORTED_CATEGORY'
     && comparableSegment
     && conditionGroup === 'USED_WORKING'
@@ -1391,11 +1425,12 @@ export function classifyPcPartListingPublic(input, options = {}) {
     price_scope_confidence: base.confidence?.price_scope ?? 0,
     statistics_eligible: statisticsEligible,
     statistics_exclusion_reasons: exclusionReasons,
+    price_eligible: browsePriceEligible || base.price_eligible,
     parser_version: 'pc-parser-public-v2',
     rule_version: 'pc-rules-public-v2',
     canonical_manufacturer: category === 'MOTHERBOARD' && exactMotherboardProduct
       ? (exactMotherboardProduct.manufacturer || null)
-      : ['SSD', 'HDD', 'PSU'].includes(category)
+      : ['SSD', 'HDD', 'PSU', 'CASE', 'COOLING'].includes(category)
       ? (base.manufacturer || PC_UNCLASSIFIED_MANUFACTURER_V3)
       : (base.canonical_manufacturer ?? base.manufacturer ?? null),
     ...fields
@@ -1407,5 +1442,5 @@ export const PC_PART_CATEGORIES = Object.freeze([
 ]);
 
 export const PUBLIC_PC_PART_CATEGORIES = Object.freeze([
-  'CPU', 'GPU', 'RAM', 'MOTHERBOARD', 'SSD', 'HDD', 'PSU'
+  'CPU', 'GPU', 'RAM', 'MOTHERBOARD', 'SSD', 'HDD', 'PSU', 'CASE', 'COOLING'
 ]);
