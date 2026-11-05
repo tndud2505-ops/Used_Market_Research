@@ -13,6 +13,7 @@ import { statsChecksum } from '../cloudflare/public-product-stats.mjs';
 import { canonicalPcStatsTraceMembers, pcStatsTraceability } from '../aws-runner/pc-stats-traceability.mjs';
 import { probeRunnerReadiness } from '../cloudflare/runner-readiness.mjs';
 import { createLifecycleStatusCache, createLifecycleQueueBootstrap } from '../aws-runner/lifecycle-status-cache.mjs';
+import { createPcListingsReadCache } from '../aws-runner/pc-listings-read-cache.mjs';
 import { PcPartsLedger } from '../aws-runner/pc-parts-ledger.mjs';
 import { reconcilePublication, completeReconciledPublication } from '../aws-runner/reconcile-publication.mjs';
 
@@ -180,4 +181,24 @@ try {
   assert.equal(statusCache.get().bunjang.status, 'UNAVAILABLE');
   assert.equal(statusCache.get().bunjang.error, 'LIFECYCLE_STATUS_TIMEOUT');
 } finally { await statusCache?.close(); rmSync(statusDir, { recursive: true, force: true }); }
+
+{
+  // Listing browse: one whole-scope scan per aged scope, never one per visitor.
+  let clock = 0, computed = 0;
+  const listingCache = createPcListingsReadCache({ freshMs: 300, maxStaleMs: 3_600, now: () => clock });
+  const compute = async () => { await new Promise(resolve => setTimeout(resolve, 5)); return { version: ++computed }; };
+  const misses = await Promise.all([1, 2, 3].map(() => listingCache.read('GPU', compute)));
+  assert.deepEqual(misses.map(read => read.value.version), [1, 1, 1], 'concurrent misses share one scan');
+  clock = 200;
+  assert.equal((await listingCache.read('GPU', compute)).state, 'HIT');
+  clock = 400;
+  for (let visitor = 0; visitor < 3; visitor++) assert.deepEqual(await listingCache.read('GPU', compute), { value: { version: 1 }, state: 'STALE' });
+  await new Promise(resolve => setTimeout(resolve, 30));
+  assert.equal(computed, 2, 'an aged scope is refreshed once in the background');
+  assert.deepEqual(await listingCache.read('GPU', compute), { value: { version: 2 }, state: 'HIT' });
+  clock = 10_000;
+  assert.deepEqual(await listingCache.read('GPU', compute), { value: { version: 3 }, state: 'MISS' }, 'an hour-old scope is recomputed before responding');
+  await assert.rejects(listingCache.read('BAD', async () => { throw new TypeError('bad scope'); }), /bad scope/);
+  assert.equal(listingCache.size, 1, 'failed scopes are not cached');
+}
 console.log('Runtime isolation: deadline, busy guard, failure, disconnect, checksum equivalence, real read readiness and nonblocking lifecycle status passed');

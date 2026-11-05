@@ -47,6 +47,7 @@ import {
 import { OPERATIONAL_PC_DIRECTORY_SITES, OPERATIONAL_TARGET_SITES } from "../cloudflare/target-sites.mjs";
 import { decodeSearchCursor, encodeSearchCursor } from "../aws-runner/search-cursor.mjs";
 import { SearchIndex, collectionIdentity } from "../aws-runner/search-index.mjs";
+import { createPcListingsBrowseWorker } from "../aws-runner/pc-listings-browse-worker.mjs";
 import { recordDanawaQueryWindows } from "../aws-runner/lifecycle-queue.mjs";
 import { MAX_PRICE_HISTORY_DAYS, parsePriceStatsRequest } from "../aws-runner/pc-price-stats-http.mjs";
 import { pcCollectionTargetSetV2 } from "../cloudflare/pc-directory-http.mjs";
@@ -818,7 +819,7 @@ const items = [
     item_id: `danawa:composition-${id}`, site: 'danawa', title, price,
     url: `https://dmall.danawa.com/v3/?controller=sale&methods=blog&seq=composition-${id}`,
     canonical_product_id: model, ...extra });
-  compositionIndex.upsertPublicProjections([
+  const compositionFixtures = [
     fixture('single-a', 'RTX 5090 그래픽카드', 6_000_000),
     fixture('laptop', '레노버 LEGION Pro 7 16IAX10 U9 5090 Edition W11 (SSD 1TB)', 7_450_000),
     fixture('single-b', 'RTX 5090 단품 팝니다', 8_000_000),
@@ -831,7 +832,8 @@ const items = [
     fixture('unrelated', 'RTX 3080 + 라이젠 5600 묶음 판매', 1_000_000, {
       canonical_product_id: null, listing_kind: 'COMPONENT_BUNDLE', price_eligible: false,
       category_code: 'UNSUPPORTED_CATEGORY', components: ['gpu:nvidia:rtx-3080', 'cpu:amd:ryzen-5-5600'] })
-  ], { observedAt: '2026-08-29T00:00:00.000Z' });
+  ];
+  compositionIndex.upsertPublicProjections(compositionFixtures, { observedAt: '2026-08-29T00:00:00.000Z' });
   const stored = compositionIndex.db.prepare('SELECT item_id, pc_metadata_json FROM listings ORDER BY item_id').all();
   const scope = { canonicalProductId: model, sites: ['danawa'], sort: 'price_asc', currency: 'KRW', limit: 1,
     asOf: '2026-08-29T00:00:01.000Z', saleComposition: 'ALL' };
@@ -876,6 +878,26 @@ const items = [
   assert.deepEqual(compositionIndex.db.prepare('SELECT item_id, pc_metadata_json FROM listings ORDER BY item_id').all(), stored,
     'composition reads must not rewrite observations or stored product identities');
   compositionIndex.close();
+
+  // The production scan worker opens the same file read-only and must return
+  // exactly the writer connection's scope result.
+  const workerDirectory = await mkdtemp(path.join(os.tmpdir(), 'used-browse-worker-'));
+  const fileIndex = new SearchIndex({ filePath: path.join(workerDirectory, 'index.sqlite') });
+  const browseWorker = createPcListingsBrowseWorker(fileIndex.filePath);
+  try {
+    fileIndex.upsertPublicProjections(compositionFixtures, { observedAt: new Date().toISOString() });
+    const liveScope = { ...scope, limit: 2, asOf: new Date().toISOString() };
+    for (const saleComposition of ['ALL', 'SINGLE']) {
+      const inline = fileIndex.browsePcListings({ ...liveScope, saleComposition });
+      assert.ok(inline.total > 0);
+      assert.deepEqual(await browseWorker.browse({ ...liveScope, saleComposition }), inline);
+    }
+    await assert.rejects(browseWorker.browse({ ...liveScope, saleComposition: 'PARTIAL' }), /sale_composition/);
+  } finally {
+    await browseWorker.close();
+    fileIndex.close();
+    await rm(workerDirectory, { recursive: true, force: true });
+  }
 }
 
 // Read-time RAM facets preserve stored identities and filter the entire scope
@@ -1385,6 +1407,11 @@ try {
   assert.equal(Object.hasOwn(listingsPayload.data.pagination, "next_cursor"), true);
   assert.ok(Number(listingsPayload.data.source_counts?.joonggonara || 0) > 0,
     "the AWS listing path must publish whole-query source counts");
+  assert.equal(listingsResponse.headers.get("x-pc-runner-cache"), "MISS");
+  const repeatedListings = await fetch(`${baseUrl}/api/pc/listings?canonical_product_id=gpu%3Anvidia%3Artx-3080&board_manufacturer=ASUS&sites=joonggonara&sort=price_asc&price_min=400000&price_max=600000&currency=KRW&limit=2`, { headers });
+  assert.equal(repeatedListings.headers.get("x-pc-runner-cache"), "HIT", "a repeated first page must reuse the recent scope scan");
+  assert.deepEqual((await repeatedListings.json()).data.items, listingsPayload.data.items);
+  assert.doesNotMatch(stderr, /PC listing worker read failed/, "listing scans must run on the read-only worker");
   const authorized = await fetch(`${baseUrl}/api/search`, {
     method: "POST", headers, body: JSON.stringify(pcRequest)
   });

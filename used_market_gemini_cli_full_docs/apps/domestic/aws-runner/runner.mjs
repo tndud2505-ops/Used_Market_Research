@@ -34,6 +34,8 @@ import { runLifecycleBatch, pacedLifecycleFetch, lifecycleRecheckEnabled } from 
 import { reconcileSearchStatusObservations } from './search-status-observations.mjs';
 import { recordBunjangSearchWindows, recordDanawaQueryWindows } from './lifecycle-queue.mjs';
 import { schedulerReadDeferral } from "./pc-scheduler-admission.mjs";
+import { createPcListingsReadCache } from "./pc-listings-read-cache.mjs";
+import { createPcListingsBrowseWorker } from "./pc-listings-browse-worker.mjs";
 import { createCollectionDiagnostics, collectionError, schedulerWatchdogMs } from './pc-collection-diagnostics.mjs';
 import { PcShadowPipeline } from "./pc-shadow-pipeline.mjs";
 import { explicitSoldText, structuredSoldEvidenceFromHtml, joongnaListingUrl, joongnaStatusStructureTokens,
@@ -313,6 +315,9 @@ const searchRuntimeMetrics = {
 function markPcPublicRead() {
   lastPcPublicReadAt = Date.now();
 }
+
+const pcListingsReadCache = createPcListingsReadCache();
+const pcListingsBrowseWorker = createPcListingsBrowseWorker(INDEX_PATH);
 
 function pcPartsLedgerMigrationNeedsBackup(db) {
   try {
@@ -2683,27 +2688,44 @@ const server = http.createServer(async (req, res) => {
           ...legacyResolution.canonicalProductIds
         ] };
       }
-      const catalogModels = query.catalogScope
-        ? publicPcModelsForApi({
-          category: query.catalogScope.categoryCode,
-          q: query.catalogScope.query,
-          ...query.catalogScope.facets
-        }).models
-        : null;
       const categoryOnlyCatalogScope = Boolean(query.catalogScope?.categoryCode
         && !query.catalogScope.query
         && Object.keys(query.catalogScope.facets || {}).length === 0);
       const cursorState = decodePcListingsCursor(query, SEARCH_CURSOR_SECRET);
-      const asOf = cursorState?.asOf || new Date().toISOString();
-      const result = searchIndex.browsePcListings({
-        ...query,
-        categoryCode: categoryOnlyCatalogScope ? query.catalogScope.categoryCode : "",
-        canonicalProductIds: query.canonicalProductIds || (categoryOnlyCatalogScope
-          ? null
-          : catalogModels?.map((model) => model.canonical_product_id) ?? null),
-        asOf,
-        after: cursorState?.after || null
-      });
+      const browse = async (browseAsOf) => {
+        const catalogModels = query.catalogScope
+          ? publicPcModelsForApi({
+            category: query.catalogScope.categoryCode,
+            q: query.catalogScope.query,
+            ...query.catalogScope.facets
+          }).models
+          : null;
+        const browseOptions = {
+          ...query,
+          categoryCode: categoryOnlyCatalogScope ? query.catalogScope.categoryCode : "",
+          canonicalProductIds: query.canonicalProductIds || (categoryOnlyCatalogScope
+            ? null
+            : catalogModels?.map((model) => model.canonical_product_id) ?? null),
+          asOf: browseAsOf,
+          after: cursorState?.after || null
+        };
+        let browseResult;
+        try { browseResult = await pcListingsBrowseWorker.browse(browseOptions); }
+        catch (error) {
+          // Availability first: the same read on the HTTP thread also surfaces
+          // genuine query errors as the established 400 response.
+          console.warn("[aws-runner] PC listing worker read failed; scanning inline", error?.message || error);
+          browseResult = searchIndex.browsePcListings(browseOptions);
+        }
+        return { result: browseResult, asOf: browseAsOf, matchedModelCount: catalogModels?.length ?? null };
+      };
+      // Continuations keep their own snapshot time. First pages reuse a recent
+      // scope result; its own as_of drives freshness and the next cursor.
+      const read = cursorState
+        ? { value: await browse(cursorState.asOf), state: "BYPASS" }
+        : await pcListingsReadCache.read(JSON.stringify(query), () => browse(new Date().toISOString()));
+      const { result, asOf, matchedModelCount } = read.value;
+      res.setHeader("x-pc-runner-cache", read.state);
       if (!result.cursorFound) return json(res, 410, { status: "error", error: "CURSOR_EXPIRED: listing snapshot changed" });
       const nextCursor = result.nextAfter
         ? encodePcListingsCursor(query, { asOf, after: result.nextAfter }, SEARCH_CURSOR_SECRET)
@@ -2724,7 +2746,7 @@ const server = http.createServer(async (req, res) => {
             catalog_scope: query.catalogScope || null,
             listing_facets: query.listingFacets || {},
             sale_composition: query.saleComposition || null,
-            matched_model_count: catalogModels?.length ?? null,
+            matched_model_count: matchedModelCount,
             manufacturer: query.manufacturer || null,
             board_manufacturer: query.boardManufacturer || null,
             sites: query.sites,
@@ -3008,6 +3030,7 @@ for (const signal of ["SIGTERM", "SIGINT"]) {
     clearInterval(lifecycleBootstrapTimer);
     void lifecycleQueueBootstrap.close();
     void lifecycleStatusCache.close();
+    void pcListingsBrowseWorker.close();
     try { searchIndex?.close(); } catch {}
     server.close(() => process.exit(0));
   });

@@ -158,6 +158,8 @@ validate_release() {
 node --check "$APP_ROOT/aws-runner/runner.mjs"
 node --check "$APP_ROOT/aws-runner/pc-collection-diagnostics.mjs"
 node --check "$APP_ROOT/aws-runner/lifecycle-status-cache.mjs"
+node --check "$APP_ROOT/aws-runner/pc-listings-read-cache.mjs"
+node --check "$APP_ROOT/aws-runner/pc-listings-browse-worker.mjs"
 node --check "$APP_ROOT/aws-runner/lifecycle-queue.mjs"
 node --check "$APP_ROOT/aws-runner/publish-pc-stats-runner.mjs"
 node --check "$APP_ROOT/aws-runner/isolated-stats-publisher.mjs"
