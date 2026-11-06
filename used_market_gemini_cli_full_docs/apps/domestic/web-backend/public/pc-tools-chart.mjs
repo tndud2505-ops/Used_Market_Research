@@ -105,6 +105,11 @@ export function drawChart(container, series, { index = false, label = '가격 �
   const detail = document.createElement('div'); detail.className = 'tools-chart-tooltip'; detail.hidden = true;
   detail.setAttribute('role', 'status'); plot.append(detail);
   const legend = document.createElement('div'); legend.className = 'tools-chart-legend';
+  // Hiding every line is a display choice; say so instead of looking empty.
+  const hiddenNote = document.createElement('p'); hiddenNote.className = 'tools-empty';
+  hiddenNote.textContent = '가격선을 모두 숨겼습니다. 아래 항목을 누르면 다시 표시됩니다.';
+  const syncHiddenNote = () => { hiddenNote.hidden = normalizedSeries.some(item => !hidden.has(item.id)); };
+  syncHiddenNote();
   normalizedSeries.forEach(({ id, metricKey, label: seriesLabel, color, dash, currency: seriesCurrency }) => {
     const item = document.createElement('button'); item.type = 'button'; item.className = `series-${metricKey}`;
     item.dataset.series = id;
@@ -114,6 +119,7 @@ export function drawChart(container, series, { index = false, label = '가격 �
       if (hidden.has(id)) hidden.delete(id); else hidden.add(id);
       groups.get(id).style.display = hidden.has(id) ? 'none' : '';
       item.setAttribute('aria-pressed', String(!hidden.has(id)));
+      syncHiddenNote();
       hide();
     });
     item.style.color = color;
@@ -124,7 +130,7 @@ export function drawChart(container, series, { index = false, label = '가격 �
   const frame = document.createElement('div'); frame.className = 'tools-chart-frame'; frame.append(viewport);
   const axes = svgNode('svg', { class: 'tools-chart-fixed-axes', 'aria-label': '고정 날짜·가격 축' });
   if (scrollable) frame.append(axes);
-  container.append(frame, legend);
+  container.append(frame, hiddenNote, legend);
   const updateAxes = () => {
     if (!scrollable) return;
     const w = viewport.clientWidth, h = viewport.clientHeight;
