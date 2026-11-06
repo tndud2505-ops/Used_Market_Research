@@ -2712,8 +2712,10 @@ const server = http.createServer(async (req, res) => {
         let browseResult;
         try { browseResult = await pcListingsBrowseWorker.browse(browseOptions); }
         catch (error) {
-          // Availability first: the same read on the HTTP thread also surfaces
-          // genuine query errors as the established 400 response.
+          // A scan that outlived its deadline would block every request if
+          // repeated here; report it as retryable. Otherwise the same read on
+          // the HTTP thread keeps availability and surfaces query errors as 400.
+          if (error?.code === "PC_LISTING_WORKER_TIMEOUT") throw error;
           console.warn("[aws-runner] PC listing worker read failed; scanning inline", error?.message || error);
           browseResult = searchIndex.browsePcListings(browseOptions);
         }
@@ -2759,6 +2761,10 @@ const server = http.createServer(async (req, res) => {
         }
       });
     } catch (error) {
+      if (error?.code === "PC_LISTING_WORKER_TIMEOUT") {
+        console.warn("[aws-runner] PC listing scan exceeded its worker deadline");
+        return json(res, 503, { status: "error", error: "PC listing read is busy; retry shortly" });
+      }
       return json(res, 400, { status: "error", error: error instanceof Error ? error.message : String(error) });
     }
   }

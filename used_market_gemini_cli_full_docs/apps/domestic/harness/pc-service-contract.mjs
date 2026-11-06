@@ -893,6 +893,13 @@ const items = [
       assert.deepEqual(await browseWorker.browse({ ...liveScope, saleComposition }), inline);
     }
     await assert.rejects(browseWorker.browse({ ...liveScope, saleComposition: 'PARTIAL' }), /sale_composition/);
+    const inlineSingle = fileIndex.browsePcListings({ ...liveScope, saleComposition: 'SINGLE' });
+    const queued = await Promise.all([1, 2, 3, 4, 5].map(() => browseWorker.browse({ ...liveScope, saleComposition: 'SINGLE' })));
+    for (const result of queued) assert.deepEqual(result, inlineSingle, 'queued scans wait their turn instead of timing out together');
+    const hurried = createPcListingsBrowseWorker(fileIndex.filePath, { timeoutMs: 1 });
+    try {
+      await assert.rejects(hurried.browse(liveScope), (error) => error.code === 'PC_LISTING_WORKER_TIMEOUT');
+    } finally { await hurried.close(); }
   } finally {
     await browseWorker.close();
     fileIndex.close();
