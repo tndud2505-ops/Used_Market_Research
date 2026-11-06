@@ -837,7 +837,9 @@ function renderAnalysis() {
   const sparsePrices = sources.some(item => item.data?.daily?.some(day => metricPresentation(day.active).state === 'insufficient'));
   $('#price-chart').setAttribute('aria-busy', String(Boolean(state.selectedId) && pending));
   $('#price-chart').dataset.modelId = state.selectedId;
-  $('#price-chart').dataset.priceState = !state.selectedId ? 'empty' : pending ? 'loading'
+  // Unchecking every site is a display choice, not missing market data.
+  const sourcesHidden = Boolean(state.selectedId) && !sources.length;
+  $('#price-chart').dataset.priceState = !state.selectedId ? 'empty' : sourcesHidden ? 'hidden' : pending ? 'loading'
     : chartSeries.length ? 'ready' : failedSource ? 'error' : sparsePrices ? 'insufficient' : 'unavailable';
   $('#price-chart').hidden=false;
   const issue = !state.selectedId ? '선택 조건에 맞는 모델이 없습니다.'

@@ -141,7 +141,8 @@ export function drawMarketChart(container, input, options = {}) {
     currentView?.closeExpansion?.(false);
     const state = container.dataset.priceState;
     container.append(node('p', 'market-chart-empty', state === 'loading' ? '불러오는 중' : state === 'error' ? '가격 조회 실패'
-      : state === 'insufficient' ? '대표가격 표본 부족' : '가격 자료 없음'));
+      : state === 'insufficient' ? '대표가격 표본 부족'
+        : state === 'hidden' ? '가격선을 모두 숨겼습니다 · 사이트를 다시 선택하면 표시됩니다' : '가격 자료 없음'));
     return;
   }
   const measuredDates=[...new Set(series.flatMap(line=>line.points.filter(observed).map(point=>point.date)))].sort();
