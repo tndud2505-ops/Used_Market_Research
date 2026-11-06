@@ -267,7 +267,7 @@ export function drawMarketChart(container, input, options = {}) {
         if(averagePeriod){const average=line.averages.find(point=>point.date===date);cells.average.textContent=`${averagePeriod}일 평균 ${valid(average?.value)?money(average.value,currency):'자료 부족'}`;}
         if(valid(value)){cells.marker.setAttribute('cx',x(date));cells.marker.setAttribute('cy',y(value));}
     }
-    values.hidden=!dockedReadout&&!cornerReadout&&!rowCount;emptyReadout.hidden=dockedReadout||cornerReadout||Boolean(rowCount);
+    values.hidden=!dockedReadout&&!cornerReadout&&!rowCount;emptyReadout.textContent=visible().length?'가격 기록 없음':'가격선을 모두 숨겼습니다';emptyReadout.hidden=dockedReadout||cornerReadout||Boolean(rowCount);
     readout.hidden = false;
   }
   function paintNow() {
@@ -279,7 +279,8 @@ export function drawMarketChart(container, input, options = {}) {
     svg.dataset.visibleCount = String(view.count); svg.dataset.offset = String(view.offset);
     if(geometry){svg.dataset.scaleMin=String(geometry.scaleMin);svg.dataset.scaleMax=String(geometry.scaleMax);}
     plot.replaceChildren(); clearCursor();
-    if (!geometry) { plot.append(svgNode('text', { x:16, y:height/2 }, '표시할 가격 없음')); return; }
+    // Hiding every line is a display choice, not missing market data.
+    if (!geometry) { plot.append(svgNode('text', { x:16, y:height/2 }, visible().length ? '표시할 가격 없음' : '가격선을 모두 숨겼습니다 · 위 항목을 누르면 다시 표시됩니다')); return; }
     const { pad, compactAxis, plotWidth, plotHeight, priceTicks, dateTicks, shownSet, x, y } = geometry;
     const from=geometry.shownDates[0],to=geometry.shownDates.at(-1),changed=view.from!==from||view.to!==to;
     view.from=from;view.to=to;view.endDate=to;

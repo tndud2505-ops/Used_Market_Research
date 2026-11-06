@@ -96,7 +96,8 @@ export function priceRecordIssue(record, data = record?.data) {
     if (['HISTORICAL_PRICE_STATS_UNAVAILABLE', 'HISTORICAL_EXACT_STATS_UNAVAILABLE'].includes(code)) {
       return '선택 기간의 정확 통계가 게시되지 않았습니다. 현재 기간의 가격으로 대체하지 않습니다.';
     }
-    return '공개 통계 미제공 · 표본 부족 여부를 확인할 수 없습니다.';
+    // Not proof of zero listings: the model may simply not be aggregated yet.
+    return '아직 집계된 가격 통계가 없습니다. 판매중 매물 가격은 매물 목록에서 확인할 수 있습니다.';
   }
   if (!data) return '선택한 사이트·제조사의 통계가 제공되지 않았습니다.';
   if (data.availability?.stale === true && data.availability?.status === 'LAST_PUBLISHED') {

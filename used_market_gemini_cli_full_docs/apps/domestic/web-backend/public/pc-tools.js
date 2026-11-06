@@ -17,6 +17,8 @@ const state = {
   historyPending: false,
   priceKind: 'active',
   priceKindExplicit: false,
+  // A shared sold-price URL waits until prices load before it is applied.
+  requestedPriceKind: '',
   priceSources: new Set(['joonggonara','bunjang','danawa','ebay']),
 };
 let repaintTimer, statusTimer, pickerRepaintTimer;
@@ -96,6 +98,8 @@ function syncAnalysisUrl(range = state.range, deferred = false) {
   const url = new URL(analysisSelectionUrl(location.href, state.selectedId, state.selectedManufacturer));
   if (state.source) url.searchParams.set('source', state.source); else url.searchParams.delete('source');
   url.searchParams.set('from', range.from); url.searchParams.set('to', range.to);
+  const kind = state.requestedPriceKind || (state.priceKindExplicit ? state.priceKind : '');
+  if (kind === 'sold') url.searchParams.set('kind', 'sold'); else url.searchParams.delete('kind');
   if(url.href!==location.href)history.replaceState(null, '', url.href);
 }
 function buildEntryData(entry) {
@@ -300,7 +304,7 @@ function priceCell(data, key, record, { showChange = false } = {}) {
   const sample = record?.state === 'ready' && !statsUnavailable(record.data) && Number.isInteger(metric?.sample_count)
     ? `표본 ${metric.sample_count.toLocaleString('ko-KR')}건` : '표본 미확인';
   td.title = `${presentation.label} · ${sample}${builder ? ' · 최근 30일' : ` · ${state.range.from} ~ ${state.range.to}`}${data?.integrity_filtered_source_count || data?.integrity_repaired_source_ids?.length ? ' · 불일치 사이트 제외' : ''}`;
-  if (statsUnavailable(data)) td.title = '공개 통계 미제공 · 표본 부족 여부 미확인';
+  if (statsUnavailable(data)) td.title = '가격 통계 미집계';
   if (showChange) {
     const change = percentChange(dailySeries(data, key, state.days));
     if (change != null) td.append(el('span', `tools-change ${change > 0 ? 'up' : 'down'}`, `${state.days}일 ${change > 0 ? '▲' : change < 0 ? '▼' : '—'} ${Math.abs(change).toFixed(1)}%`));
@@ -788,8 +792,13 @@ function renderAnalysis() {
   for (const [index, line] of referenceSeries.entries()) referenceSeries[index] = convertLine(line, currency);
   const soldLine=line=>line.metricKey==='sold'&&line.id.startsWith('joonggonara:');
   const soldAvailable=soldSiteSelected()&&availableSeries.some(soldLine);
+  const pricesSettled=sources.every(item=>item.record&&item.record.state!=='loading');
+  if(state.requestedPriceKind==='sold'&&(soldAvailable||pricesSettled)){
+    if(soldAvailable){state.priceKind='sold';state.priceKindExplicit=true;}
+    state.requestedPriceKind='';syncAnalysisUrl();
+  }
   if(!state.priceKindExplicit)state.priceKind=referenceSeries.some(line=>line.metricKey==='active')?'active':soldAvailable?'sold':'active';
-  if(state.priceKind==='sold'&&!soldAvailable){state.priceKind='active';state.priceKindExplicit=false;}
+  if(state.priceKind==='sold'&&!soldAvailable){state.priceKind='active';state.priceKindExplicit=false;syncAnalysisUrl();}
   const kindLine=line=>state.priceKind==='sold'?soldLine(line):line.metricKey===state.priceKind;
   const kindSources=list=>state.priceKind==='sold'?list.filter(item=>item.id==='joonggonara'):list;
   const series=availableSeries.filter(kindLine);
@@ -938,7 +947,7 @@ document.addEventListener('click', event => {
   }
   if(type==='price-kind'){
     if(button.disabled)return;
-    state.priceKind=button.dataset.kind==='sold'?'sold':'active';state.priceKindExplicit=true;renderAnalysis();return;
+    state.priceKind=button.dataset.kind==='sold'?'sold':'active';state.priceKindExplicit=true;state.requestedPriceKind='';syncAnalysisUrl();renderAnalysis();return;
   }
   if(type==='display-currency'){
     state.displayCurrency=button.dataset.currency==='USD'?'USD':'KRW';renderAnalysis();return;
@@ -1013,7 +1022,7 @@ document.addEventListener('click', event => {
   if (type === 'remove') { state.entries = state.entries.filter(e => e.id !== id); persistBuild(); status(''); }
   if (type === 'analyze') {
     $('#analysis-model-dialog')?.close();
-    state.priceKind='active';state.priceKindExplicit=false;
+    state.priceKind='active';state.priceKindExplicit=false;state.requestedPriceKind='';
     state.selectedId = id; state.selectedManufacturer = manufacturer; state.chartDate = ''; resetHistoryWindow();resetChartView();
     syncAnalysisUrl();
   }
@@ -1101,6 +1110,7 @@ async function start() {
         ? '요청한 모델은 가격 선택 대상이 아닙니다. 검증된 모델을 다시 선택해 주세요.' : '', params.has('model') && (!requested || !filterToolProducts([requested]).length));
       const requestedSource = params.get('source');
       if (state.sources.some(s => String(s.source_id || s.id || s.key) === requestedSource)) state.source = requestedSource;
+      if (params.get('kind') === 'sold') state.requestedPriceKind = 'sold';
       if (params.has('from') || params.has('to')) {
         try { state.range = priceDateRange(params.get('from') || '', params.get('to') || ''); state.days = state.range.days; }
         catch (error) { status(error.message, true); }

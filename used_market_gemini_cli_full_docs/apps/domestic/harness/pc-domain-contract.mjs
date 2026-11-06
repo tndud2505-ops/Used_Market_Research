@@ -2086,5 +2086,21 @@ assert.equal(ledger.runIntegrityAudit(new Date(now + 2 * DAY_MS)).ok, true,
 
 ledger.close();
 db.close();
+
+// "케이스 쿨러 팬" sells fans; fans that come with a case keep the case.
+for (const [title, category, product] of [
+  ['프랙탈디자인 Fractal Design 14인치 케이스 쿨러 팬', 'COOLING', /^cooling:facet:case-fan:/u],
+  ['앱코 케이스 쿨링 팬 120mm', 'COOLING', /^cooling:facet:case-fan:/u],
+  ['앱코 케이스 팬 3개 (허브 포함)', 'COOLING', /^cooling:facet:case-fan:/u],
+  ['앱코 미들타워 케이스 (케이스 쿨러 팬 4개 포함)', 'CASE', /^case:facet:mid-tower:abko$/u],
+  ['리안리 케이스 팬 포함 판매', 'CASE', /^case:facet:mid-tower:lian-li$/u],
+  ['프랙탈디자인 팝 2 에어 RGB 블랙 컴퓨터 케이스', 'CASE', /^case:facet:mid-tower:fractal-design$/u]
+]) {
+  const publicResult = classifyPcPartListingPublic({ title, price: 10000 });
+  assert.equal(publicResult.category_code, category, title);
+  assert.match(String(publicResult.canonical_product_id), product, title);
+}
+assert.equal(reviewedPcListingExclusion("joonggonara", "233032031")?.reason, "CATEGORY_MISMATCH",
+  "the reported 3,500 KRW case fan leaves stored case statistics");
 await import('./pc-observation-days-contract.mjs');
 console.log(JSON.stringify({ status: "passed", contract: "pc-domain" }, null, 2));

@@ -1382,9 +1382,12 @@ function productSpecText(product) {
     && Number.isFinite(Number(specs.module_capacity_gb)) && Number.isFinite(Number(specs.module_count))) {
     specs.total_capacity_gb = Number(specs.module_capacity_gb) * Number(specs.module_count);
   }
+  // Capacity/wattage groups list every form a member may have. That candidate
+  // list is not a member's specification, so it is not shown as one.
+  const aggregateGroup = Boolean(specs.capacity_bucket || specs.watts_bucket);
   return orderedKeys.map((key) => [key, specs[key]])
     .filter(([key, value]) => !["directory_node_type", "market_segment", "board_manufacturer", "chip_manufacturer", "manufacturer_roles"].includes(key)
-      && (["string", "number"].includes(typeof value) || Array.isArray(value))
+      && (["string", "number"].includes(typeof value) || (Array.isArray(value) && !aggregateGroup))
       && (Array.isArray(value) ? value.length : normalizeText(value)))
     .slice(0, 3)
     .map(([key, value]) => facetOptionLabel(key, Array.isArray(value) ? value.join(" / ") : normalizeText(value)))
@@ -1405,7 +1408,7 @@ function renderProducts() {
     const count = state.modelCounts === null ? null : Number(state.modelCounts[productId(product)] || 0);
     const unavailable = count === 0;
     const option = createElement("option", unavailable ? "model-no-listings" : "",
-      `${productName(product)} · ${productSpecText(product)}${unavailable ? " · 매물 없음" : ""}`);
+      [productName(product), productSpecText(product), unavailable ? "매물 없음" : ""].filter((part) => part && part !== "—").join(" · "));
     option.value = productId(product);
     option.selected = option.value === selectedId;
     dom.modelSelect.append(option);

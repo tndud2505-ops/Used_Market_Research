@@ -84,6 +84,7 @@
   {"id":"sentinel_repeating_price","input":{"title":"삼성 PM9A1 M.2 NVMe 512GB SSD Gen4 벌크","price":1111},"expected":{"category_code":"SSD","exclusion_reasons":["ANOMALOUS_PRICE"],"price_eligible":false}},
   {"id":"cooler_cpu_board_bundle","input":{"title":"라이젠9 5900X,X570 PHANTOM,녹투아 공랭쿨러","price":419000},"expected":{"category_code":"BUNDLE","canonical_model":null,"listing_kind":"COMPONENT_BUNDLE","price_eligible":false}},
   {"id":"case_fan_is_cooling","input":{"title":"써멀테이크 PC 케이스 팬 120mm","price":45000},"expected":{"category_code":"COOLING","canonical_model":"Thermaltake PC Case Fan","listing_kind":"SINGLE_COMPONENT","price_eligible":true}},
+  {"id":"case_with_included_fans_stays_case","input":{"title":"리안리 O11 다이나믹 케이스 쿨링팬 3개 포함","price":120000},"expected":{"category_code":"CASE","canonical_model":"Lian Li Mid Tower PC Case","listing_kind":"SINGLE_COMPONENT","price_eligible":true}},
   {"id":"external_sound_not_pcie","input":{"title":"크리에이티브 G6 외장사운드카드","price":120000},"expected":{"category_code":"EXPANSION_CARD","canonical_model":null,"price_eligible":false}},
   {"id":"dvd_rom_not_writer","input":{"title":"Hitachi-LG DH40N 내장형 DVD-ROM ODD","price":3000},"expected":{"category_code":"ODD","canonical_model":null,"price_eligible":false}},
   {"id":"home_av_player_not_odd","input":{"title":"LG CD VCD DVD플레이어 DVD 5700A (오디오 앰프 스피커","price":100000},"expected":{"category_code":"UNKNOWN","canonical_model":null,"listing_kind":"NON_PC_ITEM","price_eligible":false}},

@@ -82,7 +82,7 @@ test('uppercase UNAVAILABLE suppresses quote even if diagnostic central values e
 });
 test('uppercase NO_EXACT_PUBLICATION is not genuine zero market samples', () => {
   const data = { ...raw(), publication_id: undefined, availability: { status: 'NO_EXACT_PUBLICATION' } };
-  assert.match(core.priceRecordIssue({ state: 'ready', data }), /표본 부족 여부|게시/);
+  assert.match(core.priceRecordIssue({ state: 'ready', data }), /집계된 가격 통계가 없습니다|게시/);
   assert.equal(setup({ data }).sandbox.buildEntryData({ id: ram.canonical_product_id }), null);
 });
 test('mismatched published period is not plotted as the requested period', async () => {

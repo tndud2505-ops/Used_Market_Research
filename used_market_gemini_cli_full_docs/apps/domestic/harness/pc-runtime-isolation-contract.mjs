@@ -200,5 +200,25 @@ try {
   assert.deepEqual(await listingCache.read('GPU', compute), { value: { version: 3 }, state: 'MISS' }, 'an hour-old scope is recomputed before responding');
   await assert.rejects(listingCache.read('BAD', async () => { throw new TypeError('bad scope'); }), /bad scope/);
   assert.equal(listingCache.size, 1, 'failed scopes are not cached');
+
+  // Keep-warm: recently requested scopes refresh without a waiting visitor;
+  // scopes nobody requested recently stay cold.
+  const waits = [];
+  const warmCache = createPcListingsReadCache({ freshMs: 300, maxStaleMs: 3_600, now: () => clock });
+  const warmCompute = async ({ waiting }) => { waits.push(waiting); return { version: waits.length }; };
+  clock = 0;
+  await warmCache.read('CPU', warmCompute);
+  assert.deepEqual(waits, [true], 'a missing first page is computed for a waiting visitor');
+  clock = 500;
+  assert.equal(warmCache.keepWarm({ refreshAfterMs: 400, recentMs: 1_000 }), 1);
+  await new Promise(resolve => setTimeout(resolve, 5));
+  assert.deepEqual(waits, [true, false], 'keep-warm refreshes in the background');
+  assert.deepEqual(await warmCache.read('CPU', warmCompute), { value: { version: 2 }, state: 'HIT' });
+  assert.deepEqual(warmCache.recentKeys({ recentMs: 1_000 }), ['CPU']);
+  clock = 5_000;
+  assert.equal(warmCache.keepWarm({ refreshAfterMs: 400, recentMs: 1_000 }), 0, 'a scope idle past the recent window stays cold');
+  warmCache.prime('GPU', async () => ({ version: 'primed' }));
+  await new Promise(resolve => setTimeout(resolve, 5));
+  assert.deepEqual(await warmCache.read('GPU', warmCompute), { value: { version: 'primed' }, state: 'HIT' }, 'a remembered scope is warmed at startup');
 }
 console.log('Runtime isolation: deadline, busy guard, failure, disconnect, checksum equivalence, real read readiness and nonblocking lifecycle status passed');

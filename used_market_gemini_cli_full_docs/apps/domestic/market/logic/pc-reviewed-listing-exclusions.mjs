@@ -224,6 +224,85 @@ export const PC_REVIEWED_LISTING_EXCLUSIONS = Object.freeze([
     reason: "FULL_SYSTEM",
     reviewed_at: "2026-09-09",
     evidence: "PUBLIC_TITLE_DESKTOP_CONFIGURATION"
+  }),
+  // Case-fan sales the 2026-11-05 case rule put in case groups. They stay
+  // searchable; they must not count as case prices for stored observations.
+  Object.freeze({
+    source_id: "joonggonara",
+    source_listing_token: "216683432",
+    reason: "CATEGORY_MISMATCH",
+    reviewed_at: "2026-11-06",
+    evidence: "PUBLIC_TITLE_CASE_FAN_SALE_IN_CASE_GROUP"
+  }),
+  Object.freeze({
+    source_id: "joonggonara",
+    source_listing_token: "230082339",
+    reason: "CATEGORY_MISMATCH",
+    reviewed_at: "2026-11-06",
+    evidence: "PUBLIC_TITLE_CASE_FAN_SALE_IN_CASE_GROUP"
+  }),
+  Object.freeze({
+    source_id: "joonggonara",
+    source_listing_token: "233032031",
+    reason: "CATEGORY_MISMATCH",
+    reviewed_at: "2026-11-06",
+    evidence: "PUBLIC_TITLE_CASE_FAN_SALE_IN_CASE_GROUP"
+  }),
+  Object.freeze({
+    source_id: "bunjang",
+    source_listing_token: "437269638",
+    reason: "CATEGORY_MISMATCH",
+    reviewed_at: "2026-11-06",
+    evidence: "PUBLIC_TITLE_CASE_FAN_SALE_IN_CASE_GROUP"
+  }),
+  Object.freeze({
+    source_id: "bunjang",
+    source_listing_token: "438482436",
+    reason: "CATEGORY_MISMATCH",
+    reviewed_at: "2026-11-06",
+    evidence: "PUBLIC_TITLE_CASE_FAN_SALE_IN_CASE_GROUP"
+  }),
+  Object.freeze({
+    source_id: "bunjang",
+    source_listing_token: "439718160",
+    reason: "CATEGORY_MISMATCH",
+    reviewed_at: "2026-11-06",
+    evidence: "PUBLIC_TITLE_CASE_FAN_SALE_IN_CASE_GROUP"
+  }),
+  Object.freeze({
+    source_id: "bunjang",
+    source_listing_token: "441734684",
+    reason: "CATEGORY_MISMATCH",
+    reviewed_at: "2026-11-06",
+    evidence: "PUBLIC_TITLE_CASE_FAN_SALE_IN_CASE_GROUP"
+  }),
+  Object.freeze({
+    source_id: "bunjang",
+    source_listing_token: "442374272",
+    reason: "CATEGORY_MISMATCH",
+    reviewed_at: "2026-11-06",
+    evidence: "PUBLIC_TITLE_CASE_FAN_SALE_IN_CASE_GROUP"
+  }),
+  Object.freeze({
+    source_id: "bunjang",
+    source_listing_token: "442616219",
+    reason: "CATEGORY_MISMATCH",
+    reviewed_at: "2026-11-06",
+    evidence: "PUBLIC_TITLE_CASE_FAN_SALE_IN_CASE_GROUP"
+  }),
+  Object.freeze({
+    source_id: "bunjang",
+    source_listing_token: "442887762",
+    reason: "CATEGORY_MISMATCH",
+    reviewed_at: "2026-11-06",
+    evidence: "PUBLIC_TITLE_CASE_FAN_SALE_IN_CASE_GROUP"
+  }),
+  Object.freeze({
+    source_id: "bunjang",
+    source_listing_token: "443518365",
+    reason: "CATEGORY_MISMATCH",
+    reviewed_at: "2026-11-06",
+    evidence: "PUBLIC_TITLE_CASE_FAN_SALE_IN_CASE_GROUP"
   })
 ]);
 

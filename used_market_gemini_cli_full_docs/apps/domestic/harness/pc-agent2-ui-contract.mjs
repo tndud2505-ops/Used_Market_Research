@@ -19,7 +19,7 @@ assert.equal(metricPresentation(low).state, 'insufficient');
 assert.equal(metricValue(low), null);
 assert.match(priceRecordIssue({ state: 'ready', data: { active: incomplete } }), /고유 매물/);
 assert.match(priceRecordIssue({ state: 'error', error: 'HTTP 503' }), /조회 실패/);
-assert.match(priceRecordIssue({ state: 'ready', data: { availability: { status: 'unavailable' } } }), /표본 부족 여부/);
+assert.match(priceRecordIssue({ state: 'ready', data: { availability: { status: 'unavailable' } } }), /집계된 가격 통계가 없습니다/);
 assert.equal(priceRecordIssue({ state: 'ready', data: { active: low } }), '');
 const facet = { canonical_product_id: 'board-facet', category_code: 'MOTHERBOARD', key_specs: { directory_node_type: 'BROWSE_FACET' } };
 assert.throws(() => validateBuild([{ id: 'board-facet' }], new Map([['board-facet', facet]]), new Set(['MOTHERBOARD'])),

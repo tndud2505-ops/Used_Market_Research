@@ -4,7 +4,7 @@ import { requestIsolatedPublication, requestIsolatedVerification, statsWorkerSta
 import { PublicationJobState } from './publication-job-state.mjs';
 import { completeReconciledPublication } from './reconcile-publication.mjs';
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
-import { statfsSync, existsSync, readFileSync } from "node:fs";
+import { statfsSync, existsSync, readFileSync, writeFileSync, renameSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { saveDanawaResponseEvidence } from './danawa-response-evidence.mjs';
@@ -318,6 +318,77 @@ function markPcPublicRead() {
 
 const pcListingsReadCache = createPcListingsReadCache();
 const pcListingsBrowseWorker = createPcListingsBrowseWorker(INDEX_PATH);
+const PC_LISTING_WARM_PATH = path.join(path.dirname(INDEX_PATH), "pc-listing-warm-scopes.json");
+let pcListingWarmKeysWritten = "";
+
+// The whole-scope read for one parsed listing query. Only a waiting visitor may
+// fall back to the HTTP thread; background refreshes never block it.
+async function browsePcListingScope(query, { asOf, after = null, inlineFallback = true }) {
+  const categoryOnlyCatalogScope = Boolean(query.catalogScope?.categoryCode
+    && !query.catalogScope.query
+    && Object.keys(query.catalogScope.facets || {}).length === 0);
+  const catalogModels = query.catalogScope
+    ? publicPcModelsForApi({
+      category: query.catalogScope.categoryCode,
+      q: query.catalogScope.query,
+      ...query.catalogScope.facets
+    }).models
+    : null;
+  const browseOptions = {
+    ...query,
+    categoryCode: categoryOnlyCatalogScope ? query.catalogScope.categoryCode : "",
+    canonicalProductIds: query.canonicalProductIds || (categoryOnlyCatalogScope
+      ? null
+      : catalogModels?.map((model) => model.canonical_product_id) ?? null),
+    asOf,
+    after
+  };
+  let result;
+  try { result = await pcListingsBrowseWorker.browse(browseOptions); }
+  catch (error) {
+    // A scan that outlived its deadline would block every request if repeated
+    // here; report it as retryable. A waiting visitor otherwise gets the same
+    // read on the HTTP thread, which also surfaces query errors as 400.
+    if (error?.code === "PC_LISTING_WORKER_TIMEOUT" || !inlineFallback) throw error;
+    console.warn("[aws-runner] PC listing worker read failed; scanning inline", error?.message || error);
+    result = searchIndex.browsePcListings(browseOptions);
+  }
+  return { result, asOf, matchedModelCount: catalogModels?.length ?? null };
+}
+
+const pcListingFirstPage = (query) => ({ waiting = false } = {}) =>
+  browsePcListingScope(query, { asOf: new Date().toISOString(), inlineFallback: waiting });
+
+// Remember the most recently requested first pages so a restart warms them
+// again instead of making the next visitors wait for each scan.
+function rememberPcListingWarmScopes() {
+  const keys = JSON.stringify(pcListingsReadCache.recentKeys());
+  if (keys === pcListingWarmKeysWritten) return;
+  try {
+    writeFileSync(PC_LISTING_WARM_PATH + ".tmp", keys);
+    renameSync(PC_LISTING_WARM_PATH + ".tmp", PC_LISTING_WARM_PATH);
+    pcListingWarmKeysWritten = keys;
+  } catch (error) { console.warn("[aws-runner] PC listing warm scopes were not saved", error?.message || error); }
+}
+
+function primeRememberedPcListingScopes() {
+  if (!searchIndex || deploymentPaused()) return;
+  let keys = [];
+  try { keys = JSON.parse(readFileSync(PC_LISTING_WARM_PATH, "utf8")); } catch { return; }
+  for (const key of Array.isArray(keys) ? keys.slice(0, 12) : []) {
+    let query;
+    try { query = JSON.parse(key); } catch { continue; }
+    if (!query || typeof query !== "object" || query.cursor) continue;
+    pcListingsReadCache.prime(key, pcListingFirstPage(query));
+  }
+}
+
+setInterval(() => {
+  if (!searchIndex || deploymentPaused()) return;
+  pcListingsReadCache.keepWarm();
+  rememberPcListingWarmScopes();
+}, 60_000).unref();
+setTimeout(primeRememberedPcListingScopes, 30_000).unref();
 
 function pcPartsLedgerMigrationNeedsBackup(db) {
   try {
@@ -2688,44 +2759,12 @@ const server = http.createServer(async (req, res) => {
           ...legacyResolution.canonicalProductIds
         ] };
       }
-      const categoryOnlyCatalogScope = Boolean(query.catalogScope?.categoryCode
-        && !query.catalogScope.query
-        && Object.keys(query.catalogScope.facets || {}).length === 0);
       const cursorState = decodePcListingsCursor(query, SEARCH_CURSOR_SECRET);
-      const browse = async (browseAsOf) => {
-        const catalogModels = query.catalogScope
-          ? publicPcModelsForApi({
-            category: query.catalogScope.categoryCode,
-            q: query.catalogScope.query,
-            ...query.catalogScope.facets
-          }).models
-          : null;
-        const browseOptions = {
-          ...query,
-          categoryCode: categoryOnlyCatalogScope ? query.catalogScope.categoryCode : "",
-          canonicalProductIds: query.canonicalProductIds || (categoryOnlyCatalogScope
-            ? null
-            : catalogModels?.map((model) => model.canonical_product_id) ?? null),
-          asOf: browseAsOf,
-          after: cursorState?.after || null
-        };
-        let browseResult;
-        try { browseResult = await pcListingsBrowseWorker.browse(browseOptions); }
-        catch (error) {
-          // A scan that outlived its deadline would block every request if
-          // repeated here; report it as retryable. Otherwise the same read on
-          // the HTTP thread keeps availability and surfaces query errors as 400.
-          if (error?.code === "PC_LISTING_WORKER_TIMEOUT") throw error;
-          console.warn("[aws-runner] PC listing worker read failed; scanning inline", error?.message || error);
-          browseResult = searchIndex.browsePcListings(browseOptions);
-        }
-        return { result: browseResult, asOf: browseAsOf, matchedModelCount: catalogModels?.length ?? null };
-      };
       // Continuations keep their own snapshot time. First pages reuse a recent
       // scope result; its own as_of drives freshness and the next cursor.
       const read = cursorState
-        ? { value: await browse(cursorState.asOf), state: "BYPASS" }
-        : await pcListingsReadCache.read(JSON.stringify(query), () => browse(new Date().toISOString()));
+        ? { value: await browsePcListingScope(query, { asOf: cursorState.asOf, after: cursorState.after || null }), state: "BYPASS" }
+        : await pcListingsReadCache.read(JSON.stringify(query), pcListingFirstPage(query));
       const { result, asOf, matchedModelCount } = read.value;
       res.setHeader("x-pc-runner-cache", read.state);
       if (!result.cursorFound) return json(res, 410, { status: "error", error: "CURSOR_EXPIRED: listing snapshot changed" });

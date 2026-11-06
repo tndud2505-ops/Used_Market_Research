@@ -446,7 +446,9 @@ function detectCategory(text, specialKind, evidence, title = '') {
     return 'SSD';
   }
   const rules = [
-    ['COOLING', /(?:CPU\s*(?:공랭|수랭)?\s*쿨러(?!\s*(?:별도|제외|없음|미포함))|공랭\s*쿨러|수랭\s*쿨러|케이스\s*팬|(?:120|240|280|360|420)\s*(?:MM\s*)?수랭|NH-D15)/i],
+    // "케이스 (쿨러|쿨링) 팬" sells fans unless the fans come with the case
+    // ("쿨링팬 3개 포함"); that wording falls through to the case rule below.
+    ['COOLING', /(?:CPU\s*(?:공랭|수랭)?\s*쿨러(?!\s*(?:별도|제외|없음|미포함))|공랭\s*쿨러|수랭\s*쿨러|케이스\s*(?:쿨러|쿨링)?\s*팬(?!\s*(?:\d+\s*개\s*)?(?:포함|증정|장착|기본))|(?:120|240|280|360|420)\s*(?:MM\s*)?수랭|NH-D15)/i],
     ['GPU', LEGACY_DISCRETE_GPU_PATTERN],
     ['GPU', /(?:RTX\s*\d{4}|GTX\s*\d{3,4}|\bGT\s*\d{3,4}|RX\s*\d{3,4}|(?:INTEL\s*)?ARC\s*[AB]\d{3}|\b[5-9]\d{3}\s*XT[X]?\b|\b(?:30[5-9]0|40[5-9]0|50[5-9]0)(?:\s*TI)?(?:\s*SUPER)?\b|그래픽\s*카드|그래픽카드|\bGPU\b|지포스|라데온)/i],
     ['SSD', /(?:\bSSD\b|NVMe|M\.2|\b(?:8[67]0|9(?:70|80|90))\s*(?:EVO(?:\s*PLUS)?|QVO|PRO)\b|(?:Samsung|삼성).{0,20}\b(?:870|980|(?:PM|SM)\d[A-Z0-9]+)\b|(?:SK\s*hynix|하이닉스).{0,20}\bP(?:31|41)\b|\bSN\d{3,4}X?\b)/i],
@@ -456,7 +458,7 @@ function detectCategory(text, specialKind, evidence, title = '') {
     ['CPU', CORE_ULTRA_PATTERN],
     ['CPU', /(?:\bCPU\b|라이젠|RYZEN|인텔\s*(?:코어)?|\bI[3579]\s*(?:[-~]\s*)?\d{4,5}(?:KF|KS|HX|K|F|H|U|T)?(?=\b|CPU)|\b\d{4,5}X(?:3D2?)?\b|\b1[2345]\d{3}K[F]?\b)/i],
     ['PSU', /(?:\bPSU\b|power\s*supply|파워\s*(?:서플라이)?|\b(?:RM|HX|AX|TX|CX|CV|SF)\d{3,4}(?:X|I|M)?\b|GX-\d{3,4}|ATX\s*3\.0|(?:정격|피크)\s*\d{3,4}\s*W\b|(?:Classic\s*II|클래식\s*2|HYDRO\s*PRO|하이드로\s*프로|LEADEX|리덱스).{0,20}\d{3,4}\s*W?\b|(?:Seasonic|시소닉|Corsair|커세어|FSP|Super\s*Flower|슈퍼플라워|Micronics|마이크로닉스|Cooler\s*Master|쿨러마스터|Thermaltake|써멀테이크|Antec|안텍).{0,30}\d{3,4}\s*W\b)/i],
-    ['CASE', /(?:PC\s*케이스|컴퓨터\s*케이스|Fractal\s+Design\s+North|(?:미니|미들|빅|풀)\s*타워|\b(?:MINI|MID|MIDDLE|FULL|BIG)[\s-]*TOWER\b|(?:리안리|LIAN\s*LI|앱코|ABKO|NZXT|프랙탈|FRACTAL|다크플래[쉬시]|DARKFLASH|3RSYS|쓰리알시스|마이크로닉스|MICRONICS|써멀테이크|THERMALTAKE|쿨러마스터|COOLER\s*MASTER|커세어|CORSAIR|팬텍스|PHANTEKS|안텍|ANTEC|HYTE)[^,\n]{0,30}케이스(?!\s*팬))/iu],
+    ['CASE', /(?:PC\s*케이스|컴퓨터\s*케이스|Fractal\s+Design\s+North|(?:미니|미들|빅|풀)\s*타워|\b(?:MINI|MID|MIDDLE|FULL|BIG)[\s-]*TOWER\b|(?:리안리|LIAN\s*LI|앱코|ABKO|NZXT|프랙탈|FRACTAL|다크플래[쉬시]|DARKFLASH|3RSYS|쓰리알시스|마이크로닉스|MICRONICS|써멀테이크|THERMALTAKE|쿨러마스터|COOLER\s*MASTER|커세어|CORSAIR|팬텍스|PHANTEKS|안텍|ANTEC|HYTE)[^,\n]{0,30}케이스(?!\s*(?:쿨러|쿨링)?\s*팬(?!\s*(?:\d+\s*개\s*)?(?:포함|증정|장착|기본))))/iu],
     ['EXPANSION_CARD', /(?:확장\s*카드|확장카드|랜\s*카드|랜카드|사운드\s*카드|캡처\s*보드|XG-C100C)/i],
     ['ODD', /(?:\bODD\b|DVD\s*(?:ROM|라이터)?|블루레이\s*드라이브|GP60NB50)/i]
   ];
@@ -756,7 +758,7 @@ function detectModel(text, category, specialKind, evidence, quantityResult = {},
     const aioSize = text.match(/\b(120|240|280|360|420)\s*(?:MM)?\s*(?:AIO|수(?:냉|랭))/iu)
       || text.match(/(?:AIO|수(?:냉|랭))\s*(120|240|280|360|420)\s*(?:MM)?/iu);
     const subtypeName = /\bAIO\b|수(?:냉|랭)|water\s*cool/iu.test(text) ? 'AIO Liquid Cooler'
-      : /case\s*fan|케이스\s*팬|쿨링\s*팬/iu.test(text) ? 'PC Case Fan'
+      : /case\s*fan|케이스\s*(?:쿨러|쿨링)?\s*팬|쿨링\s*팬/iu.test(text) ? 'PC Case Fan'
         : /cooler|heat\s*sink|쿨러|공랭/iu.test(text) ? 'Air CPU Cooler' : null;
     if (nhD15) result = { model: 'NH-D15', matchedText: nhD15[0] };
     else if (aioSize) result = { model: `${aioSize[1]}MM AIO`, matchedText: aioSize[0] };
@@ -1134,7 +1136,7 @@ function caseCoolingNodeId(category, manufacturer, facetValue) {
 
 function coolingSubtype(text) {
   if (/\bAIO\b|수\s*[랭냉]|WATER\s*COOL|라디에이터|RADIATOR/iu.test(text)) return 'AIO';
-  if (/케이스\s*팬|CASE\s*FAN|쿨링\s*팬|시스템\s*팬|PWM\s*팬|\d{2,3}\s*MM\s*팬|팬\s*\d+\s*개/iu.test(text)
+  if (/케이스\s*(?:쿨러|쿨링)?\s*팬|CASE\s*FAN|쿨링\s*팬|시스템\s*팬|PWM\s*팬|\d{2,3}\s*MM\s*팬|팬\s*\d+\s*개/iu.test(text)
     && !/CPU\s*쿨러|공랭|타워\s*쿨러/iu.test(text)) return 'CASE_FAN';
   return 'AIR_CPU';
 }
