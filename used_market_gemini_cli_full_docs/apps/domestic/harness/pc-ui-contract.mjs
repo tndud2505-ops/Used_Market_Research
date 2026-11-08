@@ -115,13 +115,13 @@ const analysisSourcesSource = toolsScript.slice(toolsScript.indexOf('function an
 const sourceContext = vm.createContext({
   state: { sources: [{ source_id: 'joonggonara' }, { source_id: 'ebay' }], priceSources: new Set(['joonggonara']), selectedId: 'cpu:test' },
   prices: { getAvailable: () => null }, overseasPrices: { getAvailable: () => null },
-  chartRecord: () => null,
+  chartRecord: () => null, requestedPriceAsOf: () => '',
 });
 vm.runInContext(analysisSourcesSource, sourceContext);
 assert.deepEqual(Array.from(vm.runInContext('analysisSources({ latest: true }).map(item => item.id)', sourceContext)), ['joonggonara', 'ebay'],
   'latest prices must hide disabled sources while remaining independent of chart selection');
-assert.deepEqual(Array.from(vm.runInContext('analysisSources().map(item => item.id)', sourceContext)), ['joonggonara'],
-  'chart sources must respect public availability and the current selection');
+assert.deepEqual(Array.from(vm.runInContext('analysisSources().map(item => item.id)', sourceContext)), ['joonggonara', 'ebay'],
+  'readout sources must respect public availability while retaining unchecked sources for restoration');
 requireText(toolsChart, "item.label || metric?.label",
   "site-specific chart descriptors must provide stable legend and tooltip labels");
 requireText(toolsChart, "filter(item => item.points.some(point => point.value != null))",

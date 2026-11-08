@@ -72,7 +72,7 @@ body.ui-a.pc-tools[data-page=analysis] #analysis-chart-pane.is-expanded { positi
   body[data-page=analysis] .market-price-rail .market-snapshot-item { display:grid; grid-template-columns:17px minmax(0,1fr); align-content:start; align-items:center; gap:2px 4px; min-height:66px; margin:0; padding:0; border:0; }
   body[data-page=analysis] .market-price-rail .market-source-check { grid-column:1; grid-row:1; width:16px; height:16px; margin:0; accent-color:var(--series-color,var(--accent)); }
   body[data-page=analysis] .market-price-rail .market-snapshot-source { grid-column:2; grid-row:1; padding:0; font-size:11px; font-weight:650; line-height:20px; }
-  body[data-page=analysis] .market-price-rail .market-snapshot-amount { grid-column:1/-1; grid-row:2; margin:0; color:var(--ink); font-size:15px; font-weight:700; line-height:23px; white-space:nowrap; }
+  body[data-page=analysis] .market-price-rail .market-snapshot-amount { grid-column:1/-1; grid-row:2; margin:0; color:var(--ink); font-size:15px; font-weight:700; line-height:23px; white-space:normal; }
   body[data-page=analysis] .market-price-rail .market-snapshot-meta { grid-column:1/-1; grid-row:3; padding:0; color:var(--muted); font-size:9px; line-height:14px; }
   body.ui-a.pc-tools .market-price-rail :is(.market-source-link,.market-snapshot-retry) { grid-column:2; font-size:11px; }
   body.ui-a.pc-tools .sf-builder-bar { display:flex; flex-wrap:nowrap; align-items:center; min-height:48px; margin:0; padding:0 0 4px; gap:8px; border:0; }

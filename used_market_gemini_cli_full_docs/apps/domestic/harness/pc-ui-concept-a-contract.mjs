@@ -198,6 +198,96 @@ test('latest source rail retains missing and failed sources without mixing USD v
   assert.match(items[3].textContent,/\$25\.50/);assert.match(items[3].textContent,/USD/);assert.doesNotMatch(items[3].textContent,/25.50원/);
 });
 
+function setupAnalysis(bySource) {
+  const range = core.priceDateRange('2026-09-16', '2026-09-17', '2026-09-17');
+  const t = setup({ record: { state: 'ready', data: {
+    canonical_product_id: product.canonical_product_id,
+    methodology: { currency: 'KRW', days: range.days }, window: range, by_source: bySource,
+  } } });
+  const ids = ['joonggonara', 'bunjang', 'danawa', 'ebay'];
+  Object.assign(t.state, { range, days: range.days, priceKind: 'active', priceKindExplicit: true,
+    priceSources: new Set(ids), sources: ids.map(source_id => ({ source_id, public_enabled: true })) });
+  t.context.priceDateRange = (from, to) => core.priceDateRange(from, to, range.latest);
+  for (const id of ['chart-sources', 'chart-coverage', 'analysis-prices', 'analysis-readout-title',
+    'analysis-readout-reset', 'analysis-price-rail', 'chart-sold-note', 'analysis-workspace',
+    'analysis-model-select', 'price-chart']) t.nodes.set(`#${id}`, new Node());
+  const rail = t.nodes.get('#analysis-price-rail');
+  rail.append(t.nodes.get('#analysis-prices'));
+  t.checkbox = id => rail.querySelectorAll('*').find(node => node.dataset.priceSource === id);
+  Object.assign(t.context.document, {
+    querySelectorAll: () => [],
+    querySelector: selector => t.checkbox(selector.match(/^\[data-price-source="([^"]+)"\]$/)?.[1]),
+    addEventListener: (type, listener) => { if (type === 'change') t.change = listener; },
+  });
+  // Capture only the chart boundary; renderAnalysis and its readout callback stay real.
+  t.context.drawChart = (container, series, options) => { t.chart = { container, series, options }; };
+  vm.runInContext(script.slice(script.indexOf("document.addEventListener('change', event => {"),
+    script.indexOf('function resetToolFilters()')), t.context);
+  return t;
+}
+
+test('a pinned-date source checkbox survives hiding its line and can restore it', () => {
+  const t = setupAnalysis([
+    { source_id: 'joonggonara', daily: [
+      { date: '2026-09-16', active: metric(45000) }, { date: '2026-09-17', active: metric(46000) },
+    ] },
+    { source_id: 'bunjang', daily: [{ date: '2026-09-16', active: metric(43000) }] },
+  ]);
+  const pinned = { date: '2026-09-16', pinned: true };
+  t.context.renderAnalysis();
+  t.chart.options.onReadout(pinned);
+  assert.equal(t.checkbox('joonggonara').checked, true);
+  for (const checked of [false, true]) {
+    const checkbox = t.checkbox('joonggonara');
+    checkbox.checked = checked;
+    t.change({ target: checkbox });
+    // Re-emit the chart's pinned-date readout after each render.
+    t.chart.options.onReadout(pinned);
+    assert.equal(t.nodes.get('#analysis-price-rail').dataset.mode, 'selected');
+    assert.equal(t.nodes.get('#analysis-readout-reset').hidden, false);
+    const restored = t.checkbox('joonggonara');
+    assert.ok(restored, 'the selected-date rail must retain the source checkbox');
+    assert.equal(restored.checked, checked);
+    assert.equal(t.state.priceSources.has('joonggonara'), checked);
+    assert.equal(t.chart.series.some(line => line.id === 'joonggonara:active'), checked);
+    const readout = t.chart.options.readoutInput.find(line => line.id === 'joonggonara:active');
+    assert.ok(readout, 'hidden sources must remain available to the chart readout');
+    assert.equal(readout.points.find(point => point.date === pinned.date)?.value, 45000);
+    const item = t.nodes.get('#analysis-prices').children[0].children.find(node => node.dataset.source === 'joonggonara');
+    assert.match(item.textContent, /45,000원/);
+    assert.doesNotMatch(item.textContent, /46,000원/);
+  }
+});
+
+test('hiding the only drawable line reports hidden while empty sources stay checked', () => {
+  const t = setupAnalysis([{ source_id: 'danawa', daily: [{ date: '2026-09-16', active: metric(40000, 1) }] }]);
+  t.context.renderAnalysis();
+  assert.deepEqual(Array.from(t.chart.series, line => line.id), ['danawa:active']);
+  assert.equal(t.chart.container.dataset.priceState, 'ready');
+  const checkbox = t.checkbox('danawa');
+  checkbox.checked = false;
+  t.change({ target: checkbox });
+  assert.equal(t.chart.series.length, 0);
+  assert.equal(t.chart.container.dataset.priceState, 'hidden');
+  assert.equal(t.checkbox('danawa').checked, false);
+  for (const id of ['joonggonara', 'bunjang', 'ebay']) {
+    assert.equal(t.state.priceSources.has(id), true);
+    assert.equal(t.checkbox(id).checked, true);
+  }
+});
+
+test('truly empty analysis remains unavailable when an empty source is hidden', () => {
+  const t = setupAnalysis([]);
+  t.context.renderAnalysis();
+  assert.equal(t.chart.series.length, 0);
+  assert.equal(t.chart.container.dataset.priceState, 'unavailable');
+  const checkbox = t.checkbox('danawa');
+  checkbox.checked = false;
+  t.change({ target: checkbox });
+  assert.equal(t.chart.series.length, 0);
+  assert.equal(t.chart.container.dataset.priceState, 'unavailable');
+});
+
 test('explicit save keeps canonical validated entries, quantity and original storage key', () => {
   const t = setup({ builder: true }); assert.equal(t.context.persistBuild(), true);
   assert.deepEqual(JSON.parse(t.stored.get('used-pick:pc-build:v1')), [{ id: product.canonical_product_id, quantity: 2 }]);

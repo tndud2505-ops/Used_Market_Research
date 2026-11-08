@@ -706,7 +706,7 @@ function loadEarlierPrices({retry=false} = {}) {
 function analysisSources({ latest = false } = {}) {
   const allowedSources = new Set(state.sources.map(source => String(source.source_id || source.id || source.key || '')));
   const ids = latest ? ['joonggonara','bunjang','danawa','ebay'] : state.source ? [state.source] : [...allowedSources];
-  return ids.filter(id => allowedSources.has(id) && (latest || state.priceSources.has(id))).map(id => {
+  return ids.filter(id => allowedSources.has(id)).map(id => {
     const store = id === 'ebay' ? overseasPrices : prices;
     const record = latest ? store?.getAvailable(state.selectedId,60,'') : id === 'ebay' ? overseasPrices?.getAvailable(state.selectedId, state.days, requestedPriceAsOf()) : chartRecord(state.selectedId);
     const data = record?.state === 'ready' && !statsUnavailable(record.data)
@@ -780,6 +780,7 @@ function renderAnalysis() {
   });
   const coverage = $('#chart-coverage'); coverage.replaceChildren(); coverage.hidden = true;
   const sources = analysisSources();
+  const visibleSources = sources.filter(item => state.priceSources.has(item.id));
   const availableSeries = sources.flatMap(item => buildAnalysisSeries(statsUnavailable(item.data) ? null : item.data, {
     source: item.id, allowedSourceIds: [item.id], days: item.data?.methodology?.days || state.days, sourceLabels: SOURCE_LABELS,includeSparse:false,
   }).map(line => ({ ...line,
@@ -802,7 +803,7 @@ function renderAnalysis() {
   const kindLine=line=>state.priceKind==='sold'?soldLine(line):line.metricKey===state.priceKind;
   const kindSources=list=>state.priceKind==='sold'?list.filter(item=>item.id==='joonggonara'):list;
   const series=availableSeries.filter(kindLine);
-  const chartSeries=series;
+  const chartSeries=series.filter(line=>state.priceSources.has(line.id.split(':')[0]));
   const dates = [...new Set(chartSeries.flatMap(item => item.points.map(point => point.date)))].sort();
   const latestSources=analysisSources({latest:true}).filter(item=>state.source?item.id===state.source:true);
   const latestSeries=latestSources.flatMap(item=>buildAnalysisSeries(statsUnavailable(item.data)?null:item.data,{
@@ -832,13 +833,13 @@ function renderAnalysis() {
   const product = state.byId.get(state.selectedId), modelName = product ? nameOf(product) : '선택 모델 없음';
   $('#analysis-model-select').replaceChildren(el('span', 'tools-model-full', modelName), el('span', 'tools-model-short', compactModelName(modelName)));
   $('#analysis-model-select').title = modelName;
-  const pending = sources.some(item => !item.record || item.record.state === 'loading');
-  const failedSource = sources.find(item => item.record?.state === 'error');
-  const sparsePrices = sources.some(item => item.data?.daily?.some(day => metricPresentation(day.active).state === 'insufficient'));
+  const pending = visibleSources.some(item => !item.record || item.record.state === 'loading');
+  const failedSource = visibleSources.find(item => item.record?.state === 'error');
+  const sparsePrices = visibleSources.some(item => item.data?.daily?.some(day => metricPresentation(day.active).state === 'insufficient'));
   $('#price-chart').setAttribute('aria-busy', String(Boolean(state.selectedId) && pending));
   $('#price-chart').dataset.modelId = state.selectedId;
-  // Unchecking every site is a display choice, not missing market data.
-  const sourcesHidden = Boolean(state.selectedId) && !sources.length;
+  // Keep every source available in the readout, even when its line is hidden.
+  const sourcesHidden = Boolean(state.selectedId) && (!visibleSources.length || (series.length > 0 && !chartSeries.length));
   $('#price-chart').dataset.priceState = !state.selectedId ? 'empty' : sourcesHidden ? 'hidden' : pending ? 'loading'
     : chartSeries.length ? 'ready' : failedSource ? 'error' : sparsePrices ? 'insufficient' : 'unavailable';
   $('#price-chart').hidden=false;
