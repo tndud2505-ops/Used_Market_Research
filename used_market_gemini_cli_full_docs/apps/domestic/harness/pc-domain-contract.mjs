@@ -2102,5 +2102,29 @@ for (const [title, category, product] of [
 }
 assert.equal(reviewedPcListingExclusion("joonggonara", "233032031")?.reason, "CATEGORY_MISMATCH",
   "the reported 3,500 KRW case fan leaves stored case statistics");
+for (const title of [
+  "시놀로지 DS224+ 정품 HDD 4TB[AS28년도까지]",
+  "시놀로지 DS920+ 서버용 HDD MG 6TB 6테라",
+  "시놀로지DS220+ 저소음 2.5인치 HDD 5TB",
+  "synology DS220+ (HDD 8TB 2EA) 판매합니다",
+  "할인 - [초고속 고사양 미니 SSD 나스] 32TB SSD 큐냅/QNAP TVS-882ST3"
+]) {
+  const result = classifyPcPartListingPublic({ title, price: 702000, currency: "KRW" });
+  assert.equal(result.listing_kind, "COMPONENT_BUNDLE", title);
+  assert.equal(result.listing_type, "BUNDLE", title);
+  assert.equal(result.canonical_product_id, null, title);
+  assert.equal(result.statistics_eligible, false, title);
+}
+for (const [title, expectedId] of [
+  ["Seagate IronWolf HDD 4TB 5900/64M NAS", "hdd:seagate:capacity-bucket:gt-2-tb-le-4-tb"],
+  ["Synology Plus Series 5400/256M/중고 4TB HAT3300-4T HDD", "hdd:other-unclassified:capacity-bucket:gt-2-tb-le-4-tb"],
+  ["시놀로지 HAT3320-8TB HDD 팝니다.", "hdd:other-unclassified:capacity-bucket:gt-6-tb-le-8-tb"],
+  ["(시놀로지 나스 추가 장착) DDR3 4GB 삼성 램", "ram:spec:ddr3-4gb"],
+  ["18TB 3.5\" Toshiba MG09ACA18TE HDD Hard Drive for Synology Diskstation Models", "hdd:toshiba:capacity-bucket:gt-16-tb-le-20-tb"]
+]) {
+  const result = classifyPcPartListingPublic({ title, price: 150000, currency: "KRW" });
+  assert.equal(result.listing_kind, "SINGLE_COMPONENT", title);
+  assert.equal(result.canonical_product_id, expectedId, title);
+}
 await import('./pc-observation-days-contract.mjs');
 console.log(JSON.stringify({ status: "passed", contract: "pc-domain" }, null, 2));

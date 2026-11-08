@@ -303,6 +303,202 @@ export const PC_REVIEWED_LISTING_EXCLUSIONS = Object.freeze([
     reason: "CATEGORY_MISMATCH",
     reviewed_at: "2026-11-06",
     evidence: "PUBLIC_TITLE_CASE_FAN_SALE_IN_CASE_GROUP"
+  }),
+  Object.freeze({
+    source_id: "joonggonara",
+    source_listing_token: "232936678",
+    reason: "COMPONENT_BUNDLE",
+    reviewed_at: "2026-11-08",
+    evidence: "PUBLIC_TITLE_NAS_APPLIANCE_STORAGE_BUNDLE"
+  }),
+  Object.freeze({
+    source_id: "bunjang",
+    source_listing_token: "437123818",
+    reason: "COMPONENT_BUNDLE",
+    reviewed_at: "2026-11-08",
+    evidence: "PUBLIC_TITLE_NAS_APPLIANCE_STORAGE_BUNDLE"
+  }),
+  Object.freeze({
+    source_id: "joonggonara",
+    source_listing_token: "233068668",
+    reason: "COMPONENT_BUNDLE",
+    reviewed_at: "2026-11-08",
+    evidence: "PUBLIC_TITLE_NAS_APPLIANCE_STORAGE_BUNDLE"
+  }),
+  Object.freeze({
+    source_id: "joonggonara",
+    source_listing_token: "233461497",
+    reason: "COMPONENT_BUNDLE",
+    reviewed_at: "2026-11-08",
+    evidence: "PUBLIC_TITLE_NAS_APPLIANCE_STORAGE_BUNDLE"
+  }),
+  Object.freeze({
+    source_id: "joonggonara",
+    source_listing_token: "233515359",
+    reason: "COMPONENT_BUNDLE",
+    reviewed_at: "2026-11-08",
+    evidence: "PUBLIC_TITLE_NAS_APPLIANCE_STORAGE_BUNDLE"
+  }),
+  Object.freeze({
+    source_id: "joonggonara",
+    source_listing_token: "232256658",
+    reason: "COMPONENT_BUNDLE",
+    reviewed_at: "2026-11-08",
+    evidence: "PUBLIC_TITLE_NAS_APPLIANCE_STORAGE_BUNDLE"
+  }),
+  Object.freeze({
+    source_id: "joonggonara",
+    source_listing_token: "229940569",
+    reason: "COMPONENT_BUNDLE",
+    reviewed_at: "2026-11-08",
+    evidence: "PUBLIC_TITLE_NAS_APPLIANCE_STORAGE_BUNDLE"
+  }),
+  Object.freeze({
+    source_id: "joonggonara",
+    source_listing_token: "232171224",
+    reason: "COMPONENT_BUNDLE",
+    reviewed_at: "2026-11-08",
+    evidence: "PUBLIC_TITLE_NAS_APPLIANCE_STORAGE_BUNDLE"
+  }),
+  Object.freeze({
+    source_id: "joonggonara",
+    source_listing_token: "232255771",
+    reason: "COMPONENT_BUNDLE",
+    reviewed_at: "2026-11-08",
+    evidence: "PUBLIC_TITLE_NAS_APPLIANCE_STORAGE_BUNDLE"
+  }),
+  Object.freeze({
+    source_id: "joonggonara",
+    source_listing_token: "232384037",
+    reason: "COMPONENT_BUNDLE",
+    reviewed_at: "2026-11-08",
+    evidence: "PUBLIC_TITLE_NAS_APPLIANCE_STORAGE_BUNDLE"
+  }),
+  Object.freeze({
+    source_id: "joonggonara",
+    source_listing_token: "230731364",
+    reason: "COMPONENT_BUNDLE",
+    reviewed_at: "2026-11-08",
+    evidence: "PUBLIC_TITLE_NAS_APPLIANCE_STORAGE_BUNDLE"
+  }),
+  Object.freeze({
+    source_id: "joonggonara",
+    source_listing_token: "228843056",
+    reason: "COMPONENT_BUNDLE",
+    reviewed_at: "2026-11-08",
+    evidence: "PUBLIC_TITLE_NAS_APPLIANCE_STORAGE_BUNDLE"
+  }),
+  Object.freeze({
+    source_id: "joonggonara",
+    source_listing_token: "229981517",
+    reason: "COMPONENT_BUNDLE",
+    reviewed_at: "2026-11-08",
+    evidence: "PUBLIC_TITLE_NAS_APPLIANCE_STORAGE_BUNDLE"
+  }),
+  Object.freeze({
+    source_id: "joonggonara",
+    source_listing_token: "230770968",
+    reason: "COMPONENT_BUNDLE",
+    reviewed_at: "2026-11-08",
+    evidence: "PUBLIC_TITLE_NAS_APPLIANCE_STORAGE_BUNDLE"
+  }),
+  Object.freeze({
+    source_id: "joonggonara",
+    source_listing_token: "229855973",
+    reason: "COMPONENT_BUNDLE",
+    reviewed_at: "2026-11-08",
+    evidence: "PUBLIC_TITLE_NAS_APPLIANCE_STORAGE_BUNDLE"
+  }),
+  Object.freeze({
+    source_id: "joonggonara",
+    source_listing_token: "231889773",
+    reason: "COMPONENT_BUNDLE",
+    reviewed_at: "2026-11-08",
+    evidence: "PUBLIC_TITLE_NAS_APPLIANCE_STORAGE_BUNDLE"
+  }),
+  Object.freeze({
+    source_id: "joonggonara",
+    source_listing_token: "232752649",
+    reason: "COMPONENT_BUNDLE",
+    reviewed_at: "2026-11-08",
+    evidence: "PUBLIC_TITLE_NAS_APPLIANCE_STORAGE_BUNDLE"
+  }),
+  Object.freeze({
+    source_id: "joonggonara",
+    source_listing_token: "232674128",
+    reason: "COMPONENT_BUNDLE",
+    reviewed_at: "2026-11-08",
+    evidence: "PUBLIC_TITLE_NAS_APPLIANCE_STORAGE_BUNDLE"
+  }),
+  Object.freeze({
+    source_id: "joonggonara",
+    source_listing_token: "227661787",
+    reason: "COMPONENT_BUNDLE",
+    reviewed_at: "2026-11-08",
+    evidence: "PUBLIC_TITLE_NAS_APPLIANCE_STORAGE_BUNDLE"
+  }),
+  Object.freeze({
+    source_id: "joonggonara",
+    source_listing_token: "233054662",
+    reason: "COMPONENT_BUNDLE",
+    reviewed_at: "2026-11-08",
+    evidence: "PUBLIC_TITLE_NAS_APPLIANCE_STORAGE_BUNDLE"
+  }),
+  Object.freeze({
+    source_id: "joonggonara",
+    source_listing_token: "233247298",
+    reason: "COMPONENT_BUNDLE",
+    reviewed_at: "2026-11-08",
+    evidence: "PUBLIC_TITLE_NAS_APPLIANCE_STORAGE_BUNDLE"
+  }),
+  Object.freeze({
+    source_id: "joonggonara",
+    source_listing_token: "228378904",
+    reason: "COMPONENT_BUNDLE",
+    reviewed_at: "2026-11-08",
+    evidence: "PUBLIC_TITLE_NAS_APPLIANCE_STORAGE_BUNDLE"
+  }),
+  Object.freeze({
+    source_id: "bunjang",
+    source_listing_token: "405450570",
+    reason: "COMPONENT_BUNDLE",
+    reviewed_at: "2026-11-08",
+    evidence: "PUBLIC_TITLE_NAS_APPLIANCE_STORAGE_BUNDLE"
+  }),
+  Object.freeze({
+    source_id: "bunjang",
+    source_listing_token: "405681588",
+    reason: "COMPONENT_BUNDLE",
+    reviewed_at: "2026-11-08",
+    evidence: "PUBLIC_TITLE_NAS_APPLIANCE_STORAGE_BUNDLE"
+  }),
+  Object.freeze({
+    source_id: "bunjang",
+    source_listing_token: "367452941",
+    reason: "COMPONENT_BUNDLE",
+    reviewed_at: "2026-11-08",
+    evidence: "PUBLIC_TITLE_NAS_APPLIANCE_STORAGE_BUNDLE"
+  }),
+  Object.freeze({
+    source_id: "bunjang",
+    source_listing_token: "432400840",
+    reason: "COMPONENT_BUNDLE",
+    reviewed_at: "2026-11-08",
+    evidence: "PUBLIC_TITLE_NAS_APPLIANCE_STORAGE_BUNDLE"
+  }),
+  Object.freeze({
+    source_id: "bunjang",
+    source_listing_token: "430958834",
+    reason: "COMPONENT_BUNDLE",
+    reviewed_at: "2026-11-08",
+    evidence: "PUBLIC_TITLE_NAS_APPLIANCE_STORAGE_BUNDLE"
+  }),
+  Object.freeze({
+    source_id: "bunjang",
+    source_listing_token: "417985138",
+    reason: "COMPONENT_BUNDLE",
+    reviewed_at: "2026-11-08",
+    evidence: "PUBLIC_TITLE_NAS_APPLIANCE_STORAGE_BUNDLE"
   })
 ]);
 

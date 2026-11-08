@@ -4,9 +4,13 @@ export const PC_UNCLASSIFIED_MANUFACTURER_V3 = "기타/미분류 제조사";
 // were previously "unknown maker" and add no marketplace searches of their own.
 export const PC_LISTING_ONLY_PSU_MANUFACTURERS_V3 = Object.freeze(["EVGA", "Zalman", "GIGABYTE", "NZXT", "MAXELITE", "Energy Optimus", "ABKO"]);
 
-// Domestic sources run at their 100-query capacity, so these CPUs (released
-// 2026) are sorted from the general Ryzen queries instead of new searches.
-export const PC_SEARCHLESS_PRODUCT_IDS_V3 = Object.freeze(["cpu:amd:ryzen-7-9850x3d", "cpu:amd:ryzen-9-9950x3d2"]);
+// Domestic sources run at their 100-query capacity, so these models are sorted
+// from the existing category/manufacturer queries instead of new searches.
+export const PC_SEARCHLESS_PRODUCT_IDS_V3 = Object.freeze([
+  "cpu:amd:ryzen-7-9850x3d",
+  "cpu:amd:ryzen-9-9950x3d2",
+  "motherboard:gigabyte:b660m-ds3h-ddr4"
+]);
 
 // Groups that only sort listings already found by broader queries. They get
 // no marketplace search of their own.
@@ -699,6 +703,7 @@ const MOTHERBOARD_PRODUCTS = [
     { manufacturer: "GIGABYTE", model: "X870 AORUS ELITE WIFI7 ICE", family: "AORUS", platform: "AMD", socket: "AM5", chipset: "X870", formFactor: "ATX", ddr: "DDR5", wifi: true, edition: "WIFI7 ICE", revision: "1.x", revisionRequired: true, verifiedRevisions: ["1.0", "1.1", "1.2"], sourceUrl: "https://www.gigabyte.com/Motherboard/X870-AORUS-ELITE-WIFI7-ICE-rev-12" },
     { manufacturer: "GIGABYTE", model: "B850M AORUS STEALTH ICE", family: "AORUS", platform: "AMD", socket: "AM5", chipset: "B850", formFactor: "Micro-ATX", ddr: "DDR5", wifi: true, edition: "STEALTH ICE", sourceUrl: "https://www.gigabyte.com/Motherboard/B850M-AORUS-STEALTH-ICE" },
     { manufacturer: "GIGABYTE", model: "B850M AORUS ELITE", family: "AORUS", platform: "AMD", socket: "AM5", chipset: "B850", formFactor: "Micro-ATX", ddr: "DDR5", edition: "ELITE", sourceUrl: "https://www.gigabyte.com/Motherboard/B850M-AORUS-ELITE" },
+    { manufacturer: "GIGABYTE", model: "B660M DS3H DDR4", family: "Ultra Durable", platform: "Intel", socket: "LGA1700", chipset: "B660", formFactor: "Micro-ATX", ddr: "DDR4", edition: "DS3H DDR4", revision: "1.0", verifiedRevisions: ["1.0"], sourceUrl: "https://www.gigabyte.com/Motherboard/B660M-DS3H-DDR4-rev-10/sp" },
     { manufacturer: "GIGABYTE", model: "B450M DS3H", family: "Ultra Durable", platform: "AMD", socket: "AM4", chipset: "B450", formFactor: "Micro-ATX", ddr: "DDR4", revision: "1.x", revisionRequired: true, sourceUrl: "https://www.gigabyte.com/Motherboard/B450M-DS3H-rev-1x" },
     { manufacturer: "GIGABYTE", model: "A520M K V2", family: "Ultra Durable", platform: "AMD", socket: "AM4", chipset: "A520", formFactor: "Micro-ATX", ddr: "DDR4", edition: "V2", revision: "1.x", revisionRequired: true, verifiedRevisions: ["1.0", "1.1", "1.2"], sourceUrl: "https://www.gigabyte.com/Motherboard/A520M-K-V2-rev-12" },
     { manufacturer: "ASRock", model: "Z390 Steel Legend", family: "Steel Legend", platform: "Intel", socket: "LGA1151", chipset: "Z390", formFactor: "ATX", ddr: "DDR4", edition: "STEEL LEGEND", sourceUrl: "https://www.asrock.com/mb/Intel/Z390%20Steel%20Legend/index.asp" },

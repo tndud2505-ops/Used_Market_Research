@@ -208,11 +208,13 @@ const exactMotherboardCases = [
   ["ROG STRIX B550-I GAMING", "motherboard:asus:rog-strix-b550-i-gaming"],
   ["ASRock Z370M Pro4 메인보드", "motherboard:asrock:z370m-pro4"],
   ["ASUS TUF GAMING B850M-PLUS II 메인보드", "motherboard:asus:tuf-gaming-b850m-plus-ii"],
+  ["기가바이트 B660M DS3H DDR4 12세대 메인보드", "motherboard:gigabyte:b660m-ds3h-ddr4"],
+  ["GIGABYTE B660M DS3H DDR4 rev 1.0 메인보드", "motherboard:gigabyte:b660m-ds3h-ddr4"],
   ["GIGABYTE B550M AORUS ELITE rev 1.3 메인보드", "motherboard:gigabyte:b550m-aorus-elite"],
   ["GIGABYTE X870 AORUS ELITE WIFI7 ICE rev 1.2 메인보드", "motherboard:gigabyte:x870-aorus-elite-wifi7-ice"]
 ];
 const registeredMotherboards = publicPcModelsForApi({ category: "MOTHERBOARD" }).models;
-assert.equal(registeredMotherboards.filter((product) => product.key_specs.directory_node_type === "PRODUCT").length, 45);
+assert.equal(registeredMotherboards.filter((product) => product.key_specs.directory_node_type === "PRODUCT").length, 46);
 assert.equal(registeredMotherboards.some((product) => product.canonical_product_id === "motherboard:asus:tuf-gaming-b760m-a-d4"), false,
   "an unverified/non-existent supplemental model must not survive outside the master");
 for (const [title, id] of exactMotherboardCases) {
@@ -240,6 +242,12 @@ for (const title of [
   "ASRock B150M Pro4 D3 메인보드",
   "GIGABYTE B450M DS3H 메인보드",
   "GIGABYTE B450M DS3H V2 메인보드",
+  "GIGABYTE B660M DS3H 메인보드",
+  "GIGABYTE B660M DS3H DDR5 메인보드",
+  "GIGABYTE B660M DS3H D5 메인보드",
+  "GIGABYTE B660M DS3H AX DDR4 메인보드",
+  "GIGABYTE B660M DS3H WIFI DDR4 메인보드",
+  "GIGABYTE B660M DS3H DDR4 rev 1.2 메인보드",
   "GIGABYTE B550M AORUS ELITE AX 메인보드",
   "GIGABYTE B550M AORUS ELITE AX rev 1.3 메인보드",
   "GIGABYTE A520M K V2 ICE rev 1.0 메인보드",

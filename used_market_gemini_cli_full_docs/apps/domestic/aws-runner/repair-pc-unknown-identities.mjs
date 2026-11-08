@@ -59,11 +59,19 @@ function metadataPromotion(old, promotion, statistics = null) {
         previous_value: old.canonical_product_id }, ...next.evidence.filter(e => ['manufacturer', 'canonical_model'].includes(e.field))] };
 }
 
-// scope 'motherboard-chipset' limits a run to platform -> chipset narrowing so
-// unrelated identity promotions (and their price scopes) are not bundled in.
+// scope 'motherboard-chipset', 'motherboard-product', or an exact motherboard
+// PRODUCT ID limits a run so unrelated identity promotions are not bundled in.
 export function buildUnknownIdentityRepair(db, { asOf = new Date().toISOString(), cohortAsOf = asOf, scope = null } = {}) {
-  if (scope !== null && scope !== 'motherboard-chipset') throw new Error('UNKNOWN_IDENTITY_SCOPE_UNSUPPORTED');
-  const inScope = promotion => scope === null || /^motherboard:chipset:/.test(promotion.product.id);
+  const exactBoardProduct = scope ? products.get(scope) : null;
+  const isExactBoardScope = Boolean(exactBoardProduct && exactBoardProduct.category === 'MOTHERBOARD'
+    && exactBoardProduct.spec?.directory_node_type === 'PRODUCT');
+  if (scope !== null && scope !== 'motherboard-chipset' && scope !== 'motherboard-product' && !isExactBoardScope)
+    throw new Error('UNKNOWN_IDENTITY_SCOPE_UNSUPPORTED');
+  const inScope = promotion => scope === null
+    || (scope === 'motherboard-chipset' && /^motherboard:chipset:/.test(promotion.product.id))
+    || (scope === 'motherboard-product' && promotion.product.category === 'MOTHERBOARD'
+      && promotion.product.spec?.directory_node_type === 'PRODUCT')
+    || (isExactBoardScope && promotion.product.id === scope);
   const ledger = new PcPartsLedger({ db });
   const active = ledger.getActivePipelineVersion();
   if (!active) throw new Error('ACTIVE_PIPELINE_REQUIRED');

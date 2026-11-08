@@ -38,6 +38,11 @@ const plan = buildUnknownIdentityRepair(db, { asOf: '2026-10-05T00:00:00.000Z' }
 const chipsetOnly = buildUnknownIdentityRepair(db, { asOf: '2026-10-05T00:00:00.000Z', scope: 'motherboard-chipset' });
 assert.equal(chipsetOnly.listings.length, 0, 'a chipset-only run excludes SSD and exact-model promotions');
 assert.equal(chipsetOnly.scope, 'motherboard-chipset');
+const productOnly = buildUnknownIdentityRepair(db, { asOf: '2026-10-05T00:00:00.000Z', scope: 'motherboard-product' });
+assert.equal(productOnly.listings.length, 1, 'motherboard-product scope promotes only verified exact boards');
+assert.equal(productOnly.listings[0].after.pc_canonical_product_id, 'motherboard:asus:prime-b460m-a');
+const exactBoardOnly = buildUnknownIdentityRepair(db, { asOf: '2026-10-05T00:00:00.000Z', scope: 'motherboard:asus:prime-b460m-a' });
+assert.equal(exactBoardOnly.listings.length, 1);
 assert.throws(() => buildUnknownIdentityRepair(db, { scope: 'ssd' }), /SCOPE_UNSUPPORTED/);
 assert.equal(plan.normalizations.length, 2); assert.equal(plan.listings.length, 2);
 assert.equal(dump('listings'), before, 'preview does not write');

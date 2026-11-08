@@ -365,9 +365,20 @@ function detectSpecialKind(text, evidence, title = text) {
     && !/(?:호환|지원|테스트|장착\s*확인|사용\s*가능)/iu.test(title);
   const mixedStorageBundle = /\bSSD\b/iu.test(title) && /(?:\bHDD\b|하드\s*디스크|하드디스크)/iu.test(title);
   const storageEnclosureBundle = /(?:SSD|HDD|하드\s*디스크).{0,50}\+.{0,30}(?:외장\s*)?케이스|(?:외장\s*)?케이스.{0,30}\+.{0,50}(?:SSD|HDD|하드\s*디스크)/iu.test(title);
+  // DiskStation/RackStation/QNAP/Asustor/TerraMaster/UGREEN/ipTIME NAS models
+  // are network appliances sold diskless by default; when paired with drives or
+  // memory in the title, the price is a NAS + storage/memory bundle rather than
+  // a standalone drive/module. Standalone NAS-grade drives (IronWolf, WD Red,
+  // Synology Plus/HAT3300/HAT5300) and compatibility/pull mentions stay single.
+  const nasAppliance = firstMatch(title, /(?:\b(?:SYNOLOGY|시놀로지)\s*(?:나스\s*|NAS\s*)?|\bNAS\s+)\b(?:DS|RS|FS|DX)\s*\d{3,4}(?:\+|PLUS|II|J|PLAY|SE|SLIM|XS\+?)?(?![A-Z0-9-])|\b(?:DS|RS)\d{3,4}(?:\+|PLUS|II|J|PLAY|SE|SLIM|XS\+?)(?![A-Z0-9-])|\b(?:DS|RS)(?:11[589]|124|21[4568]|22[0345]|41[58]|42[035]|71[68]|72[03]|91[68]|92[035]|1019|1221|151[57]|152[02]|1618|1621|181[579]|182[135]|2419|2422|361[57]|3622)(?![A-Z0-9-])|(?:SYNOLOGY|시놀로지)(?:\s*(?:SYNOLOGY|시놀로지|나스|NAS))*\s*\d{3,4}\+|\b(?:QNAP|큐냅)\s*(?:TS|TVS|TBS)-\d{3,4}[A-Z0-9-]*|\b(?:ASUSTOR|아수스토어|아수스)\s*(?:AS|FS)\d{4}[A-Z]*|\bAS[356]\d{3}T\b|\b(?:TERRAMASTER|테라마스터)\s*F[2468]-\d{3}(?:\s*PRO|\s*프로)?|\b(?:UGREEN|유그린)?\s*(?:NASYNC\s*)?DXP\d{4}(?:\s*PRO)?|\bIPTIME\s*NAS\d{1,3}(?:DUAL)?\b/iu);
+  const nasComponentOnly = separateComponentSale
+    || /(?:시놀로지|SYNOLOGY|큐냅|QNAP|아수스토어|ASUSTOR|나스|NAS)\s*(?:전용|호환|추가\s*장착|용\b)|\b(?:TESTED\s+IN|PULL)\b/iu.test(title);
+  const nasComponentBundle = nasAppliance && !nasComponentOnly
+    && (componentGroups.has('STORAGE') || componentGroups.has('RAM') || hasStorageConfiguration || hasMemoryConfiguration || /\b\d{1,3}\s*(?:TB|테라)\b/iu.test(title))
+    ? nasAppliance : null;
   const gpuCoolingBundle = /(?:RTX|GTX|RX\s*\d{4}|그래픽\s*카드).{0,50}(?:(?:워터\s*(?:블록|보드)|WATER\s*BLOCK).{0,20}포함|(?:수랭\s*)?쿨러\s*포함|\bEGPU\b)|\bEGPU\b.{0,40}(?:RTX|GTX|RX\s*\d{4})/iu.test(text);
   const componentBundle = explicitComponentBundle || cpuBoardBundle || cpuGpuBundle
-    || storageEnclosureBundle || storagePsuBundle || mixedStorageBundle || gpuCoolingBundle || distinctGpuModels.size >= 2 || multiComponentBundle;
+    || storageEnclosureBundle || nasComponentBundle || storagePsuBundle || mixedStorageBundle || gpuCoolingBundle || distinctGpuModels.size >= 2 || multiComponentBundle;
   if (componentBundle) {
     addEvidence(evidence, 'listing_kind', componentBundle.matchedText || [...componentGroups].join('+'), 'COMPONENT_BUNDLE');
     return 'COMPONENT_BUNDLE';
