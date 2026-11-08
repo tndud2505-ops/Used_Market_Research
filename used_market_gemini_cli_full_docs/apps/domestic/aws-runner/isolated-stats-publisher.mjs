@@ -2,7 +2,10 @@ import http from 'node:http';
 import { spawn } from 'node:child_process';
 
 export const STATS_SOCKET = '/run/used-market-stats/publisher.sock';
-export const STATS_DEADLINE_MS = 2 * 60 * 60 * 1000;
+// The nightly run computes and activates prices in about 1h45m, then takes a
+// full-DB backup before compaction. A 2h limit killed that backup on
+// 2026-11-07 and left the job interrupted, which blocks the next publication.
+export const STATS_DEADLINE_MS = 3 * 60 * 60 * 1000;
 
 export function statsWorkerStatus({ socketPath = STATS_SOCKET } = {}) {
   return new Promise((resolve, reject) => {
