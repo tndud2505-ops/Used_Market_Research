@@ -1,3 +1,81 @@
+// D1 Free allows 500 MB, and a replacement publication is staged beside the
+// active one. Rows may therefore be stored as gzip+base64 inside a small JSON
+// wrapper. Checksums, validation and readers always use the original JSON
+// text; the wrapper is only a storage encoding. The wrapper also keeps the
+// few summary fields that SQL reads with json_extract.
+const STATS_GZIP_KEY = "__used_pick_gzip_v1";
+const STATS_GZIP_PREFIX = `{"${STATS_GZIP_KEY}":"`;
+const MAX_DECODED_STATS_BYTES = 4_000_000;
+
+export function isEncodedStatsJson(text) {
+  return typeof text === "string" && text.startsWith(STATS_GZIP_PREFIX);
+}
+
+function bytesToBase64(bytes) {
+  let binary = "";
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+  }
+  return btoa(binary);
+}
+
+function base64ToBytes(text) {
+  const binary = atob(text);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  return bytes;
+}
+
+async function transformBytes(bytes, stream) {
+  return new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(stream)).arrayBuffer());
+}
+
+function statsStorageSummary(stats) {
+  const summary = {};
+  for (const key of ["active", "sold"]) {
+    const metric = stats?.[key];
+    if (!metric || typeof metric !== "object") continue;
+    summary[key] = { sample_count: metric.sample_count ?? null, mean: metric.mean ?? null, median: metric.median ?? null };
+  }
+  return summary;
+}
+
+export async function encodeStatsJson(value) {
+  const text = typeof value === "string" ? value : JSON.stringify(value);
+  if (isEncodedStatsJson(text)) return text;
+  const stats = JSON.parse(text);
+  const compressed = await transformBytes(new TextEncoder().encode(text), new CompressionStream("gzip"));
+  return JSON.stringify({ [STATS_GZIP_KEY]: bytesToBase64(compressed), ...statsStorageSummary(stats) });
+}
+
+export async function decodeStatsJson(text) {
+  if (!isEncodedStatsJson(text)) return text;
+  const wrapper = JSON.parse(text);
+  const payload = wrapper?.[STATS_GZIP_KEY];
+  if (typeof payload !== "string" || !payload) throw new Error("encoded stats_json payload is invalid");
+  const bytes = await transformBytes(base64ToBytes(payload), new DecompressionStream("gzip"));
+  if (bytes.byteLength > MAX_DECODED_STATS_BYTES) throw new Error("encoded stats_json is too large");
+  const decoded = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  const stats = JSON.parse(decoded);
+  const { [STATS_GZIP_KEY]: _payload, ...summary } = wrapper;
+  if (JSON.stringify(summary) !== JSON.stringify(statsStorageSummary(stats))) {
+    throw new Error("encoded stats_json summary mismatch");
+  }
+  return decoded;
+}
+
+export async function decodeStatsRows(rows) {
+  return Promise.all([...(Array.isArray(rows) ? rows : [])].map(async (row) => (
+    isEncodedStatsJson(row?.stats_json) ? { ...row, stats_json: await decodeStatsJson(row.stats_json) } : row
+  )));
+}
+
+export async function encodeStatsRows(rows) {
+  return Promise.all([...(Array.isArray(rows) ? rows : [])].map(async (row) => (
+    { ...row, stats_json: await encodeStatsJson(row.stats_json) }
+  )));
+}
+
 function canonicalRows(rows) {
   return [...rows]
     .map((row) => ({
@@ -178,7 +256,7 @@ export async function readStagedProductStatsPage(db, publicationId, kind, offset
 // alone: compare both every chunk and the canonical complete row byte stream.
 export async function verifyProductStatsReadback(input, inputRows, inputChunks, checksumRows = statsChecksum) {
   const metadata = assertPublicationMetadata(input, null);
-  const rows = canonicalRows(inputRows);
+  const rows = canonicalRows(await decodeStatsRows(inputRows));
   const keys = rows.map(statsPublicationKey);
   if (rows.length !== metadata.expectedRowCount || new Set(keys).size !== keys.length)
     throw new Error('staged publication scope count mismatch');
@@ -343,7 +421,7 @@ async function verifyStagedContent(db, input, metadata) {
       FROM public_product_stats WHERE publication_id = ?
         AND rowid IN (${identitiesPage.map(() => '?').join(',')})`)
       .bind(metadata.publicationId, ...identitiesPage.map(identity => identity.storage_rowid)).all();
-    const storedRows = canonicalRows(Array.isArray(pageResult?.results) ? pageResult.results : pageResult || []);
+    const storedRows = canonicalRows(await decodeStatsRows(Array.isArray(pageResult?.results) ? pageResult.results : pageResult || []));
     if (storedRows.length !== identitiesPage.length || storedRows.some((row, i) =>
       statsPublicationKey(row) !== statsPublicationKey(identitiesPage[i]))) {
       throw new Error("staged publication scope changed during verification");
@@ -371,7 +449,9 @@ export async function stageProductStatsChunk(db, input) {
   const metadata = assertPublicationMetadata(input, null);
   const chunkIndex = Number(input.chunk_index);
   const expectedChunkCount = Number(input.expected_chunk_count);
-  const inputRows = canonicalRows(input.rows || []);
+  // Validate and hash the original JSON; store the row exactly as received.
+  const storedStatsByKey = new Map(canonicalRows(input.rows || []).map(row => [statsPublicationKey(row), row.stats_json]));
+  const inputRows = canonicalRows(await decodeStatsRows(input.rows || []));
   if (!Number.isInteger(chunkIndex) || chunkIndex < 0
     || !Number.isInteger(expectedChunkCount) || expectedChunkCount < 1 || chunkIndex >= expectedChunkCount) {
     throw new Error("invalid publication chunk position");
@@ -451,7 +531,7 @@ export async function stageProductStatsChunk(db, input) {
       publication_id, canonical_product_id, market_pool, condition_code, currency, days, stats_json, as_of
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).bind(
       metadata.publicationId, row.canonical_product_id, row.market_pool, row.condition_code,
-      row.currency, row.days, row.stats_json, row.as_of
+      row.currency, row.days, storedStatsByKey.get(statsPublicationKey(row)), row.as_of
     ));
   statements.push(db.prepare(`INSERT INTO public_stats_publication_chunks (
       publication_id, chunk_index, expected_chunk_count, chunk_checksum, row_count,
@@ -655,9 +735,9 @@ export async function publishProductStats(db, input) {
     const previousResult = await db.prepare(`SELECT canonical_product_id, market_pool, condition_code,
         currency, days, stats_json, as_of
       FROM public_product_stats WHERE publication_id = ?`).bind(previous.publication_id).all();
-    previousRows = canonicalRows(Array.isArray(previousResult?.results)
+    previousRows = canonicalRows(await decodeStatsRows(Array.isArray(previousResult?.results)
       ? previousResult.results
-      : Array.isArray(previousResult) ? previousResult : []);
+      : Array.isArray(previousResult) ? previousResult : []));
   }
 
   let rows = inputRows;
@@ -817,7 +897,7 @@ export async function readPublishedProductStats(db, query) {
     query.canonicalProductId, query.marketPool, query.condition, query.currency, query.days
   ).first();
   if (!row) return null;
-  const stats = JSON.parse(row.stats_json);
+  const stats = JSON.parse(await decodeStatsJson(row.stats_json));
   const publishedWindow = stats?.published_window || publicationWindow(row.as_of, row.days);
   return {
     ...stats,

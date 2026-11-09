@@ -3,7 +3,8 @@ import { DatabaseSync } from 'node:sqlite';
 import { readFileSync } from 'node:fs';
 import {
   stageProductStatsChunk, activateStagedProductStats, readActiveProductStatsScopes, statsChecksum,
-  statsChunkManifestChecksum, statsPublicationBoundaryKey, statsPublicationKey, readActiveProductStatsScopePage, readStagedProductStatsPage
+  statsChunkManifestChecksum, statsPublicationBoundaryKey, statsPublicationKey, readActiveProductStatsScopePage, readStagedProductStatsPage,
+  isEncodedStatsJson, readPublishedProductStats
 } from '../cloudflare/public-product-stats.mjs';
 import worker from '../cloudflare/worker.mjs';
 import { readActiveStatsScopes, publishStatsInChunks } from '../aws-runner/pc-stats-publication-client.mjs';
@@ -264,6 +265,14 @@ await check('client-to-Worker publication survives a lost chunk acknowledgement 
     assert.equal(result.row_checksum_verified, true);
     assert.equal(result.checksum, checksum);
     assert.equal(db.active(), 'roundtrip');
+    const stored = db.sqlite.prepare("SELECT stats_json FROM public_product_stats WHERE publication_id = 'roundtrip'").all();
+    assert.ok(stored.length === rows.length && stored.every(row => isEncodedStatsJson(row.stats_json)),
+      'chunked publications are stored compressed in D1');
+    const original = typeof rows[0].stats_json === 'string' ? JSON.parse(rows[0].stats_json) : rows[0].stats_json;
+    const published = await readPublishedProductStats(db, { canonicalProductId: rows[0].canonical_product_id,
+      marketPool: rows[0].market_pool, condition: rows[0].condition_code, currency: rows[0].currency, days: rows[0].days });
+    assert.deepEqual(published.versions, original.versions, 'public readers receive the original statistics');
+    assert.deepEqual(published.active, original.active);
     assert.equal(result.verifier, 'aws-readback-v1');
     assert.equal(seen.filter(item => item.path === '/admin/stage-product-stats').length, 12);
     assert.equal(seen.filter(item => item.path === '/api/runner/verify-stats-publication').length, 1);

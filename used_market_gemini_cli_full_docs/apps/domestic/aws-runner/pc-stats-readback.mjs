@@ -1,5 +1,5 @@
 import { getStatsJson } from './pc-stats-publication-client.mjs';
-import { verifyProductStatsReadback, statsChunkManifestChecksum } from '../cloudflare/public-product-stats.mjs';
+import { decodeStatsRows, verifyProductStatsReadback, statsChunkManifestChecksum } from '../cloudflare/public-product-stats.mjs';
 import { streamStatsChecksum } from './stream-stats-checksum.mjs';
 
 // Called only by the authenticated runner route. Fetch targets come from the
@@ -72,7 +72,7 @@ export async function verifyStoredStatsOnAws({ importUrl, token, publication, ex
   if (new Set(identities.map(row => row.storage_rowid)).size !== identities.length
     || identities.some(row => !Number.isSafeInteger(row.storage_rowid) || row.storage_rowid < 1))
     throw new Error('PUBLICATION_READBACK_IDENTITIES_INVALID');
-  const rows = await readAll('rows', publication.expected_row_count, 4);
+  const rows = await decodeStatsRows(await readAll('rows', publication.expected_row_count, 4));
   const chunks = await readAll('chunks', publication.expected_chunk_count, 40);
   const input = recoverManifest ? { ...publication, chunk_manifest_checksum: await statsChunkManifestChecksum(chunks) } : publication;
   const proof = await verifyProductStatsReadback(input, rows, chunks, streamStatsChecksum);

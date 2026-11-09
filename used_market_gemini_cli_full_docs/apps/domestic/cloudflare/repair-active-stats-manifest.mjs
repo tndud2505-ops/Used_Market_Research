@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { promisify } from "node:util";
 
-import { statsChecksum, statsPublicationKey } from "./public-product-stats.mjs";
+import { decodeStatsRows, statsChecksum, statsPublicationKey } from "./public-product-stats.mjs";
 
 const execFileAsync = promisify(execFile);
 const apply = process.argv.includes("--apply");
@@ -54,7 +54,7 @@ const rowResult = await executeD1(`SELECT canonical_product_id, market_pool, con
   FROM public_product_stats
   WHERE publication_id = ${sqlString(publicationId)}
   ORDER BY canonical_product_id, market_pool, condition_code, currency, days`);
-const rows = rowResult.results;
+const rows = await decodeStatsRows(rowResult.results);
 if (Number(metadata.expected_row_count) !== rows.length) {
   throw new Error("active publication row count does not match its manifest");
 }

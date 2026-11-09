@@ -1,4 +1,5 @@
 import {
+  encodeStatsRows,
   statsChecksum,
   statsChunkManifestChecksum,
   statsPublicationBoundaryKey,
@@ -218,12 +219,14 @@ export async function publishStatsInChunks({ importUrl, token, publication, time
       last_scope_key: statsPublicationBoundaryKey(chunkRows.at(-1))
     };
     descriptors.push(descriptor);
+    // Checksums above cover the original JSON. Only the transfer/storage
+    // encoding is compressed; the Worker decodes and re-verifies every row.
     const result = await postImmutableStatsChunk(stageUrl, token, {
       ...common,
       ...descriptor,
       chunk_row_count: descriptor.row_count,
       chunk_non_empty_scope_count: descriptor.non_empty_scope_count,
-      rows: chunkRows
+      rows: await encodeStatsRows(chunkRows)
     }, timeoutMs);
     if (result?.chunk?.publication_id !== publication.publication_id
       || Number(result?.chunk?.chunk_index) !== chunkIndex) {
