@@ -8,18 +8,24 @@
   <link rel="icon" href="/assets/mark.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/styles.css?v=pc-tools-v1"><link rel="stylesheet" href="/pc-tools.css?v=parts-ux-v6"><link rel="stylesheet" href="/ui-concept-a.css?v=aligned-shell-v1">
   <link rel="stylesheet" href="/builder-toolbar.css?v=price-clarity-v1">
-  <link rel="stylesheet" href="/pc-workspace.css?v=fx-ebay-v1">
   <link rel="stylesheet" href="/adfit-layout.css?v=adfit-all-v3">
+    <link rel="stylesheet" href="/promotions/train-gallery/banner.css?v=motion-v1">
   <link rel="stylesheet" href="/site-header-links.css?v=1">
   <link rel="stylesheet" href="/mobile-tools.css?v=sold-joongna-v1">
   <link rel="stylesheet" href="/mobile-model-picker.css?v=tab-picker-v1">
-</head>
-<body class="pc-tools ui-a" data-page="builder" data-ui-release="search-first-v2" data-build-price="active">
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#ffffff" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-180.png" />
+    <link rel="stylesheet" href="/pwa.css?v=1" />
+    <script type="module" src="/pwa.js?v=1"></script>
+  <link rel="stylesheet" href="/pc-workspace.css?v=builder-six-columns-v1">
+  </head>
+<body class="pc-tools ui-a" data-page="builder" data-ui-release="search-first-v2" data-build-price="active" data-build-source="">
   <a class="skip-link" href="#main">본문으로 건너뛰기</a>
   <header class="tools-header">
     <button class="tools-mobile-menu-open" type="button" data-mobile-tools="menu" aria-label="메뉴" aria-haspopup="dialog" aria-controls="tools-menu-dialog"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg><span>메뉴</span></button>
     <a class="brand" href="/" aria-label="USED PICK 홈"><img src="/assets/mark.svg" alt=""><span class="brand-used">USED</span><span class="brand-pick">PICK</span></a>
-    <nav aria-label="주 메뉴"><a href="/">검색</a><a href="/price-analysis.html">가격 분석</a><a href="/computer-builder.html" aria-current="page">컴퓨터 시세</a></nav>
+    <nav aria-label="주 메뉴"><a href="/">검색</a><a href="/computer-builder.html" aria-current="page">컴퓨터 시세</a></nav>
     <nav class="up-header-links" aria-label="이용 및 정책"><a href="/changelog.html">패치 내역</a><a href="/support.html">후원</a><a href="/contact.html">문의</a><a href="/guide.html">이용 안내</a><a href="/privacy.html">개인정보처리방침</a><a href="/terms.html">이용약관</a></nav>
   </header>
   <div class="adfit-layout">
@@ -31,12 +37,22 @@
       <button class="up-button" type="button" data-action="print-build">인쇄</button>
     </div></header>
     <div id="tools-status" role="status" aria-live="polite">불러오는 중</div>
-    <div class="tools-build-price-kind" role="radiogroup" aria-label="표시할 부품 가격">
-      <label><input type="radio" name="build-price-kind" value="active" checked><span>판매중</span></label>
-      <label><input type="radio" name="build-price-kind" value="sold"><span>판매완료 표시가</span></label>
-      <label><input type="radio" name="build-price-kind" value="danawa"><span>다나와</span></label>
-    </div>
     <section class="sf-build-panel" aria-label="내 PC 구성">
+      <div class="build-price-toolbar">
+        <div class="build-price-source-field">
+          <label for="build-price-source">가격 기준</label>
+          <select id="build-price-source">
+            <option value="" selected>국내 통합 평균</option>
+            <option value="joonggonara">중고나라</option>
+            <option value="bunjang">번개장터</option>
+            <option value="danawa">다나와 중고 표시가</option>
+          </select>
+        </div>
+        <div class="tools-build-price-kind" role="radiogroup" aria-label="표시할 부품 가격">
+          <label><input type="radio" name="build-price-kind" value="active" checked><span>판매중</span></label>
+          <label><input type="radio" name="build-price-kind" value="sold"><span>판매완료 표시가</span></label>
+        </div>
+      </div>
       <div id="build-table" class="tools-table-scroll" aria-label="선택 부품 표"></div>
       <p id="build-save-status" class="up-save-status" role="status" aria-live="polite" hidden></p>
     </section>
@@ -63,16 +79,26 @@
     <aside class="adfit-banner" id="adfit-rail" data-placement="rail" aria-label="카카오 AdFit 광고" hidden>
       <template data-format="desktop"><ins class="kakao_ad_area" style="display:none;" data-ad-unit="DAN-gG0WEoycq7Nup5kT" data-ad-width="160" data-ad-height="600"></ins></template>
     </aside>
-    <aside class="adfit-banner" id="adfit-banner" data-placement="bottom" aria-label="카카오 AdFit 광고" hidden>
-      <template data-format="mobile"><ins class="kakao_ad_area" style="display:none;" data-ad-unit="DAN-gvTVDnxVn9S3leR5" data-ad-width="320" data-ad-height="100"></ins></template>
+    <aside class="adfit-banner train-gallery-promotion" id="adfit-banner" data-placement="bottom" data-provider="house" aria-label="Train Gallery 자사 앱 광고" hidden>
+      <a class="train-gallery-promotion__link" href="https://play.google.com/store/apps/details?id=com.trainingapp.traingallery" target="_blank" rel="sponsored noopener noreferrer" aria-label="Train Gallery — 운동 달력과 브이로그 편집. Google Play에서 보기 (새 창)">
+        <img class="train-gallery-mobile-art" src="/promotions/train-gallery/slim.webp" width="2172" height="724" alt="트레인갤러리 — 운동 달력·브이로그 편집" loading="lazy" decoding="async" />
+        <div class="train-gallery-desktop-art" aria-hidden="true">
+          <video class="train-gallery-moa" muted playsinline preload="none" poster="/promotions/train-gallery/moa-poster.png" data-motion-src="/promotions/train-gallery/moa-lift.mp4" tabindex="-1"></video>
+          <div class="train-gallery-copy"><strong>트레인갤러리</strong><span>운동을 기록하고 영상으로 남겨요.</span></div>
+          <figure class="train-gallery-calendar"><figcaption>운동 달력</figcaption><div class="train-gallery-calendar-window"><img src="/promotions/train-gallery/calendar.webp" alt="" width="1080" height="2400" loading="lazy" decoding="async" /></div></figure>
+          <figure class="train-gallery-editor"><figcaption>브이로그 편집</figcaption><div class="train-gallery-editor-window"><video muted playsinline preload="none" poster="/promotions/train-gallery/exercise-poster.jpg" data-src="/promotions/train-gallery/exercise.mp4" tabindex="-1"></video><div class="train-gallery-timeline-window"><img src="/promotions/train-gallery/vlog.webp" alt="" width="1080" height="2400" loading="lazy" decoding="async" /></div></div></figure>
+        </div>
+        <span class="train-gallery-promotion__caption"><span>자사 앱 광고</span><span>Google Play에서 보기 ↗</span></span>
+      </a>
+      <button class="train-gallery-motion-toggle" type="button" data-motion-toggle aria-label="배너 동작 재생" hidden>▶</button>
     </aside>
   </div>
   <dialog id="tools-menu-dialog" class="tools-mobile-sheet" aria-labelledby="tools-menu-title">
     <div class="tools-sheet-handle" aria-hidden="true"></div>
     <div class="tools-sheet-heading"><h2 id="tools-menu-title" tabindex="-1">메뉴</h2><button type="button" data-close-tools-dialog aria-label="메뉴 닫기">×</button></div>
-    <nav class="tools-mobile-pages" aria-label="모바일 주 메뉴"><a href="/">매물 찾기</a><a href="/price-analysis.html">가격 분석</a><a href="/computer-builder.html">컴퓨터 시세</a></nav>
+    <nav class="tools-mobile-pages" aria-label="모바일 주 메뉴"><a href="/">매물 찾기</a><a href="/computer-builder.html">컴퓨터 시세</a></nav>
     <nav class="tools-mobile-policy" aria-label="이용 및 정책"><a href="/changelog.html">패치 내역</a><a href="/support.html">후원</a><a href="/contact.html">문의</a><a href="/guide.html">이용 안내</a><a href="/privacy.html">개인정보처리방침</a><a href="/terms.html">이용약관</a></nav>
   </dialog>
-  <script type="module" src="/pc-tools.js?v=fx-ebay-v1"></script>
+  <script type="module" src="/pc-tools.js?v=approved-workspace-v2"></script>
 </body>
 </html>

@@ -40,6 +40,10 @@ if [[ "${EUID}" -ne 0 ]]; then
   fail 'root 권한으로 실행하세요: sudo bash aws-runner/install-ubuntu24.sh'
 fi
 
+if [[ -n "$(systemctl list-units --no-pager --no-legend --type=service --state=activating,active 'used-market-daangn-*.service')" ]]; then
+  fail 'A Daangn job is active. Preserve it and defer deployment until it finishes.'
+fi
+
 if [[ ! -f "${SOURCE_ROOT}/aws-runner/runner.mjs" ]]; then
   fail "runner.mjs를 찾을 수 없습니다: ${SOURCE_ROOT}/aws-runner/runner.mjs"
 fi
@@ -70,6 +74,7 @@ for required_file in \
   collector/logic/pc-source-registry.mjs \
   collector/logic/pc-source-adapters.mjs \
   collector/logic/danawa-search.mjs \
+  collector/logic/daangn-public-search.mjs \
   collector/logic/pc-specialist-targets.mjs \
   market/logic/pc-parts-classifier.mjs \
   market/logic/pc-market-pools.mjs \
@@ -172,7 +177,10 @@ node --check "$APP_ROOT/aws-runner/stream-stats-checksum.mjs"
 node --check "$APP_ROOT/aws-runner/pc-stats-publication-client.mjs"
 node --check "$APP_ROOT/aws-runner/search-index.mjs"
 node --check "$APP_ROOT/aws-runner/backup-storage-policy.mjs"
-node "$APP_ROOT/aws-runner/backup-storage-policy.mjs"
+# SearchIndex backs up only on a schema upgrade and also checks space at the
+# actual copy. An unchanged-schema code release does not need another DB copy.
+target_schema="$(node --input-type=module -e 'const { SEARCH_INDEX_SCHEMA_VERSION } = await import(process.argv[1]); console.log(SEARCH_INDEX_SCHEMA_VERSION)' "$APP_ROOT/aws-runner/search-index.mjs")"
+node "$APP_ROOT/aws-runner/backup-storage-policy.mjs" --migration-version "$target_schema"
 node --check "$APP_ROOT/aws-runner/migration-smoke.mjs"
 migration_smoke_dir="$(mktemp -d)"
 node "$APP_ROOT/aws-runner/migration-smoke.mjs" "$migration_smoke_dir/search-index.sqlite"
@@ -184,6 +192,7 @@ node --check "$APP_ROOT/aws-runner/backfill-legacy-inactive.mjs"
 node --check "$APP_ROOT/collector/logic/pc-source-registry.mjs"
 node --check "$APP_ROOT/collector/logic/pc-source-adapters.mjs"
 node --check "$APP_ROOT/collector/logic/danawa-search.mjs"
+node --check "$APP_ROOT/collector/logic/daangn-public-search.mjs"
 node --check "$APP_ROOT/market/logic/pc-market-pools.mjs"
 node --check "$APP_ROOT/collector/logic/pc-specialist-targets.mjs"
 node --check "$APP_ROOT/market/logic/pc-parts-classifier.mjs"
@@ -313,6 +322,7 @@ if [[ "$SOURCE_ROOT" != "$APP_ROOT" ]]; then
   install -m 0644 "$SOURCE_ROOT/collector/logic/pc-source-registry.mjs" "$APP_ROOT/collector/logic/pc-source-registry.mjs"
   install -m 0644 "$SOURCE_ROOT/collector/logic/pc-source-adapters.mjs" "$APP_ROOT/collector/logic/pc-source-adapters.mjs"
   install -m 0644 "$SOURCE_ROOT/collector/logic/danawa-search.mjs" "$APP_ROOT/collector/logic/danawa-search.mjs"
+  install -m 0644 "$SOURCE_ROOT/collector/logic/daangn-public-search.mjs" "$APP_ROOT/collector/logic/daangn-public-search.mjs"
   install -m 0644 "$SOURCE_ROOT/collector/logic/pc-specialist-targets.mjs" "$APP_ROOT/collector/logic/pc-specialist-targets.mjs"
   install -m 0644 "$SOURCE_ROOT/market/logic/pc-parts-classifier.mjs" "$APP_ROOT/market/logic/pc-parts-classifier.mjs"
   install -m 0644 "$SOURCE_ROOT/market/logic/pc-market-pools.mjs" "$APP_ROOT/market/logic/pc-market-pools.mjs"

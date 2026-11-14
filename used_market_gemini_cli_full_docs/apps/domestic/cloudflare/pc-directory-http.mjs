@@ -15,7 +15,7 @@ import {
   publicPcModelsForApi,
   publicPcProducts
 } from "../market/logic/pc-public-catalog.mjs";
-import { PC_SOURCE_REGISTRY, DANAWA_COLLECTION_LIMITS } from "../collector/logic/pc-source-registry.mjs";
+import { PC_SOURCE_REGISTRY, DANAWA_COLLECTION_LIMITS, pcSourcePublishesListings } from "../collector/logic/pc-source-registry.mjs";
 import { pcBrowseFlowForApiV1 } from "../market/data/browse-flows/index.mjs";
 
 function values(params, name) {
@@ -55,8 +55,7 @@ export function pcCatalogResponse() {
   const directory = pcPartsDirectoryForApiV2({ category: [...PUBLIC_PC_CATEGORY_CODES], limit: 1 });
   const publicCatalog = publicPcCatalogForApi();
   const operationalSources = PC_SOURCE_REGISTRY
-    .filter((source) => source.directory_source === true && source.policy_status === "APPROVED"
-      && source.runtime_status === "ENABLED")
+    .filter(pcSourcePublishesListings)
     .sort((left, right) => Number(left.directory_order || 999) - Number(right.directory_order || 999));
   return {
     master_version: publicCatalog.master_version,
@@ -76,7 +75,9 @@ export function pcCatalogResponse() {
         display_name: source.name,
         market_pool: source.market_pool,
         market_pools: source.market_pools,
-        public_enabled: true
+        public_enabled: true,
+        ...(source.listing_publication ? { collection_mode: source.listing_publication,
+          coverage: "BUY_NOW_FIRST_PAGE", daily_query_limit: 100, statistics_enabled: false } : {})
       })),
     source_candidates: PC_SOURCE_REGISTRY
       .filter((source) => source.directory_source === true && !operationalSources.some((entry) => entry.key === source.key))

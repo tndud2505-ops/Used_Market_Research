@@ -46,6 +46,7 @@ function normalizedText(input) {
     .filter((value) => typeof value === 'string' && value.trim())
     .join(' ')
     .normalize('NFKC')
+    .replace(/\bCPU(?=I[3579]\s*(?:[-~]\s*)?\d{4,5})/giu, 'CPU ')
     .replace(/_/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
@@ -53,7 +54,9 @@ function normalizedText(input) {
 
 function normalizedTitle(input) {
   return typeof input?.title === 'string'
-    ? input.title.normalize('NFKC').replace(/_/g, ' ').replace(/\s+/g, ' ').trim()
+    ? input.title.normalize('NFKC')
+      .replace(/\bCPU(?=I[3579]\s*(?:[-~]\s*)?\d{4,5})/giu, 'CPU ')
+      .replace(/_/g, ' ').replace(/\s+/g, ' ').trim()
     : '';
 }
 
@@ -184,6 +187,17 @@ function detectSpecialKind(text, evidence, title = text) {
       || /(?:용|호환|교체용|\bFOR\b).{0,15}(?:수냉\s*블[럭록]|워터\s*블[럭록]|WATER\s*BLOCK)/iu.test(title));
   if (gpuAccessory) {
     addEvidence(evidence, 'listing_kind', title, 'ACCESSORY_ONLY');
+    return 'ACCESSORY_ONLY';
+  }
+  // A cooler/housing sale needs both its own sale wording and an absent GPU
+  // board. Included, damaged or replaced heatsinks on a card are not enough.
+  const gpuHeatsinkSale = firstMatch(title, /(?:방열판|히트\s*싱크|HEAT\s*SINK|하우징)\s*(?:만\s*)?(?:판매(?:합니다|해요)?|팝니다|팔아요)[\s.!~]*$/iu);
+  const missingGpuBoard = firstMatch(text, /(?:^|[\s(,])(?:기판|PCB|그래픽\s*카드|GPU)(?:\s*(?:은|는|이|가))?\s*(?:없(?:어요|습니다|음|다)|미포함|불포함|제외)/iu);
+  if (gpuHeatsinkSale && missingGpuBoard
+    && /(?:RTX|GTX|RX\s*\d{3,4}|GEFORCE|그래픽\s*카드|\bGPU\b)/iu.test(title)
+    && !/(?:메인\s*보드|마더\s*보드|MOTHERBOARD|본체|컴퓨터|데스크[탑톱]|노트북|\bPC\b)/iu.test(title)) {
+    addEvidence(evidence, 'listing_kind', gpuHeatsinkSale.matchedText, 'ACCESSORY_ONLY');
+    addEvidence(evidence, 'listing_kind', missingGpuBoard.matchedText, 'ACCESSORY_ONLY');
     return 'ACCESSORY_ONLY';
   }
   const accessory = firstMatch(text, /본품\s*(?:없음|없이).*(?:쿨러|방열판)|(?:(?:SSD|HDD|NVMe|M\.2).{0,30}(?:방열판|히트\s*싱크|heat\s*sink|heatsink)|(?:방열판|히트\s*싱크|heat\s*sink|heatsink).{0,30}(?:SSD|HDD|NVMe|M\.2)).{0,20}(?:only|만|지원|호환|전용)|(?:RTX|GTX|RX\s*\d{4}|그래픽\s*카드|\bGPU\b).{0,30}(?:쿨러|방열판)만\s*판매|(?:RTX|GTX|RX)\s*\d{3,4}.{0,30}(?:키캡|브라켓|백플레이트|지지대)(?=$|[\s,.)])/iu);
@@ -351,7 +365,23 @@ function detectSpecialKind(text, evidence, title = text) {
     return 'FULL_SYSTEM';
   }
   const explicitComponentBundle = firstMatch(text, /반본체|CPU\s*\+.*(?:보드|RAM|램)|(?:CPU|메인보드|보드).*(?:묶음|세트)|(?:묶음|세트).*?(?:CPU|메인보드|보드)|(?:\d{4,5}X(?:3D2?)?|I[3579][ -]?\d{4,5}[A-Z]*)\s*\+\s*[ABHXZ]\d{3}.*(?:RAM|램)|(?:\d{4,5}X(?:3D2?)?|I[3579][ -]?\d{4,5}[A-Z]*)\s*\+\s*(?:(?:RTX|GTX|RX)\s*)?[1-9]\d{3}(?:\s*(?:TI|SUPER|XT|S)\b)?(?![\d원])|(?:\d{4,5}X(?:3D2?)?|I[3579][ -]?\d{4,5}[A-Z]*)\s*\+.{0,30}쿨러.{0,30}\+\s*DDR[345]\b|(?:RTX|GTX|RX\s*\d{4}).{0,20}\+.{0,20}(?:\d{4,5}X|I[3579][ -]?\d{4,5}).{0,30}(?:세트|일괄)|\bSSD\b[^+]{0,20}\d+\s*TB\s*\+\s*\d+\s*TB.*일괄|(?:미니\s*PC|MINI\s*PC).{0,50}(?:\+|와|및|포함).{0,50}(?:RTX|GTX|RX\s*\d{4}|그래픽\s*카드)/i);
-  const cpuBoardBundle = componentGroups.has('CPU') && componentGroups.has('MOTHERBOARD');
+  // A named CPU in a compatibility/provenance clause is not another sold part.
+  // Keep this local to composition: the original title still supplies identity.
+  const intelCpuReference = String.raw`\b(?:CPU\s*)?I[3579]\s*(?:[-~]\s*)?\d{4,5}(?:KF|KS|HX|K|F|H|U|T)?\b(?:\s*CPU)?`;
+  const cpuReferenceOnly = new RegExp(
+    `${intelCpuReference}\\s*(?:호환|지원|미포함|불포함|제외|없음|(?:에서|으로)\\s*(?:사용|테스트|업그레이드)|사용하던|사용한|대비|보다|와\\s*비교|과\\s*비교|\\b(?:COMPATIBLE|SUPPORTS?|NOT\\s+INCLUDED)\\b)`
+      + `|(?:호환|지원|\\b(?:SUPPORTS?|COMPATIBLE\\s+WITH|UPGRADED\\s+(?:FROM|TO))\\b)\\s*${intelCpuReference}`,
+    'iu'
+  ).test(title);
+  const soldCpuComposition = componentGroups.has('CPU') && !cpuReferenceOnly
+    && !/\bCPU\s*(?:미포함|불포함|제외|없음|단품|만\s*판매|NOT\s+INCLUDED)|\bNO\s+CPU\b/iu.test(text);
+  const cpuBoardBundle = soldCpuComposition && componentGroups.has('MOTHERBOARD');
+  // Separator-free CPU + RAM capacity + drive capacity is a composition list,
+  // even without a GPU or an explicit desktop noun. Do not infer a part price.
+  const cpuMemoryStorageBundle = soldCpuComposition && componentGroups.has('RAM') && componentGroups.has('STORAGE')
+    && /(?:램|렘|메모리|\bRAM\b)\s*(?:8|16|24|32|48|64|96|128)(?:\s*(?:G(?:B)?|기가))?(?=$|[\s,/+])/iu.test(title)
+    && /\b(?:SSD|HDD)\s*\d+(?:\.\d+)?\s*(?:G(?:B)?|기가|T(?:B)?|테라)(?=$|[\s,/+])/iu.test(title)
+    && !separateComponentSale;
   const distinctGpuModels = new Set([...title.matchAll(/\b(?:RTX|GTX)\s*\d{3,4}(?:\s*(?:TI|SUPER))?|\bRX\s*\d{3,4}(?:\s*XT[X]?)?/giu)]
     .map((match) => match[0].replace(/\s+/gu, '').toUpperCase()));
   for (const match of title.matchAll(new RegExp(LEGACY_DISCRETE_GPU_PATTERN.source, 'giu'))) {
@@ -359,7 +389,8 @@ function detectSpecialKind(text, evidence, title = text) {
   }
   const cpuGpuBundle = cpuGpuPair
     && !/(?:에서|으로)\s*(?:테스트|사용)|호환|장착\s*테스트/iu.test(title);
-  const multiComponentBundle = componentGroups.size >= 2
+  const bundleComponentCount = componentGroups.size - (componentGroups.has('CPU') && !soldCpuComposition ? 1 : 0);
+  const multiComponentBundle = bundleComponentCount >= 2
     && /(?:\+|\/|[&＆]|와\s|과\s|,|일괄|묶음|세트|셋트|셋(?:\s|$)|포함)/i.test(title);
   const storagePsuBundle = componentGroups.has('STORAGE') && componentGroups.has('PSU')
     && !/(?:호환|지원|테스트|장착\s*확인|사용\s*가능)/iu.test(title);
@@ -377,7 +408,7 @@ function detectSpecialKind(text, evidence, title = text) {
     && (componentGroups.has('STORAGE') || componentGroups.has('RAM') || hasStorageConfiguration || hasMemoryConfiguration || /\b\d{1,3}\s*(?:TB|테라)\b/iu.test(title))
     ? nasAppliance : null;
   const gpuCoolingBundle = /(?:RTX|GTX|RX\s*\d{4}|그래픽\s*카드).{0,50}(?:(?:워터\s*(?:블록|보드)|WATER\s*BLOCK).{0,20}포함|(?:수랭\s*)?쿨러\s*포함|\bEGPU\b)|\bEGPU\b.{0,40}(?:RTX|GTX|RX\s*\d{4})/iu.test(text);
-  const componentBundle = explicitComponentBundle || cpuBoardBundle || cpuGpuBundle
+  const componentBundle = explicitComponentBundle || cpuBoardBundle || cpuMemoryStorageBundle || cpuGpuBundle
     || storageEnclosureBundle || nasComponentBundle || storagePsuBundle || mixedStorageBundle || gpuCoolingBundle || distinctGpuModels.size >= 2 || multiComponentBundle;
   if (componentBundle) {
     addEvidence(evidence, 'listing_kind', componentBundle.matchedText || [...componentGroups].join('+'), 'COMPONENT_BUNDLE');
@@ -1230,8 +1261,11 @@ function ssdProductKind(text, placement) {
   text = ssdInterfaceEvidence(text);
   if (placement === 'EXTERNAL') return 'EXTERNAL';
   if (/M\.2/iu.test(text) && /SATA/iu.test(text) && !/NVMe/iu.test(text)) return 'M2_SATA';
-  if (/NVMe|PCIe|\b(?:PM9A1|PM981A?|SM981|SN5[78]0|SN7[57]0|SN8[57]0X?|9[6789]0\s*(?:EVO|PRO)?|P[235]1|P41|FIRECUDA\s*5[123]0|KC3000|NV2)\b/iu.test(text)) return 'M2_NVME';
+  // NVMe/PCIe describes the protocol/interface, not the drive's physical form.
+  if ((/M\.2/iu.test(text) && /NVMe|PCIe/iu.test(text))
+      || /\b(?:PM9A1|PM981A?|SM981|SN5[78]0|SN7[57]0|SN8[57]0X?|9[6789]0\s*(?:EVO|PRO)?|P[235]1|P41|FIRECUDA\s*5[123]0|KC3000|NV2)\b/iu.test(text)) return 'M2_NVME';
   if (/M\.2/iu.test(text) && /\b8[567]0\s*(?:EVO|QVO|PRO)\b/iu.test(text)) return 'M2_SATA';
+  if (/NVMe|PCIe/iu.test(text)) return 'OTHER_UNKNOWN';
   if (/2[.,]5\s*(?:INCH|인치|["″])|\bSATA\b|\b(?:8[567]0|870)\s*(?:EVO|QVO|PRO)\b|\b(?:MX500|BX500|SA510|A400)\b/iu.test(text)) return 'SATA_2_5';
   return 'OTHER_UNKNOWN';
 }

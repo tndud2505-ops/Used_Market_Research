@@ -75,8 +75,10 @@ export function buildMarketView(series, dates, count, offset, width, height, { a
   if (emptyViewport) values.push(...series.flatMap(line=>line.points.flatMap(priceValues)));
   if (!values.length) return null;
   const axisSpace = width < 480 ? 76 : 90;
-  const compactAxis=axisLeft&&width<480;
-  const pad = { left: compactAxis ? 46 : axisLeft ? axisSpace : 16, right: compactAxis ? 10 : axisLeft ? 16 : axisSpace, top: 26, bottom: 34 };
+  const compactAxis=width<480;
+  const compactSpace=series[0]?.currency==='USD'?64:46;
+  const priceSpace=compactAxis?compactSpace:axisSpace, oppositeSpace=compactAxis?10:16;
+  const pad = { left: axisLeft ? priceSpace : oppositeSpace, right: axisLeft ? oppositeSpace : priceSpace, top: 26, bottom: 34 };
   // KSTOCK volume pane: shared dates, 17% height, 44–110px and an independent scale.
   const sampleHeight = showSamples ? Math.min(110, Math.max(44, height*.17)) : 0;
   const plotWidth = Math.max(1, width - pad.left - pad.right), plotHeight = Math.max(1, height - pad.top - pad.bottom - (showSamples ? sampleHeight+24 : 0));
@@ -221,7 +223,8 @@ export function drawMarketChart(container, input, options = {}) {
   priceBadge.append(priceRect,priceText);
   const dateBadge=svgNode('g',{class:'market-cursor-date'}),dateRect=svgNode('rect',{width:64,height:24,rx:3}),dateText=svgNode('text',{x:32,y:16,'text-anchor':'middle'});
   dateBadge.append(dateRect,dateText);
-  if(axisLeft){if(!externalReadout)cursor.append(horizontal,priceBadge);cursor.append(dateBadge);}
+  if(axisLeft&&!externalReadout)cursor.append(horizontal,priceBadge);
+  if(axisLeft||externalReadout)cursor.append(dateBadge);
   const readoutRows=new Map(detailSeries.map(line=>{
     const row=node('tr'),caption=node('th','',line.sourceLabel);caption.scope='row';caption.style.color=line.color;
     const cell=node('td','market-tooltip-value'),amount=node('strong'),basis=node('small'),count=node('td'),average=node('small');
@@ -244,8 +247,8 @@ export function drawMarketChart(container, input, options = {}) {
       horizontal.setAttribute('d',`M${pad.left},${py}H${pad.left+geometry.plotWidth}`);
       priceBadge.setAttribute('transform',`translate(${Math.max(0,pad.left-80)},${py-12})`);
       priceText.setAttribute('x',39);priceText.textContent=currency==='USD'?`$${price.toFixed(2)}`:Math.round(price).toLocaleString('ko-KR');
-      dateBadge.setAttribute('transform',`translate(${clamp(x(date)-32,pad.left,width-pad.right-64)},${height-26})`);dateText.textContent=dateLabel(date);
     }
+    if(axisLeft||externalReadout){dateBadge.setAttribute('transform',`translate(${clamp(x(date)-32,pad.left,width-pad.right-64)},${height-26})`);dateText.textContent=dateLabel(date);}
     if(externalReadout)onReadout?.({date,pinned:Boolean(view.pinned)});
     if(shownDate===date&&!readout.hidden)return;
     shownDate=date;
@@ -288,7 +291,7 @@ export function drawMarketChart(container, input, options = {}) {
     if(changed)onViewChange?.({from,to});
     const edge = pad.left + plotWidth;
     if(geometry.emptyViewport)plot.append(svgNode('text',{x:pad.left+plotWidth/2,y:pad.top+plotHeight/2,'text-anchor':'middle'},'이 구간에는 가격 기록이 없습니다'));
-    const axisX=axisLeft?pad.left-(compactAxis?6:12):edge+10,axisAnchor=axisLeft?'end':'start';
+    const axisX=axisLeft?pad.left-(compactAxis?6:12):edge+(compactAxis?6:10),axisAnchor=axisLeft?'end':'start';
     if (showUnit) plot.append(svgNode('text', {x:pad.left, y:14, class:'market-axis market-axis-unit','text-anchor':'start'}, currency === 'USD' ? '단위: USD' : '단위: 원'));
     for (const tick of priceTicks) {
       plot.append(svgNode('line', {x1:pad.left, x2:edge, y1:tick.y, y2:tick.y, class:'market-grid'}));

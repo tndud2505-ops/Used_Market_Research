@@ -1,0 +1,36 @@
+[Unit]
+Description=USED PICK Daangn sequential 100-query collection and listing publication
+After=network-online.target used-market-runner.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=usedrunner
+Group=usedrunner
+WorkingDirectory=/opt/used-market-runner
+RuntimeDirectory=used-market-daangn
+RuntimeDirectoryMode=0750
+RuntimeDirectoryPreserve=yes
+BindReadOnlyPaths=/home/ubuntu/Kstock/tmp:/run/used-market-daangn/kstock
+ExecStart=/usr/bin/flock -n /var/lib/used-market-runner/daangn-trial/collector.lock /usr/bin/node --max-old-space-size=128 /opt/used-market-runner/aws-runner/collect-daangn-trial.mjs --scheduled
+Slice=usedpick.slice
+MemoryMax=256M
+MemorySwapMax=0
+CPUQuota=25%
+Nice=15
+IOSchedulingClass=idle
+TimeoutStartSec=52min
+TimeoutStopSec=25s
+Restart=no
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/used-market-runner
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=
+UMask=0077

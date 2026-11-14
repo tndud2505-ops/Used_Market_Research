@@ -102,7 +102,10 @@ async function checkPublicSite(baseUrl) {
   }
   const home = await homeResponse.text();
   if (!home.includes('<title>중고 PC·컴퓨터 부품 검색 | 중고 시세 비교 | USED PICK</title>')
-    || !home.includes('DAN-gvTVDnxVn9S3leR5')
+    || !home.includes('DAN-gG0WEoycq7Nup5kT')
+    || !home.includes('data-provider="house"')
+    || !home.includes('com.trainingapp.traingallery')
+    || home.includes('DAN-gvTVDnxVn9S3leR5')
     || /link\.coupang\.com|ads-partners\.coupang\.com|data-coupang/u.test(home)) {
     throw new Error(`${baseUrl}/ did not return the listing home shell`);
   }
@@ -119,7 +122,10 @@ async function checkPublicSite(baseUrl) {
   const analysis = await analysisResponse.text();
   if (!analysis.includes('href="https://used-pick.com/price-analysis.html"')
     || !analysis.includes('id="analysis-workspace"')
-    || !analysis.includes('DAN-gvTVDnxVn9S3leR5')) {
+    || !analysis.includes('DAN-gG0WEoycq7Nup5kT')
+    || !analysis.includes('data-provider="house"')
+    || !analysis.includes('com.trainingapp.traingallery')
+    || analysis.includes('DAN-gvTVDnxVn9S3leR5')) {
     throw new Error(`${baseUrl}/price-analysis.html did not return the price-analysis shell`);
   }
   for (const [label, response, html] of [['home', homeResponse, home], ['analysis', analysisResponse, analysis]]) {

@@ -1,0 +1,14 @@
+/* Page-specific USED PICK poses on informational pages. Decorative only. */
+.ui-a .content-page-header.has-mascot { display:flex; align-items:center; justify-content:space-between; gap:24px; }
+.ui-a .content-page-header.has-mascot > .page-mascot-copy { min-width:0; flex:1 1 auto; }
+.ui-a .page-mascot { display:block; flex:0 0 auto; width:116px; height:auto; aspect-ratio:300 / 364; object-fit:contain; margin:-8px 0 -4px; }
+.ui-a .page-mascot-copy h1 { overflow-wrap:anywhere; word-break:keep-all; }
+@media (max-width: 640px) {
+  .ui-a .content-page-header.has-mascot { gap:14px; }
+  .ui-a .page-mascot { width:84px; }
+}
+@media (max-width: 360px) {
+  .ui-a .content-page-header.has-mascot { gap:12px; }
+  .ui-a .page-mascot { width:64px; }
+  .ui-a .page-mascot-copy h1 { font-size:21px; }
+}

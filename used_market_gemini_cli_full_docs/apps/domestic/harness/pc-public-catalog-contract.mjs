@@ -210,11 +210,18 @@ const exactMotherboardCases = [
   ["ASUS TUF GAMING B850M-PLUS II 메인보드", "motherboard:asus:tuf-gaming-b850m-plus-ii"],
   ["기가바이트 B660M DS3H DDR4 12세대 메인보드", "motherboard:gigabyte:b660m-ds3h-ddr4"],
   ["GIGABYTE B660M DS3H DDR4 rev 1.0 메인보드", "motherboard:gigabyte:b660m-ds3h-ddr4"],
+  ["기가바이트 Z890 AORUS ELITE WIFI7 메인보드", "motherboard:gigabyte:z890-aorus-elite-wifi7"],
+  ["기가바이트 Z890 AORUS ELITE WIFI7 메인보드 팝니다", "motherboard:gigabyte:z890-aorus-elite-wifi7"],
+  ["GIGABYTE Z890 AORUS ELITE WI-FI 7 rev 1.1 메인보드", "motherboard:gigabyte:z890-aorus-elite-wifi7"],
   ["GIGABYTE B550M AORUS ELITE rev 1.3 메인보드", "motherboard:gigabyte:b550m-aorus-elite"],
   ["GIGABYTE X870 AORUS ELITE WIFI7 ICE rev 1.2 메인보드", "motherboard:gigabyte:x870-aorus-elite-wifi7-ice"]
 ];
 const registeredMotherboards = publicPcModelsForApi({ category: "MOTHERBOARD" }).models;
-assert.equal(registeredMotherboards.filter((product) => product.key_specs.directory_node_type === "PRODUCT").length, 46);
+assert.equal(registeredMotherboards.filter((product) => product.key_specs.directory_node_type === "PRODUCT").length, 47);
+const z890EliteWifi7 = registeredMotherboards.find((product) => product.canonical_product_id === "motherboard:gigabyte:z890-aorus-elite-wifi7");
+assert.equal(z890EliteWifi7.key_specs.socket, "LGA1851");
+assert.equal(z890EliteWifi7.key_specs.memory_generation, "DDR5");
+assert.equal(z890EliteWifi7.key_specs.form_factor, "ATX");
 assert.equal(registeredMotherboards.some((product) => product.canonical_product_id === "motherboard:asus:tuf-gaming-b760m-a-d4"), false,
   "an unverified/non-existent supplemental model must not survive outside the master");
 for (const [title, id] of exactMotherboardCases) {
@@ -248,6 +255,11 @@ for (const title of [
   "GIGABYTE B660M DS3H AX DDR4 메인보드",
   "GIGABYTE B660M DS3H WIFI DDR4 메인보드",
   "GIGABYTE B660M DS3H DDR4 rev 1.2 메인보드",
+  "GIGABYTE Z890 AORUS ELITE WIFI7 ICE 메인보드",
+  "GIGABYTE Z890 AORUS ELITE WIFI7 DDR4 메인보드",
+  "GIGABYTE Z890 AORUS ELITE WIFI7 rev 1.2 메인보드",
+  "GIGABYTE Z890 AORUS ELITE WIFI6 메인보드",
+  "GIGABYTE Z790 AORUS ELITE WIFI7 메인보드",
   "GIGABYTE B550M AORUS ELITE AX 메인보드",
   "GIGABYTE B550M AORUS ELITE AX rev 1.3 메인보드",
   "GIGABYTE A520M K V2 ICE rev 1.0 메인보드",
@@ -465,6 +477,19 @@ for (const [title, category] of [
 const nvmeSsd = classifyPcPartListingPublic({ title: "삼성 980 PRO M.2 NVMe SSD 1TB", price: 100_000, currency: "KRW" });
 assert.equal(nvmeSsd.product_kind, "M2_NVME");
 assert.equal(nvmeSsd.placement, "INTERNAL");
+for (const [title, expectedKind, expectedForm] of [
+  ["Samsung PM9A3 7.68TB (Enterprise NVMe SSD)", "OTHER_UNKNOWN", null],
+  ["Samsung PM9A3 7.68TB 2.5인치 NVMe SSD", "OTHER_UNKNOWN", "2.5-inch"],
+  ["Samsung PM9A3 3.84TB M.2 NVMe SSD", "M2_NVME", "M.2"]
+]) {
+  const result = classifyPcPartListingPublic({ title, price: 1_590_000, currency: "KRW" });
+  assert.equal(result.product_kind, expectedKind, `${title}: NVMe alone must not imply M.2 or SATA`);
+  assert.equal(result.form_factor, expectedForm, `${title}: retain only stated physical form`);
+  assert.equal(result.interface, "PCIe");
+  assert.equal(result.protocol, "NVMe");
+  assert.ok(result.canonical_product_id.startsWith("ssd:samsung:capacity-bucket:"), `${title}: keep searchable capacity identity`);
+  assert.equal(result.price_eligible, true, `${title}: do not remove the listing`);
+}
 const sataSsdIdentityCase = classifyPcPartListingPublic({ title: "삼성 870 EVO 2.5인치 SATA SSD 1TB", price: 100_000, currency: "KRW" });
 assert.equal(sataSsdIdentityCase.product_kind, "SATA_2_5");
 assert.equal(sataSsdIdentityCase.canonical_product_id, nvmeSsd.canonical_product_id, "SSD detail filters must not split the statistics identity");

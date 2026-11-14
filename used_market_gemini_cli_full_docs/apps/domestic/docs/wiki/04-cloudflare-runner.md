@@ -20,6 +20,7 @@ Workers Free를 유지한다. Worker는 전체 통계를 한 요청에서 다시
 현재 Node 작업 실행 코드는 `aws-runner/runner.mjs`다. 실행 잠금과 idempotency 결과는 프로세스 메모리이므로 재시작·다중 인스턴스 사이의 중복 방지를 보장한다고 해석하지 않는다. 공개 PC API는 원 사이트를 호출하지 않으며 매물 freshness와 일일 통계 게시 시각은 따로 판단한다.
 
 - [게시 운영·인증·장애 대응·배포 순서](09-price-publication-operations.md)
+- [Cloudflare 봇 통제 설정 기록과 러너 경로 예외 원칙](11-cloudflare-bot-control.md)
 - [2026-09-24 원인·결정·배포 및 게시 증거](../worklog/2026-09-24-aws-publication-verification.md)
 - [현재 AWS 설치 절차](../../aws-runner/README.md), [Worker 배포](../../cloudflare/README.md)
 

@@ -1,6 +1,15 @@
 import { existsSync, statfsSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { DatabaseSync } from 'node:sqlite';
+
+export function migrationBackupRequired(currentVersion, targetVersion) {
+  if (![currentVersion, targetVersion].every(version => Number.isSafeInteger(version) && version >= 0)) {
+    throw new Error('MIGRATION_VERSION_INVALID');
+  }
+  if (currentVersion > targetVersion) throw new Error('DATABASE_SCHEMA_NEWER_THAN_RELEASE');
+  return currentVersion < targetVersion;
+}
 
 export function requiredBackupFreeBytes(databaseBytes) {
   if (!Number.isFinite(databaseBytes) || databaseBytes < 0) throw new Error('BACKUP_SIZE_INVALID');
@@ -26,8 +35,19 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     if (process.argv.includes('--db') && (!database || database.startsWith('--') || !existsSync(database))) {
       throw new Error('BACKUP_DATABASE_NOT_FOUND');
     }
-    console.log(JSON.stringify(existsSync(database) ? assertBackupSpace(database, destination)
-      : { initial_install: true, database_exists: false }));
+    let needsBackup = existsSync(database);
+    if (needsBackup && process.argv.includes('--migration-version')) {
+      const target = Number(option('--migration-version'));
+      const db = new DatabaseSync(database, { readOnly: true });
+      let current;
+      try { current = Number(db.prepare('PRAGMA user_version').get().user_version); }
+      finally { db.close(); }
+      needsBackup = migrationBackupRequired(current, target);
+      if (!needsBackup) console.log(JSON.stringify({ schema_version: current, backup_required: false,
+        reason: 'SCHEMA_UNCHANGED_CODE_RELEASE' }));
+    }
+    if (needsBackup) console.log(JSON.stringify(assertBackupSpace(database, destination)));
+    else if (!existsSync(database)) console.log(JSON.stringify({ initial_install: true, database_exists: false }));
   } catch (error) {
     console.error(error.message);
     process.exitCode = 1;

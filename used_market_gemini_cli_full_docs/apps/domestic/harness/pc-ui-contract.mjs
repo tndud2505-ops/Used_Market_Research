@@ -55,10 +55,10 @@ requireText(toolsScript, "history.replaceState(null, '', url)", 'builder selecti
 
 requireText(html, '<a href="/" aria-current="page">검색</a>',
   "the listing page must be the default home navigation target");
-requireText(analysisHtml, '<a href="/price-analysis.html" aria-current="page">가격 분석</a>',
-  "price analysis must retain its own explicit navigation target");
-requireText(builderHtml, '<a href="/price-analysis.html">가격 분석</a>',
-  "the builder must link to the explicit price-analysis page");
+requireText(script, 'priceWindowUrl(canonicalProductId',
+  'listing charts must target their verified model in a separate window');
+requireText(toolsScript, 'priceWindowUrl(entry.id',
+  'builder prices must retain model-specific chart access');
 requireText(analysisHtml, 'href="https://used-pick.com/price-analysis.html"',
   "price analysis must publish its explicit canonical URL");
 requireText(html, 'href="https://used-pick.com/"', "the listing home must publish the root canonical URL");
@@ -85,9 +85,11 @@ requireText(toolsScript, "const link = el('a', 'model-name-link', nameOf(product
   "the visible model name must be the direct original-search link");
 assert.equal(toolsScript.includes("state.expanded"), false, "flat model rows must not retain expansion state");
 assert.equal(toolsScript.includes("동일 모델 묶기"), false, "flat model rows must not expose a grouping toggle");
-requireText(toolsScript, "makeTable(['부품', '선택 모델', '수량', '판매중', '판매완료 표시가', '다나와 중고 표시가', ''])",
-  'the builder includes a separate Danawa displayed-price column');
-assert.match(builderHtml, /id="adfit-banner" data-placement="bottom" aria-label="카카오 AdFit 광고" hidden/,
+requireText(builderHtml, 'id="build-price-source"',
+  'builder reference prices must follow an explicit source selection');
+requireText(toolsScript, "state.buildSource === 'danawa' ? '다나와 중고 표시가' : '판매중 평균가'",
+  'Danawa asking prices must not be relabelled as representative averages');
+assert.match(builderHtml, /id="adfit-banner" data-placement="bottom" data-provider="house" aria-label="Train Gallery 자사 앱 광고" hidden/,
   'the builder has an explicitly identified bottom AdFit placement');
 assert.equal(toolsScript.includes("el('tfoot')"), true, 'totals share the component table footer');
 assert.equal(toolsScript.includes("'원문 검색'"), false,
@@ -107,8 +109,10 @@ assert.equal(evaluatePriceAsOf({ builder: false, to: '2026-09-20', latest: '2026
 assert.equal(evaluatePriceAsOf({ builder: true, to: '2026-09-20', latest: '2026-09-21' }), '');
 requireText(toolsScript, "const pageCatalog = builder ? catalog.tools_catalog : catalog.public_catalog",
   "price analysis must use the public catalog while the builder uses the tools catalog");
-requireText(toolsScript, "state.sources = (catalog.sources || [])",
+requireText(toolsScript, "const publicSources = (catalog.sources || [])",
   "analysis source tabs must follow the operational catalog instead of per-model evidence");
+requireText(toolsScript, "state.sources = publicSources.filter(source => source.statistics_enabled !== false)",
+  "listing-only sources must not be offered as statistics sources");
 requireText(toolsScript, "sources.flatMap(item => buildAnalysisSeries",
   "the chart must build each source from its own published currency scope");
 const analysisSourcesSource = toolsScript.slice(toolsScript.indexOf('function analysisSources('), toolsScript.indexOf('function renderLatestPrices('));
@@ -182,7 +186,7 @@ requireText(script, "payload?.available_facets", "the model response must drive 
 requireText(html, 'class="source-selector-label">거래 사이트</span>', "site scope needs a short visible label");
 requireText(script, 'input.type = "radio"', "site controls must use the same single-selection semantics as price analysis");
 requireText(script, 'input.name = "listing-source"', "main listing site tabs must form one radio group");
-requireText(script, '["joonggonara", "bunjang", "danawa", "ebay"]',
+requireText(script, '["joonggonara", "bunjang", "danawa", "daangn", "ebay"]',
   "source toggles must put domestic sources before overseas eBay");
 requireText(script, 'source.id === "ebay" ? "eBay (USD)"', "the overseas tab must state its separate currency");
 requireText(script, "state.selectedSites.add(source.id)", "a site tab must apply one exact source");

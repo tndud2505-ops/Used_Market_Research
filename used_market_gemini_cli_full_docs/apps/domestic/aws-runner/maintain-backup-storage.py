@@ -22,6 +22,7 @@ import time
 
 DAILY = re.compile(r"^search-index-(\d{4}-\d{2}-\d{2})\.sqlite(?:\.gz)?$")
 CHUNK = 1024 * 1024
+DISK_RESERVE = 1024**3
 VERIFIED_SQLITE_HASHES = set()
 
 
@@ -95,11 +96,16 @@ def assert_unused(p, tree=False):
             raise ValueError('Run as root to verify all active file references') from e
 
 
-def validate_archive(p):
+def validate_sqlite_header(p):
     opener = gzip.open if p.suffix == '.gz' else open
     with opener(p, 'rb') as f:
         if f.read(16) != b'SQLite format 3\x00':
             raise ValueError(f"Not a SQLite backup: {p}")
+
+
+def validate_archive(p):
+    validate_sqlite_header(p)
+    opener = gzip.open if p.suffix == '.gz' else open
     with opener(p, 'rb') as f:
         return digest(f)  # Reading to EOF also verifies gzip CRC/truncation.
 
@@ -147,6 +153,33 @@ def verify_recovery(p):
             restored.unlink(missing_ok=True)
 
 
+def require_compression_space(directory, pending=0):
+    # Check actual output, not a guessed compression ratio. Leave an additional
+    # chunk for allocation/metadata overhead; concurrent users are not reserved.
+    if shutil.disk_usage(directory).free < DISK_RESERVE + CHUNK + pending:
+        raise ValueError('Compression output would consume the disk reserve')
+
+
+class CompressionOutput:
+    """Bound every gzip write, including its header and closing trailer."""
+    def __init__(self, output, directory, source_bytes):
+        self.output = output
+        self.directory = directory
+        self.source_bytes = source_bytes
+        self.written = 0
+
+    def write(self, data):
+        if self.written + len(data) >= self.source_bytes:
+            raise ValueError('Compression output does not reduce source size')
+        require_compression_space(self.directory, len(data))
+        count = self.output.write(data)
+        if count != len(data):
+            raise OSError('Short compression output write')
+        self.written += count
+        require_compression_space(self.directory)
+        return count
+
+
 def compress(root, p, apply, min_age=86400):
     p = safe_file(root, p, min_age=min_age)
     if p.suffix == '.gz':
@@ -173,24 +206,25 @@ def compress(root, p, apply, min_age=86400):
     before = identity(p)
     if not apply:
         return {'action': 'compress', 'path': str(p), 'source_bytes': before[2]}
-    # A failed or incompressible attempt must not exhaust the filesystem.
-    if shutil.disk_usage(root).free < before[2] + 1024**3:
-        raise ValueError(f"Insufficient temporary space for {p}")
+    require_compression_space(p.parent)
     s = p.stat()
     fd, name = tempfile.mkstemp(prefix=p.name + '.', suffix='.partial', dir=p.parent)
     temp = Path(name)
     try:
         original = hashlib.sha256()
-        with os.fdopen(fd, 'wb') as output:
+        # Unbuffered writes make each free-space check observe emitted bytes.
+        with os.fdopen(fd, 'wb', buffering=0) as output:
             os.fchmod(output.fileno(), stat.S_IMODE(s.st_mode))
             os.fchown(output.fileno(), s.st_uid, s.st_gid)
-            with gzip.GzipFile(filename='', mode='wb', fileobj=output, compresslevel=1, mtime=0) as gz:
+            bounded = CompressionOutput(output, p.parent, before[2])
+            with gzip.GzipFile(filename='', mode='wb', fileobj=bounded, compresslevel=1, mtime=0) as gz:
                 with p.open('rb') as source:
                     if source.read(16) != b'SQLite format 3\x00':
                         raise ValueError(f"Not a SQLite backup: {p}")
                     source.seek(0)
                     copied = 0
                     while chunk := source.read(CHUNK):
+                        require_compression_space(p.parent)
                         original.update(chunk)
                         gz.write(chunk)
                         copied += len(chunk)
@@ -208,7 +242,10 @@ def compress(root, p, apply, min_age=86400):
         safe_file(root, p, min_age=min_age)
         if identity(p) != before:
             raise ValueError(f"Source changed during compression: {p}")
+        require_compression_space(p.parent)
         os.utime(temp, ns=(s.st_atime_ns, s.st_mtime_ns))
+        with temp.open('rb') as published:
+            os.fsync(published.fileno())
         os.link(temp, dest)  # Atomic publication, never replace another archive.
         temp.unlink()
         directory = os.open(p.parent, os.O_RDONLY | os.O_DIRECTORY)
@@ -216,6 +253,9 @@ def compress(root, p, apply, min_age=86400):
             os.fsync(directory)
         finally:
             os.close(directory)
+        safe_file(root, p, min_age=min_age)
+        if identity(p) != before:
+            raise ValueError(f"Source changed before archive replacement: {p}")
         p.unlink()  # Only after verified, durably published replacement exists.
         return {'action': 'compressed', 'path': str(p), 'archive': str(dest),
                 'sha256': checksum, 'source_bytes': before[2],
@@ -279,26 +319,64 @@ def maintain_daily(root, apply, emit):
           'max_age_days': 7, 'last_recovery_exception': bool(keep and min(keep) < cutoff)})
 
 
-def expire_manual_backups(root, apply, emit, legacy_parent=False):
+def real_directory(p):
+    p = Path(p).absolute()
+    if p.resolve(strict=True) != p or not p.is_dir():
+        raise ValueError(f'Backup root must be a real directory without symlinks: {p}')
+    return p
+
+
+def legacy_manual_root(root, manual_root):
+    """Explicit operator scope must be disjoint from the whole operating tree."""
+    root = real_directory(root)
+    manual_root = real_directory(manual_root)
+    operating = root.parent
+    if manual_root.is_relative_to(operating) or operating.is_relative_to(manual_root):
+        raise ValueError('Legacy manual root overlaps operating data or daily recovery directories')
+    return manual_root
+
+
+def ancestor_pinned(directory):
+    # Ancestor pins apply even when an operator selects a nested legacy root.
+    return any(os.path.lexists(d / '.keep') for d in [directory, *directory.parents])
+
+
+def manual_pinned(p, recovery_root):
+    return (os.path.lexists(str(p) + '.keep')
+            or ancestor_pinned(p.parent) or ancestor_pinned(recovery_root))
+
+
+def expire_manual_backups(root, apply, emit, legacy_parent=False, *, manual_root=None):
     """Seven-day rollback policy, independent of long-lived price aggregates.
 
     Only SQLite backup files expire here; code, credentials, repair evidence and
     unknown formats are untouched. A .keep file on any parent pins recovery.
     """
+    if legacy_parent and manual_root is not None:
+        raise ValueError('Choose either sibling reconcile expiry or an explicit legacy manual root')
+    scan_root = (legacy_manual_root(root, manual_root) if manual_root is not None
+                 else root.parent if legacy_parent else root)
     daily = daily_files(root)
     if not daily:
-        emit({'action': 'manual_expiry_skipped', 'reason': 'no_daily_recovery'})
+        emit({'action': 'manual_expiry_skipped', 'path': str(scan_root), 'reason': 'no_daily_recovery'})
         return
     recovery = daily[0]
     safe_file(root, recovery, min_age=0)
     if time.time() - recovery.stat().st_mtime >= 7 * 86400:
-        emit({'action': 'manual_expiry_skipped', 'reason': 'daily_recovery_stale'})
+        emit({'action': 'manual_expiry_skipped', 'path': str(scan_root),
+              'recovery': str(recovery), 'reason': 'daily_recovery_stale'})
         return
-    verify_recovery(recovery)
     recovery_identity = identity(recovery)
+    verify_recovery(recovery)
+    safe_file(root, recovery, min_age=0)
+    if identity(recovery) != recovery_identity:
+        raise ValueError('Validated daily recovery changed')
     pattern = re.compile(r'^search-index(?:[-.].*)?\.sqlite(?:\.pre)?(?:\.gz)?$')
     # The common subdirectory form has exactly the basename search-index.sqlite.
-    scan_root = root.parent if legacy_parent else root
+    if ancestor_pinned(scan_root) or ancestor_pinned(root):
+        emit({'action': 'manual_expiry_skipped', 'path': str(scan_root),
+              'recovery': str(recovery), 'reason': 'Recovery backup root or ancestor was pinned'})
+        return
     for directory, dirs, names in os.walk(scan_root, followlinks=False):
         parent = Path(directory)
         if (parent / '.keep').exists():
@@ -319,20 +397,34 @@ def expire_manual_backups(root, apply, emit, legacy_parent=False):
                 continue
             try:
                 safe_file(scan_root, p, min_age=7 * 86400)
+                before = identity(p)
+                # No expected old hash exists: raw identification needs only its
+                # signature. Compressed candidates still require EOF/CRC checks.
+                if p.suffix == '.gz':
+                    validate_archive(p)
+                else:
+                    validate_sqlite_header(p)
                 if p.stat().st_mtime >= recovery.stat().st_mtime:
                     raise ValueError('Recovery does not supersede this backup')
+                safe_file(root, recovery, min_age=0)
                 if identity(recovery) != recovery_identity:
                     raise ValueError('Validated daily recovery changed')
-                if (root / '.keep').exists() or any((parent / '.keep').exists() for parent in [p.parent, *p.parents] if parent.is_relative_to(scan_root)) or Path(str(p) + '.keep').exists():
+                if manual_root is not None:
+                    legacy_manual_root(root, scan_root)
+                safe_file(scan_root, p, min_age=7 * 86400)
+                if identity(p) != before:
+                    raise ValueError('Manual backup changed during validation')
+                if manual_pinned(p, root):
                     raise ValueError('Recovery backup was pinned')
-                size = p.stat().st_size
+                size = before[2]
                 if apply:
                     p.unlink()
                 emit({'action': 'expired_manual' if apply else 'expire_manual',
                       'path': str(p), 'recovery': str(recovery), 'bytes': size,
                       'reclaimed_bytes': size if apply else 0})
-            except ValueError as error:
-                emit({'action': 'manual_expiry_skipped', 'path': str(p), 'reason': str(error)})
+            except (ValueError, OSError, EOFError) as error:
+                emit({'action': 'manual_expiry_skipped', 'path': str(p),
+                      'recovery': str(recovery), 'reason': str(error)})
 
 
 def expire_abandoned_checks(root, apply, emit):
@@ -440,14 +532,16 @@ def main():
     parser.add_argument('--daily', action='store_true')
     parser.add_argument('--legacy-reconcile', action='store_true',
                         help='Operator-only expiry of legacy sibling reconcile backups')
+    parser.add_argument('--legacy-manual-root',
+                        help='Operator-only seven-day SQLite expiry in an explicit separate directory; '
+                             'uses --backup-root for verified daily recovery and the maintenance lock')
     parser.add_argument('--archive', action='append', default=[])
     parser.add_argument('--apply', action='store_true')
     args = parser.parse_args()
-    root = Path(args.backup_root).absolute()
-    if root.resolve() != root or not root.is_dir():
-        raise ValueError('Backup root must be a real directory without symlinks')
-    if not args.daily and not args.archive and not args.legacy_reconcile:
-        parser.error('Specify --daily and/or explicit --archive paths')
+    root = real_directory(args.backup_root)
+    manual_root = legacy_manual_root(root, args.legacy_manual_root) if args.legacy_manual_root else None
+    if not args.daily and not args.archive and not args.legacy_reconcile and manual_root is None:
+        parser.error('Specify --daily, --archive, --legacy-reconcile or --legacy-manual-root')
     def emit(value):
         print(json.dumps(value), flush=True)
     # Prevent duplicate maintenance. Lock file contains no credentials or state.
@@ -465,6 +559,8 @@ def main():
             expire_completed_staging(root.parent / 'staging', root.parent / 'search-index.sqlite', args.apply, emit)
         if args.legacy_reconcile:
             expire_manual_backups(root, args.apply, emit, legacy_parent=True)
+        if manual_root is not None:
+            expire_manual_backups(root, args.apply, emit, manual_root=manual_root)
         emit({'action': 'complete', 'apply': args.apply,
               'free_bytes': shutil.disk_usage(root).free})
 

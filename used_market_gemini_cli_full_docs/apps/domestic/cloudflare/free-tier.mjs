@@ -619,7 +619,7 @@ export async function buildCacheKey(request, url) {
     if (body.byteLength > 262_144) return null;
     suffix = `:body=${await sha256Hex(body)}`;
   }
-  return new Request(`https://used-market-free-cache-v4.invalid${url.pathname}${url.search}${suffix}`, {
+  return new Request(`https://used-market-free-cache-v5.invalid${url.pathname}${url.search}${suffix}`, {
     method: "GET"
   });
 }
@@ -699,7 +699,7 @@ export async function fetchThroughPcReadCache(request, env, originFetch, validat
   normalizedUrl.search = "";
   normalizedEntries.forEach(([key, value]) => normalizedUrl.searchParams.append(key, value));
   const cacheKey = new Request(
-    `https://used-market-pc-read-cache-v4.invalid${normalizedUrl.pathname}${normalizedUrl.search}`,
+    `https://used-market-pc-read-cache-v8.invalid${normalizedUrl.pathname}${normalizedUrl.search}`,
     { method: "GET" }
   );
   let cached;

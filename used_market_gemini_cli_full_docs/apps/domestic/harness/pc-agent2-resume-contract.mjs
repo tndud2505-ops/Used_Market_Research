@@ -37,6 +37,7 @@ function setup({ builder = true, data = raw() } = {}) {
     selectedId: ram.canonical_product_id, selectedManufacturer: '', entries: [{ id: ram.canonical_product_id, quantity: 2, category: 'RAM', manufacturer: '' }],
     source: 'bunjang', days: 30, range: { from: '2026-08-19', to: '2026-09-17' } };
   const sandbox = vm.createContext({ ...core, ...catalog, state, builder, Intl, URL, Number, Date, Map, Set,
+    priceWindowUrl: () => '/price-analysis.html?window=1',
     document: { createTextNode: text => node(text), createElement: () => node() },
     $: selector => selector === '#build-table' ? table : selector === '#tools-summary' ? summary : node(),
     prices: { get: () => ({ state: 'ready', data }) }, overseasPrices: null,

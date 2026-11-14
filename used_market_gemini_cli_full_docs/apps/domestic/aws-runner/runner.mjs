@@ -58,6 +58,7 @@ import {
 } from "../cloudflare/pc-listings-contract.mjs";
 import {
   PC_SOURCE_REGISTRY,
+  PC_DIRECTORY_PUBLICATION_SOURCE_KEYS,
   DANAWA_COLLECTION_LIMITS,
   getSourceRuntimeDefaults,
   operatorAttestedSourceGovernance,
@@ -2746,7 +2747,7 @@ const server = http.createServer(async (req, res) => {
     markPcPublicRead();
     if (!searchIndex) return json(res, 503, { status: "error", error: "PC listing projection is unavailable" });
     try {
-      let query = parsePcListingsRequest(url, { allowedSites: PC_DIRECTORY_SITES });
+      let query = parsePcListingsRequest(url, { allowedSites: PC_DIRECTORY_PUBLICATION_SOURCE_KEYS });
       const legacyResolution = query.canonicalProductId ? resolvePcCanonicalIdV3(query.canonicalProductId) : null;
       if (legacyResolution?.status === "alias") {
         query = { ...query, canonicalProductId: "", canonicalProductIds: [

@@ -9,6 +9,7 @@ import {
 import { PC_SOURCE_REGISTRY, getPcSource } from "../collector/logic/pc-source-registry.mjs";
 import { trustedSpecialistCategory } from "../collector/logic/pc-specialist-targets.mjs";
 import { reviewedPcListingExclusion } from "../market/logic/pc-reviewed-listing-exclusions.mjs";
+import { daangnDeliveryRestriction } from '../collector/logic/daangn-public-search.mjs';
 
 const VERSIONS = Object.freeze({ parserVersion: "pc-parser-v1", ruleVersion: "pc-rules-v1", filterVersion: "pc-filter-v1" });
 
@@ -404,6 +405,8 @@ export class PcShadowPipeline {
     if (classified.category_code === 'GPU' && marketSegment !== 'CONSUMER_DESKTOP') product = null;
     const matched = Boolean(product);
     const exclusionReasons = [...classified.exclusion_reasons];
+    const deliveryRestriction = source.key === 'daangn' ? daangnDeliveryRestriction(item) : null;
+    if (deliveryRestriction) exclusionReasons.push(deliveryRestriction);
     if (reviewedExclusion) exclusionReasons.push(`REVIEWED_${reviewedExclusion.reason}`);
     if (!matched) exclusionReasons.push("MODEL_NOT_IN_MASTER");
     const quantityValid = Number.isInteger(classified.quantity) && classified.quantity > 0;
@@ -456,10 +459,14 @@ export class PcShadowPipeline {
         ...(!['SINGLE_COMPONENT', 'SAME_PRODUCT_LOT'].includes(classified.listing_kind) ? ['NOT_COMPARABLE_COMPONENT'] : [])
       ] : publicClassified.statistics_exclusion_reasons || [])
     ])];
+    // Listing comparability drives search visibility independently of statistics.
+    // Keep valid candidates visible without treating unknown delivery costs as zero.
+    if (source.key === 'daangn') statisticsExclusionReasons.push('SHIPPING_COST_UNVERIFIED');
     let priceEligible = matched && prices.unitPrice !== null && statsExclusionReasons.length === 0;
     let statisticsEligible = matched && prices.unitPrice !== null && (toolComparisonCategory
       ? statisticsExclusionReasons.length === 0
       : publicSupportedCategory && publicClassified.statistics_eligible === true && statsExclusionReasons.length === 0);
+    if (source.key === 'daangn') statisticsEligible = false;
     const exactSku = matched && product?.spec?.directory_node_type === "PRODUCT";
     let stats = null;
     if (exactSku && priceEligible && !options.reclassification) {
@@ -565,6 +572,22 @@ export class PcShadowPipeline {
         search_only: true,
         matched_text: titleGpu.matchedText.trim()
       });
+      // A CPU-led parts bundle remains searchable by its title CPU. This is
+      // an association only: keep the bundle's total and component prices out
+      // of CPU statistics. Body-only upgrade/compatibility mentions do not count.
+      const titleCpu = classified.listing_kind === 'COMPONENT_BUNDLE'
+        ? String(item.title || '').normalize('NFKC').match(/^(?:(?:CPU|인텔|INTEL|CORE|코어|중고)\s*)*(i[3579]\s*[- ]?\s*\d{4,5}[A-Z]{0,3})(?![A-Z0-9])/iu) : null;
+      if (titleCpu && !/^\s*(?:CPU\s*)?(?:미포함|불포함|제외|없|지원|호환)/iu.test(String(item.title).slice(titleCpu[0].length))) {
+        const cpu = classifyPcPartListing({ title: `${titleCpu[1]} CPU` });
+        const cpuProducts = cpu.category_code === 'CPU' && cpu.canonical_model
+          ? PC_PRODUCT_MASTER_V2.filter(candidate => candidate.category === 'CPU'
+            && cpuModelToken(candidate.spec?.cpu_model) === cpuModelToken(cpu.canonical_model)
+            && cpuProductMatchesClassification(cpu, candidate)) : [];
+        if (cpuProducts.length === 1) normalized.searchComponents.push({
+          canonical_product_id: cpuProducts[0].id, association_type: 'TITLE_CPU_MODEL_FAMILY',
+          search_only: true, matched_text: titleCpu[1].trim()
+        });
+      }
       const components = this.ledger.findApprovedProductsInText(`${item.title || ""} ${item.description || ""}`);
       if (components.length >= 2) {
         normalized.items = componentItemsWithExplicitPrices(`${item.title || ""} ${item.description || ""}`, components);

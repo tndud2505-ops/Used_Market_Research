@@ -1,0 +1,13 @@
+.pwa-install-link {
+  appearance: none;
+  display: inline;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--accent-strong, #b84120);
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.pwa-install-link:focus-visible { outline: 3px solid #246cab; outline-offset: 3px; }

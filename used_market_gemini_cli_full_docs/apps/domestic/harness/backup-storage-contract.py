@@ -13,6 +13,8 @@ import sys
 import json
 import tempfile
 import time
+from types import SimpleNamespace
+from unittest.mock import patch
 
 module_path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(__file__).resolve().parents[1] / 'aws-runner/maintain-backup-storage.py'
 spec = importlib.util.spec_from_file_location('storage', module_path)
@@ -66,9 +68,41 @@ with tempfile.TemporaryDirectory(prefix='used-web-storage-test-') as td:
     with closing(sqlite3.connect(large)) as db, db:
         db.execute('insert into sample values (zeroblob(?))', (32 * 1024 * 1024,))
     os.utime(large, (time.time() - 172800,) * 2)
-    large_archive = Path(storage.compress(root, large, True)['archive'])
+    large_checksum = storage.validate_archive(large)
+    # Model free space from actual partial output, without filling the host disk.
+    # Far less free than source + reserve must still admit compressible input.
+    emitted = []
+    def limited_space(directory):
+        written = sum(p.stat().st_size for p in root.glob('*.partial'))
+        emitted.append(written)
+        return SimpleNamespace(free=storage.DISK_RESERVE + 2 * storage.CHUNK - written)
+    with patch.object(storage.shutil, 'disk_usage', side_effect=limited_space):
+        large_archive = Path(storage.compress(root, large, True)['archive'])
+    assert max(emitted) > 0 and storage.validate_archive(large_archive) == large_checksum
     storage.verify_recovery(large_archive)
     assert not list(root.glob('.restore-check-*.sqlite'))
+    # Actual incompressible output exhausts the budget only after writing starts.
+    noisy = fixture(root / 'budget-limited.sqlite')
+    with closing(sqlite3.connect(noisy)) as db, db:
+        db.execute('insert into sample values (randomblob(?))', (6 * storage.CHUNK,))
+    os.utime(noisy, (time.time() - 172800,) * 2)
+    noisy_checksum = storage.validate_archive(noisy)
+    noisy_identity = storage.identity(noisy)
+    emitted.clear()
+    with patch.object(storage.shutil, 'disk_usage', side_effect=limited_space):
+        refuses(lambda: storage.compress(root, noisy, True))
+    assert max(emitted) > 0, 'budget failure must exercise actual output, not source-size admission'
+    assert storage.identity(noisy) == noisy_identity and storage.validate_archive(noisy) == noisy_checksum
+    assert not Path(str(noisy) + '.gz').exists() and not list(root.glob('*.partial'))
+    # Other disk users can consume space after admission. Do not publish or unlink.
+    def externally_consumed_space(directory):
+        written = sum(p.stat().st_size for p in root.glob('*.partial'))
+        return SimpleNamespace(free=(storage.DISK_RESERVE - storage.CHUNK if written >= storage.CHUNK
+                                    else storage.DISK_RESERVE + 4 * storage.CHUNK - written))
+    with patch.object(storage.shutil, 'disk_usage', side_effect=externally_consumed_space):
+        refuses(lambda: storage.compress(root, noisy, True))
+    assert storage.identity(noisy) == noisy_identity and storage.validate_archive(noisy) == noisy_checksum
+    assert not Path(str(noisy) + '.gz').exists() and not list(root.glob('*.partial'))
     # Resume a crash between publishing .gz and unlinking its verified source.
     with gzip.open(archived, 'rb') as src:
         original.write_bytes(src.read())
@@ -241,6 +275,103 @@ with tempfile.TemporaryDirectory(prefix='used-web-storage-cli-') as td:
     assert unrelated.exists() and outside.exists(), 'unrecognized files and other services are outside cleanup scope'
     assert not list(backups.glob('*.partial')) and not list(backups.glob('.restore-check-*.sqlite'))
 
+# Explicit legacy roots share recovery/lock policy without widening --daily.
+with tempfile.TemporaryDirectory(prefix='used-web-storage-legacy-') as td:
+    host = Path(td).resolve()
+    data = host / 'data'
+    backups = data / 'backups'
+    backups.mkdir(parents=True)
+    legacy = host / 'legacy-manual'
+    legacy.mkdir()
+    today = datetime.datetime.now(datetime.timezone.utc).date()
+    recovery = fixture(backups / f'search-index-{today.isoformat()}.sqlite')
+    operating = fixture(data / 'search-index.sqlite')
+    operating_bytes = operating.read_bytes()
+    def old_backup(parent, name='search-index.sqlite'):
+        parent.mkdir(parents=True, exist_ok=True)
+        p = fixture(parent / name)
+        os.utime(p, (time.time() - 10 * 86400,) * 2)
+        return p
+    expired = old_backup(legacy, 'search-index-pre-migration.sqlite')
+    nested = old_backup(legacy / 'state')
+    recent = fixture(legacy / 'search-index-recent.sqlite')
+    pinned = old_backup(legacy, 'search-index-pinned.sqlite')
+    Path(str(pinned) + '.keep').write_text('unresolved recovery')
+    pinned_tree = old_backup(legacy / 'pinned' / 'state')
+    (legacy / 'pinned' / '.keep').write_text('ancestor recovery pin')
+    hardlink = old_backup(legacy, 'search-index-hardlink.sqlite')
+    os.link(hardlink, legacy / 'hardlink-evidence')
+    busy = old_backup(legacy, 'search-index-wal.sqlite')
+    Path(str(busy) + '-wal').write_bytes(b'pending transaction')
+    active = old_backup(legacy, 'search-index-active.sqlite')
+    outside = old_backup(host / 'outside')
+    alias = legacy / 'search-index-alias.sqlite'
+    alias.symlink_to(outside)
+    (legacy / 'linked-directory').symlink_to(outside.parent, target_is_directory=True)
+    empty = legacy / 'search-index-empty.sqlite'
+    empty.touch()
+    disguised = legacy / 'search-index-unknown.sqlite'
+    disguised.write_text('not a SQLite backup')
+    (legacy / 'runner.mjs').write_text('code must survive')
+    (legacy / '.env').write_text('disposable fixture, not credentials')
+    unknown = old_backup(legacy, 'operator-evidence.sqlite')
+    for p in [empty, disguised, legacy / 'runner.mjs', legacy / '.env']:
+        os.utime(p, (time.time() - 10 * 86400,) * 2)
+    before = inventory(legacy)
+    run_cli(backups, '--daily', '--apply')
+    assert inventory(legacy) == before, 'daily service must not acquire a separate legacy scope'
+    recovery = Path(str(recovery) + '.gz')
+    args = ['--legacy-manual-root', str(legacy)]
+    events = run_cli(backups, *args)
+    planned = {e['path'] for e in events if e['action'] == 'expire_manual'}
+    assert {str(expired), str(nested), str(active)} == planned
+    assert all(e['recovery'] == str(recovery) and e['reclaimed_bytes'] == 0
+               for e in events if e['action'] == 'expire_manual')
+    assert inventory(legacy) == before, 'explicit legacy dry run must not mutate files'
+    with (backups / '.storage-maintenance.lock').open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        run_cli(backups, *args, '--apply', succeeds=False)
+    assert inventory(legacy) == before
+    # Fences reject both descendants and ancestors of operating/recovery data,
+    # including symlinked roots, before performing any deletion.
+    alias_root = host / 'legacy-alias'
+    alias_root.symlink_to(legacy, target_is_directory=True)
+    for forbidden in [backups, data, host, data / 'nested', alias_root]:
+        if forbidden == data / 'nested':
+            forbidden.mkdir()
+        run_cli(backups, '--legacy-manual-root', str(forbidden), '--apply', succeeds=False)
+    # Ancestor and daily-root pins protect the whole separate legacy tree.
+    for pin in [host / '.keep', backups / '.keep']:
+        pin.write_text('freeze recovery')
+        run_cli(backups, *args, '--apply')
+        assert inventory(legacy) == before
+        pin.unlink()
+    recovery_time = recovery.stat().st_mtime_ns
+    os.utime(recovery, (time.time() - 8 * 86400,) * 2)
+    events = run_cli(backups, *args, '--apply')
+    assert any(e.get('reason') == 'daily_recovery_stale' for e in events)
+    assert inventory(legacy) == before
+    os.utime(recovery, ns=(recovery_time, recovery_time))
+    child = subprocess.Popen([sys.executable, '-c',
+        'import sys; f=open(sys.argv[1], "rb"); print("ready", flush=True); sys.stdin.read()', str(active)],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+    try:
+        assert child.stdout.readline().strip() == 'ready'
+        expected_bytes = expired.stat().st_size + nested.stat().st_size
+        events = run_cli(backups, *args, '--apply')
+        assert active.exists(), 'active legacy file references must survive'
+    finally:
+        child.communicate('', timeout=10)
+    removed = [e for e in events if e['action'] == 'expired_manual']
+    assert {e['path'] for e in removed} == {str(expired), str(nested)}
+    assert sum(e['reclaimed_bytes'] for e in removed) == expected_bytes
+    assert all(e['recovery'] == str(recovery) for e in removed)
+    assert not expired.exists() and not nested.exists()
+    retained = {name: checksum for name, checksum in before.items()
+                if name not in {str(expired.relative_to(legacy)), str(nested.relative_to(legacy))}}
+    assert inventory(legacy) == retained, 'pins, links, WAL, code, env, unknown and empty files must survive'
+    assert outside.exists() and operating.read_bytes() == operating_bytes
+
 # Age limits must not remove the last recovery point when daily creation stops.
 with tempfile.TemporaryDirectory(prefix='used-web-storage-retention-') as td:
     root = Path(td).resolve()
@@ -266,4 +397,4 @@ with tempfile.TemporaryDirectory(prefix='used-web-storage-retention-') as td:
     storage.expire_manual_backups(root, True, events.append)
     assert manual.exists(), 'a stale daily recovery must not authorize manual backup expiry'
     assert any(e.get('last_recovery_exception') is True for e in events)
-print('backup storage contract passed: lossless archives, retention, pins, live-file/lock safety, CLI dry-run, idempotence, operating DB preservation')
+print('backup storage contract passed: bounded low-space compression, lossless archives, explicit legacy expiry, retention, pins, live-file/lock safety, CLI dry-run, idempotence, operating DB preservation')

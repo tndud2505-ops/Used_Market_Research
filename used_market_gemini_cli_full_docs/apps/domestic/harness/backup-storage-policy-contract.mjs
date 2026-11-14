@@ -4,7 +4,7 @@ import { gzipSync } from 'node:zlib';
 import os from 'node:os';
 import path from 'node:path';
 import { SearchIndex } from '../aws-runner/search-index.mjs';
-import { requiredBackupFreeBytes } from '../aws-runner/backup-storage-policy.mjs';
+import { requiredBackupFreeBytes, migrationBackupRequired } from '../aws-runner/backup-storage-policy.mjs';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
@@ -33,8 +33,16 @@ try {
   assert.equal(requiredBackupFreeBytes(1024 ** 3), 2 * 1024 ** 3);
   assert.equal(requiredBackupFreeBytes(10 * 1024 ** 3), 12 * 1024 ** 3);
   assert.throws(() => requiredBackupFreeBytes(NaN), /SIZE_INVALID/);
+  assert.equal(migrationBackupRequired(10, 10), false);
+  assert.equal(migrationBackupRequired(9, 10), true);
+  assert.throws(() => migrationBackupRequired(11, 10), /SCHEMA_NEWER/);
+  assert.throws(() => migrationBackupRequired(10, NaN), /VERSION_INVALID/);
   const preflight = fileURLToPath(new URL('../aws-runner/backup-storage-policy.mjs', import.meta.url));
   assert.equal(spawnSync(process.execPath, [preflight, '--db', dbPath]).status, 0);
+  const unchanged = spawnSync(process.execPath, [preflight, '--db', dbPath, '--migration-version', '10'], { encoding: 'utf8' });
+  assert.equal(unchanged.status, 0, unchanged.stderr);
+  assert.equal(JSON.parse(unchanged.stdout).backup_required, false);
+  assert.notEqual(spawnSync(process.execPath, [preflight, '--db', dbPath, '--migration-version', '9']).status, 0);
   assert.notEqual(spawnSync(process.execPath, [preflight, '--db', path.join(dir, 'missing.sqlite')]).status, 0,
     'an explicit wrong database target must not pass preflight as a new install');
   const installer = readFileSync(new URL('../aws-runner/install-ubuntu24.sh', import.meta.url), 'utf8');

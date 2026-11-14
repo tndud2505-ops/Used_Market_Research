@@ -1,0 +1,23 @@
+{
+  "id": "/",
+  "name": "USED PICK — 중고 PC 부품 시세",
+  "short_name": "USED PICK",
+  "description": "중고 PC 부품 매물 검색, 가격 분석과 컴퓨터 시세 비교",
+  "lang": "ko-KR",
+  "start_url": "/?source=app",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f5f6f8",
+  "theme_color": "#ffffff",
+  "orientation": "any",
+  "categories": ["shopping", "utilities"],
+  "icons": [
+    { "src": "/icons/app-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/app-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "가격 분석", "url": "/price-analysis.html?source=app" },
+    { "name": "컴퓨터 시세", "url": "/computer-builder.html?source=app" }
+  ]
+}

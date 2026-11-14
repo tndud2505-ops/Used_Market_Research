@@ -1,0 +1,15 @@
+/* One listing surface; the graph opens in its own window. */
+body.ui-a #listing-rows:not(:empty) { border:1px solid var(--line,#dfe4ea); border-radius:8px; overflow:clip; }
+body.ui-a .listing-row { grid-template-columns:88px minmax(0,1fr) minmax(130px,170px) 32px; padding:18px 16px; gap:16px; align-items:center; }
+body.ui-a .listing-row:last-child { border-bottom:0; }
+body.ui-a .listing-title { line-height:1.5; overflow-wrap:anywhere; }
+body.ui-a a.listing-title::after { content:'↗'; margin-left:7px; color:var(--muted); font-size:.85em; white-space:nowrap; }
+body.ui-a .listing-commerce { min-width:0; font-variant-numeric:tabular-nums; }
+body.ui-a a.listing-price-window { display:inline-flex; align-items:center; justify-content:center; min-height:32px; margin-top:6px; padding:4px 10px; border:1px solid #e3b6a9; border-radius:4px; background:#fff; color:var(--accent-strong,#bd422f); font-size:12px; line-height:20px; font-weight:550; text-decoration:none; white-space:nowrap; }
+body.ui-a a.listing-price-window:hover { background:#fff7f3; border-color:var(--accent-strong,#bd422f); }
+body.ui-a a.listing-price-window:focus-visible { outline:2px solid var(--accent-strong,#bd422f); outline-offset:3px; }
+@media(max-width:760px) {
+  body.ui-a #listing-rows:not(:empty) { margin:0 12px; }
+  body.ui-a[data-mobile-release] .listing-row { grid-template-columns:96px minmax(0,1fr); gap:6px 12px; padding:14px 12px; }
+  body.ui-a a.listing-price-window { min-height:36px; padding:5px 10px; }
+}

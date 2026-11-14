@@ -1,0 +1,170 @@
+import { createHash } from 'node:crypto';
+import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { ConsoleLog, TwaGenerator, TwaManifest, fetchUtils } from '@bubblewrap/core';
+
+const root = fileURLToPath(new URL('../', import.meta.url));
+const project = path.join(root, 'android');
+const publicRoot = path.resolve(root, '../web-backend/public');
+const configFile = path.join(root, 'twa-manifest.json');
+const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
+const GRADLE_SHA256 = 'f397b287023acdba1e9f6fc5ea72d22dd63669d59ed4a289a29b1a76eee151c6';
+const assetNames = ['manifest.webmanifest', 'icons/app-192.png', 'icons/app-512.png',
+  'icons/maskable-512.png', 'icons/play-store-512.png'];
+
+async function config() {
+  const data = JSON.parse(await readFile(configFile, 'utf8'));
+  if (!/^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*){2,}$/.test(data.packageId) ||
+      data.host !== 'used-pick.com' || data.startUrl !== '/?source=app' ||
+      data.webManifestUrl !== 'https://used-pick.com/manifest.webmanifest' ||
+      data.fullScopeUrl !== 'https://used-pick.com/' ||
+      data.iconUrl !== 'https://used-pick.com/icons/app-512.png' ||
+      data.maskableIconUrl !== 'https://used-pick.com/icons/maskable-512.png' ||
+      data.fallbackType !== 'customtabs' || data.additionalTrustedOrigins.length ||
+      data.signingKey.path || data.signingKey.alias || data.fingerprints.length ||
+      Object.keys(data.features).length || data.enableNotifications ||
+      !Number.isSafeInteger(data.appVersionCode) || data.appVersionCode < 1 ||
+      !/^\d+\.\d+\.\d+$/.test(data.appVersion)) {
+    throw new Error('Invalid target/version or unexpected signing/feature config. See docs/android-release.md.');
+  }
+  return data;
+}
+
+async function sourceAssets() {
+  const assets = new Map();
+  for (const name of assetNames) {
+    const bytes = await readFile(path.join(publicRoot, name)).catch(() => {
+      throw new Error(`Missing public/${name}; the primary must prepare the PWA assets first.`);
+    });
+    assets.set(`https://used-pick.com/${name}`, bytes);
+  }
+  const manifest = JSON.parse(assets.get('https://used-pick.com/manifest.webmanifest').toString());
+  if (manifest.start_url !== '/?source=app' || manifest.scope !== '/') {
+    throw new Error('PWA manifest must retain start_url /?source=app and scope /.');
+  }
+  return assets;
+}
+
+async function assertOwnedProject() {
+  await mkdir(project, { recursive: true });
+  if (await realpath(project) !== path.join(await realpath(root), 'android')) {
+    throw new Error('android/ must be a real directory inside mobile/, not a junction/symlink.');
+  }
+}
+
+async function generate(mode) {
+  const data = await config();
+  const assets = await sourceAssets();
+  await assertOwnedProject();
+  const generatedConfig = path.join(project, 'twa-manifest.json');
+  if (mode === 'init' && existsSync(generatedConfig)) {
+    throw new Error('Project already initialized. Use npm run android:update to regenerate it.');
+  }
+  if (mode === 'update' && !existsSync(generatedConfig)) {
+    throw new Error('Initialize first with npm run android:init.');
+  }
+  // Bubblewrap consumes URL assets. Supply only our checked-out public files, with
+  // their production URLs retained in generated Android metadata. No profile,
+  // signing key, SDK installer, network request or production write is involved.
+  const originalFetch = fetchUtils.fetch;
+  fetchUtils.fetch = async input => {
+    const url = String(input);
+    const bytes = assets.get(url);
+    if (!bytes) throw new Error(`Generator requested an unexpected asset: ${url}`);
+    return new Response(bytes, { headers: { 'content-type':
+      url.endsWith('.png') ? 'image/png' : 'application/manifest+json' } });
+  };
+  try {
+    await new TwaGenerator().createTwaProject(project, new TwaManifest(data), new ConsoleLog('USED PICK'));
+  } finally {
+    fetchUtils.fetch = originalFetch;
+  }
+  await writeFile(generatedConfig, `${JSON.stringify(data, null, 2)}\n`);
+  // Bubblewrap CLI uses SHA-1 here solely as a change detector, not for signing.
+  const checksum = createHash('sha1').update(await readFile(generatedConfig)).digest('hex');
+  await writeFile(path.join(project, 'manifest-checksum.txt'), checksum);
+  const wrapper = path.join(project, 'gradle/wrapper/gradle-wrapper.properties');
+  await writeFile(wrapper, `${await readFile(wrapper, 'utf8')}\ndistributionSha256Sum=${GRADLE_SHA256}\n`);
+  const topGradle = path.join(project, 'build.gradle');
+  await writeFile(topGradle, (await readFile(topGradle, 'utf8')).replaceAll('jcenter()', 'mavenCentral()'));
+  // No SDK downloads/license prompts and no global Gradle init/profile configuration.
+  const props = path.join(project, 'gradle.properties');
+  await writeFile(props, `${await readFile(props, 'utf8')}\nandroid.builder.sdkDownload=false\n`);
+  const hashes = Object.fromEntries([...assets].map(([url, bytes]) => [url, sha256(bytes)]));
+  await writeFile(path.join(project, 'source-assets.sha256.json'), `${JSON.stringify(hashes, null, 2)}\n`);
+  await verifyProject();
+  console.log(`Generated ${project} (unsigned; version ${data.appVersion}/${data.appVersionCode}).`);
+}
+
+async function verifyProject() {
+  const data = await config();
+  await assertOwnedProject();
+  const generated = JSON.parse(await readFile(path.join(project, 'twa-manifest.json'), 'utf8'));
+  if (JSON.stringify(data) !== JSON.stringify(generated)) {
+    throw new Error('Config changed after generation; run npm run android:update.');
+  }
+  const gradle = await readFile(path.join(project, 'app/build.gradle'), 'utf8');
+  if (!gradle.includes('compileSdkVersion 36') || !gradle.includes('targetSdkVersion 36') ||
+      !gradle.includes(`applicationId: '${data.packageId}'`) ||
+      !gradle.includes("hostName: 'used-pick.com'") ||
+      !gradle.includes("launchUrl: '/?source=app'")) {
+    throw new Error('Generated Android target SDK, identity or exact launch URL is incorrect.');
+  }
+  const current = await sourceAssets();
+  const hashes = JSON.parse(await readFile(path.join(project, 'source-assets.sha256.json'), 'utf8'));
+  if ([...current].some(([url, bytes]) => hashes[url] !== sha256(bytes))) {
+    throw new Error('Public PWA assets changed; run npm run android:update before building.');
+  }
+  console.log(`Verified ${data.packageId}: https://${data.host}${data.startUrl}; target API 36.`);
+  return data;
+}
+
+async function build() {
+  const data = await verifyProject();
+  const sdk = process.env.ANDROID_HOME || process.env.ANDROID_SDK_ROOT;
+  const jdk = process.env.JAVA_HOME;
+  if (!sdk || !jdk || !existsSync(path.join(sdk, 'platforms/android-36/android.jar')) ||
+      !existsSync(path.join(sdk, 'build-tools/35.0.0/source.properties')) ||
+      !existsSync(path.join(jdk, 'bin', process.platform === 'win32' ? 'java.exe' : 'java'))) {
+    throw new Error('Set JAVA_HOME (JDK 21) and ANDROID_HOME; install platform 36 and Build Tools 35.0.0 yourself. No SDK installation or license acceptance is automated.');
+  }
+  const env = { ...process.env, ANDROID_HOME: sdk, ANDROID_SDK_ROOT: sdk,
+    GRADLE_USER_HOME: path.join(root, '.cache/gradle') };
+  const args = ['--no-daemon', '--console=plain', '--max-workers=2',
+    '-Pandroid.builder.sdkDownload=false', 'assembleRelease', 'bundleRelease'];
+  const win = process.platform === 'win32';
+  const child = spawn(win ? (process.env.ComSpec || 'cmd.exe') : './gradlew',
+    win ? ['/d', '/s', '/c', `gradlew.bat ${args.join(' ')}`] : args,
+    { cwd: project, env, stdio: 'inherit' });
+  await new Promise((resolve, reject) => {
+    child.once('error', reject);
+    child.once('exit', code => code === 0 ? resolve() : reject(new Error(`Gradle failed (${code}).`)));
+  });
+  const artifacts = {};
+  for (const name of ['app/build/outputs/apk/release/app-release-unsigned.apk',
+    'app/build/outputs/bundle/release/app-release.aab']) {
+    const bytes = await readFile(path.join(project, name));
+    artifacts[name] = { bytes: bytes.length, sha256: sha256(bytes), signing: 'unsigned' };
+  }
+  const receipt = { builtAt: new Date().toISOString(), packageId: data.packageId,
+    launchUrl: `https://${data.host}${data.startUrl}`, targetSdk: 36,
+    appVersion: data.appVersion, appVersionCode: data.appVersionCode,
+    packageLockSha256: sha256(await readFile(path.join(root, 'package-lock.json'))), artifacts };
+  await writeFile(path.join(project, 'build-receipt.json'), `${JSON.stringify(receipt, null, 2)}\n`);
+  console.log(JSON.stringify(receipt, null, 2));
+  console.log('Unsigned build only. No device/TWA verification or Play submission is implied.');
+}
+
+const command = process.argv[2];
+try {
+  if (command === 'init' || command === 'update') await generate(command);
+  else if (command === 'check') await verifyProject();
+  else if (command === 'build') await build();
+  else throw new Error('Usage: node scripts/android.mjs init|update|check|build');
+} catch (error) {
+  console.error(error.message);
+  process.exitCode = 1;
+}

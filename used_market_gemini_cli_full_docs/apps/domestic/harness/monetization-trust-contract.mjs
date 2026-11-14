@@ -10,6 +10,90 @@ import {
   selectContextualOffer
 } from "../cloudflare/affiliate-registry.mjs";
 import { COUPANG_COMMISSION_DISCLOSURE, createContextualAffiliate, validContextualOffer } from "../web-backend/public/affiliate.js";
+import { createAdfitSlot } from "../web-backend/public/adfit.js";
+
+// No DOM/SDK globals are available here: a house ad must not touch either.
+const houseRoot = { dataset: { provider: 'house' }, hidden: false };
+const houseSlot = createAdfitSlot(houseRoot);
+assert.equal(houseRoot.hidden, true);
+houseSlot.setEligible(true);
+assert.equal(houseRoot.hidden, false);
+
+// Motion must respect organic eligibility, reduced motion, and end-of-clip.
+const savedMotionGlobals = Object.fromEntries(['window', 'document', 'IntersectionObserver'].map(key => [key, globalThis[key]]));
+try {
+  let observeMotion;
+  let playCount = 0;
+  let clipTime = 0;
+  let toggleMotion;
+  const playbackEvents = {};
+  const motionPreference = { matches: true, addEventListener() {} };
+  const clip = {
+    dataset: { motionSrc: '/test/moa-lift.mp4' }, src: '', ended: false, paused: true,
+    get currentTime() { return clipTime; }, set currentTime(value) { clipTime = value; if (value === 0) this.ended = false; },
+    getAttribute() { return this.src || null; }, addEventListener(name, callback) { playbackEvents[name] = callback; },
+    pause() { this.paused = true; playbackEvents.pause?.(); },
+    play() { this.paused = false; playCount++; playbackEvents.play?.(); return Promise.resolve(); }
+  };
+  const exercise = {
+    dataset: { src: '/test/exercise.mp4' }, src: '', paused: true, currentTime: 0,
+    getAttribute() { return this.src || null; },
+    pause() { this.paused = true; },
+    play() { this.paused = false; return Promise.resolve(); }
+  };
+  const button = { hidden: true, addEventListener(name, callback) { if (name === 'click') toggleMotion = callback; }, setAttribute() {} };
+  globalThis.window = { matchMedia: query => query.includes('prefers-reduced-motion') ? motionPreference : { matches: true, addEventListener() {} }, addEventListener() {} };
+  globalThis.document = { hidden: false, addEventListener() {} };
+  globalThis.IntersectionObserver = class { constructor(callback) { observeMotion = callback; } observe() {} };
+  const root = { dataset: { provider: 'house' }, hidden: false, querySelector: selector => selector === 'video.train-gallery-moa' ? clip : selector === '.train-gallery-editor video' ? exercise : button };
+  const slot = createAdfitSlot(root);
+  observeMotion([{ isIntersecting: true, intersectionRatio: 1 }]);
+  assert.equal(clip.src, '', 'ineligible content must not load video');
+  assert.equal(exercise.src, '', 'ineligible content must not load the companion clip');
+  motionPreference.matches = false;
+  slot.setEligible(true);
+  assert.equal(clip.src, '', 'reduced motion must keep the poster without loading video');
+  motionPreference.matches = true;
+  slot.setEligible(true);
+  await Promise.resolve();
+  assert.equal(playCount, 1, 'visible eligible desktop content can start the clip');
+  assert.equal(exercise.paused, false, 'the companion clip follows actual mascot playback');
+  slot.setEligible(false);
+  assert.equal(clip.paused, true);
+  assert.equal(exercise.paused, true, 'eligibility changes pause both clips');
+  clip.ended = true;
+  slot.setEligible(true);
+  assert.equal(playCount, 1, 'an ended clip must not autoplay again');
+  clip.currentTime = 4.5;
+  exercise.currentTime = 4.5;
+  toggleMotion();
+  assert.equal(clip.currentTime, 0, 'explicit replay restarts the mascot');
+  assert.equal(exercise.currentTime, 0, 'explicit replay restarts the companion');
+  await Promise.resolve();
+  toggleMotion();
+  assert.equal(clip.paused, true);
+  assert.equal(exercise.paused, true);
+  const pausedCount = playCount;
+  observeMotion([{ isIntersecting: false, intersectionRatio: 0 }]);
+  observeMotion([{ isIntersecting: true, intersectionRatio: 1 }]);
+  assert.equal(playCount, pausedCount, 'manual pause survives viewport re-entry');
+  motionPreference.matches = false;
+  toggleMotion();
+  await Promise.resolve();
+  assert.equal(clip.paused, false, 'reduced-motion users may explicitly play');
+  assert.equal(exercise.paused, false);
+  clip.ended = true;
+  playbackEvents.ended();
+  assert.equal(exercise.paused, true, 'mascot completion stops the companion clip');
+} finally {
+  for (const [key, value] of Object.entries(savedMotionGlobals)) {
+    if (value === undefined) delete globalThis[key]; else globalThis[key] = value;
+  }
+}
+houseSlot.setEligible(false);
+assert.equal(houseRoot.hidden, true);
+houseSlot.setEligible(true);
+assert.equal(houseRoot.hidden, false);
 
 const html = await readFile(new URL("../web-backend/public/index.html", import.meta.url), "utf8");
 const analysisHtml = await readFile(new URL("../web-backend/public/price-analysis.html", import.meta.url), "utf8");
@@ -47,14 +131,17 @@ for (const page of [html, builderHtml, analysisHtml]) {
   assert.match(page, /id="adfit-banner" data-placement="bottom"[^>]+hidden/u);
   assert.ok(page.indexOf('id="adfit-banner"') > page.indexOf('</main>'), "bottom ad follows page content");
   assert.match(page, /data-ad-unit="DAN-gG0WEoycq7Nup5kT" data-ad-width="160" data-ad-height="600"/u);
-  assert.match(page, /data-ad-unit="DAN-gvTVDnxVn9S3leR5" data-ad-width="320" data-ad-height="100"/u);
+  assert.doesNotMatch(page, /DAN-gvTVDnxVn9S3leR5/u, "the replaced bottom unit must not request paid impressions");
+  assert.match(page, /id="adfit-banner" data-placement="bottom" data-provider="house"/u);
+  assert.equal((page.match(/class="train-gallery-promotion__link"/gu) || []).length, 1, "one replacement promotion per page");
+  assert.match(page, /href="https:\/\/play\.google\.com\/store\/apps\/details\?id=com\.trainingapp\.traingallery"[^>]+rel="sponsored noopener noreferrer"/u);
   assert.doesNotMatch(page, /adsterra|contextual-offer|google-adsense-account/iu);
 }
 assert.doesNotMatch(app + toolsUi, /createAdsterraSlot|createContextualAffiliate/u);
 assert.doesNotMatch(staticHeaders, /bauval/u);
 assert.ok(app.includes('adfit.setEligible(visibleListings.length > 0)'), "search ads require organic results");
 assert.ok(toolsUi.includes('adfit.setEligible(true)'), "tool ads follow successful initialization");
-assert.match(analysisHtml, /data-ad-unit\s*=\s*"DAN-gvTVDnxVn9S3leR5"/u);
+assert.match(analysisHtml, /data-provider="house"/u);
 assert.match(adfitUi, /MutationObserver/u, "AdFit must react when the SDK inserts a creative");
 assert.match(adfitUi, /querySelector\("iframe, \.kakao_ad_area > \*"\)/u,
   "an empty or blocked AdFit response must not reserve blank page space");

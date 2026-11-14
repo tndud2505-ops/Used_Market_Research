@@ -17,6 +17,7 @@ import { PC_DIRECTORY_PUBLICATION_SOURCE_KEYS } from '../collector/logic/pc-sour
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
 const BUNJANG_VISIBILITY_MAX_AGE_MS = 7 * DAY_MS;
+const DAANGN_VISIBILITY_MAX_AGE_MS = 7 * DAY_MS;
 // eBay collection samples the top Browse results per query, so an active offer
 // can go unseen for a week; in October 6% did, but only 1.1% beyond 14 days.
 const EBAY_VISIBILITY_MAX_AGE_MS = 14 * DAY_MS;
@@ -197,6 +198,8 @@ function pcProjection(item = {}) {
     condition_code: cleanText(item.condition_code, 80) || "UNKNOWN",
     lifecycle_status: cleanText(item.lifecycle_status, 80) || "ACTIVE",
     market_pool: cleanText(item.market_pool, 80) || null,
+    ...(item.site === 'daangn' ? { shipping_evidence: cleanText(item.shipping_evidence, 80) || null,
+      shipping_fee: item.shipping_fee == null ? null : Number(item.shipping_fee) } : {}),
     confidence: item.confidence && typeof item.confidence === "object" ? item.confidence : {},
     evidence: item.evidence && typeof item.evidence === "object" ? item.evidence : {},
     price_eligible: item.price_eligible === true,
@@ -326,6 +329,8 @@ function publicItem(row) {
     condition_code: pc.condition_code || "UNKNOWN",
     lifecycle_status: pc.lifecycle_status || "ACTIVE",
     market_pool: pc.market_pool || null,
+    ...(row.site === 'daangn' ? { shipping_evidence: pc.shipping_evidence || null,
+      shipping_fee: pc.shipping_fee ?? null } : {}),
     confidence: pc.confidence && typeof pc.confidence === "object" ? pc.confidence : {},
     evidence: pc.evidence && typeof pc.evidence === "object" ? pc.evidence : {},
     price_eligible: pc.price_eligible === true,
@@ -343,15 +348,19 @@ export class SearchIndex {
     this.backupDir = options.backupDir || (this.filePath === ":memory:" ? "" : path.join(path.dirname(this.filePath), "backups"));
     this.limits = { ...DEFAULT_LIMITS, ...(options.limits || {}) };
     const existingFileNeedsInspection = this.filePath !== ":memory:" && existsSync(this.filePath) && statSync(this.filePath).size > 0;
+    if (options.requireExistingSchema && !existingFileNeedsInspection) throw new Error('EXISTING_INDEX_REQUIRED');
     if (this.filePath !== ":memory:") mkdirSync(path.dirname(this.filePath), { recursive: true });
     this.db = new DatabaseSync(this.filePath);
     try {
       this.configure();
       const currentVersion = Number(this.db.prepare("PRAGMA user_version").get()?.user_version || 0);
+      if (options.requireExistingSchema && currentVersion !== SEARCH_INDEX_SCHEMA_VERSION) {
+        throw new Error('EXISTING_INDEX_SCHEMA_MISMATCH');
+      }
       if (existingFileNeedsInspection && currentVersion < SEARCH_INDEX_SCHEMA_VERSION) {
         if (!this.recentMigrationBackupExists(currentVersion)) this.createMigrationBackup(currentVersion);
       }
-      this.migrate();
+      if (!options.requireExistingSchema) this.migrate();
     } catch (error) {
       this.db.close();
       throw error;
@@ -1077,7 +1086,9 @@ export class SearchIndex {
           ...pcListingColumnValues(metadata)
         );
         if (!previous || previous.content_hash !== hash) {
-          deleteFts.run(item.item_id);
+          // Daangn IDs are introduced by the atomic trial writer. A brand-new
+          // identity has no FTS row to delete; avoid scanning the legacy index.
+          if (previous || item.site !== 'daangn') deleteFts.run(item.item_id);
           insertFts.run(item.item_id, normalizedText, compactText);
         }
       }
@@ -1135,17 +1146,20 @@ export class SearchIndex {
   // Sources without a detail recheck stay current only while recent scheduled
   // searches or eBay item checks keep confirming them (Browse returns active
   // offers only). Display only: lifecycle status, prices and history are unchanged.
-  // Bindings: currentVisibilityCutoffs() (Bunjang, eBay, then Danawa).
+  // Bindings: currentVisibilityCutoffs() (Bunjang, eBay, Danawa, then Daangn).
   currentVisibilitySql(alias) {
-    return `(${alias}.site NOT IN ('bunjang', 'ebay', 'danawa')
+    return `(${alias}.site NOT IN ('bunjang', 'ebay', 'danawa', 'daangn')
       OR (${alias}.site = 'bunjang' AND ${this.bunjangConfirmationSql(alias)} >= ?${this.bunjangMissingSql(alias)})
       OR (${alias}.site = 'ebay' AND ${this.ebayConfirmationSql(alias)} >= ?)
-      OR (${alias}.site = 'danawa' AND ${alias}.last_checked_at >= ?${this.danawaMissingSql(alias)}))`;
+      OR (${alias}.site = 'danawa' AND ${alias}.last_checked_at >= ?${this.danawaMissingSql(alias)})
+      OR (${alias}.site = 'daangn' AND ${alias}.last_checked_at >= ?
+        AND NOT EXISTS (SELECT 1 FROM json_each(${alias}.pc_metadata_json, '$.exclusion_reasons')
+          WHERE value = 'DELIVERY_LOCAL_ONLY')))`;
   }
 
   currentVisibilityCutoffs() {
     return [iso(this.now() - BUNJANG_VISIBILITY_MAX_AGE_MS), iso(this.now() - EBAY_VISIBILITY_MAX_AGE_MS),
-      iso(this.now() - DANAWA_VISIBILITY_MAX_AGE_MS)];
+      iso(this.now() - DANAWA_VISIBILITY_MAX_AGE_MS), iso(this.now() - DAANGN_VISIBILITY_MAX_AGE_MS)];
   }
 
   browsePcListingsInReadView(options = {}) {
@@ -1638,7 +1652,7 @@ export class SearchIndex {
     // Apply visibility at read time, including already materialized snapshots.
     // Age never changes the ledger's lifecycle state or price history.
     const conditions = ["si.query_key = ?", "si.snapshot_version = ?",
-      `(si.site NOT IN ('bunjang', 'ebay', 'danawa') OR EXISTS (SELECT 1 FROM listings current WHERE current.item_id = si.item_id AND ${this.currentVisibilitySql('current')}))`];
+      `(si.site NOT IN ('bunjang', 'ebay', 'danawa', 'daangn') OR EXISTS (SELECT 1 FROM listings current WHERE current.item_id = si.item_id AND ${this.currentVisibilitySql('current')}))`];
     const bindings = [identity.key, snapshotVersion, ...this.currentVisibilityCutoffs()];
     const requestedViewSites = sortedStrings(body?.view_sites);
     const invalidViewSites = requestedViewSites.filter((site) => !identity.sites.includes(site));

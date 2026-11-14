@@ -23,6 +23,8 @@ import { publicPcCatalogForApi, publicPcFacetsForApi, publicPcModelsForApi, publ
 import { resolvePcCanonicalIdV3 } from '../../../market/data/pc-product-master-v2.mjs';
 // @ts-ignore canonical PC-directory source policy is authored as shared ESM JavaScript
 import { OPERATIONAL_PC_DIRECTORY_SITES } from '../../../cloudflare/target-sites.mjs';
+// @ts-ignore candidate listing visibility is separate from scheduler activation
+import { PC_DIRECTORY_PUBLICATION_SOURCE_KEYS } from '../../../collector/logic/pc-source-registry.mjs';
 // @ts-ignore shared request validation is authored as runtime ESM JavaScript
 import { parsePcListingsRequest } from '../../../cloudflare/pc-listings-contract.mjs';
 import { getPriceHistory } from './price-history-service.js';
@@ -510,7 +512,7 @@ export function createServer(
       if (pathname === '/api/pc/listings') {
         let listingQuery;
         try {
-          listingQuery = parsePcListingsRequest(urlObj, { allowedSites: OPERATIONAL_PC_DIRECTORY_SITES });
+          listingQuery = parsePcListingsRequest(urlObj, { allowedSites: PC_DIRECTORY_PUBLICATION_SOURCE_KEYS });
         } catch (error) {
           throw new ApiError(400, error instanceof Error ? error.message : String(error));
         }
@@ -1836,6 +1838,7 @@ async function serveStaticAsset(
     '.js': 'text/javascript; charset=utf-8',
     '.mjs': 'text/javascript; charset=utf-8',
     '.json': 'application/json; charset=utf-8',
+    '.webmanifest': 'application/manifest+json; charset=utf-8',
     '.txt': 'text/plain; charset=utf-8',
     '.xml': 'application/xml; charset=utf-8',
     '.svg': 'image/svg+xml',

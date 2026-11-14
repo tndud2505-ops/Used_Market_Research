@@ -79,7 +79,11 @@ export const PC_SOURCE_REGISTRY = Object.freeze([
     policy_status: "DENIED",
     runtime_status: "ADAPTER_READY",
     public_search: false,
-    directory_source: false,
+    directory_source: true,
+    directory_order: 4,
+    // Operator-requested, bounded candidate publication is separate from
+    // marketplace permission and general scheduler activation.
+    listing_publication: "OPERATOR_REQUESTED_TRIAL",
     policy_reviewed_at: "2026-08-31",
     policy_basis_url: "https://www.daangn.com/robots.txt",
     policy_note: "The public marketplace search path /kr/buy-sell/s/ is disallowed; live collection requires an approved feed or written permission.",
@@ -161,9 +165,15 @@ export const PC_SOURCE_REGISTRY = Object.freeze([
   })
 ]);
 
+export function pcSourcePublishesListings(entry) {
+  return entry.directory_source === true && (
+    (entry.policy_status === "APPROVED" && entry.runtime_status === "ENABLED")
+    || (entry.key === "daangn" && entry.listing_publication === "OPERATOR_REQUESTED_TRIAL")
+  );
+}
+
 export const PC_DIRECTORY_PUBLICATION_SOURCE_KEYS = Object.freeze(PC_SOURCE_REGISTRY
-  .filter((entry) => entry.directory_source === true
-    && entry.policy_status === "APPROVED" && entry.runtime_status === "ENABLED")
+  .filter(pcSourcePublishesListings)
   .map((entry) => entry.key)
   .sort());
 

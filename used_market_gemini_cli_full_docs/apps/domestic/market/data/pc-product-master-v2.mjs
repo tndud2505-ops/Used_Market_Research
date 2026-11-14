@@ -9,7 +9,8 @@ export const PC_LISTING_ONLY_PSU_MANUFACTURERS_V3 = Object.freeze(["EVGA", "Zalm
 export const PC_SEARCHLESS_PRODUCT_IDS_V3 = Object.freeze([
   "cpu:amd:ryzen-7-9850x3d",
   "cpu:amd:ryzen-9-9950x3d2",
-  "motherboard:gigabyte:b660m-ds3h-ddr4"
+  "motherboard:gigabyte:b660m-ds3h-ddr4",
+  "motherboard:gigabyte:z890-aorus-elite-wifi7"
 ]);
 
 // Groups that only sort listings already found by broader queries. They get
@@ -701,6 +702,7 @@ const MOTHERBOARD_PRODUCTS = [
     { manufacturer: "MSI", model: "B450M MORTAR MAX", family: "MORTAR", platform: "AMD", socket: "AM4", chipset: "B450", formFactor: "Micro-ATX", ddr: "DDR4", edition: "MAX", sourceUrl: "https://www.msi.com/Motherboard/B450M-MORTAR-MAX" },
     { manufacturer: "GIGABYTE", model: "B550M AORUS ELITE", family: "AORUS", platform: "AMD", socket: "AM4", chipset: "B550", formFactor: "Micro-ATX", ddr: "DDR4", revision: "1.x", revisionRequired: true, verifiedRevisions: ["1.0", "1.1", "1.2", "1.3"], sourceUrl: "https://www.gigabyte.com/Motherboard/B550M-AORUS-ELITE-rev-13" },
     { manufacturer: "GIGABYTE", model: "X870 AORUS ELITE WIFI7 ICE", family: "AORUS", platform: "AMD", socket: "AM5", chipset: "X870", formFactor: "ATX", ddr: "DDR5", wifi: true, edition: "WIFI7 ICE", revision: "1.x", revisionRequired: true, verifiedRevisions: ["1.0", "1.1", "1.2"], sourceUrl: "https://www.gigabyte.com/Motherboard/X870-AORUS-ELITE-WIFI7-ICE-rev-12" },
+    { manufacturer: "GIGABYTE", model: "Z890 AORUS ELITE WIFI7", family: "AORUS", platform: "Intel", socket: "LGA1851", chipset: "Z890", formFactor: "ATX", ddr: "DDR5", wifi: true, edition: "ELITE WIFI7", revision: "1.x", verifiedRevisions: ["1.0", "1.1"], aliases: ["Z890 AORUS ELITE WIFI 7", "Z890 AORUS ELITE WI-FI 7", "Z890 AORUS ELITE WI-FI7"], sourceUrl: "https://www.gigabyte.com/Motherboard/Z890-AORUS-ELITE-WIFI7/sp" },
     { manufacturer: "GIGABYTE", model: "B850M AORUS STEALTH ICE", family: "AORUS", platform: "AMD", socket: "AM5", chipset: "B850", formFactor: "Micro-ATX", ddr: "DDR5", wifi: true, edition: "STEALTH ICE", sourceUrl: "https://www.gigabyte.com/Motherboard/B850M-AORUS-STEALTH-ICE" },
     { manufacturer: "GIGABYTE", model: "B850M AORUS ELITE", family: "AORUS", platform: "AMD", socket: "AM5", chipset: "B850", formFactor: "Micro-ATX", ddr: "DDR5", edition: "ELITE", sourceUrl: "https://www.gigabyte.com/Motherboard/B850M-AORUS-ELITE" },
     { manufacturer: "GIGABYTE", model: "B660M DS3H DDR4", family: "Ultra Durable", platform: "Intel", socket: "LGA1700", chipset: "B660", formFactor: "Micro-ATX", ddr: "DDR4", edition: "DS3H DDR4", revision: "1.0", verifiedRevisions: ["1.0"], sourceUrl: "https://www.gigabyte.com/Motherboard/B660M-DS3H-DDR4-rev-10/sp" },

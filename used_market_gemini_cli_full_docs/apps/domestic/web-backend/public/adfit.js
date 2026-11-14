@@ -1,3 +1,6 @@
+import { createHousePromotion } from './promotions/train-gallery/motion.js?v=1';
+import { paidWebAdsAllowed } from './app-settings.mjs';
+
 const SDK_URL = "https://t1.kakaocdn.net/kas/static/ba.min.js";
 let sdkPromise;
 let slotSequence = 0;
@@ -28,6 +31,19 @@ function loadSdk() {
 
 export function createAdfitSlot(root) {
   if (!root) return { setEligible() {} };
+
+  // A first-party promotion shares the content eligibility boundary but must
+  // never request a paid creative or register an AdFit impression.
+  if (root.dataset.provider === 'house') {
+    return createHousePromotion(root);
+  }
+
+  // Installed app advertising is configured separately from website AdFit.
+  // Do not request a hidden website ad in the TWA/PWA surface.
+  if (!paidWebAdsAllowed()) {
+    root.hidden = true;
+    return { setEligible() {} };
+  }
 
   let eligible = false;
   let started = false;

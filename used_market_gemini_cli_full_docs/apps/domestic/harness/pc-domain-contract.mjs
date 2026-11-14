@@ -24,6 +24,105 @@ import { classifyPcPartListing, classifyPcPartListingPublic } from "../market/lo
 import { explicitSoldText, isPartialSaleText, structuredSoldEvidenceFromHtml, joongnaListingUrl } from "../market/logic/listing-lifecycle.mjs";
 import { reviewedPcListingExclusion } from "../market/logic/pc-reviewed-listing-exclusions.mjs";
 
+// Actual Daangn compositions: keep the evidence and total, never a part price.
+for (const [title, description] of [
+  ['i3 10100 램 8 ssd 120기가', '쓸만합니다 가격제안 사양합니다 10/7 - 10/14 사이엔 구매 불가능'],
+  ['CPUi5 7500 기가바이트 B250M-DS3H 메인보드', 'i5 7500 CPU 기가바이트 B250M-DS3H 메인보드 판매해요 사진에 보이는 구성품 그대로 드려요'],
+  ['i3-10100 RAM 8 SSD 120GB', ''],
+  ['CPUi5-7500 기가바이트 B250M-DS3H 메인보드 윈도우11 호환', 'DDR4 지원, 램 미포함']
+]) {
+  const input = { title, description, price: 100000, currency: 'KRW' };
+  const original = structuredClone(input);
+  for (const classify of [classifyPcPartListing, classifyPcPartListingPublic]) {
+    const result = classify(input);
+    assert.equal(result.listing_kind, 'COMPONENT_BUNDLE', title);
+    assert.equal(result.price_scope, 'BUNDLE', title);
+    assert.equal(result.price_eligible, false, title);
+    assert.equal(result.price.amount, input.price, title);
+    if (classify === classifyPcPartListingPublic) {
+      assert.equal(result.listing_type, 'BUNDLE', title);
+      assert.equal(result.canonical_product_id, null, title);
+      assert.equal(result.statistics_eligible, false, title);
+    }
+  }
+  assert.deepEqual(input, original, 'classification preserves raw title/model and description evidence');
+}
+for (const [title, description, category] of [
+  ['i3 10100에서 사용한 삼성 SSD 120GB 단품', '', 'SSD'],
+  ['기가바이트 B250M-DS3H 메인보드 i5-7500 호환', 'CPU 미포함', 'MOTHERBOARD'],
+  ['기가바이트 B250M-DS3H 메인보드 / i5-7500 호환', '', 'MOTHERBOARD'],
+  ['기가바이트 B250M-DS3H 메인보드 supports CPUi5-7500', '', 'MOTHERBOARD'],
+  ['기가바이트 B250M-DS3H 메인보드 i5-7500 CPU 지원', '', 'MOTHERBOARD'],
+  ['i5-7500 기가바이트 B250M-DS3H 메인보드', 'CPU 미포함', 'MOTHERBOARD'],
+  ['기가바이트 B250M-DS3H 메인보드 i5-7500에서 사용한', '', 'MOTHERBOARD'],
+  ['기가바이트 B250M-DS3H 메인보드 i5-7500에서 업그레이드', '', 'MOTHERBOARD'],
+  ['기가바이트 B250M-DS3H 메인보드 i5-7500와 비교', '', 'MOTHERBOARD'],
+  ['i5-7500 CPU 단품', '', 'CPU'],
+  ['CPUi5 7500 단품', '', 'CPU']
+]) {
+  const input = { title, description, price: 100000, currency: 'KRW' };
+  for (const classify of [classifyPcPartListing, classifyPcPartListingPublic]) {
+    const result = classify(input);
+    assert.equal(result.listing_kind, 'SINGLE_COMPONENT', title);
+    assert.equal(result.category_code, category, title);
+    assert.equal(result.price_eligible, true, title);
+    if (classify === classifyPcPartListingPublic && category !== 'MOTHERBOARD') {
+      assert.equal(result.statistics_eligible, true, title);
+      assert.equal(result.canonical_product_id, category === 'CPU'
+        ? 'cpu:intel:i5-7500' : 'ssd:samsung:capacity-bucket:le-256-gb', title);
+    }
+  }
+}
+
+// daangn:ibibtmj9ry93 sells the heatsink/housing, explicitly without the GPU board.
+const daangnGpuHeatsink = {
+  title: '이엠텍 RTX 2070그래픽카드 방열판 판매합니다',
+  description: 'rtx2000번때에 사용가능한 방열판 하우징 판매합니다 쿨러 단자 하나끊김(기판 없어요!!!) 나사는 일부만 있는거 같습니다 블로워 타입에서 개조하실분 사용하시면 됩니다',
+  price: 50000, currency: 'KRW'
+};
+for (const input of [
+  daangnGpuHeatsink,
+  { ...daangnGpuHeatsink, title: 'RTX 2070 하우징 판매합니다', description: '기판 미포함' },
+  { ...daangnGpuHeatsink, description: '그래픽카드 없습니다. 방열판 하우징 판매합니다.' }
+]) {
+  const original = structuredClone(input);
+  for (const classify of [classifyPcPartListing, classifyPcPartListingPublic]) {
+    const result = classify(input);
+    assert.equal(result.listing_kind, 'ACCESSORY_ONLY', input.title);
+    assert.equal(result.price_eligible, false, input.title);
+    assert.ok(result.exclusion_reasons.includes('ACCESSORY_ONLY'));
+    assert.ok(result.evidence.some(entry => entry.field === 'listing_kind' && /방열판|하우징/u.test(entry.matched_text)));
+    assert.ok(result.evidence.some(entry => entry.field === 'listing_kind' && /기판|그래픽카드/u.test(entry.matched_text)));
+    if (classify === classifyPcPartListingPublic) {
+      assert.equal(result.canonical_product_id, 'gpu:nvidia:rtx-2070-cooler');
+      assert.equal(result.statistics_eligible, false);
+    }
+  }
+  assert.deepEqual(input, original, 'accessory classification preserves raw evidence and price');
+}
+for (const [title, description, kind, comparableGpu] of [
+  ['이엠텍 RTX 2070 그래픽카드 방열판 포함 판매합니다', '기판 정상 작동합니다.', 'SINGLE_COMPONENT', true],
+  ['이엠텍 RTX 2070 그래픽카드 방열판 파손 판매합니다', '기판은 정상 작동합니다.', 'SINGLE_COMPONENT', false],
+  ['이엠텍 RTX 2070 그래픽카드 방열판 교체 판매합니다', '기판 이상 없음, 정상 작동합니다.', 'SINGLE_COMPONENT', true],
+  [daangnGpuHeatsink.title, '기판 고장 없음. 그래픽카드 정상 작동합니다.', 'SINGLE_COMPONENT', true],
+  ['이엠텍 RTX 2070 그래픽카드 판매합니다', daangnGpuHeatsink.description, 'SINGLE_COMPONENT', false],
+  ['기가바이트 B250M-DS3H 메인보드', 'IO 실드 없음. 기판은 정상입니다.', 'SINGLE_COMPONENT', false],
+  ['RTX 2070 호환 B250M-DS3H 메인보드 방열판 판매합니다', '메인보드 정상, 그래픽카드 미포함', 'SINGLE_COMPONENT', false],
+  ['i5-7500 RTX 2070 게이밍 본체 판매합니다', '방열판 교체, IO 실드 없음', 'FULL_SYSTEM', false],
+  ['i5-7500 RTX 2070 PC 방열판 판매합니다', '그래픽카드 미포함, 나머지 본체 판매', 'FULL_SYSTEM', false]
+]) {
+  const input = { title, description, price: 150000, currency: 'KRW' };
+  for (const classify of [classifyPcPartListing, classifyPcPartListingPublic]) {
+    const result = classify(input);
+    assert.equal(result.listing_kind, kind, title);
+    if (comparableGpu && classify === classifyPcPartListingPublic) {
+      assert.equal(result.canonical_product_id, 'gpu:nvidia:rtx-2070', title);
+      assert.equal(result.price_eligible, true, title);
+      assert.equal(result.statistics_eligible, true, title);
+    }
+  }
+}
+
 // Reported cross-product collisions, with nearby valid components retained.
 for (const [title, kind, product] of [
   ['USED BOX 4 Intel Core i7-14700K NO CPU INCLUDED REPEAT BOX ONLY "SOLO CAJA"', 'BOX_ONLY', null],

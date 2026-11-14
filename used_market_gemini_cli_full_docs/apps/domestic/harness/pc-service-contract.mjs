@@ -956,6 +956,29 @@ const items = [
   ramIndex.close();
 }
 
+// A pre-existing snapshot must not restore a Daangn row whose seller's
+// delivery restriction was subsequently corrected in the current projection.
+{
+  const shippingIndex = new SearchIndex({ filePath: ':memory:', now: () => now });
+  try {
+    const request = { ...pcRequest, sites: ['daangn'], limit: 30 };
+    const item = { ...items[0], id: 'daangn:shipping-snapshot', item_id: 'daangn:shipping-snapshot',
+      site: 'daangn', url: 'https://www.daangn.com/kr/buy-sell/rtx-3080-shipping-snapshot/',
+      shipping_evidence: 'BUY_NOW_BADGE', shipping_fee: null, statistics_eligible: false };
+    shippingIndex.registerQuery(request);
+    shippingIndex.ingest(request, [item], { deep: true, complete: true, successfulSites: ['daangn'] });
+    const snapshot = shippingIndex.searchPage(request, { allowStale: true });
+    assert.equal(snapshot.items.length, 1);
+    const row = shippingIndex.db.prepare('SELECT pc_metadata_json FROM listings WHERE item_id=?').get(item.id);
+    const metadata = { ...JSON.parse(row.pc_metadata_json), exclusion_reasons: ['DELIVERY_LOCAL_ONLY'] };
+    shippingIndex.db.prepare('UPDATE listings SET pc_metadata_json=? WHERE item_id=?').run(JSON.stringify(metadata), item.id);
+    const page = shippingIndex.searchPage(request, { allowStale: true, snapshotVersion: snapshot.snapshotVersion });
+    assert.equal(page.total, 0, 'materialized snapshots apply the current Daangn delivery restriction');
+    assert.equal(shippingIndex.db.prepare('SELECT COUNT(*) n FROM query_snapshot_items').get().n, 1,
+      'read visibility does not delete saved evidence');
+  } finally { shippingIndex.close(); }
+}
+
 // Listing age is a read policy: preserve the stored state and restore visibility
 // after a genuine new observation, including an old listing's original post date.
 {
@@ -1839,8 +1862,8 @@ const workerCatalogPayload = await workerCatalog.json();
 assert.equal(workerCatalogPayload.data.categories.some((category) => category.code === "GPU"), true);
 assert.deepEqual(
   workerCatalogPayload.data.sources.map((source) => source.source_id).sort(),
-  [...OPERATIONAL_PC_DIRECTORY_SITES].sort(),
-  "the catalog must expose every operational PC directory source"
+  [...OPERATIONAL_PC_DIRECTORY_SITES, 'daangn'].sort(),
+  "the catalog exposes operational sources and the bounded operator listing trial"
 );
 assert.equal(workerCatalogPayload.data.source_candidates.some((source) => ["bunjang", "hellomarket"]
   .includes(source.source_id)), false,
@@ -2136,8 +2159,8 @@ try {
   ), {}, statsOriginRead);
   assert.equal(firstCachedStats.headers.get("x-pc-read-cache"), "MISS");
   assert.equal(secondCachedStats.headers.get("x-pc-read-cache"), "HIT");
-  assert.ok([...listingCacheEntries.keys()].every(key => key.startsWith('https://used-market-pc-read-cache-v4.invalid/')),
-    'the repaired price cohort must never reuse pre-release v1 edge cache entries');
+  assert.ok([...listingCacheEntries.keys()].every(key => key.startsWith('https://used-market-pc-read-cache-v8.invalid/')),
+    'repaired listing associations and price cohorts must not reuse previous edge cache entries');
   assert.equal(statsReads, 1, "normalized price-stat reads must share a Worker cache entry");
 
   let failedReads = 0;
@@ -3125,7 +3148,7 @@ try {
   const localCatalog = await fetch(`${baseUrl}/api/pc/catalog`);
   assert.equal(localCatalog.status, 200);
   const localCatalogData = (await localCatalog.json()).data;
-  assert.deepEqual(localCatalogData.sources.map((source) => source.source_id).sort(), ["bunjang", "danawa", "ebay", "joonggonara"],
+  assert.deepEqual(localCatalogData.sources.map((source) => source.source_id).sort(), ["bunjang", "daangn", "danawa", "ebay", "joonggonara"],
     "the local PC catalog must expose the current operational sources");
   const localCategories = await fetch(`${baseUrl}/api/categories`);
   assert.equal(localCategories.status, 200);

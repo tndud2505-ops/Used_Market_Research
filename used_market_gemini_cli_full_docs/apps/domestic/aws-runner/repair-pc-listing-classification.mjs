@@ -17,15 +17,34 @@ const fields = {
   listing_kind: 'listingKind', listing_type: 'listingType', spec_group_id: 'specGroupId',
   model_confidence: 'modelConfidence', category_code: 'categoryCode', market_segment: 'marketSegment'
 };
+const facets = { product_kind: 'productKind', placement: 'placement', form_factor: 'formFactor' };
 
-function correction(previous, item, pipeline) {
+function correction(previous, item, pipeline, child) {
   const next = pipeline.normalizeItem(item, item.observed_at, null, { reclassification: true }).normalized;
   const statistics=reconcileExactModelStatistics(previous,next,item.currency);
+  let facetOnly = false;
   if (previous.canonical_product_id === next.canonicalProductId && previous.listing_kind === next.listingKind
     && previous.quantity === next.quantity && previous.price_scope === next.priceScope
     && previous.statistics_eligible===statistics.statistics_eligible
     && previous.exact_product===statistics.exact_product
-    && previous.statistics_exclusion_reasons_json===statistics.statistics_exclusion_reasons_json) return null;
+    && previous.statistics_exclusion_reasons_json===statistics.statistics_exclusion_reasons_json) {
+    const addedCpu = next.listingKind === 'COMPONENT_BUNDLE' && Array.isArray(previous.components)
+      ? next.searchComponents.filter(component => component.search_only === true
+        && component.association_type === 'TITLE_CPU_MODEL_FAMILY'
+        && !previous.components.includes(component.canonical_product_id)) : [];
+    const priorFacets = child ? json(child.spec_json) : previous;
+    facetOnly = Object.entries(facets).some(([column, key]) =>
+      (priorFacets[child ? `listing_${column}` : column] ?? null) !== next[key]);
+    if (!facetOnly && !addedCpu.length) return null;
+    // Search metadata only; unchanged normalized rows and monetary fields do
+    // not need another classification or price repair.
+    if (!facetOnly) return { next, after: { ...previous, evidence_json: JSON.stringify([
+      ...json(previous.evidence_json || '[]'), ...addedCpu.map(component => ({
+        field: 'components', source: 'SCOPED_TITLE_CPU_ASSOCIATION', search_only: true,
+        value: component.canonical_product_id, matched_text: component.matched_text
+      }))
+    ]) } };
+  }
   // A positively identified complete PC may lose its false component identity,
   // never the reverse. Raw observations and sale units remain untouched.
   const fullSystemCorrection = next.listingKind === 'FULL_SYSTEM' && next.categoryCode === 'SYSTEM'
@@ -67,6 +86,7 @@ function correction(previous, item, pipeline) {
     || (!ramSetCorrection && !bundleCorrection && (previous.quantity !== next.quantity || previous.price_scope !== next.priceScope))
     || previous.condition_code !== next.conditionCode || previous.market_pool !== next.marketPool)
     throw new Error('CLASSIFICATION_REPAIR_SEMANTICS_CHANGED');
+  if (facetOnly) return { next, after: { ...previous }, facetOnly };
   const after = { ...previous };
   for (const [column, key] of Object.entries(fields)) after[column] = next[key];
   // Re-label the same observed total as a bundle price. Never split the price
@@ -90,7 +110,7 @@ function correction(previous, item, pipeline) {
 
 export function buildListingClassificationRepair(db, itemIds, { asOf = new Date().toISOString() } = {}) {
   if (!Array.isArray(itemIds) || !itemIds.length || new Set(itemIds).size !== itemIds.length
-    || itemIds.some(id => !/^(bunjang|joonggonara|danawa|ebay):[^\s]+$/u.test(id)))
+    || itemIds.some(id => !/^(bunjang|joonggonara|danawa|ebay|daangn):[^\s]+$/u.test(id)))
     throw new Error('EXPLICIT_UNIQUE_LISTING_IDS_REQUIRED');
   const ledger = new PcPartsLedger({ db });
   const active = ledger.getActivePipelineVersion();
@@ -149,13 +169,11 @@ export function buildListingClassificationRepair(db, itemIds, { asOf = new Date(
     if (repairedSoldStorage && changed) throw new Error('CLASSIFICATION_REPAIR_SEMANTICS_CHANGED');
     if (changed) {
     const updated = { ...metadata };
+    if (!changed.facetOnly) {
     for (const column of [...Object.keys(fields), 'quantity', 'price_scope', 'quantity_confidence', 'price_scope_confidence']) updated[column] = changed.after[column];
     updated.canonical_manufacturer = changed.next.canonicalManufacturer;
     updated.chip_manufacturer = changed.next.spec?.chip_manufacturer || null;
     updated.board_manufacturer = changed.next.spec?.board_manufacturer || null;
-    updated.product_kind = changed.next.productKind;
-    updated.placement = changed.next.placement;
-    updated.form_factor = changed.next.formFactor;
     updated.statistics_eligible = Boolean(changed.after.statistics_eligible);
     updated.price_eligible = Boolean(changed.after.price_eligible);
     updated.statistics_exclusion_reasons = json(changed.after.statistics_exclusion_reasons_json);
@@ -168,9 +186,12 @@ export function buildListingClassificationRepair(db, itemIds, { asOf = new Date(
     const searchComponents = changed.next.searchComponents || [];
     updated.components = ['FULL_SYSTEM', 'COMPONENT_BUNDLE'].includes(changed.next.listingKind)
       ? [...new Set(searchComponents.filter(component => component.search_only === true
-        && component.association_type === 'TITLE_GPU_MODEL_FAMILY')
+        && ['TITLE_GPU_MODEL_FAMILY', 'TITLE_CPU_MODEL_FAMILY'].includes(component.association_type))
         .map(component => component.canonical_product_id).filter(Boolean))] : [];
-    const after = { ...before, pc_metadata_json: JSON.stringify(updated),
+    }
+    for (const [column, key] of Object.entries(facets)) updated[column] = changed.next[key];
+    const after = changed.facetOnly ? { ...before, pc_metadata_json: JSON.stringify(updated) }
+      : { ...before, pc_metadata_json: JSON.stringify(updated),
       pc_canonical_product_id: updated.canonical_product_id,
       pc_category_code: updated.category_code,
       pc_canonical_manufacturer: updated.canonical_manufacturer,
@@ -178,7 +199,7 @@ export function buildListingClassificationRepair(db, itemIds, { asOf = new Date(
       pc_listing_kind: updated.listing_kind, pc_price_eligible: updated.price_eligible ? 1 : 0,
       pc_quantity: updated.quantity, pc_price_scope: updated.price_scope };
     listings.push({ before, after });
-    addScopes(current, changed.after, before.currency);
+    if (!changed.facetOnly) addScopes(current, changed.after, before.currency);
     }
 
     const sourceListingId = itemId.slice(before.site.length + 1);
@@ -201,14 +222,14 @@ export function buildListingClassificationRepair(db, itemIds, { asOf = new Date(
       const item = { ...json(row.raw_json), site: row.source_id, title: row.title, description: row.description,
         price: row.price_value, currency: row.currency, observed_at: row.observed_at,
         status: row.lifecycle_status, seller_type: original.market_pool === 'KR_DEALER_USED' ? 'DEALER' : undefined };
-      const repaired = correction(original, item, pipeline);
+      const children = db.prepare('SELECT * FROM listing_items WHERE normalized_listing_id=? ORDER BY item_index').all(row.id);
+      const repaired = correction(original, item, pipeline, children[0]);
       if (!repaired) continue;
       if (soldStorageTarget && (original.category_code !== 'GPU'
         || original.canonical_product_id !== 'gpu:amd:rx-550'
         || !isTammuzRx550SsdTitle(item.title) || repaired.next.categoryCode !== 'SSD'
         || !repaired.next.canonicalProductId?.startsWith('ssd:')))
         throw new Error('CLASSIFICATION_REPAIR_SEMANTICS_CHANGED');
-      const children = db.prepare('SELECT * FROM listing_items WHERE normalized_listing_id=? ORDER BY item_index').all(row.id);
       if (children.length !== 1 || children[0].canonical_product_id !== original.canonical_product_id)
         throw new Error('REPAIR_COMPONENT_TARGET_MISMATCH');
       const child = children[0];
@@ -217,10 +238,13 @@ export function buildListingClassificationRepair(db, itemIds, { asOf = new Date(
           ...(original.quantity !== repaired.next.quantity ? {
             quantity: repaired.next.quantity, unit_price: repaired.next.unitPrice, total_price: repaired.next.totalPrice
           } : {}),
-          spec_json: JSON.stringify(original.category_code === repaired.next.categoryCode
+          spec_json: JSON.stringify(repaired.facetOnly
+            ? { ...json(child.spec_json), ...Object.fromEntries(Object.entries(facets)
+              .map(([column, key]) => [`listing_${column}`, repaired.next[key]])) }
+            : original.category_code === repaired.next.categoryCode
             ? { ...json(child.spec_json), ...repaired.next.spec } : repaired.next.spec) },
         evidence_hash: digest(row) });
-      addScopes(original, repaired.after, row.currency);
+      if (!repaired.facetOnly) addScopes(original, repaired.after, row.currency);
     }
   }
   const plan = { format: 1, as_of: asOf, cutoff, active, item_ids: itemIds,
@@ -263,7 +287,8 @@ async function main() {
   if (!['plan', 'apply', 'mirror'].includes(mode) || !filename || !process.env.RUNNER_INDEX_PATH)
     throw new Error('Usage: repair-pc-listing-classification.mjs plan|apply|mirror /protected/plan.json [source:item-id ...]');
   const health = await fetch(`http://127.0.0.1:${process.env.RUNNER_PORT || 8787}/health`).then(r => r.json());
-  if (!health.ok || health.active_run || health.pc_parts?.scheduler_enabled
+  if (!health.ok || health.active_run || (health.pc_parts?.scheduler_enabled && !health.maintenance)
+    || health.draining
     || health.pc_parts?.scheduler_active || health.pc_parts?.publication_active)
     throw new Error('REPAIR_REQUIRES_IDLE_RUNNER_AND_PAUSED_SCHEDULER');
   const db = new DatabaseSync(process.env.RUNNER_INDEX_PATH, { readOnly: mode !== 'apply' });

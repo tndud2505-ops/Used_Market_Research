@@ -4,6 +4,7 @@ import { readJsonResponse } from "./read-json.mjs?v=lookup-recovery-v1";
 import { createPriceStore } from "./pc-tools-data.mjs?v=domestic-danawa-v1";
 import { listingPriceWarning } from "./listing-price-warning.mjs?v=iqr-disclosure-v1";
 import { PUBLIC_SALE_COMPOSITIONS, listingCompositionLabel } from './listing-composition.mjs?v=sale-composition-v2';
+import { priceWindowUrl } from './price-window.mjs?v=price-window-v1';
 
 const PRODUCT_QUERY_KEYS = new Set([
   "manufacturer", "model", "gpu_model", "board_brand", "usage", "configuration", "socket", "chipset", "form_interface", "capacity", "purpose", "rated_wattage",
@@ -1233,12 +1234,13 @@ function renderSourceFilters() {
   syncSourceFilterSummary();
   syncMobileControls();
   if (!state.sources.length) return;
-  const priority = ["joonggonara", "bunjang", "danawa", "ebay"];
+  const priority = ["joonggonara", "bunjang", "danawa", "daangn", "ebay"];
   const compactLabels = {
     joonggonara: "중고나라",
     bunjang: "번개장터",
     hellomarket: "헬로마켓",
     danawa: "다나와",
+    daangn: "당근",
   };
   const orderedSources = [...state.sources].sort((left, right) => {
     const leftIndex = priority.indexOf(left.id);
@@ -1808,6 +1810,7 @@ function listingScopeLabel(listing) {
 }
 
 function listingMarketLabel(listing) {
+  if (normalizeText(firstDefined(listing?.source_id, listing?.site, listing?.source)) === 'daangn') return '';
   const marketPool = normalizeText(listing?.market_pool).toUpperCase();
   return ({
     KR_C2C_USED: "개인 중고",
@@ -1815,6 +1818,12 @@ function listingMarketLabel(listing) {
     KR_REFURB_RETAIL: "리퍼비시",
     OVERSEAS_USED: "해외 중고",
   })[marketPool] || "";
+}
+
+function listingShippingLabel(listing) {
+  const sourceId = normalizeText(firstDefined(listing?.source_id, listing?.site, listing?.source));
+  if (sourceId !== "daangn") return "";
+  return listing?.shipping_evidence === "BUY_NOW_BADGE" ? "당근 바로거래" : "";
 }
 
 function listingFavoriteStorageKey(listing) {
@@ -1881,7 +1890,7 @@ function renderListings() {
       media.href = url;
       media.target = "_blank";
       media.rel = "noopener noreferrer";
-      media.setAttribute("aria-label", `${titleText} 매물 보기`);
+      media.setAttribute("aria-label", `${titleText} 매물 원문 새 탭에서 보기`);
     }
     if (imageUrl) {
       const image = document.createElement("img");
@@ -1901,16 +1910,21 @@ function renderListings() {
     }
     const body = createElement("div", "listing-body");
     const sourceId = normalizeText(firstDefined(listing.source_id, listing.site, listing.source));
-    const source = createElement("span", "listing-source", sourceLabel(sourceId));
+    const shippingLabel = listingShippingLabel(listing);
+    const sourceText = [sourceId === 'daangn' ? shippingLabel || sourceLabel(sourceId) : sourceLabel(sourceId), sourceId === 'daangn' ? normalizeText(listing.location) : ''].filter(Boolean).join(' · ');
+    const source = createElement("span", "listing-source", sourceText);
     source.dataset.source = sourceId;
+    if (sourceId === 'daangn') source.title = '배송 가능 여부와 배송비는 매물 원문에서 확인해 주세요.';
     const postedAtRaw = firstDefined(listing.posted_at, listing.created_at);
-    const observedAtRaw = firstDefined(listing.observed_at, listing.updated_at);
+    const observedAtRaw = firstDefined(listing.observed_at, listing.updated_at,
+      sourceId === 'daangn' ? listing.indexed_last_checked_at : null);
     const listingTime = formatListingTime(firstDefined(postedAtRaw, observedAtRaw));
     const title = createElement(url ? "a" : "span", "listing-title", titleText);
     if (url) {
       title.href = url;
       title.target = "_blank";
       title.rel = "noopener noreferrer";
+      title.setAttribute('aria-label', `${titleText} · 매물 원문 새 탭에서 보기`);
     }
     body.append(title);
     const composite = ['FULL_SYSTEM', 'COMPONENT_BUNDLE'].includes(listing.listing_kind);
@@ -1972,7 +1986,7 @@ function renderListings() {
     if (!composite && quantity > 1) meta.append(createElement("span", "listing-scope", listingScopeLabel(listing)));
     if (meta.childElementCount) body.append(meta);
     const mobileMeta = createElement("div", "mobile-listing-meta");
-    const mobileSource = createElement("span", "mobile-listing-source", sourceLabel(sourceId));
+    const mobileSource = createElement("span", "mobile-listing-source", sourceText);
     mobileSource.dataset.source = sourceId;
     mobileMeta.append(mobileSource);
     if (listingTime) {
@@ -2005,6 +2019,13 @@ function renderListings() {
       const machineTime = normalizeText(firstDefined(postedAtRaw, observedAtRaw));
       if (machineTime) time.dateTime = machineTime;
       commerce.append(time);
+    }
+    if (!composite && canonicalProductId && exactMotherboardModel) {
+      const chartLink = createElement('a', 'listing-price-window', '시세 보기');
+      chartLink.href = priceWindowUrl(canonicalProductId, { source: sourceId === 'ebay' ? 'ebay' : '' });
+      chartLink.target = '_blank'; chartLink.rel = 'noopener noreferrer'; chartLink.dataset.priceWindow = '';
+      chartLink.setAttribute('aria-label', `${canonicalModel || titleText} 시세 별도 창에서 보기`);
+      commerce.append(chartLink);
     }
     const favorite = createElement("button", "listing-favorite");
     favorite.type = "button";

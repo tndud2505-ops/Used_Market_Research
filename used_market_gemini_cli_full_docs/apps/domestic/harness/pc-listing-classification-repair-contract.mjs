@@ -6,6 +6,140 @@ import { buildListingClassificationRepair, applyListingClassificationRepair } fr
 import { reconcileExactModelStatistics } from '../aws-runner/pc-classification-consistency.mjs';
 
 const index = new SearchIndex({ filePath: ':memory:' });
+// The operator trial uses the same exact-ID repair without adding price samples.
+{
+  const candidateIndex = new SearchIndex({ filePath: ':memory:' });
+  try {
+    const db = candidateIndex.db, ledger = new PcPartsLedger({ db }); ledger.migrate();
+    const pipeline = new PcShadowPipeline({ ledger }); await pipeline.initialize();
+    const observedAt = '2026-11-10T00:00:00.000Z';
+    const examples = [
+      ['okj83xtyxxjh', 'i3 10100 램 8 ssd 120기가', '', 'SSD', 'ssd:other-unclassified:capacity-bucket:le-256-gb'],
+      ['boux7i58vwhk', 'CPUi5 7500 기가바이트 B250M-DS3H 메인보드', 'i5 7500 CPU 기가바이트 B250M-DS3H 메인보드 판매해요 사진에 보이는 구성품 그대로 드려요', 'MOTHERBOARD', 'motherboard:chipset:b250:gigabyte'],
+      ['localonly', 'RTX 3060 12GB 그래픽카드', '택배불가라 직거래만 가능합니다.', 'GPU', 'gpu:nvidia:rtx-3060'],
+      ['ibibtmj9ry93', '이엠텍 RTX 2070그래픽카드 방열판 판매합니다', 'rtx2000번때에 사용가능한 방열판 하우징 판매합니다 쿨러 단자 하나끊김(기판 없어요!!!) 나사는 일부만 있는거 같습니다 블로워 타입에서 개조하실분 사용하시면 됩니다', 'GPU', 'gpu:nvidia:rtx-2070']
+    ];
+    for (const [id, title, description, category, product] of examples) {
+      const projected = pipeline.recordItem({ site: 'daangn', item_id: `daangn:${id}`, source_listing_id: id,
+        url: `https://www.daangn.com/kr/buy-sell/test-${id}/`, title, description, price: 100000,
+        currency: 'KRW', lifecycle_status: 'ACTIVE', shipping_fee: null }, observedAt, { reclassification: true });
+      candidateIndex.upsertPublicProjections([projected], { observedAt });
+      const n = db.prepare('SELECT id FROM normalized_listings ORDER BY id DESC LIMIT 1').get();
+      db.prepare("UPDATE normalized_listings SET category_code=?,canonical_product_id=?,listing_kind='SINGLE_COMPONENT',listing_type='SINGLE',price_scope='TOTAL',price_eligible=1,statistics_eligible=0,exact_product=1,exclusion_reasons_json='[]',statistics_exclusion_reasons_json='[\"SHIPPING_COST_UNVERIFIED\"]' WHERE id=?").run(category, product, n.id);
+      db.prepare('DELETE FROM listing_items WHERE normalized_listing_id=? AND item_index<>0').run(n.id);
+      db.prepare('UPDATE listing_items SET canonical_product_id=? WHERE normalized_listing_id=?').run(product, n.id);
+      const pc = { ...projected, category_code: category, canonical_product_id: product,
+        listing_kind: 'SINGLE_COMPONENT', listing_type: 'SINGLE', price_scope: 'TOTAL', price_eligible: true,
+        statistics_eligible: false, exclusion_reasons: [], statistics_exclusion_reasons: ['SHIPPING_COST_UNVERIFIED'] };
+      db.prepare("UPDATE listings SET pc_category_code=?,pc_canonical_product_id=?,pc_listing_kind='SINGLE_COMPONENT',pc_price_scope='TOTAL',pc_price_eligible=1,pc_metadata_json=? WHERE item_id=?").run(category, product, JSON.stringify(pc), projected.item_id);
+    }
+    const before = JSON.stringify(db.prepare('SELECT * FROM raw_listings').all());
+    const plan = buildListingClassificationRepair(db, examples.map(([id]) => `daangn:${id}`), { asOf: observedAt });
+    assert.equal(plan.listings.length, 4);
+    applyListingClassificationRepair(db, plan);
+    assert.equal(JSON.stringify(db.prepare('SELECT * FROM raw_listings').all()), before);
+    for (const entry of plan.listings) {
+      const localOnly = entry.after.item_id === 'daangn:localonly';
+      const accessory = entry.after.item_id === 'daangn:ibibtmj9ry93';
+      assert.equal(entry.after.pc_listing_kind, localOnly ? 'SINGLE_COMPONENT' : accessory ? 'ACCESSORY_ONLY' : 'COMPONENT_BUNDLE');
+      assert.equal(entry.after.pc_canonical_product_id, localOnly ? 'gpu:nvidia:rtx-3060' : null);
+      assert.equal(entry.after.pc_price_scope, localOnly || accessory ? 'TOTAL' : 'BUNDLE');
+      assert.equal(entry.after.pc_price_eligible, 0);
+      assert.equal(entry.after.price_value, entry.before.price_value);
+      assert.equal(entry.after.last_checked_at, entry.before.last_checked_at);
+      assert.equal(JSON.parse(entry.after.pc_metadata_json).statistics_eligible, false);
+    }
+    for (const [id, model] of [['okj83xtyxxjh', 'cpu:intel:i3-10100'], ['boux7i58vwhk', 'cpu:intel:i5-7500']]) {
+      const item = candidateIndex.browsePcListings({ categoryCode: 'CPU', sites: ['daangn'],
+        saleComposition: 'BUNDLE', asOf: observedAt }).items.find(item => item.id === `daangn:${id}`);
+      assert.ok(item, 'corrected bundle is accessible from its CPU category');
+      const row = db.prepare('SELECT pc_metadata_json FROM listings WHERE item_id=?').get(`daangn:${id}`);
+      const metadata = JSON.parse(row.pc_metadata_json);
+      assert.ok(metadata.components.includes(model));
+      // Reproduce bundles repaired before title associations were supported.
+      metadata.components = [];
+      db.prepare('UPDATE listings SET pc_metadata_json=? WHERE item_id=?').run(JSON.stringify(metadata), `daangn:${id}`);
+    }
+    const associations = buildListingClassificationRepair(db, examples.slice(0, 2).map(([id]) => `daangn:${id}`), { asOf: observedAt });
+    assert.equal(associations.listings.length, 2);
+    assert.equal(associations.normalizations.length, 0, 'search associations do not rewrite normalized observations');
+    assert.equal(associations.scopes.length, 0, 'search associations do not recalculate prices');
+    applyListingClassificationRepair(db, associations);
+    assert.equal(JSON.stringify(db.prepare('SELECT * FROM raw_listings').all()), before);
+    for (const [title, description] of [
+      ['메인보드와 램 세트', 'i5-7500에서 사용했습니다'],
+      ['i5-7500 미포함 메인보드 + DDR4 램 세트', ''],
+      ['i5-7500U + 메인보드 세트', ''],
+      ['i5-7500 본체', '']
+    ]) {
+      const result = pipeline.normalizeItem({ site: 'daangn', title, description, price: 100000, currency: 'KRW' }, observedAt).normalized;
+      assert.ok(!result.searchComponents.some(component => component.association_type === 'TITLE_CPU_MODEL_FAMILY'), title);
+    }
+  } finally { candidateIndex.close(); }
+}
+// A protocol-only PM9A3 facet repair must not become a price/statistics repair.
+{
+  const facetIndex = new SearchIndex({ filePath: ':memory:' });
+  try {
+    const db = facetIndex.db, ledger = new PcPartsLedger({ db }); ledger.migrate();
+    const pipeline = new PcShadowPipeline({ ledger }); await pipeline.initialize();
+    const itemId = 'joonggonara:231104713', observedAt = '2026-11-14T00:00:00.000Z';
+    const projected = pipeline.recordItem({ site: 'joonggonara', item_id: itemId, source_listing_id: '231104713',
+      title: 'Samsung PM9A3 7.68TB (Enterprise NVMe SSD)', price: 650000, currency: 'KRW',
+      lifecycle_status: 'ACTIVE', url: 'https://web.joongna.com/product/231104713' }, observedAt);
+    facetIndex.upsertPublicProjections([projected], { observedAt });
+    const listing = db.prepare('SELECT * FROM listings WHERE item_id=?').get(itemId);
+    const normalized = db.prepare('SELECT * FROM normalized_listings').get();
+    const child = db.prepare('SELECT * FROM listing_items').get();
+    const reasons = [...JSON.parse(normalized.statistics_exclusion_reasons_json), 'ANOMALOUS_PRICE'];
+    const metadata = { ...JSON.parse(listing.pc_metadata_json), product_kind: 'M2_NVME',
+      placement: 'UNKNOWN', form_factor: 'M.2', price_eligible: false,
+      exclusion_reasons: ['MANUAL_REVIEW'], statistics_exclusion_reasons: reasons,
+      reference_price: 620000 };
+    const staleSpec = { ...JSON.parse(child.spec_json), listing_product_kind: 'M2_NVME',
+      listing_placement: 'UNKNOWN', listing_form_factor: 'M.2' };
+    db.prepare('UPDATE listings SET pc_metadata_json=?,pc_price_eligible=0 WHERE item_id=?')
+      .run(JSON.stringify(metadata), itemId);
+    db.prepare("UPDATE normalized_listings SET price_eligible=0,exclusion_reasons_json='[\"MANUAL_REVIEW\"]',statistics_exclusion_reasons_json=? WHERE id=?")
+      .run(JSON.stringify(reasons), normalized.id);
+    db.prepare('UPDATE listing_items SET spec_json=? WHERE id=?').run(JSON.stringify(staleSpec), child.id);
+    const dump = table => JSON.stringify(db.prepare(`SELECT * FROM ${table}`).all());
+    const sealed = Object.fromEntries(['raw_listings', 'listing_snapshots', 'listing_fts', 'normalized_listings',
+      'daily_price_stats', 'daily_source_price_stats', 'daily_price_stat_windows',
+      'pc_stored_price_publications', 'pc_stored_price_publication_rows'].map(table => [table, dump(table)]));
+    const beforeListing = { ...db.prepare('SELECT * FROM listings WHERE item_id=?').get(itemId) };
+    const beforeChild = { ...db.prepare('SELECT * FROM listing_items WHERE id=?').get(child.id) };
+    const expectedMetadata = { ...metadata, product_kind: 'OTHER_UNKNOWN', placement: 'INTERNAL', form_factor: null };
+    const expectedSpec = { ...staleSpec, listing_product_kind: 'OTHER_UNKNOWN',
+      listing_placement: 'INTERNAL', listing_form_factor: null };
+    const plan = buildListingClassificationRepair(db, [itemId], { asOf: observedAt });
+    assert.equal(plan.listings.length, 1); assert.equal(plan.normalizations.length, 1);
+    assert.deepEqual(plan.scopes, [], 'facet-only repairs never request statistics recalculation');
+    assert.deepEqual(JSON.parse(plan.listings[0].after.pc_metadata_json), expectedMetadata);
+    assert.deepEqual(JSON.parse(plan.normalizations[0].afterChild.spec_json), expectedSpec);
+    assert.deepEqual(plan.normalizations[0].after, { ...plan.normalizations[0].before });
+    applyListingClassificationRepair(db, plan);
+    assert.deepEqual({ ...db.prepare('SELECT * FROM listings WHERE item_id=?').get(itemId) },
+      { ...beforeListing, pc_metadata_json: JSON.stringify(expectedMetadata) }, 'only projection facets change');
+    assert.deepEqual({ ...db.prepare('SELECT * FROM listing_items WHERE id=?').get(child.id) },
+      { ...beforeChild, spec_json: JSON.stringify(expectedSpec) }, 'child money, currency and unrelated spec remain intact');
+    for (const [table, before] of Object.entries(sealed)) assert.equal(dump(table), before,
+      `${table} retains evidence, observation dates, eligibility and statistics`);
+    let again = buildListingClassificationRepair(db, [itemId], { asOf: observedAt });
+    assert.equal(again.listings.length, 0); assert.equal(again.normalizations.length, 0); assert.deepEqual(again.scopes, []);
+    // A current projection must not hide a stale scoped child on a resumed repair.
+    db.prepare('UPDATE listing_items SET spec_json=? WHERE id=?').run(JSON.stringify(staleSpec), child.id);
+    const childOnly = buildListingClassificationRepair(db, [itemId], { asOf: observedAt });
+    assert.equal(childOnly.listings.length, 0); assert.equal(childOnly.normalizations.length, 1);
+    assert.deepEqual(childOnly.scopes, []);
+    applyListingClassificationRepair(db, childOnly);
+    assert.deepEqual(JSON.parse(db.prepare('SELECT spec_json FROM listing_items WHERE id=?').get(child.id).spec_json), expectedSpec);
+    again = buildListingClassificationRepair(db, [itemId], { asOf: observedAt });
+    assert.equal(again.listings.length, 0); assert.equal(again.normalizations.length, 0); assert.deepEqual(again.scopes, []);
+    for (const [table, before] of Object.entries(sealed)) assert.equal(dump(table), before);
+    console.log('PM9A3 facet-only scoped repair passed; projection/child agree, repeat is a no-op, raw/money/statistics preserved');
+  } finally { facetIndex.close(); }
+}
 const hpSourceId = 'search_7b233f42d4f77df6e5f56430';
 // Scoped recovery of reported accessories, systems, a bundle and an explicit
 // manufacturer conflict. The source observations and monetary units are sealed.

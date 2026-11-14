@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="description" content="중고 PC와 컴퓨터 부품을 모델별로 검색하세요. 중고 그래픽카드, CPU, RAM, SSD, 메인보드, 파워서플라이 매물과 일별 중고 시세를 비교합니다." />
     <meta name="robots" content="index, follow, max-image-preview:large" />
+    <meta name="naver-site-verification" content="88f039d42a3fb596adf57c9a053615556c5331b7" />
     <meta name="google-site-verification" content="3DaGcd7QWP0wz8ZE1kklG8d728HZDpGBb_g4pU-gh7M" />    <link rel="canonical" href="https://used-pick.com/" />
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="USED PICK" />
@@ -34,9 +35,16 @@
     <link rel="stylesheet" href="/ui-concept-a.css?v=adfit-all-v3" />
     <link rel="stylesheet" href="/search-controls.css?v=model-label-v1" />
     <link rel="stylesheet" href="/adfit-layout.css?v=adfit-all-v3">
+    <link rel="stylesheet" href="/promotions/train-gallery/banner.css?v=motion-v1">
     <link rel="stylesheet" href="/site-header-links.css?v=1">
     <link rel="stylesheet" href="/mobile-search.css?v=tab-picker-v1">
-</head>
+    <link rel="stylesheet" href="/listing-workspace.css?v=price-window-v1">
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#ffffff" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-180.png" />
+    <link rel="stylesheet" href="/pwa.css?v=1" />
+    <script type="module" src="/pwa.js?v=1"></script>
+  </head>
   <body class="ui-a" data-ui-release="search-modal-v4" data-mobile-release="compact-search-v1">
     <a class="skip-link" href="#main">본문으로 건너뛰기</a>
 
@@ -50,7 +58,6 @@
       </button>
       <nav class="main-navigation" aria-label="주 메뉴">
         <a href="/" aria-current="page">검색</a>
-        <a href="/price-analysis.html">가격 분석</a>
         <a href="/computer-builder.html">컴퓨터 시세</a>
       </nav>
       <div class="catalog-meta" id="catalog-meta" aria-live="polite" hidden>제품 목록을 불러오는 중</div>
@@ -95,7 +102,7 @@
                 <a href="/categories/cpu">CPU <span class="category-count">189개</span></a>
                 <a href="/categories/gpu">그래픽카드 <span class="category-count">94개</span></a>
                 <a href="/categories/ram">RAM <span class="category-count">216개</span></a>
-                <a href="/categories/motherboard">메인보드 <span class="category-count">56개</span></a>
+                <a href="/categories/motherboard">메인보드 <span class="category-count">57개</span></a>
                 <a href="/categories/ssd">SSD <span class="category-count">161개</span></a>
                 <a href="/categories/hdd">HDD <span class="category-count">70개</span></a>
                 <a href="/categories/psu">파워서플라이 <span class="category-count">133개</span></a>
@@ -191,8 +198,18 @@
     <aside class="adfit-banner" id="adfit-rail" data-placement="rail" aria-label="카카오 AdFit 광고" hidden>
       <template data-format="desktop"><ins class="kakao_ad_area" style="display:none;" data-ad-unit="DAN-gG0WEoycq7Nup5kT" data-ad-width="160" data-ad-height="600"></ins></template>
     </aside>
-    <aside class="adfit-banner" id="adfit-banner" data-placement="bottom" aria-label="카카오 AdFit 광고" hidden>
-      <template data-format="mobile"><ins class="kakao_ad_area" style="display:none;" data-ad-unit="DAN-gvTVDnxVn9S3leR5" data-ad-width="320" data-ad-height="100"></ins></template>
+    <aside class="adfit-banner train-gallery-promotion" id="adfit-banner" data-placement="bottom" data-provider="house" aria-label="Train Gallery 자사 앱 광고" hidden>
+      <a class="train-gallery-promotion__link" href="https://play.google.com/store/apps/details?id=com.trainingapp.traingallery" target="_blank" rel="sponsored noopener noreferrer" aria-label="Train Gallery — 운동 달력과 브이로그 편집. Google Play에서 보기 (새 창)">
+        <img class="train-gallery-mobile-art" src="/promotions/train-gallery/slim.webp" width="2172" height="724" alt="트레인갤러리 — 운동 달력·브이로그 편집" loading="lazy" decoding="async" />
+        <div class="train-gallery-desktop-art" aria-hidden="true">
+          <video class="train-gallery-moa" muted playsinline preload="none" poster="/promotions/train-gallery/moa-poster.png" data-motion-src="/promotions/train-gallery/moa-lift.mp4" tabindex="-1"></video>
+          <div class="train-gallery-copy"><strong>트레인갤러리</strong><span>운동을 기록하고 영상으로 남겨요.</span></div>
+          <figure class="train-gallery-calendar"><figcaption>운동 달력</figcaption><div class="train-gallery-calendar-window"><img src="/promotions/train-gallery/calendar.webp" alt="" width="1080" height="2400" loading="lazy" decoding="async" /></div></figure>
+          <figure class="train-gallery-editor"><figcaption>브이로그 편집</figcaption><div class="train-gallery-editor-window"><video muted playsinline preload="none" poster="/promotions/train-gallery/exercise-poster.jpg" data-src="/promotions/train-gallery/exercise.mp4" tabindex="-1"></video><div class="train-gallery-timeline-window"><img src="/promotions/train-gallery/vlog.webp" alt="" width="1080" height="2400" loading="lazy" decoding="async" /></div></div></figure>
+        </div>
+        <span class="train-gallery-promotion__caption"><span>자사 앱 광고</span><span>Google Play에서 보기 ↗</span></span>
+      </a>
+      <button class="train-gallery-motion-toggle" type="button" data-motion-toggle aria-label="배너 동작 재생" hidden>▶</button>
     </aside>
   </div>
 
@@ -208,7 +225,6 @@
       <div class="mobile-sheet-heading"><h2 id="mobile-menu-title" tabindex="-1">메뉴</h2><button id="mobile-menu-close" class="mobile-sheet-close" type="button" aria-label="메뉴 닫기"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg></button></div>
       <nav class="mobile-menu-pages" aria-label="모바일 주 메뉴">
         <a href="/" aria-current="page"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" /><path d="m15.5 15.5 5 5" /></svg><span>매물 찾기</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg></a>
-        <a href="/price-analysis.html"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4v16h16M8 15l4-5 4 2 4-7" /></svg><span>가격 분석</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg></a>
         <a href="/computer-builder.html"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="13" rx="1.5" /><path d="M8 21h8m-4-4v4" /></svg><span>컴퓨터 시세</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg></a>
       </nav>
       <nav class="mobile-menu-policy" aria-label="이용 및 정책"><a href="/changelog.html">패치 내역</a><a href="/support.html">후원</a><a href="/contact.html">문의</a><a href="/guide.html">이용 안내</a><a href="/privacy.html">개인정보처리방침</a><a href="/terms.html">이용약관</a></nav>
@@ -230,6 +246,6 @@
       </nav>
     </footer>
 
-    <script type="module" src="/app.js?v=hdd-size-v1"></script>
+    <script type="module" src="/app.js?v=approved-workspace-v1"></script>
   </body>
 </html>

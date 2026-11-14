@@ -18,7 +18,7 @@ test('public pages retain accessible document structure and common navigation', 
     assert.doesNotMatch(html, /ui-refinement\.css/);
     assert.match(html, /class="skip-link" href="#main"/);
     assert.equal([...html.matchAll(/<h1\b/g)].length, 1);
-    for (const href of ['/', '/computer-builder.html', '/price-analysis.html', '/guide.html', '/changelog.html', '/support.html']) assert.ok(html.includes(`href="${href}"`));
+    for (const href of ['/', '/computer-builder.html', '/guide.html', '/changelog.html', '/support.html']) assert.ok(html.includes(`href="${href}"`));
     for (const [, refs] of html.matchAll(/\baria-(?:controls|labelledby)="([^"]+)"/g)) {
       for (const id of refs.split(/\s+/)) assert.ok(ids.includes(id), `${name}: missing ${id}`);
     }
@@ -82,7 +82,7 @@ test('builder toolbar keeps actions while advertising follows the content', () =
   assert.ok(toolbar);
   assert.equal([...html.matchAll(/id="adfit-banner"/g)].length, 1);
   for (const name of ['save-build', 'print-build']) assert.ok(toolbar.includes(`data-action="${name}"`));
-  assert.match(html, /data-placement="bottom" aria-label="카카오 AdFit 광고" hidden/);
+  assert.match(html, /data-placement="bottom" data-provider="house" aria-label="Train Gallery 자사 앱 광고" hidden/);
   assert.doesNotMatch(script, /cell\.append\(summary\)|const summary = \$\('#build-summary'\)/);
   assert.doesNotMatch(toolbar, /id="(?:build-summary|tools-summary)"/);
   assert.match(script, /const footer = el\('tfoot'\); footer.id = 'tools-summary'/);
@@ -122,6 +122,7 @@ class Node {
     this.className = ''; this.classList = {
       add: (...values) => { this.className = [...new Set([...this.className.split(/\s+/).filter(Boolean), ...values])].join(' '); },
       toggle: (value, on) => { if (on) this.classList.add(value); else this.className = this.className.split(/\s+/).filter(v => v !== value).join(' '); },
+      contains: value => this.className.split(/\s+/).includes(value),
     };
   }
   set textContent(value) { this.ownText = String(value); this.children = []; }
@@ -163,7 +164,7 @@ function setup({ builder = false, source = '', manufacturer = '', storageFails =
     STORAGE_KEY: 'used-pick:pc-build:v1', SOURCE_LABELS: { bunjang: '번개장터', joonggonara: '중고나라', ebay: 'eBay' },
     PAGE_SIZE: 12, pickerReturnCategory: '', modelPickerView: { dimension: 'models' }, matchMedia: () => ({ matches: mobile }),
     $: selector => nodes.get(selector) || [...nodes.values()].flatMap(node => node.querySelectorAll('*')).find(node => `#${node.id}` === selector) || null,
-    document: { createElement: tag => new Node(tag), createTextNode: text => Object.assign(new Node(), { textContent: text }) },
+    document: { body: new Node('body'), createElement: tag => new Node(tag), createTextNode: text => Object.assign(new Node(), { textContent: text }) },
     localStorage: { setItem(key, value) { if (storageFails) throw new Error('quota'); stored.set(key, value); } },
     location: { href: 'https://example.test/computer-builder.html' }, history: { replaceState: (...args) => historyCalls.push(args) },
     prices: { get: () => selectedRecord, getAvailable:()=>selectedRecord }, overseasPrices: { get: () => selectedRecord, getAvailable:()=>selectedRecord },
@@ -410,7 +411,7 @@ test('footer totals align price columns and retain quantity-adjusted prices with
   t.context.renderSummary();
   const summary = t.nodes.get('#tools-summary');
   assert.equal(summary.children[0].tagName, 'tr');
-  assert.equal(summary.children[0].children.length, 7);
+  assert.equal(summary.children[0].children.length, 6);
   assert.equal(summary.children[0].children[0].textContent, '합계');
   // Sold prices come from Joonggonara only (89.5 × 2), never the all-site aggregate.
   assert.match(summary.textContent, /합계판매중 합계201원판매완료 합계179원/);
@@ -427,4 +428,27 @@ test('unavailable prices never become a zero-won completed header quote', () => 
   assert.doesNotMatch(text, /가격 확인/);
   assert.match(text, /가격 다시 조회/);
   assert.doesNotMatch(text, /0원|201원|179원/);
+});
+
+test('builder source selection never falls back to another site or mixes sold prices', () => {
+  const t = setup({ builder: true }), entry = t.state.entries[0];
+  t.state.buildSource = 'bunjang';
+  assert.equal(t.context.buildEntryData(entry).active.mean, 101.5);
+  assert.equal(t.context.buildEntryData(entry).sold, null);
+  t.state.buildSource = 'joonggonara';
+  assert.equal(t.context.buildEntryData(entry).sold.mean, 89.5);
+  t.state.buildSource = 'danawa';
+  assert.equal(t.context.buildEntryData(entry), null);
+  t.state.buildSource = '';
+  assert.equal(t.context.buildEntryData(entry).active.mean, 100.5);
+});
+
+test('Danawa displayed ranges remain available without becoming an average total', () => {
+  const t = setup({ builder: true }), entry = t.state.entries[0];
+  t.record.data.by_source.push({ source_id: 'danawa', active: { sample_count: 1, min: 75000, max: 75000 } });
+  t.state.buildSource = 'danawa';
+  assert.equal(core.listedPriceRange(t.context.buildEntryData(entry).active).minimum, 75000);
+  t.context.renderSummary();
+  assert.match(t.nodes.get('#tools-summary').textContent, /참고 표시가/);
+  assert.doesNotMatch(t.nodes.get('#tools-summary').textContent, /75,000|150,000|201원|179원/);
 });

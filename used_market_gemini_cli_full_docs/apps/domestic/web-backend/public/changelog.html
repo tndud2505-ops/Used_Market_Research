@@ -11,20 +11,129 @@
     <link rel="stylesheet" href="/ui-concept-a.css?v=search-first-v2" />
     <link rel="stylesheet" href="/site-header-links.css?v=1" />
     <link rel="stylesheet" href="/changelog.css?v=1" />
+    <link rel="stylesheet" href="/character.css?v=2" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#ffffff" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-180.png" />
+    <link rel="stylesheet" href="/pwa.css?v=1" />
+    <script type="module" src="/pwa.js?v=1"></script>
   </head>
   <body class="ui-a info-screen" data-ui-release="search-first-v2">
     <a class="skip-link" href="#main">본문으로 건너뛰기</a>
     <div class="market-app">
       <header class="site-header simple-site-header">
         <a class="brand" href="/" aria-label="USED PICK 홈"><img src="/assets/mark.svg" alt="" /><span class="brand-used">USED</span><span class="brand-pick">PICK</span></a>
-        <nav aria-label="주 메뉴"><a href="/">검색</a><a href="/price-analysis.html">가격 분석</a><a href="/computer-builder.html">컴퓨터 시세</a></nav>
+        <nav aria-label="주 메뉴"><a href="/">검색</a><a href="/computer-builder.html">컴퓨터 시세</a></nav>
         <nav class="up-header-links" aria-label="이용 및 정책"><a href="/changelog.html" aria-current="page">패치 내역</a><a href="/support.html">후원</a><a href="/contact.html">문의</a><a href="/guide.html">이용 안내</a><a href="/privacy.html">개인정보처리방침</a><a href="/terms.html">이용약관</a></nav>
       </header>
       <main id="main" class="content-page info-page changelog-page">
-        <header class="content-page-header">
-          <h1>패치 내역</h1>
-          <p class="changelog-intro">항목을 누르면 화면과 설명을 볼 수 있습니다.</p>
+        <header class="content-page-header has-mascot">
+          <div class="page-mascot-copy">
+            <h1>패치 내역</h1>
+            <p class="changelog-intro">항목을 누르면 화면과 설명을 볼 수 있습니다.</p>
+          </div>
+          <img class="page-mascot" src="/assets/characters/picky-changelog.webp" alt="" width="300" height="364" decoding="async" />
         </header>
+
+        <section aria-labelledby="release-2026-11-14">
+          <h2 id="release-2026-11-14"><time datetime="2026-11-14">2026.11.14</time></h2>
+          <details class="changelog-entry">
+            <summary>매물에서 여는 시세 창</summary>
+            <figure>
+              <a href="/changelog/2026-11-14-chart-heading.png" target="_blank" rel="noopener noreferrer" aria-label="별도 시세 창 크게 보기"><img src="/changelog/2026-11-14-chart-heading.png" alt="Intel Core i5-6500 제목 옆에 판매 상태를 한 줄로 배치하고 날짜를 직접 지정하는 실제 운영 시세 창" loading="lazy" decoding="async" width="1180" height="820" /></a>
+              <figcaption>매물의 ‘시세 보기’를 누르면 별도 창이 열립니다. 제목 옆에서 판매중·판매완료를 바꾸고 날짜를 직접 지정할 수 있습니다. 휴대폰과 앱에서도 한 줄로 표시됩니다.</figcaption>
+            </figure>
+          </details>
+          <details class="changelog-entry">
+            <summary>컴퓨터 시세의 가격 기준 선택</summary>
+            <figure>
+              <a href="/changelog/2026-11-14-builder-source.png" target="_blank" rel="noopener noreferrer" aria-label="컴퓨터 시세 가격 기준 선택 크게 보기"><img src="/changelog/2026-11-14-builder-source.png" alt="국내 통합 평균을 기본으로 출처를 고르고 정렬된 가격과 모델명 아래 CPU 지원 확인을 보는 실제 운영 브라우저 화면" loading="lazy" decoding="async" width="1440" height="1000" /></a>
+              <figcaption>국내 통합 평균을 기본으로 중고나라·번개장터·다나와를 선택할 수 있습니다. 다나와는 중고 표시가로 구분하며 합계에 넣지 않습니다. 표의 경계와 열 정렬을 다듬고 CPU 지원 확인을 모델명 아래에 배치했습니다.</figcaption>
+            </figure>
+          </details>
+          <details class="changelog-entry">
+            <summary>간결해진 매물 목록</summary>
+            <figure>
+              <a href="/changelog/2026-11-14-listing-cleanup.png" target="_blank" rel="noopener noreferrer" aria-label="당근 매물 목록 크게 보기"><img src="/changelog/2026-11-14-listing-cleanup.png" alt="당근 바로거래로 짧게 표시된 매물마다 별도 시세 보기 버튼이 있는 실제 운영 브라우저 화면" loading="lazy" decoding="async" width="1440" height="1000" /></a>
+              <figcaption>당근 매물은 ‘당근 바로거래’로 간결하게 표시하고 사진·제목·가격을 정렬했습니다. 매물 원문은 새 탭으로 열리며, 시세는 별도 창에서 확인할 수 있습니다.</figcaption>
+            </figure>
+          </details>
+          <details class="changelog-entry">
+            <summary>미리보기 · SSD 연결 방식과 M.2 규격 구분</summary>
+            <figure>
+              <a href="/changelog/2026-11-14-ssd-form-factor-preview.jpg" target="_blank" rel="noopener noreferrer" aria-label="SSD 규격 분류 미리보기 크게 보기"><img src="/changelog/2026-11-14-ssd-form-factor-preview.jpg" alt="실제 공개 매물을 로컬에서 재분류해 삼성 PM9A3 7.68TB가 기타·불명확 결과에 유지되는 브라우저 검증 화면" loading="lazy" decoding="async" width="1440" height="1000" /></a>
+              <figcaption>운영 반영 전 미리보기입니다. NVMe·PCIe 표기만으로 M.2 SSD로 분류하지 않도록 준비했습니다. 형태가 확인되지 않은 매물은 ‘기타·불명확’에서 계속 찾을 수 있으며, 확인된 M.2 매물과는 구분합니다.</figcaption>
+            </figure>
+          </details>
+        </section>
+
+        <section aria-labelledby="release-2026-11-13">
+          <h2 id="release-2026-11-13"><time datetime="2026-11-13">2026.11.13</time></h2>
+          <details class="changelog-entry">
+            <summary>미리보기 · Z890 AORUS ELITE WIFI7 모델 연결</summary>
+            <figure>
+              <a href="/changelog/2026-11-13-z890-model-preview.jpg" target="_blank" rel="noopener noreferrer" aria-label="Z890 AORUS ELITE WIFI7 모델 선택 미리보기 크게 보기"><img src="/changelog/2026-11-13-z890-model-preview.jpg" alt="GIGABYTE Z890 AORUS ELITE WIFI7 모델을 선택해 해당 매물 2개를 보여 주는 실제 로컬 검증 화면" loading="lazy" decoding="async" width="1440" height="1000" /></a>
+              <figcaption>운영 반영 전 미리보기입니다. LGA1851 검색에서 모델 미확인으로 보이던 Z890 AORUS ELITE WIFI7을 정확한 모델로 선택해 볼 수 있도록 준비했습니다. ICE 등 다른 변형과는 구분합니다.</figcaption>
+            </figure>
+          </details>
+          <details class="changelog-entry">
+            <summary>미리보기 · 안내 페이지마다 다른 캐릭터</summary>
+            <figure>
+              <a href="/changelog/2026-11-13-page-specific-mascots-preview.jpg" target="_blank" rel="noopener noreferrer" aria-label="편지를 든 캐릭터가 있는 문의 페이지 미리보기 크게 보기"><img src="/changelog/2026-11-13-page-specific-mascots-preview.jpg" alt="문의 페이지 제목 오른쪽에 편지를 든 USED PICK 캐릭터가 보이는 실제 로컬 브라우저 미리보기" loading="lazy" decoding="async" width="1440" height="1000" /></a>
+              <figcaption>운영 반영 전 미리보기입니다. 문의에는 편지, 후원에는 하트, 개인정보처리방침에는 자물쇠, 이용약관에는 문서와 연필, 패치 내역에는 도구를 든 캐릭터를 넣었습니다. 이용 안내에서는 돋보기를 들고 인사합니다.</figcaption>
+            </figure>
+          </details>
+          <details class="changelog-entry">
+            <summary>안내·문의·후원 페이지에 USED PICK 캐릭터</summary>
+            <figure>
+              <a href="/changelog/2026-11-13-mascot-pages.jpg" target="_blank" rel="noopener noreferrer" aria-label="캐릭터가 들어간 후원 페이지 크게 보기"><img src="/changelog/2026-11-13-mascot-pages.jpg" alt="후원 페이지 제목 오른쪽에 남색 비니와 주황 스카프 차림으로 돋보기를 든 USED PICK 캐릭터가 인사하는 실제 운영 화면" loading="lazy" decoding="async" width="1440" height="1000" /></a>
+              <figcaption>중고매물 통합검색 시절부터 함께한 돋보기 캐릭터를 손그림으로 다시 다듬어 이용 안내·문의·후원 페이지 제목 옆에 작게 넣었습니다. 매물 검색·가격 분석·컴퓨터 시세 화면은 그대로입니다.</figcaption>
+            </figure>
+          </details>
+        </section>
+
+        <section aria-labelledby="release-2026-11-12">
+          <h2 id="release-2026-11-12"><time datetime="2026-11-12">2026.11.12</time></h2>
+          <details class="changelog-entry">
+            <summary>홈 화면에서 앱으로 설치</summary>
+            <figure>
+              <a href="/changelog/2026-11-12-pwa-install.png" target="_blank" rel="noopener noreferrer" aria-label="앱 설치 지원 화면 크게 보기"><img src="/changelog/2026-11-12-pwa-install.png" alt="USED PICK 운영 검색 화면 오른쪽 위에 앱 설치 링크가 표시된 실제 브라우저 화면" loading="lazy" decoding="async" width="1440" height="1000" /></a>
+              <figcaption>설치를 지원하는 브라우저에서 ‘앱 설치’를 선택하면 홈 화면에서 USED PICK을 열 수 있습니다. 최신 매물과 시세 조회에는 인터넷 연결이 필요하며, 연결이 끊기면 안내 화면에서 다시 시도할 수 있습니다.</figcaption>
+            </figure>
+          </details>
+          <details class="changelog-entry">
+            <summary>원본 모아곰이 아령 드는 작은 배너</summary>
+            <figure>
+              <a href="/changelog/2026-11-12-moa-png-motion.jpg" target="_blank" rel="noopener noreferrer" aria-label="트레인갤러리 배너 화면 크게 보기"><img src="/changelog/2026-11-12-moa-png-motion.jpg" alt="컴퓨터 시세 표 아래 작은 배너에서 원본 그림의 모아곰이 아령을 든 실제 운영 화면" loading="lazy" decoding="async" width="1425" height="990" /></a>
+              <figcaption>매물 검색·가격 분석·컴퓨터 시세의 하단 광고를 작은 트레인갤러리 앱 소개로 바꿨습니다. PC에서는 원본 그림의 모아곰이 아령을 두 번 들고 내리며, 운동 달력과 편집 화면 옆의 4.5초 무음 운동 장면과 함께 움직입니다. 재생·일시정지 버튼으로 동작을 제어하고, 끝난 뒤 다시 재생하면 처음부터 시작합니다. 모바일은 작은 정지 이미지를 사용하며, ‘동작 줄이기’ 설정에서는 자동 재생하지 않습니다. 배너를 누르면 Google Play의 앱 소개가 열립니다.</figcaption>
+            </figure>
+          </details>
+        </section>
+
+        <section aria-labelledby="release-2026-11-10">
+          <h2 id="release-2026-11-10"><time datetime="2026-11-10">2026.11.10</time></h2>
+          <details class="changelog-entry">
+            <summary>매물마다 당근 바로거래 표시</summary>
+            <figure>
+              <a href="/changelog/2026-11-10-daangn-named-direct-trade.png" target="_blank" rel="noopener noreferrer" aria-label="당근 바로거래 표시 화면 크게 보기"><img src="/changelog/2026-11-10-daangn-named-direct-trade.png" alt="각 그래픽카드 매물에 당근 바로거래와 배송·배송비 미확인이 함께 표시된 실제 모바일 화면" loading="lazy" decoding="async" width="390" height="844" /></a>
+              <figcaption>당근의 바로구매 표시가 있는 후보를 모으고, 각 매물에 ‘당근 바로거래’를 표시해 출처와 거래 방식을 함께 알립니다. 현재 배송 가능 여부와 배송비를 확정한 자료가 아니므로 원문에서 확인해 주세요. ‘직거만 하겠습니다’처럼 줄여 쓴 직거래 전용 문구도 목록에서 제외하도록 고쳤습니다.</figcaption>
+            </figure>
+          </details>
+          <details class="changelog-entry">
+            <summary>당근 검색을 9개 부품으로 확대</summary>
+            <figure>
+              <a href="/changelog/2026-11-10-daangn-categories.png" target="_blank" rel="noopener noreferrer" aria-label="당근 쿨러 매물 화면 크게 보기"><img src="/changelog/2026-11-10-daangn-categories.png" alt="쿨러와 당근을 선택하자 NZXT 수랭 쿨러, 녹투아와 딥쿨 CPU 쿨러가 실제 지역과 배송비 미확인 표시로 나온 모바일 화면" loading="lazy" decoding="async" width="390" height="844" /></a>
+              <figcaption>당근 검색 대상을 CPU·그래픽카드·램·메인보드·SSD·HDD·파워·케이스·쿨러로 넓혔습니다. 매일 각 부품의 대표 검색어부터 확인하고 모델을 순환합니다. CPU와 다른 부품을 함께 파는 구성은 CPU 묶음으로 찾을 수 있습니다. 그래픽카드 본체 없는 방열판과 택배 불가·직거래 전용이라고 명시한 매물은 단품 목록에서 숨깁니다. 가격 분석에서는 당근 통계가 제공되지 않는다는 안내와 함께 전체 비교를 보여 줍니다.</figcaption>
+            </figure>
+          </details>
+          <details class="changelog-entry">
+            <summary>당근 바로구매 표시 매물 추가</summary>
+            <figure>
+              <a href="/changelog/2026-11-10-daangn-listings.png" target="_blank" rel="noopener noreferrer" aria-label="당근 매물 목록 화면 크게 보기"><img src="/changelog/2026-11-10-daangn-listings.png" alt="거래 사이트에서 당근을 선택하자 GTX 960 그래픽카드 사진과 판매가격, 배송비 미확인 표시가 나온 모바일 화면" loading="lazy" decoding="async" width="390" height="844" /></a>
+              <figcaption>거래 사이트에서 당근을 골라 바로구매 표시가 있는 판매중 부품 후보를 볼 수 있습니다. CPU·그래픽카드 검색어를 하루 최대 100개씩 순서대로 확인하고, 새로 수집되는 매물도 자동으로 반영합니다. 일부 검색 결과만 확인하므로 전국 매물 전체를 보여 주지는 않습니다. 개별 매물의 실제 배송 가능 여부와 배송비는 원문에서 확인해야 하며, 당근 가격은 시세 평균에 넣지 않습니다.</figcaption>
+            </figure>
+          </details>
+        </section>
 
         <section aria-labelledby="release-2026-11-08">
           <h2 id="release-2026-11-08"><time datetime="2026-11-08">2026.11.08</time></h2>
