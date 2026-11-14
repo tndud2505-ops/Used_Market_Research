@@ -1907,7 +1907,9 @@ function renderListings() {
       || state.products.find((product) => productId(product) === normalizeText(listing.canonical_product_id)));
     const listingCategory = productCategory(listingProduct) || normalizeText(listing.category_code).toUpperCase() || state.categoryCode;
     const compositionLabel = listingCompositionLabel(listing);
-    const mobileNotes = [composite ? `${compositionLabel} · 전체가격 · 부품 시세 제외` : compositionLabel];
+    const compositionNote = composite ? `${compositionLabel} · 전체가격 · 부품 시세 제외`
+      : compositionLabel === '단품' ? '' : compositionLabel;
+    const mobileNotes = compositionNote ? [compositionNote] : [];
     let specText = listingProduct ? productSpecText(listingProduct) : "";
     if (listingProduct && productCategory(listingProduct) === "RAM") {
       const capacity = Number(listingProduct.key_specs?.module_capacity_gb);
@@ -1921,8 +1923,7 @@ function renderListings() {
     }
     if (specText && specText !== "—") body.append(createElement("div", "listing-spec", specText));
     const meta = createElement("div", "listing-meta");
-    meta.append(createElement('span', 'listing-composition', composite
-      ? `${compositionLabel} · 전체가격 · 부품 시세 제외` : compositionLabel));
+    if (compositionNote) meta.append(createElement('span', 'listing-composition', compositionNote));
     const canonicalModel = normalizeText(listing.canonical_display_name);
     const canonicalProductId = normalizeText(listing.canonical_product_id);
     const listingNodeType = normalizeText(firstDefined(listing.directory_node_type,

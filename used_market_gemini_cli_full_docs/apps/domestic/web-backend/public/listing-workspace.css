@@ -9,6 +9,7 @@ body.ui-a a.listing-price-window { display:inline-flex; align-items:center; just
 body.ui-a a.listing-price-window:hover { background:#fff7f3; border-color:var(--accent-strong,#bd422f); }
 body.ui-a a.listing-price-window:focus-visible { outline:2px solid var(--accent-strong,#bd422f); outline-offset:3px; }
 @media(max-width:760px) {
+  body.ui-a a.listing-title::after { display:none; }
   body.ui-a #listing-rows:not(:empty) { margin:0 12px; }
   body.ui-a[data-mobile-release] .listing-row { grid-template-columns:96px minmax(0,1fr); gap:6px 12px; padding:14px 12px; }
   body.ui-a a.listing-price-window { min-height:36px; padding:5px 10px; }

@@ -102,13 +102,13 @@ body.has-mobile-sheet { overflow:hidden; }
   body.ui-a[data-mobile-release] :is(.listing-spec,.listing-meta) { display:none; }
   body.ui-a[data-mobile-release] .listing-commerce { display:flex; flex-direction:column; align-items:flex-start; align-self:start; grid-column:2; grid-row:2; min-width:0; gap:3px; margin:0; padding:0; text-align:left; }
   body.ui-a[data-mobile-release] .listing-price { margin:0; color:var(--ink); font-size:21px; font-weight:750; line-height:29px; letter-spacing:-.6px; }
-  .mobile-listing-meta { display:block; max-width:100%; min-height:19px; padding-right:24px; overflow:hidden; color:#7a8390; font-size:11.5px; line-height:19px; font-weight:400; text-overflow:ellipsis; white-space:nowrap; }
-  .mobile-listing-note { display:block; padding-right:24px; color:var(--ink-soft); font-size:11px; line-height:17px; overflow-wrap:anywhere; }
+  .mobile-listing-meta { display:block; max-width:100%; min-height:19px; overflow:hidden; color:#7a8390; font-size:11.5px; line-height:19px; font-weight:400; text-overflow:ellipsis; white-space:nowrap; }
+  .mobile-listing-note { display:block; color:var(--ink-soft); font-size:11px; line-height:17px; overflow-wrap:anywhere; }
   .mobile-listing-note:empty { display:none; }
   body.ui-a[data-mobile-release] .listing-sale-state.is-active { display:none; }
   body.ui-a[data-mobile-release] .listing-sale-state.is-reserved { color:#985c0a; font-size:11px; line-height:17px; }
   body.ui-a[data-mobile-release] .listing-commerce > .listing-time { display:none; }
-  body.ui-a[data-mobile-release] .listing-price-warning:not([hidden]) { padding-right:22px; font-size:11px; line-height:17px; }
+  body.ui-a[data-mobile-release] .listing-price-warning:not([hidden]) { font-size:11px; line-height:17px; }
 body.ui-a[data-mobile-release] .listing-pagination { padding:20px 12px; margin:0; }
   body.ui-a[data-mobile-release] .detail-empty { margin:0; padding:50px 20px; border:0; color:var(--muted); font-size:14px; }
   body.ui-a[data-mobile-release] .site-footer { padding:28px 16px; border:0; color:var(--muted); font-size:11px; }
