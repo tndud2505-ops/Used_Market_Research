@@ -4,7 +4,7 @@ import { readJsonResponse } from "./read-json.mjs?v=lookup-recovery-v1";
 import { createPriceStore } from "./pc-tools-data.mjs?v=domestic-danawa-v1";
 import { listingPriceWarning } from "./listing-price-warning.mjs?v=iqr-disclosure-v1";
 import { PUBLIC_SALE_COMPOSITIONS, listingCompositionLabel } from './listing-composition.mjs?v=sale-composition-v2';
-import { priceWindowUrl } from './price-window.mjs?v=price-window-v1';
+import { priceWindowUrl } from './price-window.mjs?v=mobile-chart-v1';
 
 const PRODUCT_QUERY_KEYS = new Set([
   "manufacturer", "model", "gpu_model", "board_brand", "usage", "configuration", "socket", "chipset", "form_interface", "capacity", "purpose", "rated_wattage",
@@ -1826,31 +1826,6 @@ function listingShippingLabel(listing) {
   return listing?.shipping_evidence === "BUY_NOW_BADGE" ? "당근 바로거래" : "";
 }
 
-function listingFavoriteStorageKey(listing) {
-  return `used-pick:favorite:${encodeURIComponent(listingIdentity(listing))}`;
-}
-
-function listingFavoriteState(listing) {
-  try {
-    return window.localStorage.getItem(listingFavoriteStorageKey(listing)) === "1";
-  } catch {
-    return false;
-  }
-}
-
-function renderFavoriteButton(button, listing, titleText, isFavorite) {
-  button.replaceChildren();
-  button.classList.toggle("is-active", isFavorite);
-  button.setAttribute("aria-pressed", String(isFavorite));
-  button.setAttribute("aria-label", `${titleText} ${isFavorite ? "이 브라우저 관심 해제" : "이 브라우저에 관심 저장"}`);
-  const icon = createSvgElement("svg", { viewBox: "0 0 24 24", "aria-hidden": "true" });
-  icon.append(createSvgElement("path", {
-    d: "M12 3.7 14.55 8.9l5.73.83-4.14 4.03.98 5.7L12 16.77 6.88 19.46l.98-5.7-4.14-4.03 5.73-.83L12 3.7Z",
-  }));
-  button.append(icon);
-  button.title = isFavorite ? "이 브라우저 관심 해제" : "이 브라우저에 관심 저장";
-}
-
 const listingWarningStores = {
   KRW: createPriceStore(updateListingPriceWarnings),
   USD: createPriceStore(updateListingPriceWarnings, { marketPool: 'OVERSEAS_USED', currency: 'USD' }),
@@ -2024,24 +1999,10 @@ function renderListings() {
       const chartLink = createElement('a', 'listing-price-window', '시세 보기');
       chartLink.href = priceWindowUrl(canonicalProductId, { source: sourceId === 'ebay' ? 'ebay' : '' });
       chartLink.target = '_blank'; chartLink.rel = 'noopener noreferrer'; chartLink.dataset.priceWindow = '';
-      chartLink.setAttribute('aria-label', `${canonicalModel || titleText} 시세 별도 창에서 보기`);
+      chartLink.setAttribute('aria-label', `${canonicalModel || titleText} 시세 보기`);
       commerce.append(chartLink);
     }
-    const favorite = createElement("button", "listing-favorite");
-    favorite.type = "button";
-    let isFavorite = listingFavoriteState(listing);
-    renderFavoriteButton(favorite, listing, titleText, isFavorite);
-    favorite.addEventListener("click", () => {
-      isFavorite = !isFavorite;
-      try {
-        if (isFavorite) window.localStorage.setItem(listingFavoriteStorageKey(listing), "1");
-        else window.localStorage.removeItem(listingFavoriteStorageKey(listing));
-      } catch {
-        isFavorite = false;
-      }
-      renderFavoriteButton(favorite, listing, titleText, isFavorite);
-    });
-    row.append(media, body, commerce, favorite);
+    row.append(media, body, commerce);
     dom.listingRows.append(row);
   });
   dom.listingEmpty.hidden = visibleListings.length > 0;

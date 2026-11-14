@@ -246,8 +246,6 @@ requireText(script, 'listing?.price_eligible === false', "ineligible listings mu
 requireText(script, 'condition !== "USED_WORKING"', "broken or untested listings must be excluded");
 requireText(script, '["AMBIGUOUS", "UNKNOWN"]', "ambiguous price scope must not look valid");
 requireText(script, "listingIdentity", "same-site duplicate rows must collapse");
-requireText(script, "listingFavoriteStorageKey", "listing interest must use stable browser-local storage keys");
-requireText(script, "이 브라우저에 관심 저장", "browser-only interest must not imply account synchronization");
 requireText(script, "listing-sale-state", "current listings must expose their sale state beside the price");
 requireText(script, "listing-spec", "listing rows must retain concise model specifications");
 requireText(script, "const postedAtRaw = firstDefined(listing.posted_at, listing.created_at)",

@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ConsoleLog, TwaGenerator, TwaManifest, fetchUtils } from '@bubblewrap/core';
@@ -55,6 +55,55 @@ async function assertOwnedProject() {
   }
 }
 
+async function neutralLaunch() {
+  // Bubblewrap 1.27.0 always derives a custom TWA splash from iconUrl; it has
+  // no manifest switch to disable it. Without this metadata Browser Helper
+  // skips its splash strategy, including the extra browser splash and fade.
+  const manifest = path.join(project, 'app/src/main/AndroidManifest.xml');
+  const xml = (await readFile(manifest, 'utf8'))
+    .replace(/\s*<meta-data\s+android:name="android\.support\.customtabs\.trusted\.(?:SPLASH_IMAGE_DRAWABLE|SPLASH_SCREEN_BACKGROUND_COLOR|SPLASH_SCREEN_FADE_OUT_DURATION)"[^>]*\/>/g, '')
+    .replace('<activity android:name="LauncherActivity"',
+      '<activity android:name="LauncherActivity"\n            android:theme="@style/NeutralLaunchTheme"');
+  await writeFile(manifest, xml);
+  // Keep the existing translucent launcher lifecycle and app icon. Android 12+
+  // owns the system launch surface, but its splash icon can be transparent.
+  // Isolate platform splash attributes to API 31+; minSdk 24 keeps the base theme.
+  const res = path.join(project, 'app/src/main/res');
+  await writeFile(path.join(project, 'app/src/main/res/values/launch_theme.xml'), `<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="NeutralLaunchThemeBase" parent="android:style/Theme.Translucent.NoTitleBar">
+        <item name="android:windowBackground">@android:color/white</item>
+        <item name="android:colorBackground">@android:color/white</item>
+    </style>
+    <style name="NeutralLaunchTheme" parent="NeutralLaunchThemeBase" />
+</resources>
+`);
+  await mkdir(path.join(res, 'values-v31'), { recursive: true });
+  await writeFile(path.join(res, 'values-v31/launch_theme.xml'), `<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="NeutralLaunchTheme" parent="NeutralLaunchThemeBase">
+        <item name="android:windowSplashScreenBackground">@android:color/white</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/transparent_splash_icon</item>
+        <item name="android:windowSplashScreenIconBackgroundColor">@android:color/transparent</item>
+        <item name="android:windowSplashScreenBrandingImage">@drawable/transparent_splash_icon</item>
+    </style>
+</resources>
+`);
+  // Use an actual drawable with nonzero bounds. @null would let Android fall
+  // back to the branded application icon instead of replacing the splash icon.
+  await mkdir(path.join(res, 'drawable'), { recursive: true });
+  await writeFile(path.join(res, 'drawable/transparent_splash_icon.xml'), `<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <path android:fillColor="#00000000" android:pathData="M0,0h108v108h-108z" />
+</vector>
+`);
+  for (const density of ['mdpi', 'hdpi', 'xhdpi', 'xxhdpi', 'xxxhdpi']) {
+    await rm(path.join(project, `app/src/main/res/drawable-${density}/splash.png`), { force: true });
+  }
+}
+
 async function generate(mode) {
   const data = await config();
   const assets = await sourceAssets();
@@ -82,6 +131,7 @@ async function generate(mode) {
   } finally {
     fetchUtils.fetch = originalFetch;
   }
+  await neutralLaunch();
   await writeFile(generatedConfig, `${JSON.stringify(data, null, 2)}\n`);
   // Bubblewrap CLI uses SHA-1 here solely as a change detector, not for signing.
   const checksum = createHash('sha1').update(await readFile(generatedConfig)).digest('hex');

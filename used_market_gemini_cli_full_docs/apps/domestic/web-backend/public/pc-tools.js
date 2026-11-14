@@ -1,9 +1,9 @@
 import { SERIES, idOf, nameOf, naturalCompare, money, metricValue, soldMeanValue, metricPresentation, listedPriceRange, statsUnavailable, priceRecordIssue, analysisSelectionUrl, groupProducts, scopedStats, sourceStats, priceDateRange, shiftDate, modelPageItems, buildTotals, compactBuild, compatibility, validateBuild, dailySeries, percentChange, buildAnalysisSeries } from './pc-tools-core.mjs?v=shared-price-v2';
 import { readJson, createPriceStore } from './pc-tools-data.mjs?v=picker-fast-v3';
-import { drawMarketChart as drawChart } from './pc-market-chart.mjs?v=price-axis-right-v1';
+import { drawMarketChart as drawChart } from './pc-market-chart.mjs?v=mobile-chart-v1';
 import { createAdfitSlots } from './adfit.js?v=adfit-all-v3';
 import { toolBrand, toolFilterSchema, toolFacetValues, toolFacetLabel, filterToolProducts, visibleSelection, toolScopeNote } from './pc-tools-catalog.mjs?v=parts-ux-v4';
-import { priceWindowUrl } from './price-window.mjs?v=price-window-v1';
+import { priceWindowUrl } from './price-window.mjs?v=mobile-chart-v1';
 
 const builder = document.body.dataset.page === 'builder';
 const $ = selector => document.querySelector(selector);
@@ -21,7 +21,7 @@ const state = {
   priceKindExplicit: false,
   // A shared sold-price URL waits until prices load before it is applied.
   requestedPriceKind: '',
-  priceSources: new Set(['joonggonara','bunjang','danawa','ebay']),
+  priceSources: new Set(['joonggonara']), compare: false, focusSource: 'joonggonara', focusExplicit: false,
 };
 let repaintTimer, statusTimer, pickerRepaintTimer;
 const modelPickerView = { dimension: 'models' };
@@ -102,7 +102,7 @@ function syncAnalysisUrl(range = state.range, deferred = false) {
   url.searchParams.set('from', range.from); url.searchParams.set('to', range.to);
   const kind = state.requestedPriceKind || (state.priceKindExplicit ? state.priceKind : '');
   if (kind === 'sold') url.searchParams.set('kind', 'sold'); else url.searchParams.delete('kind');
-  if (state.priceSources.size < 4) url.searchParams.set('sites', [...state.priceSources].join(',')); else url.searchParams.delete('sites');
+  if (state.compare || state.priceSources.size < 4) url.searchParams.set('sites', [...state.priceSources].join(',')); else url.searchParams.delete('sites');
   if (state.displayCurrency) url.searchParams.set('currency', state.displayCurrency); else url.searchParams.delete('currency');
   if(url.href!==location.href)history.replaceState(null, '', url.href);
 }
@@ -701,6 +701,8 @@ function resetHistoryWindow() {
   state.days=60;state.range=priceDateRange(shiftDate(state.range.latest,-59),state.range.latest);state.historyPending=false;
 }
 function syncChartRangeInputs(range = state.range) {
+  const label = $('#chart-range-label');
+  if (label) label.textContent = `${range.from.slice(5).replace('-', '.')} – ${range.to.slice(5).replace('-', '.')}`;
   for (const [id, value] of [['chart-date-from', range.from], ['chart-date-to', range.to]]) {
     const input = $(`#${id}`);
     if (input) { input.min = state.range.earliest; input.max = state.range.latest; if (document.activeElement !== input) input.value = value; }
@@ -713,6 +715,7 @@ function applyChartRange(from, to) {
     state.range = range; state.days = range.days; state.historyPending = false;
     if (message) { message.textContent = ''; message.hidden = true; }
     resetChartView(); syncAnalysisUrl(); renderAnalysis(); refreshPrices();
+    if ($('#chart-range-details')) $('#chart-range-details').open = false;
   } catch (error) {
     if (message) { message.textContent = error.message; message.hidden = false; }
   }
@@ -751,6 +754,11 @@ function renderLatestPrices(series,record,sources = null,date = null) {
   container.replaceChildren();
   const list=el('ul','market-snapshot-list');
   const order=['joonggonara','bunjang','danawa','ebay'];
+  const sourceCaption=(id,text)=>{
+    const name=el('strong','market-snapshot-source',text);
+    if(!sources)return name;
+    const label=el('label','market-source-label');label.htmlFor=`price-source-${id}`;label.append(name);return label;
+  };
   const rank=line=>{const index=order.indexOf(line.id.split(':')[0]);return index<0?order.length:index;};
   for(const line of [...series].sort((a,b)=>rank(a)-rank(b))){
     const point=date ? line.points.find(point=>point.date===date&&(point.value!=null||point.lower!=null)) : line.points.filter(point=>point.value!=null||point.lower!=null).at(-1);if(!point)continue;
@@ -760,7 +768,7 @@ function renderLatestPrices(series,record,sources = null,date = null) {
     const count=Number.isInteger(point.sampleCount)?`${point.sampleCount.toLocaleString('ko-KR')}건`:'표본 미확인';
     const marker=el('i','market-snapshot-marker');marker.setAttribute('aria-hidden','true');
     const meta = [basis,count,...(date?[]:[point.date.slice(5).replace('-', '.')])].join(' · ');
-    item.append(marker,el('strong','market-snapshot-source',line.label.split(' · ')[0]),
+    item.append(marker,sourceCaption(sourceId,line.label.split(' · ')[0]),
       el('b','market-snapshot-amount',price),el('span','market-snapshot-meta',meta));
     list.append(item);
   }
@@ -770,7 +778,7 @@ function renderLatestPrices(series,record,sources = null,date = null) {
       const item=el('li','market-snapshot-item');item.dataset.source=source.id;
       const pending=!source.record||source.record.state==='loading';
       const failed=source.record?.state==='error'||statsUnavailable(source.record?.data);
-      item.append(el('i','market-snapshot-marker'),el('strong','market-snapshot-source',SOURCE_LABELS[source.id]||source.id),
+      item.append(el('i','market-snapshot-marker'),sourceCaption(source.id,SOURCE_LABELS[source.id]||source.id),
         el('b','market-snapshot-amount',pending?'확인 중':failed?'조회 실패':date?'—':'자료 없음'));
       if(date&&!pending&&!failed)item.append(el('span','market-snapshot-meta','관측 없음'));
       if(failed)item.append(action('다시 조회','retry',{},'market-snapshot-retry'));
@@ -779,11 +787,11 @@ function renderLatestPrices(series,record,sources = null,date = null) {
     const items=[...list.children].sort((a,b)=>order.indexOf(a.dataset.source)-order.indexOf(b.dataset.source));
     list.replaceChildren(...items);
     for(const item of items){
-      const checkbox=el('input','market-source-check');checkbox.type='checkbox';checkbox.dataset.priceSource=item.dataset.source;
+      const checkbox=el('input','market-source-check');checkbox.type=state.compare?'checkbox':'radio';checkbox.name='price-source';checkbox.dataset.priceSource=item.dataset.source;
       checkbox.checked=state.priceSources?.has(item.dataset.source)??true;
-      checkbox.setAttribute('aria-label',`${SOURCE_LABELS[item.dataset.source]||item.dataset.source} 가격선 표시`);
+      checkbox.setAttribute('aria-label',`${SOURCE_LABELS[item.dataset.source]||item.dataset.source} ${state.compare?'가격선 표시':'시세 보기'}`);
       item.dataset.visible=String(checkbox.checked);item.prepend(checkbox);
-      if(item.dataset.source==='ebay')item.append(action('USD 차트 ↗','source-chart',{source:'ebay'},'market-source-link'));
+      checkbox.id=`price-source-${item.dataset.source}`;
     }
     container.append(list);
     if(!items.length)container.append(el('p','market-price-empty','가격을 표시할 사이트가 없습니다.'));
@@ -812,7 +820,6 @@ function renderAnalysis() {
   });
   const coverage = $('#chart-coverage'); coverage.replaceChildren(); coverage.hidden = true;
   const sources = analysisSources();
-  const visibleSources = sources.filter(item => state.priceSources.has(item.id));
   const availableSeries = sources.flatMap(item => buildAnalysisSeries(statsUnavailable(item.data) ? null : item.data, {
     source: item.id, allowedSourceIds: [item.id], days: item.data?.methodology?.days || state.days, sourceLabels: SOURCE_LABELS,includeSparse:false,
   }).map(line => ({ ...line,
@@ -835,6 +842,11 @@ function renderAnalysis() {
   const kindLine=line=>state.priceKind==='sold'?soldLine(line):line.metricKey===state.priceKind;
   const kindSources=list=>state.priceKind==='sold'?list.filter(item=>item.id==='joonggonara'):list;
   const series=availableSeries.filter(kindLine);
+  if (!state.compare && !state.focusExplicit && pricesSettled && !series.some(line=>state.priceSources.has(line.id.split(':')[0]))) {
+    const fallback=series[0]?.id.split(':')[0];
+    if(fallback){state.focusSource=fallback;state.priceSources=new Set([fallback]);syncAnalysisUrl();}
+  }
+  const visibleSources = sources.filter(item => state.priceSources.has(item.id));
   const chartSeries=series.filter(line=>state.priceSources.has(line.id.split(':')[0]));
   const dates = [...new Set(chartSeries.flatMap(item => item.points.map(point => point.date)))].sort();
   const latestSources=analysisSources({latest:true}).filter(item=>state.source?item.id===state.source:true);
@@ -851,9 +863,19 @@ function renderAnalysis() {
     $('#analysis-readout-reset').hidden=!pinned;
     $('#analysis-price-rail').dataset.mode=date?'selected':'latest';
     renderLatestPrices((date?referenceSeries:latestSeries).filter(kindLine),record,kindSources(date?sources:latestSources),date);
+    const focus=state.priceSources.has(state.focusSource)?state.focusSource:[...state.priceSources][0]||'';
+    const line=referenceSeries.find(line=>line.id===`${focus}:${state.priceKind}`);
+    const point=date?line?.points.find(point=>point.date===date):line?.points.filter(point=>point.value!=null||point.lower!=null).at(-1);
+    if($('#analysis-focus-source')) {
+      $('#analysis-focus-source').textContent=focus?`${SOURCE_LABELS[focus]||focus}${line?.currency==='KRW'&&focus==='ebay'?' 환산':''} · ${line?.priceBasis==='listed-minimum'?'최저 표시가':point?.priceLabel||(state.priceKind==='sold'?'판매완료 표시가':'대표가격')}`:'사이트를 선택해 주세요';
+      $('#analysis-focus-price').textContent=point?.value!=null?money(point.value,currency):point?.lower!=null?`${money(point.lower,currency)} ~ ${money(point.upper,currency)}`:'—';
+      $('#analysis-focus-meta').textContent=!focus?'':point?`${point.date.replaceAll('-','.')} · ${Number.isInteger(point.sampleCount)?`${point.sampleCount}건`:'표본 미확인'}${point.priceLabel?.startsWith('등록가')?' · 등록가 참고 · 대표가격 아님':''}`:date?`${date.replaceAll('-','.')} · 관측 없음`:(sources.find(item=>item.id===focus)?.record?.state==='loading'?'가격 기록 확인 중':sources.find(item=>item.id===focus)?.record?.state==='error'?'가격 조회 실패':'이 기간에 관측 없음');
+    }
     renderFxNote(date,showFx);
   };
   updateReadout();
+  const compareButton=$('[data-action="compare-sources"]');
+  if(compareButton){compareButton.setAttribute('aria-pressed',String(state.compare));compareButton.textContent=state.compare?'비교 중':'비교';}
   document.querySelectorAll('[data-action="price-kind"]').forEach(button=>{
     button.setAttribute('aria-pressed',String(button.dataset.kind===state.priceKind));
     if(button.dataset.kind==='sold')button.disabled=!soldAvailable;
@@ -900,7 +922,8 @@ function renderAnalysis() {
   renderAnalysisContext(record, data, currency);
   syncMobileAnalysisControls();
   drawChart($('#price-chart'), chartSeries, { label: `${modelName} 가격 추이`, currency, identity: `${state.selectedId}:${state.selectedManufacturer}:${state.source}:${state.priceKind}:${window.to}`,
-    showLegend:false,showNote:false,showGapKey:false,showUnit:false,externalReadout:true,axisLeft:false,wheelZoom:true,connectGaps:true,pricePadding:0.23,minimumPricePadding:0.03,
+    showLegend:false,showNote:false,showGapKey:false,showUnit:false,externalReadout:true,axisLeft:false,wheelZoom:true,connectGaps:true,pricePadding:0.12,minimumPricePadding:0.015,
+    showPoints:false,touchScrub:true,
     onReadout:updateReadout,readoutContainer:$('#analysis-price-rail'),
     readoutInput:kindSources(sources).map(item=>referenceSeries.find(line=>line.id===`${item.id}:${state.priceKind}`)||{
       id:`${item.id}:${state.priceKind}`,label:SOURCE_LABELS[item.id]||item.id,currency,metricKey:state.priceKind,points:[],
@@ -978,7 +1001,17 @@ document.addEventListener('click', event => {
   const button = event.target.closest('[data-action]'); if (!button || !state.ready) return;
   if(button.tagName==='A'&&(event.ctrlKey||event.metaKey||event.shiftKey||event.altKey))return;
   let { action: type, id, manufacturer = '', key, category } = button.dataset;
-  if (type === 'close-price-window') { window.close(); return; }
+  if (type === 'close-price-window') {
+    if (window.parent !== window) window.parent.postMessage({type:'used-pick:close-price'},location.origin);
+    else if(history.length>1)history.back();else location.assign('/');
+    return;
+  }
+  if(type==='compare-sources') {
+    state.compare=!state.compare;
+    if(!state.compare&&!state.focusSource)state.focusSource=analysisSources()[0]?.id||'joonggonara';
+    state.priceSources=state.compare?new Set(analysisSources().map(item=>item.id)):new Set([state.focusSource]);
+    resetChartView();syncAnalysisUrl();renderAnalysis();return;
+  }
   if (type === 'picker-dimension') { setModelPickerDimension(button.dataset.dimension, { focus: true }); return; }
   if (type === 'picker-filter') {
     if (!updateToolFilter(button.dataset.filter, button.value)) return;
@@ -991,6 +1024,7 @@ document.addEventListener('click', event => {
   }
   if(type==='price-kind'){
     if(button.disabled)return;
+    if(button.dataset.kind==='sold'){state.focusSource='joonggonara';state.priceSources=new Set(['joonggonara']);state.compare=false;}
     state.priceKind=button.dataset.kind==='sold'?'sold':'active';state.priceKindExplicit=true;state.requestedPriceKind='';syncAnalysisUrl();renderAnalysis();return;
   }
   if(type==='display-currency'){
@@ -1081,7 +1115,11 @@ document.addEventListener('change', event => {
   if (target.id === 'chart-kind-select') { document.querySelector(`[data-action="price-kind"][data-kind="${target.value}"]`)?.click(); return; }
   if (target.name === 'build-price-kind') { document.body.dataset.buildPrice = target.value; return; }
   if(target.dataset.priceSource){
-    if(target.checked)state.priceSources.add(target.dataset.priceSource);else state.priceSources.delete(target.dataset.priceSource);
+    state.focusExplicit=true;
+    if(!state.compare){state.focusSource=target.dataset.priceSource;state.priceSources=new Set([target.dataset.priceSource]);resetChartView();}
+    else if(target.checked){state.priceSources.add(target.dataset.priceSource);state.focusSource=target.dataset.priceSource;}
+    else {state.priceSources.delete(target.dataset.priceSource);if(state.focusSource===target.dataset.priceSource)state.focusSource=[...state.priceSources][0]||'';}
+    syncAnalysisUrl();
     renderAnalysis();document.querySelector(`[data-price-source="${target.dataset.priceSource}"]`)?.focus({preventScroll:true});return;
   }
   if (target.id === 'chart-sources') { state.source = target.value; state.sourceNotice = ''; state.page = 1; resetHistoryWindow();resetChartView(); syncAnalysisUrl(); renderControls(); renderModelTable(); renderAnalysis(); refreshPrices(); return; }
@@ -1129,6 +1167,7 @@ document.addEventListener('input', event => {
 async function start() {
   try {
     if (!builder && new URLSearchParams(location.search).get('window') === '1') document.body.classList.add('price-window');
+    if (!builder && window.parent !== window) document.body.classList.add('price-embedded');
     const catalog = await readJson('/api/pc/catalog');
     const pageCatalog = builder ? catalog.tools_catalog : catalog.public_catalog;
     const excludedBuildIds = new Set((pageCatalog?.products || catalog.products || []).filter(p => builder && ['CASE', 'COOLING'].includes(p.category_code)).map(idOf));
@@ -1160,7 +1199,11 @@ async function start() {
         ? '요청한 모델은 가격 선택 대상이 아닙니다. 검증된 모델을 다시 선택해 주세요.' : '', params.has('model') && (!requested || !filterToolProducts([requested]).length));
       const requestedSource = params.get('source');
       state.source = state.sources.some(s => String(s.source_id || s.id || s.key) === requestedSource) ? requestedSource : '';
-      if (params.has('sites')) state.priceSources = new Set(params.get('sites').split(',').filter(id => ['joonggonara','bunjang','danawa','ebay'].includes(id)));
+      if (params.has('sites')) {
+        state.priceSources = new Set(params.get('sites').split(',').filter(id => ['joonggonara','bunjang','danawa','ebay'].includes(id)));
+        state.focusSource=[...state.priceSources][0]||'joonggonara';state.compare=state.priceSources.size>1;
+        state.focusExplicit=state.priceSources.size>0;
+      } else if(state.source){state.focusSource=state.source;state.priceSources=new Set([state.source]);state.focusExplicit=true;}
       if (params.get('currency') === 'USD') state.displayCurrency = 'USD';
       const unavailableSource = publicSources.find(s => String(s.source_id || s.id || s.key) === requestedSource && s.statistics_enabled === false);
       state.sourceNotice = unavailableSource

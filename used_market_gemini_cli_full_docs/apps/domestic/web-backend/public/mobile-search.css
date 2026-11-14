@@ -109,10 +109,7 @@ body.has-mobile-sheet { overflow:hidden; }
   body.ui-a[data-mobile-release] .listing-sale-state.is-reserved { color:#985c0a; font-size:11px; line-height:17px; }
   body.ui-a[data-mobile-release] .listing-commerce > .listing-time { display:none; }
   body.ui-a[data-mobile-release] .listing-price-warning:not([hidden]) { padding-right:22px; font-size:11px; line-height:17px; }
-  body.ui-a[data-mobile-release] .listing-favorite { position:absolute; right:7px; bottom:8px; display:grid; place-items:center; width:44px; height:44px; min-height:44px; margin:0; padding:10px; border:0; border-radius:8px; background:transparent; color:#89939f; }
-  body.ui-a[data-mobile-release] .listing-favorite svg { width:22px; height:22px; stroke-width:1.7; }
-  body.ui-a[data-mobile-release] .listing-favorite.is-active { color:var(--accent); }
-  body.ui-a[data-mobile-release] .listing-pagination { padding:20px 12px; margin:0; }
+body.ui-a[data-mobile-release] .listing-pagination { padding:20px 12px; margin:0; }
   body.ui-a[data-mobile-release] .detail-empty { margin:0; padding:50px 20px; border:0; color:var(--muted); font-size:14px; }
   body.ui-a[data-mobile-release] .site-footer { padding:28px 16px; border:0; color:var(--muted); font-size:11px; }
   body.ui-a[data-mobile-release] .mobile-sheet { width:100%; max-width:100%; max-height:85dvh; margin:auto 0 0; border-radius:18px 18px 0 0; overflow:hidden; }

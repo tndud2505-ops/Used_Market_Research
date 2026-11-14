@@ -168,7 +168,7 @@ function setup({ builder = false, source = '', manufacturer = '', storageFails =
     localStorage: { setItem(key, value) { if (storageFails) throw new Error('quota'); stored.set(key, value); } },
     location: { href: 'https://example.test/computer-builder.html' }, history: { replaceState: (...args) => historyCalls.push(args) },
     prices: { get: () => selectedRecord, getAvailable:()=>selectedRecord }, overseasPrices: { get: () => selectedRecord, getAvailable:()=>selectedRecord },
-    displayPrice: value => value == null ? '—' : core.money(value), clearTimeout() {},
+    displayPrice: value => value == null ? '—' : core.money(value), clearTimeout() {}, analysisUrlTimer:null,
   });
   const factories = script.slice(script.indexOf('const el = '), script.indexOf('function status('));
   const declarations = [...script.matchAll(/^(?:async )?function \w+\([\s\S]*?^\}/gm)].map(m => m[0]).join('\n');
@@ -196,7 +196,7 @@ test('latest source rail retains missing and failed sources without mixing USD v
   const items=container.children[0].children;
   assert.deepEqual(items.map(item=>item.dataset.source),['joonggonara','bunjang','danawa','ebay']);
   assert.match(items[0].textContent,/자료 없음/);assert.match(items[1].textContent,/조회 실패/);assert.match(items[2].textContent,/확인 중/);
-  assert.match(items[3].textContent,/\$25\.50/);assert.match(items[3].textContent,/USD/);assert.doesNotMatch(items[3].textContent,/25.50원/);
+  assert.match(items[3].textContent,/\$25\.50/);assert.doesNotMatch(items[3].textContent,/25.50원/);
 });
 
 function setupAnalysis(bySource) {
@@ -207,11 +207,11 @@ function setupAnalysis(bySource) {
   } } });
   const ids = ['joonggonara', 'bunjang', 'danawa', 'ebay'];
   Object.assign(t.state, { range, days: range.days, priceKind: 'active', priceKindExplicit: true,
-    priceSources: new Set(ids), sources: ids.map(source_id => ({ source_id, public_enabled: true })) });
+    priceSources: new Set(ids), compare:true, focusSource:'joonggonara', sources: ids.map(source_id => ({ source_id, public_enabled: true })) });
   t.context.priceDateRange = (from, to) => core.priceDateRange(from, to, range.latest);
   for (const id of ['chart-sources', 'chart-coverage', 'analysis-prices', 'analysis-readout-title',
     'analysis-readout-reset', 'analysis-price-rail', 'chart-sold-note', 'analysis-workspace',
-    'analysis-model-select', 'price-chart']) t.nodes.set(`#${id}`, new Node());
+    'analysis-model-select', 'analysis-focus-source', 'analysis-focus-price', 'analysis-focus-meta', 'price-chart']) t.nodes.set(`#${id}`, new Node());
   const rail = t.nodes.get('#analysis-price-rail');
   rail.append(t.nodes.get('#analysis-prices'));
   t.checkbox = id => rail.querySelectorAll('*').find(node => node.dataset.priceSource === id);
@@ -251,6 +251,8 @@ test('a pinned-date source checkbox survives hiding its line and can restore it'
     assert.equal(restored.checked, checked);
     assert.equal(t.state.priceSources.has('joonggonara'), checked);
     assert.equal(t.chart.series.some(line => line.id === 'joonggonara:active'), checked);
+    assert.equal(t.nodes.get('#analysis-focus-price').textContent,checked?'45,000원':'43,000원',
+      'the headline must follow a selected source, never a line the user just hid');
     const readout = t.chart.options.readoutInput.find(line => line.id === 'joonggonara:active');
     assert.ok(readout, 'hidden sources must remain available to the chart readout');
     assert.equal(readout.points.find(point => point.date === pinned.date)?.value, 45000);

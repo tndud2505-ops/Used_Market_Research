@@ -530,5 +530,22 @@ try{
   assert.equal(document.body.classList.contains('has-expanded-chart'),false,'detaching an expanded chart unlocks scrolling');
   assert.equal(removal.disconnected,true);assert.equal(document.events.keydown.size,keyListeners-1,'detachment removes the expansion keyboard listener');
   assert.equal(document.body.style.getPropertyValue('overflow-y'),'scroll');
+  // Analysis scrubbing reads exact dates without moving the price window or
+  // claiming the vertical page gesture used by ordinary mobile scrolling.
+  const scrubChart=new ChartNode('div');let scrubReadout;
+  drawMarketChart(scrubChart,[mobileLine],{identity:'analysis-scrub',externalReadout:true,showLegend:false,showNote:false,wheelZoom:true,touchScrub:true,showPoints:false,onReadout:value=>{scrubReadout=value;}});
+  const scrubStage=scrubChart.children[0],scrubSvg=scrubStage.children[0];
+  scrubStage.clientWidth=390;scrubSvg.clientWidth=390;scrubStage.resize.callback();flush();
+  const beforeScrub={count:scrubSvg.dataset.visibleCount,offset:scrubSvg.dataset.offset};
+  scrubSvg.emit('pointerdown',{clientX:100});scrubSvg.emit('pointermove',{clientX:240});
+  const scrubDate=scrubReadout.date;
+  assert.ok(scrubDate&&mobileLine.points.some(point=>point.date===scrubDate));
+  assert.deepEqual({count:scrubSvg.dataset.visibleCount,offset:scrubSvg.dataset.offset},beforeScrub);
+  assert.equal(scrubSvg.style.touchAction,'pan-y pinch-zoom');
+  scrubSvg.emit('pointerup',{clientX:240});
+  assert.equal(scrubReadout.date,scrubDate,'released scrub retains the selected observation');
+  scrubSvg.emit('pointerdown',{clientX:240});scrubSvg.emit('pointercancel',{clientX:240,clientY:300});
+  drawMarketChart(scrubChart,[mobileLine],{identity:'analysis-scrub',externalReadout:true,showLegend:false,touchScrub:true});flush();
+  assert.notEqual(scrubChart.children[0],scrubStage,'native vertical cancellation releases the chart interaction');
 }finally{for(const [key,value] of Object.entries(savedDom))if(value===undefined)delete globalThis[key];else globalThis[key]=value;}
 console.log('PC tools: grouping, independent prices, partial sums, quantity, compatibility, storage validation and chart gaps passed');

@@ -1,6 +1,6 @@
-/* One listing surface; the graph opens in its own window. */
+/* Keep the listing in place while the price surface is open. */
 body.ui-a #listing-rows:not(:empty) { border:1px solid var(--line,#dfe4ea); border-radius:8px; overflow:clip; }
-body.ui-a .listing-row { grid-template-columns:88px minmax(0,1fr) minmax(130px,170px) 32px; padding:18px 16px; gap:16px; align-items:center; }
+body.ui-a .listing-row { grid-template-columns:88px minmax(0,1fr) minmax(130px,170px); padding:18px 16px; gap:16px; align-items:center; }
 body.ui-a .listing-row:last-child { border-bottom:0; }
 body.ui-a .listing-title { line-height:1.5; overflow-wrap:anywhere; }
 body.ui-a a.listing-title::after { content:'↗'; margin-left:7px; color:var(--muted); font-size:.85em; white-space:nowrap; }

@@ -169,8 +169,6 @@ export async function runBrowserChecks({browser,origin,out,fixture=false}) {
     await page.waitForFunction(()=>!document.querySelector('#listing-price-dialog').open);
     assert.equal(await page.evaluate(()=>document.activeElement.id),'model-detail-open');
     addCheck('in-page price preview; original URL, listings and sorting unchanged; Escape returns focus');
-    await page.locator('.listing-favorite').first().click();assert.equal(await page.locator('.listing-favorite').first().getAttribute('aria-pressed'),'true');
-    await page.locator('.listing-favorite').first().click();addCheck('browser-local favorite toggle and original listing links');
     assert.equal(await page.locator('.listing-title').first().getAttribute('target'),'_blank');
     await page.locator('#source-filters input[data-value="joonggonara"]').focus();
     await page.keyboard.press('Space');await readySearch();

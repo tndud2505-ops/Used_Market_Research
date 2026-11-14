@@ -5617,24 +5617,6 @@ body.has-selected-product .results-flow {
 .listing-sale-state.is-reserved { color: var(--reserved); }
 .listing-time { color: var(--muted); font-size: 10px; }
 
-.listing-favorite {
-  display: grid;
-  width: 32px;
-  height: 38px;
-  align-self: center;
-  place-items: center;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: #aaa198;
-}
-
-.listing-favorite svg { width: 22px; height: 22px; fill: transparent; stroke: currentColor; stroke-linejoin: round; stroke-width: 1.5; }
-.listing-favorite:hover { color: var(--accent); }
-.listing-favorite.is-active { color: var(--accent); }
-.listing-favorite.is-active svg { fill: var(--accent-soft); }
-.listing-favorite:active { transform: scale(0.94); }
-
 .listing-pagination { min-height: 58px; padding: 10px 16px; }
 .listing-page-number[aria-current="page"] { border-color: var(--accent); background: var(--accent); color: #fff; }
 
@@ -5742,9 +5724,7 @@ body.has-selected-product .results-flow {
   .listing-price { font-size: 14px; }
   .listing-sale-state { font-size: 9px; }
   .listing-time { display: none; }
-  .listing-favorite { width: 28px; }
-  .listing-favorite svg { width: 19px; height: 19px; }
-  .model-detail-dialog:not([hidden]) .model-detail-header { min-height: 92px; padding: 12px; }
+.model-detail-dialog:not([hidden]) .model-detail-header { min-height: 92px; padding: 12px; }
   .model-detail-dialog:not([hidden]) .price-panel-content { padding-right: 12px; padding-left: 12px; }
   .model-detail-title-line h2 { font-size: 20px; }
   .price-summary-row { min-height: 78px; }

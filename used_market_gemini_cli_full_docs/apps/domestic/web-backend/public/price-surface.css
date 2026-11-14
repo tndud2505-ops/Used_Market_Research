@@ -1,0 +1,10 @@
+body.has-price-surface { overflow:hidden; }
+.price-surface { box-sizing:border-box; width:min(1120px,calc(100vw - 48px)); height:min(850px,calc(100dvh - 48px)); max-width:none; max-height:none; padding:0; border:0; border-radius:14px; background:#fff; color:#182331; overflow:hidden; }
+.price-surface::backdrop { background:rgb(17 29 48 / .35); }
+.price-surface iframe { display:block; width:100%; height:100%; border:0; background:#fff; }
+.price-surface-close { position:absolute; z-index:2; top:12px; right:14px; min-width:44px; height:44px; padding:0 10px; border:0; border-radius:6px; background:#fff; color:#637083; font:inherit; font-size:13px; cursor:pointer; }
+.price-surface-close:focus-visible { outline:2px solid #346fca; outline-offset:-2px; }
+@media(max-width:760px) {
+  .price-surface { width:100%; height:100dvh; margin:0; border-radius:0; }
+  .price-surface-close { top:8px; right:10px; }
+}

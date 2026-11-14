@@ -99,7 +99,7 @@ export function buildMarketView(series, dates, count, offset, width, height, { a
   const step = plotWidth / Math.max(1, shownDates.length);
   const dateIndices = new Map(shownDates.map((date,index)=>[date,index]));
   const x = date => pad.left + step * dateIndices.get(date) + step / 2;
-  const rawTickStep = range / Math.max(2, Math.floor(plotHeight / 90));
+  const rawTickStep = range / Math.max(3, Math.floor(plotHeight / 80));
   const magnitude = 10 ** Math.floor(Math.log10(rawTickStep));
   const tickStep = ([1, 2, 2.5, 5, 10].find(value => value * magnitude >= rawTickStep) ?? 10) * magnitude;
   const priceTicks = [];
@@ -118,7 +118,8 @@ export function drawMarketChart(container, input, options = {}) {
   const { label = '가격 추이', currency = 'KRW', identity = '', averagePeriod = 0, showSamples = false,
     showLegend = true, noteText = '', showNote = true, showGapKey = false, showUnit = true, dockedReadout = false, cornerReadout = false, axisLeft = false, readoutInput,
     onLoadEarlier, canLoadEarlier = false, loadingEarlier = false, onViewChange,
-    externalReadout = false, onReadout, readoutContainer, wheelZoom = false, connectGaps = true, pricePadding = 0.07, minimumPricePadding = 0.005 } = options;
+    externalReadout = false, onReadout, readoutContainer, wheelZoom = false, connectGaps = true, pricePadding = 0.07, minimumPricePadding = 0.005,
+    showPoints = true, touchScrub = false } = options;
   const currentView=views.get(container);
   if(currentView?.interacting && currentView.identity===identity){
     currentView.pendingRender=()=>drawMarketChart(container,input,options);return;
@@ -182,7 +183,7 @@ export function drawMarketChart(container, input, options = {}) {
   const touchOnly=()=>stage.clientWidth<480||Boolean(window.matchMedia?.('(hover: none) and (pointer: coarse)')?.matches);
   const svg = svgNode('svg', { tabindex: 0, role: 'group', 'aria-roledescription': '가격 차트', 'aria-label': `${label}. ${wheelZoom?'휠':'Ctrl+휠'}·핀치: 확대·축소, 드래그: 좌우 이동, 더블클릭·Home: 전체 보기, 좌우 키: 날짜, Escape: 선택 해제` });
   // Custom two-finger navigation must not turn into browser pinch/scroll.
-  svg.style.touchAction='none';
+  svg.style.touchAction=touchScrub?'pan-y pinch-zoom':'none';
   const plot = svgNode('g'), cursor = svgNode('g', { 'pointer-events': 'none' }); svg.append(plot, cursor);
   const readout = node('div', dockedReadout ? 'market-chart-readout market-chart-readout-docked' : cornerReadout ? 'market-chart-readout market-chart-readout-corner' : 'market-chart-readout'); readout.hidden = !dockedReadout; readout.setAttribute('role', dockedReadout ? 'region' : 'dialog'); readout.setAttribute('aria-label', '날짜별 가격');
   const note = node('p', 'market-chart-note', noteText || '점선은 가격 기록 사이의 간격입니다.');
@@ -278,7 +279,7 @@ export function drawMarketChart(container, input, options = {}) {
     width = stage.clientWidth; height = stage.clientHeight;
     if (width < 120 || height < 100) return;
     svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
-    svg.setAttribute('aria-label',`${label}. ${touchOnly()?'핀치: 확대·축소':`${wheelZoom?'휠':'Ctrl+휠'}·핀치: 확대·축소, 더블클릭·Home: 전체 보기`}, 드래그: 좌우 이동, 좌우 키: 날짜, Escape: 선택 해제`);
+    svg.setAttribute('aria-label',`${label}. ${touchScrub&&touchOnly()?'좌우로 움직여 날짜별 가격 확인, 위아래로 페이지 스크롤':`${touchOnly()?'핀치: 확대·축소':`${wheelZoom?'휠':'Ctrl+휠'}·핀치: 확대·축소, 더블클릭·Home: 전체 보기`}, 드래그: 좌우 이동`}, 좌우 키: 날짜, Escape: 선택 해제`);
     geometry = buildMarketView(visible(), dates, view.count, view.offset, width, height, {averagePeriod,showSamples,axisLeft,pricePadding,minimumPricePadding,priceScale:view.yScale||1});
     svg.dataset.visibleCount = String(view.count); svg.dataset.offset = String(view.offset);
     if(geometry){svg.dataset.scaleMin=String(geometry.scaleMin);svg.dataset.scaleMax=String(geometry.scaleMax);}
@@ -324,7 +325,7 @@ export function drawMarketChart(container, input, options = {}) {
       if(reference)group.setAttribute('data-price-basis','listed-minimum');
       const singleObservation = points.filter(point => valid(point.value)).length === 1;
       const path = marketLinePath(points, x, y);
-      group.append(svgNode('path', {d:path, fill:'none', stroke:line.color, 'stroke-width':sold||reference ? 1.7 : 1.8, 'stroke-linejoin':'round', ...(sold||reference ? {'stroke-dasharray':'6 5'} : {})}));
+      group.append(svgNode('path', {d:path, fill:'none', stroke:line.color, 'stroke-width':sold||reference ? 1.7 : 2.2, 'stroke-linejoin':'round', ...(sold||reference ? {'stroke-dasharray':'6 5'} : {})}));
       const gapPath = marketGapPath(points, x, y);
       if (connectGaps && gapPath) hasVisibleGap = true;
       if (connectGaps && gapPath) group.append(svgNode('path', {d:gapPath, fill:'none', stroke:line.color, 'stroke-width':1.8, 'stroke-dasharray':'2 5', opacity:.65, 'data-gap-bridge':'true'}));
@@ -333,6 +334,7 @@ export function drawMarketChart(container, input, options = {}) {
       const ranges = points.filter(point=>valid(point.lower)&&valid(point.upper));
       if(ranges.length) group.append(svgNode('path',{d:ranges.map(point=>`M${x(point.date)},${y(point.lower)}V${y(point.upper)}`).join(' '),fill:'none',stroke:line.color,'stroke-width':3,'data-range-series':line.id}));
       for (const point of points) {
+        if(!showPoints&&!singleObservation)continue;
         if(valid(point.lower)&&valid(point.upper))continue;
         if (!valid(point.value)) continue;
         if(points.length>180&&!singleObservation)continue;
@@ -437,7 +439,8 @@ export function drawMarketChart(container, input, options = {}) {
   svg.addEventListener('pointerdown', event => {
     if (!geometry || event.button!==0 || pointers.size>=2) return;
     const point=pointerPosition(event);
-    if (pointers.size===0 && onPriceAxis(point)) {
+    const scrub=touchScrub&&event.pointerType!=='mouse';
+    if (!scrub && pointers.size===0 && onPriceAxis(point)) {
       cancelHover();axisDrag={id:event.pointerId,y:point.y,scale:view.yScale||1};view.interacting=true;
       svg.setPointerCapture(event.pointerId);event.preventDefault();return;
     }
@@ -448,7 +451,7 @@ export function drawMarketChart(container, input, options = {}) {
     if (pointers.size===2) {
       const [a,b]=[...pointers.values()],anchor=clamp(((a.x+b.x)/2-geometry.pad.left)/geometry.plotWidth,0,1);
       pinch={distance:Math.hypot(a.x-b.x,a.y-b.y),count:view.count,index:dates.length-view.offset-view.count+anchor*view.count};drag=null;
-    }else drag={id:event.pointerId,...point,offset:view.offset,moved:false};
+    }else drag={id:event.pointerId,...point,offset:view.offset,moved:false,scrub};
     svg.setPointerCapture(event.pointerId);
   });
   svg.addEventListener('pointermove', event => {
@@ -471,6 +474,10 @@ export function drawMarketChart(container, input, options = {}) {
     }
     if (drag && drag.id===event.pointerId) {
       if (Math.abs(drag.x-point.x)>4&&Math.abs(drag.x-point.x)>Math.abs(drag.y-point.y)*1.2) drag.moved=true;
+      if(drag.scrub&&drag.moved){
+        const selected=pointAtPointer(event);
+        if(selected){view.pinned=selected.date;show(selected.date,selected.pointerY);}return;
+      }
       if (drag.moved) { pan(drag.offset+(point.x-drag.x)/(geometry.plotWidth/view.count));return; }
       // A vertical gesture is not a tap even when it cannot pan the time axis.
       if(Math.hypot(drag.x-point.x,drag.y-point.y)>6)drag.cancelTap=true;
