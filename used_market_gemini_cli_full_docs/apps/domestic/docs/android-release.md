@@ -2,9 +2,18 @@
 
 작성일: 2026-11-12 (Asia/Seoul). 앱 생성·서명 AAB 업로드·필수 스토어 설정·내부 테스트 배포·**한국 프로덕션 심사 제출**을 완료했다. **정식 공개 출시와 구분한다.** 아래 빌드 절차와 초안에는 최초 준비 당시의 기록도 포함한다.
 
-## 휴대폰 직접 설치용 APK 정정 (2026-11-14)
+## 현재 직접 설치판 0.1.1 — 최신 main 통합·운영 반영 완료 (2026-11-14)
 
-- GitHub에서 직접 설치할 파일은 [used-pick-0.1.0-direct.apk](https://github.com/tndud2505-ops/Used_Market_Research/releases/download/android-v0.1.0/used-pick-0.1.0-direct.apk)다. 기존 `android-v0.1.0` 릴리스를 재사용한다. 11월13일 전달한 `used-pick-0.1.0-play.apk`는 Play 설치 경로 검사로 직접 설치 시 라이선스 오류가 발생하므로 직접 설치용으로 사용하지 않는다. 릴리스 본문과 기존 자산 라벨도 정정했다.
+- 전달 링크는 [used-pick-0.1.1-direct.apk](https://github.com/tndud2505-ops/Used_Market_Research/releases/download/android-v0.1.1/used-pick-0.1.1-direct.apk)다. 버전 `0.1.1(2)`, 패키지 `com.usedpick.app`, 1,074,966바이트, SHA-256 `852e514f8a0a76f8facc63ca280df84d0ffc4e7d6ea307b0d6b60e7a98f6c051`. 실제 공개 다운로드의 해시가 새 서명 원본과 일치했다.
+- 원격 main의 기존 두 커밋과 작업 중인 앱 소스를 통합한 뒤, 누락된 당근 수집 의존 모듈까지 포함한 main `f95c55d381bb246011528d8e112472918f1d8aca`에서 **새로 컴파일**했다. GitHub 태그 `android-v0.1.1`도 이 빌드 커밋을 가리킨다. 이후의 출시 기록·화면 캡처 커밋은 Android 코드·버전·빌드 자산을 바꾸지 않는다. 0.1.0 파일을 이름만 바꾸거나 재서명해 새 버전이라고 하지 않았다.
+- 기존 직접 설치판과 같은 보호된 서명 정체성을 사용해 API36에서 `adb install -r` 업데이트를 통과했다. Play 서명본은 서명이 달라 직접 설치판으로 덮어쓸 수 없으므로 그 경우 기존 앱을 삭제해야 한다. Play용 지문을 보존하면서 운영 관계 파일에 직접 설치 인증서를 추가했고, 실제 앱의 최신 검색 화면·문의 이동/복귀·콜드 재실행에서 주소창이 없었다. 라이선스/치명적 예외 로그0을 확인했다.
+- Google DAL API는 직접 설치 인증서에 대해 3600초 음성 캐시 결과를 반환했고, 기존 Play 인증서는 `linked:true`였다. 게시된 두 인증서·실제 Chrome TWA 화면과 이 API 관찰을 구분한다. 검사 우회 플래그·설치 주체 위장을 사용하지 않았으며, 실제 사용자 휴대폰·Play 스토어 설치를 검증했다고 주장하지 않는다.
+- 운영 웹에는 독립 시세 창·출처별 컴퓨터 시세·최신 차트 배치와 PM9A3 M.2 오분류 교정·Z890 정확 모델 연결·페이지별 캐릭터를 반영했다. 최종 Worker463 `223f1e8c-b615-449e-92fe-435b65404ea1` 100%와 실제 공개 파일/PC·모바일 동작을 확인했다. 새 AAB의 Play 업로드·심사 제출은 이번 직접 설치 배포 범위에 포함하지 않았다.
+- 빌드·서명·기기·GitHub 검증 영수증은 무시되는 `mobile/artifacts/0.1.1/`에 보존한다. 원래 0.1.0 빌드 영수증은 `mobile/artifacts/0.1.0/build-receipt-original.json`으로 보존했고, Android 도구 버전/의존성은 바꾸지 않았다. 자세한 운영·분류 수리 근거는 [11월14일 이력](daily_history/2026-11-14.md)을 따른다.
+
+## 0.1.0 최초 직접 설치 대응 이력 (2026-11-14)
+
+- 최초 대응 파일은 [used-pick-0.1.0-direct.apk](https://github.com/tndud2505-ops/Used_Market_Research/releases/download/android-v0.1.0/used-pick-0.1.0-direct.apk)였다. 현재 전달은 위0.1.1을 사용한다. 11월13일 전달한 `used-pick-0.1.0-play.apk`는 Play 설치 경로 검사로 직접 설치 시 라이선스 오류가 발생하므로 직접 설치용으로 사용하지 않는다. 릴리스 본문과 기존 자산 라벨도 정정했다.
 - 검증된 기존 무서명 빌드의 418개 ZIP 항목을 그대로 유지하고 보호된 기존 업로드 키로 별도 서명했다. 원본·Play 추출 APK를 수정하거나 Play 보호 설정·설치 주체를 변경하지 않았다. 패키지 `com.usedpick.app`, 버전 `0.1.0(1)`, 1,074,966바이트, APK SHA-256 `d0eb7377035f116bb4f394e3151be354f48c0463aa56c906c2f60cda80f6a919`다.
 - 직접 설치 인증서는 기존 업로드 인증서 `C1:33:1F:65:FA:A5:5A:A8:E3:6C:BD:B9:19:9D:A3:6C:11:8C:B1:9F:55:82:88:C8:11:12:37:37:95:29:FB:1D`이며 Play 앱 서명 인증서와 다르다. **기존 Play 서명 USED PICK을 삭제한 뒤 설치**해야 한다. 운영 Digital Asset Links에는 Play 인증서만 있으므로 직접 설치판은 주소창이 있는 Chrome Custom Tab으로 열린다. 이 작업에서 도메인 관계 파일이나 운영 웹을 배포하지 않았다.
 - API36의 기존 격리 AVD에 직접 설치한 뒤 실제 매물 화면·82초 실행 유지·강제 종료 후 콜드 재실행을 확인했다. 로그에 기존 LicenseClient/Pairip/라이선스 오류·치명적 예외가 없었으며, GitHub 공개 URL에서 다시 내려받은 해시가 서명 원본과 일치했다. 실제 사용자 휴대폰 검증이나 Play 스토어 설치 검증을 뜻하지 않는다. 증거는 무시되는 `mobile/artifacts/0.1.0/direct-qa-20261114/receipt.json`에 있다.
