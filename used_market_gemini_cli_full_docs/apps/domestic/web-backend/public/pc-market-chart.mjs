@@ -146,6 +146,7 @@ export function drawMarketChart(container, input, options = {}) {
     container.append(node('p', 'market-chart-empty', state === 'loading' ? '불러오는 중' : state === 'error' ? '가격 조회 실패'
       : state === 'insufficient' ? '대표가격 표본 부족'
         : state === 'hidden' ? '가격선을 모두 숨겼습니다 · 사이트를 다시 선택하면 표시됩니다' : '가격 자료 없음'));
+    if(externalReadout)onReadout?.({date:null,pinned:false});
     return;
   }
   const measuredDates=[...new Set(series.flatMap(line=>line.points.filter(observed).map(point=>point.date)))].sort();
@@ -283,9 +284,10 @@ export function drawMarketChart(container, input, options = {}) {
     geometry = buildMarketView(visible(), dates, view.count, view.offset, width, height, {averagePeriod,showSamples,axisLeft,pricePadding,minimumPricePadding,priceScale:view.yScale||1});
     svg.dataset.visibleCount = String(view.count); svg.dataset.offset = String(view.offset);
     if(geometry){svg.dataset.scaleMin=String(geometry.scaleMin);svg.dataset.scaleMax=String(geometry.scaleMax);}
-    plot.replaceChildren(); clearCursor();
+    // Repaint invalidates cached rows without publishing a selection reset.
+    plot.replaceChildren(); cancelHover(); shownDate=null;
     // Hiding every line is a display choice, not missing market data.
-    if (!geometry) { plot.append(svgNode('text', { x:16, y:height/2 }, visible().length ? '표시할 가격 없음' : '가격선을 모두 숨겼습니다 · 위 항목을 누르면 다시 표시됩니다')); return; }
+    if (!geometry) { clearCursor(); plot.append(svgNode('text', { x:16, y:height/2 }, visible().length ? '표시할 가격 없음' : '가격선을 모두 숨겼습니다 · 위 항목을 누르면 다시 표시됩니다')); return; }
     const { pad, compactAxis, plotWidth, plotHeight, priceTicks, dateTicks, shownSet, x, y } = geometry;
     const from=geometry.shownDates[0],to=geometry.shownDates.at(-1),changed=view.from!==from||view.to!==to;
     view.from=from;view.to=to;view.endDate=to;
@@ -347,7 +349,7 @@ export function drawMarketChart(container, input, options = {}) {
       if (averages.some(point=>valid(point.value))) plot.append(svgNode('path',{d:marketLinePath(averages,x,y),fill:'none',stroke:line.color,'stroke-width':2.6,opacity:.5,'stroke-dasharray':'9 4','pointer-events':'none',class:'market-average-line','data-average-series':line.id}));
     }
     if (showGapKey && hasVisibleGap) plot.append(svgNode('text', {x:edge, y:14, class:'market-gap-key','text-anchor':'end'}, '점선: 기록 없는 구간'));
-    if (view.pinned) show(view.pinned);
+    if (view.pinned) show(view.pinned); else clearCursor();
   }
   const paint=()=>{cancelAnimationFrame(frame);frame=requestAnimationFrame(paintNow);};
   const redraw = () => { cancelAnimationFrame(frame); frame = requestAnimationFrame(() => {

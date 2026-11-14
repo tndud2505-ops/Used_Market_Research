@@ -39,7 +39,7 @@
     <link rel="apple-touch-icon" href="/icons/apple-touch-180.png" />
     <link rel="stylesheet" href="/pwa.css?v=1" />
     <script type="module" src="/pwa.js?v=1"></script>
-    <link rel="stylesheet" href="/analysis-window.css?v=mobile-chart-v1" />
+    <link rel="stylesheet" href="/analysis-window.css?v=compact-chart-v2" />
   </head>
 <body class="pc-tools ui-a" data-page="analysis" data-ui-release="search-first-v2">
   <a class="skip-link" href="#main">본문으로 건너뛰기</a>
@@ -70,23 +70,15 @@
         <button type="button" data-action="price-kind" data-kind="active" aria-pressed="true">판매중</button>
         <button type="button" data-action="price-kind" data-kind="sold" aria-pressed="false">판매완료</button>
       </div>
-    </div>
-    <div class="analysis-price-focus" aria-live="polite" aria-atomic="true">
-      <p id="analysis-focus-source">가격 확인 중</p>
-      <strong id="analysis-focus-price">—</strong>
-      <p id="analysis-focus-meta"></p>
+      <div id="chart-fx" class="market-chart-fx" hidden><span class="market-currency-toggle" role="group" aria-label="표시 통화" aria-describedby="chart-fx-rate"><button type="button" data-action="display-currency" data-currency="KRW" aria-pressed="true">원</button><button type="button" data-action="display-currency" data-currency="USD" aria-pressed="false">USD</button></span></div>
     </div>
     <div class="analysis-chart-controls">
-      <details id="chart-range-details">
-      <summary><span id="chart-range-label">조회 기간</span><span class="analysis-range-edit">기간 변경</span></summary>
       <form id="chart-range-form" class="analysis-range-form">
         <label for="chart-date-from"><span class="analysis-sr-only">조회 시작일</span><input id="chart-date-from" name="from" type="date" aria-describedby="chart-range-status"></label>
         <span class="analysis-range-separator" aria-hidden="true">~</span>
         <label for="chart-date-to"><span class="analysis-sr-only">조회 종료일</span><input id="chart-date-to" name="to" type="date" aria-describedby="chart-range-status"></label>
         <button type="submit">조회</button>
       </form>
-      </details>
-      <div id="chart-fx" class="market-chart-fx" hidden><span id="chart-fx-rate"></span><span class="market-currency-toggle" role="group" aria-label="표시 통화"><button type="button" data-action="display-currency" data-currency="KRW" aria-pressed="true">원</button><button type="button" data-action="display-currency" data-currency="USD" aria-pressed="false">USD</button></span></div>
       <p id="chart-range-status" role="status" hidden></p>
       <span id="chart-history-status" role="status" aria-live="polite"></span>
     </div>
@@ -100,8 +92,9 @@
         </div>
       </div>
       <aside id="analysis-price-rail" class="market-price-rail" aria-label="사이트별 가격">
-        <header><div><h2>사이트별 가격</h2><span id="analysis-readout-title">최근 관측</span></div><button type="button" data-action="compare-sources" aria-pressed="false">비교</button><button id="analysis-readout-reset" type="button" data-action="clear-chart-date" aria-label="날짜 선택 해제" hidden>해제</button></header>
+        <header><h2 id="analysis-readout-title">최근 가격</h2><div class="analysis-readout-actions"><button id="analysis-readout-reset" type="button" data-action="clear-chart-date" aria-label="최근 관측 가격으로 돌아가기" hidden>최근</button><button type="button" data-action="compare-sources" role="switch" aria-checked="false">비교<span aria-hidden="true"></span></button></div></header>
         <div id="analysis-prices" class="market-latest-prices" aria-label="최근 대표가격과 참고값"></div>
+        <details id="chart-fx-note" hidden><summary>환율 기준</summary><span id="chart-fx-rate"></span></details>
       </aside>
     </section>
     <dialog id="analysis-model-dialog" class="up-dialog up-picker-dialog" aria-labelledby="analysis-picker-title">
@@ -147,6 +140,6 @@
     <nav class="tools-mobile-pages" aria-label="모바일 주 메뉴"><a href="/">검색</a><a href="/computer-builder.html">컴퓨터 시세</a></nav>
     <nav class="tools-mobile-policy" aria-label="이용 및 정책"><a href="/changelog.html">패치 내역</a><a href="/support.html">후원</a><a href="/contact.html">문의</a><a href="/guide.html">이용 안내</a><a href="/privacy.html">개인정보처리방침</a><a href="/terms.html">이용약관</a></nav>
   </dialog>
-  <script type="module" src="/pc-tools.js?v=mobile-chart-v1"></script>
+  <script type="module" src="/pc-tools.js?v=compact-chart-v2"></script>
 </body>
 </html>

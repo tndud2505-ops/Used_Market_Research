@@ -211,7 +211,7 @@ function setupAnalysis(bySource) {
   t.context.priceDateRange = (from, to) => core.priceDateRange(from, to, range.latest);
   for (const id of ['chart-sources', 'chart-coverage', 'analysis-prices', 'analysis-readout-title',
     'analysis-readout-reset', 'analysis-price-rail', 'chart-sold-note', 'analysis-workspace',
-    'analysis-model-select', 'analysis-focus-source', 'analysis-focus-price', 'analysis-focus-meta', 'price-chart']) t.nodes.set(`#${id}`, new Node());
+    'analysis-model-select', 'price-chart']) t.nodes.set(`#${id}`, new Node());
   const rail = t.nodes.get('#analysis-price-rail');
   rail.append(t.nodes.get('#analysis-prices'));
   t.checkbox = id => rail.querySelectorAll('*').find(node => node.dataset.priceSource === id);
@@ -221,7 +221,7 @@ function setupAnalysis(bySource) {
     addEventListener: (type, listener) => { if (type === 'change') t.change = listener; },
   });
   // Capture only the chart boundary; renderAnalysis and its readout callback stay real.
-  t.context.drawChart = (container, series, options) => { t.chart = { container, series, options }; };
+  t.context.drawChart = (container, series, options) => { t.chart = { container, series, options }; options.onReadout?.(); };
   vm.runInContext(script.slice(script.indexOf("document.addEventListener('change', event => {"),
     script.indexOf('function resetToolFilters()')), t.context);
   return t;
@@ -251,8 +251,6 @@ test('a pinned-date source checkbox survives hiding its line and can restore it'
     assert.equal(restored.checked, checked);
     assert.equal(t.state.priceSources.has('joonggonara'), checked);
     assert.equal(t.chart.series.some(line => line.id === 'joonggonara:active'), checked);
-    assert.equal(t.nodes.get('#analysis-focus-price').textContent,checked?'45,000원':'43,000원',
-      'the headline must follow a selected source, never a line the user just hid');
     const readout = t.chart.options.readoutInput.find(line => line.id === 'joonggonara:active');
     assert.ok(readout, 'hidden sources must remain available to the chart readout');
     assert.equal(readout.points.find(point => point.date === pinned.date)?.value, 45000);

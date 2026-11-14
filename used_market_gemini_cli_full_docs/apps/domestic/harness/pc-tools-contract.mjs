@@ -431,12 +431,13 @@ try{
   cornerSvg.emit('pointerdown',{clientX:750});cornerSvg.emit('pointerup',{clientX:750});
   assert.equal(popup.hidden,true,'second click releases the pinned popup');
   move(200);cornerSvg.emit('keydown',{key:'Escape'});assert.equal(popup.hidden,true);
-  const unified=new ChartNode('div');let selected;
-  drawMarketChart(unified,[line],{identity:'unified',showLegend:false,showNote:false,axisLeft:true,
-    wheelZoom:true,externalReadout:true,connectGaps:false,onReadout:value=>{selected=value;}});
-  const unifiedStage=unified.children[0],unifiedSvg=unifiedStage.children[0];
+  const unified=new ChartNode('div'),unifiedReadouts=[];let selected;
+  const unifiedOptions={identity:'unified',showLegend:false,showNote:false,axisLeft:true,
+    wheelZoom:true,externalReadout:true,connectGaps:false,onReadout:value=>{selected=value;unifiedReadouts.push(value);}};
+  drawMarketChart(unified,[line],unifiedOptions);
+  let unifiedStage=unified.children[0],unifiedSvg=unifiedStage.children[0];
   assert.equal(unifiedStage.children.length,1,'external readout does not create a second tooltip');
-  assert.equal(selected.date,null,'the rail starts in latest-observation mode');
+  assert.deepEqual(unifiedReadouts,[{date:null,pinned:false}],'the rail starts with one latest-observation readout');
   const fullCount=Number(unifiedSvg.dataset.visibleCount),fullScale=Number(unifiedSvg.dataset.scaleMax)-Number(unifiedSvg.dataset.scaleMin);
   assert.equal(fullCount,timeline.length);
   unifiedSvg.emit('wheel',{deltaX:0,deltaY:-160});
@@ -449,9 +450,16 @@ try{
   unifiedSvg.emit('pointerdown',{clientX:500});unifiedSvg.emit('pointerup',{clientX:500});
   assert.equal(selected.pinned,true,'pinning an already-hovered date updates the rail');
   unifiedStage.emit('pointerleave');assert.equal(selected.pinned,true);
+  const pinnedReadout=selected;unifiedReadouts.length=0;
+  unifiedStage.resize.callback();[...frames.values()].forEach(fn=>fn());frames.clear();
+  drawMarketChart(unified,[line],unifiedOptions);
+  unifiedStage=unified.children[0];unifiedSvg=unifiedStage.children[0];
   unified.emit('chart-clear');assert.equal(selected.date,null,'release restores latest observations');
   unifiedSvg.emit('dblclick');[...frames.values()].forEach(fn=>fn());frames.clear();
   assert.equal(Number(unifiedSvg.dataset.visibleCount),fullCount);
+  drawMarketChart(unified,[{...line,points:[]}],unifiedOptions);
+  assert.deepEqual(unifiedReadouts,[pinnedReadout,pinnedReadout,{date:null,pinned:false},{date:null,pinned:false},{date:null,pinned:false}],
+    'resize and replacement retain the pinned readout directly; clear, reset and empty render each restore latest once');
   const missingDateChart=new ChartNode('div');let gapSelection;
   const missingDatePoints=[{date:'2026-10-01',value:100,sampleCount:5},{date:'2026-10-02',value:null,sampleCount:0},
     {date:'2026-10-03',value:120,sampleCount:6},{date:'2026-10-04',value:130,sampleCount:7},{date:'2026-10-05',value:125,sampleCount:5}];

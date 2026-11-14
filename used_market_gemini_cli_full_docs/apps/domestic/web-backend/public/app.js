@@ -4,7 +4,7 @@ import { readJsonResponse } from "./read-json.mjs?v=lookup-recovery-v1";
 import { createPriceStore } from "./pc-tools-data.mjs?v=domestic-danawa-v1";
 import { listingPriceWarning } from "./listing-price-warning.mjs?v=iqr-disclosure-v1";
 import { PUBLIC_SALE_COMPOSITIONS, listingCompositionLabel } from './listing-composition.mjs?v=sale-composition-v2';
-import { priceWindowUrl } from './price-window.mjs?v=mobile-chart-v1';
+import { priceWindowUrl } from './price-window.mjs?v=compact-chart-v2';
 
 const PRODUCT_QUERY_KEYS = new Set([
   "manufacturer", "model", "gpu_model", "board_brand", "usage", "configuration", "socket", "chipset", "form_interface", "capacity", "purpose", "rated_wattage",

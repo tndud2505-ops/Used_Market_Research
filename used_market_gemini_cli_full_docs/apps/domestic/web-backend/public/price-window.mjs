@@ -14,11 +14,12 @@ export function priceWindowUrl(modelId, { source = '', manufacturer = '', kind =
 let surface, frame, opener;
 const marker = 'usedPickPriceSurface';
 function closeSurface() {
-  if (!surface?.open) return;
-  surface.close();
-  frame.remove(); frame = null;
+  const wasOpen=surface?.open;
+  if (wasOpen) surface.close();
+  frame?.remove(); frame = null;
+  opener?.removeAttribute('aria-busy');
   document.body.classList.remove('has-price-surface');
-  opener?.focus({ preventScroll: true });
+  if(wasOpen)opener?.focus({ preventScroll: true });
 }
 function dismissSurface() {
   if (history.state?.[marker]) history.back(); else closeSurface();
@@ -26,7 +27,7 @@ function dismissSurface() {
 function openSurface(url, link) {
   if (!surface) {
     const css = document.createElement('link');
-    css.rel = 'stylesheet'; css.href = '/price-surface.css?v=mobile-chart-v1'; document.head.append(css);
+    css.rel = 'stylesheet'; css.href = '/price-surface.css?v=compact-chart-v2'; document.head.append(css);
     surface = document.createElement('dialog'); surface.className = 'price-surface';
     surface.setAttribute('aria-label', '시세');
     const close = document.createElement('button'); close.className = 'price-surface-close';
@@ -40,15 +41,19 @@ function openSurface(url, link) {
       else if (!surface.open) { const state={...history.state}; delete state[marker]; history.replaceState(state,'',location.href); }
     });
     window.addEventListener('message', event => {
-      if (event.origin === location.origin && event.source === frame?.contentWindow && event.data?.type === 'used-pick:close-price') dismissSurface();
+      if(event.origin!==location.origin||!frame||event.source!==frame.contentWindow)return;
+      if(event.data?.type==='used-pick:close-price')dismissSurface();
+      if(event.data?.type==='used-pick:price-ready'&&!surface.open){
+        if(!opener?.isConnected){closeSurface();return;}
+        opener.removeAttribute('aria-busy');
+        history.pushState({ ...history.state, [marker]: true }, '', location.href);
+        document.body.classList.add('has-price-surface'); surface.showModal();
+      }
     });
   }
-  opener = link; url.searchParams.set('embedded', '1');
+  opener?.removeAttribute('aria-busy');
+  opener = link; opener.setAttribute('aria-busy','true'); url.searchParams.set('embedded', '1');
   frame?.remove(); frame = document.createElement('iframe'); frame.title = '모델별 시세'; frame.src = url.href; surface.append(frame);
-  if (!surface.open) {
-    history.pushState({ ...history.state, [marker]: true }, '', location.href);
-    document.body.classList.add('has-price-surface'); surface.showModal();
-  }
 }
 document.addEventListener('click', event => {
   const link = event.target.closest?.('a[data-price-window]');
