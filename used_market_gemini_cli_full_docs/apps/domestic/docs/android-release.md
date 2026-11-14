@@ -2,7 +2,15 @@
 
 작성일: 2026-11-12 (Asia/Seoul). 앱 생성·서명 AAB 업로드·필수 스토어 설정·내부 테스트 배포·**한국 프로덕션 심사 제출**을 완료했다. **정식 공개 출시와 구분한다.** 아래 빌드 절차와 초안에는 최초 준비 당시의 기록도 포함한다.
 
-## 현재 직접 설치판 0.1.1 — 최신 main 통합·운영 반영 완료 (2026-11-14)
+## 현재 직접 설치판0.1.2 — 모바일 시세·시작 화면 정리 (2026-11-14)
+
+- [직접 설치 APK0.1.2 받기](https://github.com/tndud2505-ops/Used_Market_Research/releases/download/android-v0.1.2/used-pick-0.1.2-direct.apk). 버전 `0.1.2(3)`, 패키지 `com.usedpick.app`,923,190바이트, SHA256 `0c0f7a4cd8734e0af49795353c73f670fddb7b854580bc824e5004d404930e1e`. 공개 GitHub 자산을 다시 내려받아 서명 빌드와 동일한 bytes/hash를 확인했다. 비초안·정식 Releases `android-v0.1.2`는 빌드 소스 main `5beffd9d35f89212230b789871949da9b653c40c`를 가리킨다.
+- 기본 한 사이트/선택형 비교, 오른쪽 가격 축, 정확한 관측 기준·날짜 터치 읽기와 세로 페이지 스크롤, 접힌 날짜 조회를 적용했다. 즐겨찾기 버튼을 제거했고 시세는 매물 위에서 열려 Android 뒤로 가기/닫기로 원래 위치에 돌아온다. 운영467 `6fc736b6-c673-419f-b83d-6daf93824e00`100%를 확인했다. 수치 계산·분류·통계·가격 게시 데이터는 변경하지 않았다.
+- Bubblewrap custom splash와 이미지5개를 생성 단계에서 제거했다. API31+ 시스템 준비 화면에는 투명 drawable/흰 배경을 적용한다. 런처 아이콘·원래 인증서/패키지/도메인은 그대로다. 초기 흰 준비 화면까지 없애는 보장은 하지 않는다. API24–30는 기본 흰 theme을 쓰며 이번 실제 실행 검증은 API36이다.
+- 같은 보호 서명으로 새로 빌드해 API36 격리 AVD에서 기존 직접 설치판0.1.1 위 업데이트를 확인했다. 콜드 실행·주소창 없는 실제 운영 검색/새 시세·Android hardware Back 후 URL/목록/스크롤 유지, 최종 평균/중앙값 기준 표시를 확인했다. USED PICK FATAL/ANR·LicenseClient/Pairip 로그0. 초기 에뮬레이터 부팅의 System UI ANR는 Wait로 회복한 별도 OS 사건으로 기록했다. 실물 휴대폰과 Play 설치/제출 검증을 대신하지 않는다.
+- 전체 `scripts/verify.ps1` 통과 및 변경한 기존 UI28/미리보기10/차트 검사를 확인했다. 빌드·서명·기기·GitHub 다운로드 영수증은 ignored `mobile/artifacts/0.1.2`, 웹 배포/복구 증거는 `tmp/mobile-chart-20261114`와 [11월14일 이력](daily_history/2026-11-14.md)을 따른다. Play 신규 AAB 업로드·심사 제출은 하지 않았다. 아래0.1.1은 이전 배포 이력이다.
+
+## 이전 직접 설치판 0.1.1 — 최신 main 통합·운영 반영 완료 (2026-11-14)
 
 - 전달 링크는 [used-pick-0.1.1-direct.apk](https://github.com/tndud2505-ops/Used_Market_Research/releases/download/android-v0.1.1/used-pick-0.1.1-direct.apk)다. 버전 `0.1.1(2)`, 패키지 `com.usedpick.app`, 1,074,966바이트, SHA-256 `852e514f8a0a76f8facc63ca280df84d0ffc4e7d6ea307b0d6b60e7a98f6c051`. 실제 공개 다운로드의 해시가 새 서명 원본과 일치했다.
 - 원격 main의 기존 두 커밋과 작업 중인 앱 소스를 통합한 뒤, 누락된 당근 수집 의존 모듈까지 포함한 main `f95c55d381bb246011528d8e112472918f1d8aca`에서 **새로 컴파일**했다. GitHub 태그 `android-v0.1.1`도 이 빌드 커밋을 가리킨다. 이후의 출시 기록·화면 캡처 커밋은 Android 코드·버전·빌드 자산을 바꾸지 않는다. 0.1.0 파일을 이름만 바꾸거나 재서명해 새 버전이라고 하지 않았다.
