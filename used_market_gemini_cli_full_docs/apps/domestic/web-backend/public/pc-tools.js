@@ -1,13 +1,13 @@
 import { SERIES, idOf, nameOf, naturalCompare, money, metricValue, soldMeanValue, metricPresentation, listedPriceRange, statsUnavailable, priceRecordIssue, analysisSelectionUrl, groupProducts, scopedStats, sourceStats, priceDateRange, shiftDate, modelPageItems, buildTotals, compactBuild, compatibility, validateBuild, dailySeries, percentChange, buildAnalysisSeries } from './pc-tools-core.mjs?v=shared-price-v2';
 import { readJson, createPriceStore } from './pc-tools-data.mjs?v=picker-fast-v3';
 import { drawMarketChart as drawChart } from './pc-market-chart.mjs?v=compact-chart-v2';
-import { createAdfitSlots } from './adfit.js?v=adfit-all-v3';
+import { createPromotionSlots } from './promotions/rotation.js?v=house-rotation-v1';
 import { toolBrand, toolFilterSchema, toolFacetValues, toolFacetLabel, filterToolProducts, visibleSelection, toolScopeNote } from './pc-tools-catalog.mjs?v=parts-ux-v4';
 import { priceWindowUrl } from './price-window.mjs?v=compact-chart-v2';
 
 const builder = document.body.dataset.page === 'builder';
 const $ = selector => document.querySelector(selector);
-const adfit = createAdfitSlots(document.querySelectorAll('.adfit-banner'));
+const promotions = createPromotionSlots(document.querySelectorAll('.adfit-banner'));
 const STORAGE_KEY = 'used-pick:pc-build:v1';
 const PAGE_SIZE = 12;
 const state = {
@@ -1211,7 +1211,7 @@ async function start() {
     }
     if (state.selectedId) revealModel(state.selectedId);
     render(); refreshPrices();
-    adfit.setEligible(true);
+    promotions.setEligible(true);
   } catch (error) {
     status(`${error.message} `, true);
     const button = el('button', '', '다시 시도'); button.type = 'button'; button.addEventListener('click', start); $('#tools-status').append(button);

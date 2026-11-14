@@ -8,8 +8,8 @@
   <link rel="icon" href="/assets/mark.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/styles.css?v=pc-tools-v1"><link rel="stylesheet" href="/pc-tools.css?v=parts-ux-v6"><link rel="stylesheet" href="/ui-concept-a.css?v=aligned-shell-v1">
   <link rel="stylesheet" href="/builder-toolbar.css?v=price-clarity-v1">
-  <link rel="stylesheet" href="/adfit-layout.css?v=adfit-all-v3">
-    <link rel="stylesheet" href="/promotions/train-gallery/banner.css?v=motion-v1">
+  <link rel="stylesheet" href="/adfit-layout.css?v=house-rotation-v1">
+    <link rel="stylesheet" href="/promotions/train-gallery/banner.css?v=house-rotation-v1">
   <link rel="stylesheet" href="/site-header-links.css?v=1">
   <link rel="stylesheet" href="/mobile-tools.css?v=sold-joongna-v1">
   <link rel="stylesheet" href="/mobile-model-picker.css?v=tab-picker-v1">
@@ -76,21 +76,19 @@
       <nav id="model-pages" class="tools-pages" aria-label="모델 페이지"></nav>
     </dialog>
   </main>
-    <aside class="adfit-banner" id="adfit-rail" data-placement="rail" aria-label="카카오 AdFit 광고" hidden>
-      <template data-format="desktop"><ins class="kakao_ad_area" style="display:none;" data-ad-unit="DAN-gG0WEoycq7Nup5kT" data-ad-width="160" data-ad-height="600"></ins></template>
-    </aside>
-    <aside class="adfit-banner train-gallery-promotion" id="adfit-banner" data-placement="bottom" data-provider="house" aria-label="Train Gallery 자사 앱 광고" hidden>
-      <a class="train-gallery-promotion__link" href="https://play.google.com/store/apps/details?id=com.trainingapp.traingallery" target="_blank" rel="sponsored noopener noreferrer" aria-label="Train Gallery — 운동 달력과 브이로그 편집. Google Play에서 보기 (새 창)">
-        <img class="train-gallery-mobile-art" src="/promotions/train-gallery/slim.webp" width="2172" height="724" alt="트레인갤러리 — 운동 달력·브이로그 편집" loading="lazy" decoding="async" />
-        <div class="train-gallery-desktop-art" aria-hidden="true">
-          <video class="train-gallery-moa" muted playsinline preload="none" poster="/promotions/train-gallery/moa-poster.png" data-motion-src="/promotions/train-gallery/moa-lift.mp4" tabindex="-1"></video>
-          <div class="train-gallery-copy"><strong>트레인갤러리</strong><span>운동을 기록하고 영상으로 남겨요.</span></div>
-          <figure class="train-gallery-calendar"><figcaption>운동 달력</figcaption><div class="train-gallery-calendar-window"><img src="/promotions/train-gallery/calendar.webp" alt="" width="1080" height="2400" loading="lazy" decoding="async" /></div></figure>
-          <figure class="train-gallery-editor"><figcaption>브이로그 편집</figcaption><div class="train-gallery-editor-window"><video muted playsinline preload="none" poster="/promotions/train-gallery/exercise-poster.jpg" data-src="/promotions/train-gallery/exercise.mp4" tabindex="-1"></video><div class="train-gallery-timeline-window"><img src="/promotions/train-gallery/vlog.webp" alt="" width="1080" height="2400" loading="lazy" decoding="async" /></div></div></figure>
-        </div>
-        <span class="train-gallery-promotion__caption"><span>자사 앱 광고</span><span>Google Play에서 보기 ↗</span></span>
-      </a>
-      <button class="train-gallery-motion-toggle" type="button" data-motion-toggle aria-label="배너 동작 재생" hidden>▶</button>
+    <aside class="adfit-banner house-promo" id="adfit-rail" data-placement="rail" data-provider="house" aria-label="자사 서비스 광고" hidden></aside>
+    <aside class="adfit-banner house-promo" id="adfit-banner" data-placement="bottom" data-provider="house" aria-label="자사 서비스 광고" hidden>
+      <div class="train-gallery-promotion" data-house-motion="train-gallery" hidden>
+        <a class="train-gallery-promotion__link" href="https://play.google.com/store/apps/details?id=com.trainingapp.traingallery" target="_blank" rel="sponsored noopener noreferrer" aria-label="트레인갤러리 — 운동을 기록하고 영상으로 남겨요. Google Play에서 보기 (새 창)">
+          <div class="train-gallery-desktop-art" aria-hidden="true">
+            <video class="train-gallery-moa" muted playsinline preload="none" poster="/promotions/train-gallery/moa-poster.png" data-motion-src="/promotions/train-gallery/moa-lift.mp4" tabindex="-1"></video>
+            <div class="train-gallery-copy"><strong>트레인갤러리</strong><span>운동을 기록하고 영상으로 남겨요.</span><em>Google Play에서 보기 →</em></div>
+            <figure class="train-gallery-calendar"><figcaption>운동 달력</figcaption><div class="train-gallery-calendar-window"><img src="/promotions/train-gallery/calendar.webp" alt="" width="1080" height="2400" loading="lazy" decoding="async" /></div></figure>
+            <figure class="train-gallery-editor"><figcaption>브이로그 편집</figcaption><div class="train-gallery-editor-window"><video muted playsinline preload="none" poster="/promotions/train-gallery/exercise-poster.jpg" data-src="/promotions/train-gallery/exercise.mp4" tabindex="-1"></video><div class="train-gallery-timeline-window"><img src="/promotions/train-gallery/vlog.webp" alt="" width="1080" height="2400" loading="lazy" decoding="async" /></div></div></figure>
+          </div>
+        </a>
+        <button class="train-gallery-motion-toggle" type="button" data-motion-toggle aria-label="배너 동작 재생" hidden>▶</button>
+      </div>
     </aside>
   </div>
   <dialog id="tools-menu-dialog" class="tools-mobile-sheet" aria-labelledby="tools-menu-title">
@@ -99,6 +97,6 @@
     <nav class="tools-mobile-pages" aria-label="모바일 주 메뉴"><a href="/">매물 찾기</a><a href="/computer-builder.html">컴퓨터 시세</a></nav>
     <nav class="tools-mobile-policy" aria-label="이용 및 정책"><a href="/changelog.html">패치 내역</a><a href="/support.html">후원</a><a href="/contact.html">문의</a><a href="/guide.html">이용 안내</a><a href="/privacy.html">개인정보처리방침</a><a href="/terms.html">이용약관</a></nav>
   </dialog>
-  <script type="module" src="/pc-tools.js?v=compact-chart-v2"></script>
+  <script type="module" src="/pc-tools.js?v=house-rotation-v1"></script>
 </body>
 </html>

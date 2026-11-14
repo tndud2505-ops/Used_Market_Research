@@ -82,7 +82,7 @@ test('builder toolbar keeps actions while advertising follows the content', () =
   assert.ok(toolbar);
   assert.equal([...html.matchAll(/id="adfit-banner"/g)].length, 1);
   for (const name of ['save-build', 'print-build']) assert.ok(toolbar.includes(`data-action="${name}"`));
-  assert.match(html, /data-placement="bottom" data-provider="house" aria-label="Train Gallery 자사 앱 광고" hidden/);
+  assert.match(html, /data-placement="bottom" data-provider="house" aria-label="자사 서비스 광고" hidden/);
   assert.doesNotMatch(script, /cell\.append\(summary\)|const summary = \$\('#build-summary'\)/);
   assert.doesNotMatch(toolbar, /id="(?:build-summary|tools-summary)"/);
   assert.match(script, /const footer = el\('tfoot'\); footer.id = 'tools-summary'/);

@@ -2,8 +2,10 @@
 // null keeps the Play download link hidden; a web PWA can still be installed.
 export const APP_SETTINGS = Object.freeze({
   playStoreUrl: null,
-  paidAds: Object.freeze({ web: true, installed: false }),
 });
+
+const ANDROID_APP_REFERRER = /^android-app:\/\/com\.usedpick\.app(?:\/|$)/u;
+const ANDROID_APP_SESSION_KEY = 'usedPickAndroidApp';
 
 // Presentation hints only. Never use this for auth, API access or price data.
 export function appSurface(browser = globalThis.window, page = globalThis.document) {
@@ -16,8 +18,17 @@ export function appSurface(browser = globalThis.window, page = globalThis.docume
   return 'web';
 }
 
-export function paidWebAdsAllowed() {
-  return APP_SETTINGS.paidAds[appSurface()] === true;
+// True only inside the installed USED PICK Android app (TWA). Chrome provides the
+// app referrer on launch; keep it for later pages in the same app tab. Website
+// house promotions are hidden there because the app has its own AdMob placement.
+export function androidAppShell(page = globalThis.document, storage = globalThis.sessionStorage) {
+  const launchedByApp = ANDROID_APP_REFERRER.test(page?.referrer || '');
+  try {
+    if (launchedByApp) storage?.setItem(ANDROID_APP_SESSION_KEY, '1');
+    return launchedByApp || storage?.getItem(ANDROID_APP_SESSION_KEY) === '1';
+  } catch {
+    return launchedByApp;
+  }
 }
 
 export function verifiedPlayStoreUrl(value = APP_SETTINGS.playStoreUrl) {

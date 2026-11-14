@@ -10,14 +10,27 @@ import {
   selectContextualOffer
 } from "../cloudflare/affiliate-registry.mjs";
 import { COUPANG_COMMISSION_DISCLOSURE, createContextualAffiliate, validContextualOffer } from "../web-backend/public/affiliate.js";
-import { createAdfitSlot } from "../web-backend/public/adfit.js";
+import { createHousePromotion } from "../web-backend/public/promotions/train-gallery/motion.js";
+import { HOUSE_PRODUCTS, destinationFor, productFor } from "../web-backend/public/promotions/rotation.js";
 
 // No DOM/SDK globals are available here: a house ad must not touch either.
 const houseRoot = { dataset: { provider: 'house' }, hidden: false };
-const houseSlot = createAdfitSlot(houseRoot);
+const houseSlot = createHousePromotion(houseRoot);
 assert.equal(houseRoot.hidden, true);
 houseSlot.setEligible(true);
 assert.equal(houseRoot.hidden, false);
+
+// Two slots on one screen never show the same product, and USED PICK never promotes itself.
+for (let index = 0; index < HOUSE_PRODUCTS.length * 2; index++) {
+  assert.notEqual(productFor('rail', index).id, productFor('bottom', index).id, `slot collision at ${index}`);
+}
+assert.equal(HOUSE_PRODUCTS.some(product => /used-?pick/iu.test(`${product.id} ${product.appUrl} ${product.webUrl}`)), false);
+// Android opens the official Play listing; other devices open the public web service when one exists.
+const woori = HOUSE_PRODUCTS.find(product => product.id === 'woori-journey');
+assert.equal(destinationFor(woori, true).url, 'https://play.google.com/store/apps/details?id=app.dulharu.couple');
+assert.equal(destinationFor(woori, false).url, woori.webUrl);
+assert.equal(destinationFor(HOUSE_PRODUCTS.find(product => product.id === 'train-gallery'), false).url,
+  'https://play.google.com/store/apps/details?id=com.trainingapp.traingallery', 'app-only products fall back to Play');
 
 // Motion must respect organic eligibility, reduced motion, and end-of-clip.
 const savedMotionGlobals = Object.fromEntries(['window', 'document', 'IntersectionObserver'].map(key => [key, globalThis[key]]));
@@ -46,7 +59,7 @@ try {
   globalThis.document = { hidden: false, addEventListener() {} };
   globalThis.IntersectionObserver = class { constructor(callback) { observeMotion = callback; } observe() {} };
   const root = { dataset: { provider: 'house' }, hidden: false, querySelector: selector => selector === 'video.train-gallery-moa' ? clip : selector === '.train-gallery-editor video' ? exercise : button };
-  const slot = createAdfitSlot(root);
+  const slot = createHousePromotion(root);
   observeMotion([{ isIntersecting: true, intersectionRatio: 1 }]);
   assert.equal(clip.src, '', 'ineligible content must not load video');
   assert.equal(exercise.src, '', 'ineligible content must not load the companion clip');
@@ -103,23 +116,21 @@ const terms = await readFile(new URL("../web-backend/public/terms.html", import.
 const staticHeaders = await readFile(new URL("../web-backend/public/_headers", import.meta.url), "utf8");
 const migration = await readFile(new URL("../cloudflare/migrations/0004_monetization_metrics.sql", import.meta.url), "utf8");
 const affiliateUi = await readFile(new URL("../web-backend/public/affiliate.js", import.meta.url), "utf8");
-const adfitUi = await readFile(new URL("../web-backend/public/adfit.js", import.meta.url), "utf8");
 const productionConfig = JSON.parse(await readFile(new URL("../cloudflare/wrangler.jsonc", import.meta.url), "utf8"));
 
 const publicSurface = `${html}\n${app}\n${affiliateUi}`;
 assert.doesNotMatch(publicSurface, /ads-partners\.coupang\.com|<iframe|<script[^>]+src=["']https:\/\/[^"']*coupang/u);
 assert.doesNotMatch(publicSurface, /referrerpolicy=["']unsafe-url["']/u);
 assert.doesNotMatch(publicSurface, /생활필수품|검색 결과 없음[\s\S]{0,500}제휴/u);
-assert.match(privacy, /원문 검색어·상품명·전체 URL·영구 사용자 식별자는 광고 측정 정보로 저장하지 않습니다/u);
-assert.match(privacy, /카카오 AdFit/u);
+assert.match(privacy, /원문 검색어·상품명·전체 URL은 광고 요청에 전달하지 않습니다/u);
+assert.match(privacy, /외부 광고 네트워크의 스크립트·쿠키나 노출·클릭 측정을 사용하지 않습니다/u);
+assert.match(privacy, /Google AdMob/u);
 assert.doesNotMatch(privacy, /Adsterra/u);
-assert.match(privacy, /광고 쿠키 설정/u);
-assert.match(privacy, /쿠키·기기·브라우저·접속 정보/u);
-assert.match(terms, /카카오 AdFit/u);
+assert.doesNotMatch(`${privacy}\n${terms}`, /카카오 AdFit/u);
+assert.match(terms, /Google AdMob/u);
 assert.doesNotMatch(terms, /Adsterra/u);
 assert.match(terms, /광고 여부는 검색 결과의 추천순이나 가격 통계에 영향을 주지 않습니다/u);
-assert.match(staticHeaders, /script-src[^\n]+https:\/\/t1\.kakaocdn\.net/u);
-assert.match(staticHeaders, /frame-src[^\n]+https:\/\/display\.ad\.daum\.net[^\n]+https:\/\/serv\.ds\.kakao\.com/u);
+assert.doesNotMatch(staticHeaders, /kakao|daum\.net/u, "the website no longer allows an external ad network");
 assert.equal(productionConfig.assets.html_handling, "none",
   "Cloudflare must preserve the separate analysis home and listing index paths");
 
@@ -130,28 +141,18 @@ for (const page of [html, builderHtml, analysisHtml]) {
   assert.equal([...page.matchAll(/id="adfit-rail"/gu)].length, 1);
   assert.match(page, /id="adfit-banner" data-placement="bottom"[^>]+hidden/u);
   assert.ok(page.indexOf('id="adfit-banner"') > page.indexOf('</main>'), "bottom ad follows page content");
-  assert.match(page, /data-ad-unit="DAN-gG0WEoycq7Nup5kT" data-ad-width="160" data-ad-height="600"/u);
-  assert.doesNotMatch(page, /DAN-gvTVDnxVn9S3leR5/u, "the replaced bottom unit must not request paid impressions");
+  assert.doesNotMatch(page, /DAN-|kakao_ad_area|kakaocdn/u, "both slots are first-party promotions");
+  assert.match(page, /id="adfit-rail" data-placement="rail" data-provider="house"/u);
   assert.match(page, /id="adfit-banner" data-placement="bottom" data-provider="house"/u);
-  assert.equal((page.match(/class="train-gallery-promotion__link"/gu) || []).length, 1, "one replacement promotion per page");
+  assert.equal((page.match(/class="train-gallery-promotion__link"/gu) || []).length, 1, "one Train Gallery motion creative per page");
   assert.match(page, /href="https:\/\/play\.google\.com\/store\/apps\/details\?id=com\.trainingapp\.traingallery"[^>]+rel="sponsored noopener noreferrer"/u);
   assert.doesNotMatch(page, /adsterra|contextual-offer|google-adsense-account/iu);
 }
 assert.doesNotMatch(app + toolsUi, /createAdsterraSlot|createContextualAffiliate/u);
 assert.doesNotMatch(staticHeaders, /bauval/u);
-assert.ok(app.includes('adfit.setEligible(visibleListings.length > 0)'), "search ads require organic results");
-assert.ok(toolsUi.includes('adfit.setEligible(true)'), "tool ads follow successful initialization");
+assert.ok(app.includes('promotions.setEligible(visibleListings.length > 0)'), "search promotions require organic results");
+assert.ok(toolsUi.includes('promotions.setEligible(true)'), "tool promotions follow successful initialization");
 assert.match(analysisHtml, /data-provider="house"/u);
-assert.match(adfitUi, /MutationObserver/u, "AdFit must react when the SDK inserts a creative");
-assert.match(adfitUi, /querySelector\("iframe, \.kakao_ad_area > \*"\)/u,
-  "an empty or blocked AdFit response must not reserve blank page space");
-assert.match(adfitUi, /https:\/\/t1\.kakaocdn\.net\/kas\/static\/ba\.min\.js/u,
-  "the approved Kakao SDK must load only when an organic content surface is eligible");
-assert.match(adfitUi, /root\.hidden = false;[\s\S]{0,160}loadSdk/u,
-  "the AdFit area must be visible before the SDK inspects it");
-assert.match(adfitUi, /5_000/u, "an unfilled AdFit area must collapse after a bounded wait");
-assert.doesNotMatch(`${html}\n${analysisHtml}`, /<script[^>]+t1\.kakaocdn\.net/u,
-  "the SDK must not run before the page has eligible first-party content");
 assert.match(affiliateUi, /sponsored noopener noreferrer/u);
 assert.match(affiliateUi, /referrerPolicy: "no-referrer"/u);
 assert.match(affiliateUi, /credentials: "omit"/u);

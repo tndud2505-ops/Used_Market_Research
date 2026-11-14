@@ -90,7 +90,7 @@ function setup({ builder = true, saved = new Map(), href, extraProducts = [] } =
     history: { replaceState(...args) { if (env.historyFails) throw new Error('synthetic history failure'); env.historyCalls.push(args); location.href = String(args[2]); } },
     navigator: { clipboard: { async writeText(value) { if (env.clipboardFails) throw new Error('synthetic permission failure'); env.copied = value; } } },
     localStorage: { setItem(key, value) { if (env.storageFails) throw new Error('synthetic quota failure'); env.writes++; saved.set(key, value); }, getItem(key) { return saved.get(key) || null; } },
-    createAdfitSlot: () => ({ setEligible() {} }), createContextualAffiliate: () => ({ update() {} }),
+    createPromotionSlots: () => ({ setEligible() {} }), createContextualAffiliate: () => ({ update() {} }),
     readJson: async () => ({ tools_catalog: { products: allProducts, categories }, sources: [] }),
     drawChart: (container, series, options) => { env.draws.push({ series, options, model: container.dataset.modelId }); },
     createDatePicker: (field, { id }) => { const input = new Node('input', doc); input.id = id; field.append(input); return input; },

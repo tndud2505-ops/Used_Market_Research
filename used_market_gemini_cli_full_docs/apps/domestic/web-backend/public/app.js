@@ -1,4 +1,4 @@
-import { createAdfitSlots } from "./adfit.js?v=adfit-all-v3";
+import { createPromotionSlots } from "./promotions/rotation.js?v=house-rotation-v1";
 import { toolQueryMatches } from "./pc-tools-catalog.mjs?v=parts-ux-v4";
 import { readJsonResponse } from "./read-json.mjs?v=lookup-recovery-v1";
 import { createPriceStore } from "./pc-tools-data.mjs?v=domestic-danawa-v1";
@@ -240,7 +240,7 @@ function setupColumnResizers() {
     defaultValue: FILTER_COLUMN_DEFAULT, flexibleMinimum: 500,
   });
 }
-const adfit = createAdfitSlots(document.querySelectorAll(".adfit-banner"));
+const promotions = createPromotionSlots(document.querySelectorAll(".adfit-banner"));
 
 function createElement(tag, className, text) {
   const node = document.createElement(tag);
@@ -486,7 +486,7 @@ function setBusy(button, isBusy, busyText) {
 }
 
 function cancelListingRequest({ hidePagination = true } = {}) {
-  adfit.setEligible(false);
+  promotions.setEligible(false);
   clearTimeout(browseListingTimer);
   browseListingTimer = null;
   state.listingRequest?.abort();
@@ -2008,7 +2008,7 @@ function renderListings() {
   });
   dom.listingEmpty.hidden = visibleListings.length > 0;
   renderListingPagination();
-  adfit.setEligible(visibleListings.length > 0);
+  promotions.setEligible(visibleListings.length > 0);
   updateListingPriceWarnings();
   // One cached request per selected model/currency, never one per listing and
   // never a live marketplace request. Late responses only annotate current rows.

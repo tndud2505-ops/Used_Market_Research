@@ -102,10 +102,9 @@ async function checkPublicSite(baseUrl) {
   }
   const home = await homeResponse.text();
   if (!home.includes('<title>중고 PC·컴퓨터 부품 검색 | 중고 시세 비교 | USED PICK</title>')
-    || !home.includes('DAN-gG0WEoycq7Nup5kT')
     || !home.includes('data-provider="house"')
     || !home.includes('com.trainingapp.traingallery')
-    || home.includes('DAN-gvTVDnxVn9S3leR5')
+    || /DAN-|kakao_ad_area/u.test(home)
     || /link\.coupang\.com|ads-partners\.coupang\.com|data-coupang/u.test(home)) {
     throw new Error(`${baseUrl}/ did not return the listing home shell`);
   }
@@ -122,10 +121,9 @@ async function checkPublicSite(baseUrl) {
   const analysis = await analysisResponse.text();
   if (!analysis.includes('href="https://used-pick.com/price-analysis.html"')
     || !analysis.includes('id="analysis-workspace"')
-    || !analysis.includes('DAN-gG0WEoycq7Nup5kT')
     || !analysis.includes('data-provider="house"')
     || !analysis.includes('com.trainingapp.traingallery')
-    || analysis.includes('DAN-gvTVDnxVn9S3leR5')) {
+    || /DAN-|kakao_ad_area/u.test(analysis)) {
     throw new Error(`${baseUrl}/price-analysis.html did not return the price-analysis shell`);
   }
   for (const [label, response, html] of [['home', homeResponse, home], ['analysis', analysisResponse, analysis]]) {
@@ -134,11 +132,6 @@ async function checkPublicSite(baseUrl) {
       || !response.headers.get('content-security-policy')?.includes('https://www.google-analytics.com')) {
       throw new Error(`${baseUrl}/${label} missing common GA4 HTML processing`);
     }
-  }
-  const adfitResponse = await fetch(`${baseUrl}/adfit.js?release_check=${Date.now()}`);
-  const adfit = adfitResponse.ok ? await adfitResponse.text() : '';
-  if (!adfit.includes('https://t1.kakaocdn.net/kas/static/ba.min.js')) {
-    throw new Error(`${baseUrl}/adfit.js did not return the approved Kakao SDK loader`);
   }
 
   const categoriesResponse = await fetch(`${baseUrl}/api/categories`, {

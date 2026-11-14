@@ -89,8 +89,8 @@ requireText(builderHtml, 'id="build-price-source"',
   'builder reference prices must follow an explicit source selection');
 requireText(toolsScript, "state.buildSource === 'danawa' ? '다나와 중고 표시가' : '판매중 평균가'",
   'Danawa asking prices must not be relabelled as representative averages');
-assert.match(builderHtml, /id="adfit-banner" data-placement="bottom" data-provider="house" aria-label="Train Gallery 자사 앱 광고" hidden/,
-  'the builder has an explicitly identified bottom AdFit placement');
+assert.match(builderHtml, /id="adfit-banner" data-placement="bottom" data-provider="house" aria-label="자사 서비스 광고" hidden/,
+  'the builder has an explicitly identified bottom promotion placement');
 assert.equal(toolsScript.includes("el('tfoot')"), true, 'totals share the component table footer');
 assert.equal(toolsScript.includes("'원문 검색'"), false,
   "the model name link must not repeat a separate original-search label");
@@ -161,10 +161,10 @@ for (const id of [
   requireText(script, `querySelector("#${id}")`, `app.js must bind #${id}`);
 }
 for (const id of ['adfit-rail', 'adfit-banner']) {
-  requireText(html, `id="${id}"`, `missing required AdFit placement #${id}`);
+  requireText(html, `id="${id}"`, `missing required promotion placement #${id}`);
 }
-requireText(script, 'createAdfitSlots(document.querySelectorAll(".adfit-banner"))',
-  'the listing app must bind every AdFit placement');
+requireText(script, 'createPromotionSlots(document.querySelectorAll(".adfit-banner"))',
+  'the listing app must bind every promotion placement');
 
 assert.equal(html.includes('id="model-directory"'), false, "the old persistent model table must be removed");
 assert.equal(html.includes('class="overview-panels"'), false, "the old two-panel model/price overview must be removed");
@@ -265,9 +265,9 @@ assert.doesNotMatch(script, /setListingOptionsCollapsed|dom\.price(?:Min|Max|Res
 
 assert.equal(html.includes('class="category-button"'), false, "all components must not return as a crowded tab rail");
 assert.equal(html.includes('id="product-count"'), false, "duplicate model-count copy must stay removed");
-assert.doesNotMatch(html, /id="contextual-offer"/u, "affiliate ads are replaced by AdFit");
-assert.ok(html.indexOf('id="adfit-banner"') > html.indexOf('id="listing-pagination"'), "AdFit follows organic results");
-requireText(script, "adfit.setEligible(visibleListings.length > 0)", "AdFit must follow the same organic-result visibility boundary");
+assert.doesNotMatch(html, /id="contextual-offer"/u, "affiliate ads are replaced by first-party promotions");
+assert.ok(html.indexOf('id="adfit-banner"') > html.indexOf('id="listing-pagination"'), "promotions follow organic results");
+requireText(script, "promotions.setEligible(visibleListings.length > 0)", "promotions must follow the same organic-result visibility boundary");
 assert.equal(/['"`]\/api\/search(?:-only)?(?:[?'"`])/u.test(script), false, "the public UI must not call generic used-market search APIs");
 assert.equal(html.includes("�") || script.includes("�") || styles.includes("�"), false, "public UI files contain replacement characters");
 

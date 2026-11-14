@@ -2,15 +2,34 @@ body.ui-a .adfit-layout { display:grid; grid-template-columns:minmax(0,1fr); wid
 body.ui-a .adfit-layout > main#main { grid-column:1; grid-row:1; width:100%; min-width:0; max-width:none; margin:0; padding:0 0 16px; }
 body.ui-a .adfit-layout > .adfit-banner { justify-self:center; width:320px; max-width:100%; min-height:100px; margin:16px 0 32px; padding:0; border:0; overflow:hidden; }
 body.ui-a .adfit-layout > .adfit-banner[data-placement=bottom] { grid-column:1; grid-row:2; }
-body.ui-a .adfit-layout > .adfit-banner .kakao_ad_area { flex:0 0 auto; }
 body.ui-a .adfit-layout > .adfit-banner[data-placement=rail] { display:none; }
 body.ui-a .adfit-layout > .adfit-banner[hidden] { display:none; }
+/* First-party promotion slots (legacy adfit-* layout names kept for the shared grid). */
+body.ui-a .adfit-layout > .adfit-banner.house-promo { flex-direction:column; align-items:stretch; min-height:0; overflow:visible; }
+body.ui-a .adfit-layout > .adfit-banner.house-promo[data-placement=bottom] { width:100%; max-width:960px; }
+.house-promo__stage { position:relative; transition:opacity .25s ease; }
+.house-promo__stage.is-changing { opacity:0; }
+.house-promo__link { display:block; color:inherit; text-decoration:none; }
+.house-promo__link[hidden] { display:none; }
+.house-promo__link img { display:block; width:100%; height:auto; background:#fbf8f2; }
+.house-promo__link:focus-visible { outline:3px solid var(--focus, #246cab); outline-offset:4px; }
+.house-promo__caption { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:6px 2px 0; font-size:12px; line-height:1.5; color:#68716d; }
+.house-promo__pause { min-height:24px; padding:0 8px; border:1px solid #d9d5cc; border-radius:3px; background:#fff; color:#4b524f; font:inherit; cursor:pointer; }
+.house-promo__pause[hidden] { display:none; }
+.house-promo__pause:focus-visible { outline:2px solid var(--focus, #246cab); outline-offset:2px; }
 @media (min-width:1360px) {
   body.ui-a .adfit-layout:has(> .adfit-banner[data-placement=rail]:not([hidden])) { grid-template-columns:minmax(0,1fr) 160px; column-gap:24px; }
   body.ui-a .adfit-layout > .adfit-banner[data-placement=rail]:not([hidden]) { display:flex; grid-column:2; grid-row:1 / span 2; position:sticky; top:20px; width:160px; min-height:600px; margin:24px 0 0; }
+  body.ui-a .adfit-layout > .adfit-banner.house-promo[data-placement=rail]:not([hidden]) { min-height:0; }
+}
+@media (max-width:860px) {
+  body.ui-a .adfit-layout > .adfit-banner.house-promo[data-placement=bottom] { max-width:360px; }
 }
 @media (max-width:700px) {
   body.ui-a .adfit-layout { padding:0 14px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .house-promo__stage { transition:none; }
 }
 @media print {
   body.ui-a .adfit-layout { display:block; padding:0; }
