@@ -25,10 +25,10 @@ for (let index = 0; index < HOUSE_PRODUCTS.length * 2; index++) {
   assert.notEqual(productFor('rail', index).id, productFor('bottom', index).id, `slot collision at ${index}`);
 }
 assert.equal(HOUSE_PRODUCTS.some(product => /used-?pick/iu.test(`${product.id} ${product.appUrl} ${product.webUrl}`)), false);
-// Android opens the official Play listing; other devices open the public web service when one exists.
+// App products open the official Play listing on every device.
 const woori = HOUSE_PRODUCTS.find(product => product.id === 'woori-journey');
 assert.equal(destinationFor(woori, true).url, 'https://play.google.com/store/apps/details?id=app.dulharu.couple');
-assert.equal(destinationFor(woori, false).url, woori.webUrl);
+assert.equal(destinationFor(woori, false).url, woori.appUrl);
 assert.equal(destinationFor(HOUSE_PRODUCTS.find(product => product.id === 'train-gallery'), false).url,
   'https://play.google.com/store/apps/details?id=com.trainingapp.traingallery', 'app-only products fall back to Play');
 

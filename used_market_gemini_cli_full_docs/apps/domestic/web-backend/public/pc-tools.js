@@ -1,7 +1,7 @@
 import { SERIES, idOf, nameOf, naturalCompare, money, metricValue, soldMeanValue, metricPresentation, listedPriceRange, statsUnavailable, priceRecordIssue, analysisSelectionUrl, groupProducts, scopedStats, sourceStats, priceDateRange, shiftDate, modelPageItems, buildTotals, compactBuild, compatibility, validateBuild, dailySeries, percentChange, buildAnalysisSeries } from './pc-tools-core.mjs?v=shared-price-v2';
 import { readJson, createPriceStore } from './pc-tools-data.mjs?v=picker-fast-v3';
 import { drawMarketChart as drawChart } from './pc-market-chart.mjs?v=compact-chart-v2';
-import { createPromotionSlots } from './promotions/rotation.js?v=house-rotation-v1-live4';
+import { createPromotionSlots } from './promotions/rotation.js?v=house-rotation-v1-storelinks';
 import { toolBrand, toolFilterSchema, toolFacetValues, toolFacetLabel, filterToolProducts, visibleSelection, toolScopeNote } from './pc-tools-catalog.mjs?v=parts-ux-v4';
 import { priceWindowUrl } from './price-window.mjs?v=compact-chart-v2';
 

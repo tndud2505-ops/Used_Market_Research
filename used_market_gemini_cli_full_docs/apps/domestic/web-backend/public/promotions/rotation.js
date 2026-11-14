@@ -29,10 +29,10 @@ export function productFor(placement, index, products = HOUSE_PRODUCTS) {
   return products[(((index + (SLOT_OFFSET[placement] ?? 0)) % count) + count) % count];
 }
 
-// Android opens the official Play listing when one exists; other devices open
-// the product's public web service and fall back to Play for app-only products.
-export function destinationFor(product, android) {
-  const url = android ? (product.appUrl || product.webUrl) : (product.webUrl || product.appUrl);
+// App products always open their official Play listing, including on desktop.
+// USED PICK itself is excluded from this site's catalog.
+export function destinationFor(product) {
+  const url = product.appUrl || product.webUrl;
   const host = new URL(url).hostname;
   const label = host === 'play.google.com' ? 'Google Play에서 보기'
     : host === 'marketplace.atlassian.com' ? 'Atlassian Marketplace에서 보기' : '웹사이트에서 보기';
@@ -90,7 +90,6 @@ export function createPromotionSlots(roots) {
     for (const root of slots) root.hidden = true;
     return { setEligible() {} };
   }
-  const android = /Android/iu.test(globalThis.navigator?.userAgent || '');
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
   const desktop = window.matchMedia('(min-width: 861px)');
   const views = slots.map(buildSlot);
@@ -110,8 +109,8 @@ export function createPromotionSlots(roots) {
   };
   const render = view => {
     const product = productFor(view.placement, index);
-    const { url, label } = destinationFor(product, android);
-    const art = format => `/promotions/house/${product.id}-${format}.jpg?v=20261115-label`;
+    const { url, label } = destinationFor(product);
+    const art = format => `/promotions/house/${product.id}-${format}.jpg?v=20261115-play`;
     view.link.href = url;
     view.link.setAttribute('aria-label', `${product.name} — ${product.message} ${label} (새 창)`);
     if (view.source) view.source.srcset = art('strip');
@@ -123,7 +122,7 @@ export function createPromotionSlots(roots) {
     for (const view of views) {
       view.pause.hidden = reducedMotion.matches;
       view.pause.textContent = userPaused ? '넘기기' : '멈춤';
-      view.pause.setAttribute('aria-label', userPaused ? '자사 광고 자동 넘김 다시 시작' : '자사 광고 자동 넘김 멈춤');
+      view.pause.setAttribute('aria-label', userPaused ? '광고 자동 넘김 다시 시작' : '광고 자동 넘김 멈춤');
       view.pause.setAttribute('aria-pressed', String(userPaused));
     }
   };

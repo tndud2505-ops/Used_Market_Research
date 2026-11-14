@@ -6,10 +6,10 @@
 
 - Chrome TWA를 유지하며 성공한 시세 창 닫기 3회마다 전면 광고 표시 기회를 판단한다. 실제 표시 간 최소10분이며, 동의 또는 준비된 광고가 없으면 즉시 목록 이용을 계속한다. 일반 웹에는 다른 출시 서비스 홍보만 표시한다.
 - Next-Gen Mobile Ads1.6.0 / UMP4.0.0을 통합했다. `mobile/native/`의 원본을 생성 스크립트가 복사하므로 Bubblewrap 재생성 후에도 보존한다. 비공개 MessagePort의 정확한 출처·nonce/순번, 같은 전경 task, UMP 허용 여부, 일회성 광고 소유권을 확인한다. 외부 호출용 광고 URL은 없다.
-- 패키지 `com.usedpick.app`, 0.1.3(4), min24/target36. 기존 보호된 업로드 키로 서명한 직접 설치 APK는3,865,285바이트, SHA256 `d9ebb88a8a02f7456b4562329d381a40a8c9112f47c493a88a0bf655f53d133c`. 최종 DEX에 실제 AdMob 앱/단위 ID가 있고 공식 테스트 단위는 없다. AAB 서명본 SHA256 `293bc268167c668bad716c5ef8aa24b2e762dc434899b7cbd6379f036d2f9e08`.
+- [최종 직접 설치 APK 0.1.3](https://github.com/tndud2505-ops/Used_Market_Research/releases/download/android-v0.1.3/used-pick-0.1.3-direct.apk)는 공개 URL에서 다시 내려받아 빌드와 해시 일치를 확인했다. 패키지 `com.usedpick.app`, 0.1.3(4), min24/target36, 기존 보호된 서명,3,865,285바이트, SHA256 `d9ebb88a8a02f7456b4562329d381a40a8c9112f47c493a88a0bf655f53d133c`. 최종 DEX에 실제 AdMob 앱/단위 ID가 있고 공식 테스트 단위는 없다. AAB 서명본 SHA256 `293bc268167c668bad716c5ef8aa24b2e762dc434899b7cbd6379f036d2f9e08`. 빌드 소스/태그는 `2dc3fcf7f5004144f0eca35d947672ccc1af8563`이다.
 - 격리 API36 AVD에서 동일 코드의 debug 전용 공식 테스트 광고가 세 번째 닫기에 표시되고, 닫으면 원래 목록으로 돌아오는 것을 확인했다. 이후10분 이내 추가3회 닫기에는 광고가 없었다. 테스트 APK는 배포하지 않는다. 최종 release APK도 기존 앱 위 설치 및 TWA 실행을 확인했다. Play 설치와 실제 유료 광고 송출 검증은 구분한다.
 - USED PICK만 대상으로 한 EEA·영국·스위스 UMP 메시지는 사용자 승인 후 게시했다. app-ads.txt는 운영에 게시돼 있으나 AdMob의 앱 확인은 아직 완료되지 않았다. 코드 연결·동의 메시지 게시를 AdMob 승인으로 표현하지 않는다.
-- 사용자가 0.1.3 AAB 업로드·AdMob 데이터 신고 갱신·한국 프로덕션 심사 제출을 승인했다. 실제 제출 결과는 아래 이력과 [11월15일 작업 기록](daily_history/2026-11-15.md)에 기록한다.
+- 사용자 승인 후 같은 한국 프로덕션 트랙의 release3에 0.1.3 AAB와 데이터 보안 변경2개를 전송했다. 광고 ID 선언도 갱신했다. 사전 자동 검사 종료 후 **“변경사항을 검토 중입니다”**를 확인했다. 관리형 게시 꺼짐·한국 대상·100%를 유지했다. Play 승인/공개와 실제 유료 광고 송출은 아직 확인되지 않았다. [Play 심사 상태](https://play.google.com/console/u/1/developers/5880950647940851885/app/4975596290357962377/publishing), [11월15일 작업 기록](daily_history/2026-11-15.md).
 
 ## Play 업데이트0.1.2 심사 제출 완료 (2026-11-14)
 
