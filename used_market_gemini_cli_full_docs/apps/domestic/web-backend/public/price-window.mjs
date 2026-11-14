@@ -1,3 +1,5 @@
+import { notifyAnalysisComplete } from './app-ad-bridge.mjs?v=1';
+
 export function priceWindowUrl(modelId, { source = '', manufacturer = '', kind = 'active' } = {}) {
   const url = new URL('/price-analysis.html', location.href);
   url.searchParams.set('window', '1');
@@ -11,7 +13,7 @@ export function priceWindowUrl(modelId, { source = '', manufacturer = '', kind =
 
 // Keep the listing and its scroll position alive while inspecting a price.
 // A plain href still supports sharing, modifier clicks and browsers without dialog.
-let surface, frame, opener;
+let surface, frame, opener, analysisSucceeded = false;
 const marker = 'usedPickPriceSurface';
 function closeSurface() {
   const wasOpen=surface?.open;
@@ -20,6 +22,8 @@ function closeSurface() {
   opener?.removeAttribute('aria-busy');
   document.body.classList.remove('has-price-surface');
   if(wasOpen)opener?.focus({ preventScroll: true });
+  if(wasOpen&&analysisSucceeded)notifyAnalysisComplete();
+  analysisSucceeded=false;
 }
 function dismissSurface() {
   if (history.state?.[marker]) history.back(); else closeSurface();
@@ -43,6 +47,7 @@ function openSurface(url, link) {
     window.addEventListener('message', event => {
       if(event.origin!==location.origin||!frame||event.source!==frame.contentWindow)return;
       if(event.data?.type==='used-pick:close-price')dismissSurface();
+      if(event.data?.type==='used-pick:price-ready')analysisSucceeded=event.data.successful===true;
       if(event.data?.type==='used-pick:price-ready'&&!surface.open){
         if(!opener?.isConnected){closeSurface();return;}
         opener.removeAttribute('aria-busy');
@@ -52,6 +57,7 @@ function openSurface(url, link) {
     });
   }
   opener?.removeAttribute('aria-busy');
+  analysisSucceeded=false;
   opener = link; opener.setAttribute('aria-busy','true'); url.searchParams.set('embedded', '1');
   frame?.remove(); frame = document.createElement('iframe'); frame.title = '모델별 시세'; frame.src = url.href; surface.append(frame);
 }

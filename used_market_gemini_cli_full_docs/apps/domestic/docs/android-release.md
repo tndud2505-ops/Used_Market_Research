@@ -1,6 +1,15 @@
 # USED PICK Android TWA 출시 안내
 
-작성일: 2026-11-12 (Asia/Seoul). 앱 생성·서명 AAB 업로드·필수 스토어 설정·내부 테스트 배포·**한국 프로덕션 심사 제출**을 완료했다. **정식 공개 출시와 구분한다.** 아래 빌드 절차와 초안에는 최초 준비 당시의 기록도 포함한다.
+갱신일: 2026-11-15 (Asia/Seoul). Play 0.1.2는 11월14일21:34에 출시된 것을 제출4 상세에서 확인했다. 아래의 이전 제출 상태와 최초 준비 초안은 당시 기록이다.
+
+## Android 0.1.3 — 작업 완료 후 전면 광고
+
+- Chrome TWA를 유지하며 성공한 시세 창 닫기 3회마다 전면 광고 표시 기회를 판단한다. 실제 표시 간 최소10분이며, 동의 또는 준비된 광고가 없으면 즉시 목록 이용을 계속한다. 일반 웹에는 다른 출시 서비스 홍보만 표시한다.
+- Next-Gen Mobile Ads1.6.0 / UMP4.0.0을 통합했다. `mobile/native/`의 원본을 생성 스크립트가 복사하므로 Bubblewrap 재생성 후에도 보존한다. 비공개 MessagePort의 정확한 출처·nonce/순번, 같은 전경 task, UMP 허용 여부, 일회성 광고 소유권을 확인한다. 외부 호출용 광고 URL은 없다.
+- 패키지 `com.usedpick.app`, 0.1.3(4), min24/target36. 기존 보호된 업로드 키로 서명한 직접 설치 APK는3,865,285바이트, SHA256 `d9ebb88a8a02f7456b4562329d381a40a8c9112f47c493a88a0bf655f53d133c`. 최종 DEX에 실제 AdMob 앱/단위 ID가 있고 공식 테스트 단위는 없다. AAB 서명본 SHA256 `293bc268167c668bad716c5ef8aa24b2e762dc434899b7cbd6379f036d2f9e08`.
+- 격리 API36 AVD에서 동일 코드의 debug 전용 공식 테스트 광고가 세 번째 닫기에 표시되고, 닫으면 원래 목록으로 돌아오는 것을 확인했다. 이후10분 이내 추가3회 닫기에는 광고가 없었다. 테스트 APK는 배포하지 않는다. 최종 release APK도 기존 앱 위 설치 및 TWA 실행을 확인했다. Play 설치와 실제 유료 광고 송출 검증은 구분한다.
+- USED PICK만 대상으로 한 EEA·영국·스위스 UMP 메시지는 사용자 승인 후 게시했다. app-ads.txt는 운영에 게시돼 있으나 AdMob의 앱 확인은 아직 완료되지 않았다. 코드 연결·동의 메시지 게시를 AdMob 승인으로 표현하지 않는다.
+- 사용자가 0.1.3 AAB 업로드·AdMob 데이터 신고 갱신·한국 프로덕션 심사 제출을 승인했다. 실제 제출 결과는 아래 이력과 [11월15일 작업 기록](daily_history/2026-11-15.md)에 기록한다.
 
 ## Play 업데이트0.1.2 심사 제출 완료 (2026-11-14)
 
@@ -178,9 +187,9 @@ primary가 확인된 후보를 **`https://used-pick.com/.well-known/assetlinks.j
 
 ## 웹·설치형 광고와 다운로드 UI
 
-웹 자산의 구현·배포 검증은 primary 소유다. 현재 소스에서 `app-settings.mjs`는 일반 웹 유료 광고를 켜고 설치형 유료 웹 광고는 끈다. `adfit.js`는 설치형으로 판단되면 paid AdFit 슬롯과 SDK 요청을 시작하지 않으며 house promotion은 별도 분기로 유지한다. 표시 모드와 Android referrer는 **표시용 힌트**다. `source=app`은 최초 진입 출처이며 그 자체가 인증·권한·설치 검증은 아니다. 내부 페이지 이동과 외부 Custom Tab fallback까지 실제 Android에서 확인해야 한다.
+웹 자산의 구현·배포 검증은 primary 소유다. 현재 일반 웹은 기존 우측·하단 광고 자리에 출시 서비스5개의 소개를 순환 표시한다. AdFit 로더는 제거했다. Android TWA에서는 웹 배너를 숨긴다. 표시 모드와 Android referrer는 표시용 힌트이며 광고 권한은 검증된 별도 MessagePort로 확인한다. `source=app` 자체는 인증·설치 검증이 아니다.
 
-**이 패키지에 네이티브 AdMob은 구현되어 있지 않다.** JS 설정이나 AdFit ID를 AdMob ID로 바꿔도 네이티브 광고가 생기지 않는다. AdMob에는 별도 Android Google Mobile Ads SDK 통합, Android manifest 앱 ID, 초기화·동의 처리, Activity와 광고 UI·수명주기 구현이 필요하다. 순수 TWA 콘텐츠는 외부 브라우저가 그리므로 네이티브 배너를 웹 안에 단순히 끼워 넣을 수 없다. Android 레이어를 추가하는 후속 설계·개인정보 검토·디바이스 검증이 필요하며 Bubblewrap 재생성으로 수정이 유실되지 않게 해야 한다. 가짜 앱 ID·광고 단위 ID를 추가하지 않았다. [공식 Android Mobile Ads 통합 안내](https://developers.google.com/admob/android/quick-start)
+0.1.3에는 네이티브 AdMob 전면 광고를 구현했다. Chrome이 웹 콘텐츠를 계속 그리며, 준비된 광고만 비공개 Activity에서 표시한 뒤 원래 Chrome 화면으로 복귀한다. 배너를 웹 화면 위에 겹치거나 WebView로 전환하지 않는다. 동의가 필요한 지역에서는 기존 메뉴/푸터에 표시되는 광고 개인정보 설정으로 동의·거부·옵션을 선택할 수 있으며 UMP가 허용하기 전에는 SDK를 초기화하거나 광고를 요청하지 않는다. [공식 Next-Gen SDK 안내](https://developers.google.com/admob/android/next-gen/quick-start)
 
 현재 Train Gallery 자사 앱 홍보 배너가 설치형에서도 유지되면 Play **‘광고 포함: 예’**가 초안이다. house ad도 해당한다. ‘AdFit 비활성화’나 ‘AdMob 없음’을 ‘광고 없음’으로 해석하지 않는다. 단순 메뉴의 ‘다른 앱’ 링크 예외와 화면 배너는 다르다. [Play 광고 포함 신고 안내](https://support.google.com/googleplay/android-developer/answer/9859455?hl=en)
 

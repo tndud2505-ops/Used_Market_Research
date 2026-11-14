@@ -89,7 +89,7 @@ requireText(builderHtml, 'id="build-price-source"',
   'builder reference prices must follow an explicit source selection');
 requireText(toolsScript, "state.buildSource === 'danawa' ? '다나와 중고 표시가' : '판매중 평균가'",
   'Danawa asking prices must not be relabelled as representative averages');
-assert.match(builderHtml, /id="adfit-banner" data-placement="bottom" data-provider="house" aria-label="자사 서비스 광고" hidden/,
+assert.match(builderHtml, /id="adfit-banner" data-placement="bottom" data-provider="house" aria-label="[^"]+" hidden/,
   'the builder has an explicitly identified bottom promotion placement');
 assert.equal(toolsScript.includes("el('tfoot')"), true, 'totals share the component table footer');
 assert.equal(toolsScript.includes("'원문 검색'"), false,

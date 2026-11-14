@@ -13,8 +13,6 @@ export const HOUSE_PRODUCTS = Object.freeze([
     webUrl: 'https://dulharu-dev.tndud2503.workers.dev/about?lang=ko-KR' },
   { id: 'k-stock', name: 'K Stock', message: '국내 종목과 차트를 한곳에서 살펴봐요.',
     appUrl: null, webUrl: 'https://kstockclock.com/' },
-  { id: 'virtual-mcu', name: 'Virtual MCU', message: '코드와 회로로 모터 제어를 실습해요.',
-    appUrl: null, webUrl: 'https://virtual-mcu-training-env.pages.dev/' },
   { id: 'jira-obsidian', name: 'Jira Obsidian', message: '이슈의 계층과 연결을 한눈에 살펴봐요.',
     appUrl: null, webUrl: 'https://marketplace.atlassian.com/apps/1923219004/obsidian-context-map-for-jira' },
 ]);
@@ -76,7 +74,7 @@ function buildSlot(root) {
   if (motionRoot) stage.append(motionRoot);
   const caption = element('div', 'house-promo__caption');
   const label = element('span');
-  label.textContent = '자사 서비스 광고';
+  label.textContent = '광고';
   const pause = element('button', 'house-promo__pause');
   pause.type = 'button';
   pause.hidden = true;
@@ -97,7 +95,8 @@ export function createPromotionSlots(roots) {
   const desktop = window.matchMedia('(min-width: 861px)');
   const views = slots.map(buildSlot);
   const visible = new Set();
-  const engaged = new Set();
+  const hovered = new Set();
+  const focused = new Set();
   let index = Math.floor(Math.random() * HOUSE_PRODUCTS.length);
   let eligible = false;
   let started = false;
@@ -112,7 +111,7 @@ export function createPromotionSlots(roots) {
   const render = view => {
     const product = productFor(view.placement, index);
     const { url, label } = destinationFor(product, android);
-    const art = format => `/promotions/house/${product.id}-${format}.jpg`;
+    const art = format => `/promotions/house/${product.id}-${format}.jpg?v=20261115-label`;
     view.link.href = url;
     view.link.setAttribute('aria-label', `${product.name} — ${product.message} ${label} (새 창)`);
     if (view.source) view.source.srcset = art('strip');
@@ -154,11 +153,11 @@ export function createPromotionSlots(roots) {
     }, { threshold: [0, 0.5] });
     for (const view of views) {
       observer?.observe(view.root);
-      view.root.addEventListener('pointerenter', () => engaged.add(view.root));
-      view.root.addEventListener('pointerleave', () => engaged.delete(view.root));
-      view.root.addEventListener('focusin', () => engaged.add(view.root));
+      view.root.addEventListener('pointerenter', () => hovered.add(view.root));
+      view.root.addEventListener('pointerleave', () => hovered.delete(view.root));
+      view.root.addEventListener('focusin', () => focused.add(view.root));
       view.root.addEventListener('focusout', event => {
-        if (!view.root.contains(event.relatedTarget)) engaged.delete(view.root);
+        if (!view.root.contains(event.relatedTarget)) focused.delete(view.root);
       });
       view.pause.addEventListener('click', () => { userPaused = !userPaused; syncPauseButtons(); });
     }
@@ -167,7 +166,7 @@ export function createPromotionSlots(roots) {
     // Advance only while a promotion is actually on screen and nobody is reading,
     // hovering, focusing or has paused it. Reduced motion keeps one product.
     setInterval(() => {
-      if (!eligible || userPaused || reducedMotion.matches || document.hidden || engaged.size || !visible.size) return;
+      if (!eligible || userPaused || reducedMotion.matches || document.hidden || hovered.size || focused.size || !visible.size) return;
       activeMs += TICK_MS;
       if (activeMs < ROTATE_MS) return;
       activeMs = 0;

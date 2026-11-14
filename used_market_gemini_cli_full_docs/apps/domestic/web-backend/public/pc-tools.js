@@ -1,7 +1,7 @@
 import { SERIES, idOf, nameOf, naturalCompare, money, metricValue, soldMeanValue, metricPresentation, listedPriceRange, statsUnavailable, priceRecordIssue, analysisSelectionUrl, groupProducts, scopedStats, sourceStats, priceDateRange, shiftDate, modelPageItems, buildTotals, compactBuild, compatibility, validateBuild, dailySeries, percentChange, buildAnalysisSeries } from './pc-tools-core.mjs?v=shared-price-v2';
 import { readJson, createPriceStore } from './pc-tools-data.mjs?v=picker-fast-v3';
 import { drawMarketChart as drawChart } from './pc-market-chart.mjs?v=compact-chart-v2';
-import { createPromotionSlots } from './promotions/rotation.js?v=house-rotation-v1';
+import { createPromotionSlots } from './promotions/rotation.js?v=house-rotation-v1-live4';
 import { toolBrand, toolFilterSchema, toolFacetValues, toolFacetLabel, filterToolProducts, visibleSelection, toolScopeNote } from './pc-tools-catalog.mjs?v=parts-ux-v4';
 import { priceWindowUrl } from './price-window.mjs?v=compact-chart-v2';
 
@@ -925,7 +925,7 @@ function renderAnalysis() {
   });
   // Open the prepared price surface once, after source selection and FX settle.
   if(pricesSettled&&state.fx?.state!=='loading'&&globalThis.parent&&globalThis.parent!==globalThis)
-    globalThis.parent.postMessage({type:'used-pick:price-ready'},location.origin);
+    globalThis.parent.postMessage({type:'used-pick:price-ready',successful:sources.some(item=>item.record?.state==='ready'&&!statsUnavailable(item.record.data))},location.origin);
 }
 
 function searchReturnPath(product) {
@@ -1215,7 +1215,7 @@ async function start() {
   } catch (error) {
     status(`${error.message} `, true);
     const button = el('button', '', '다시 시도'); button.type = 'button'; button.addEventListener('click', start); $('#tools-status').append(button);
-    if(!builder&&window.parent!==window)window.parent.postMessage({type:'used-pick:price-ready'},location.origin);
+    if(!builder&&window.parent!==window)window.parent.postMessage({type:'used-pick:price-ready',successful:false},location.origin);
   }
 }
 if (builder) {

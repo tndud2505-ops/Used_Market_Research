@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ConsoleLog, TwaGenerator, TwaManifest, fetchUtils } from '@bubblewrap/core';
@@ -17,7 +17,7 @@ const assetNames = ['manifest.webmanifest', 'icons/app-192.png', 'icons/app-512.
 
 async function config() {
   const data = JSON.parse(await readFile(configFile, 'utf8'));
-  if (!/^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*){2,}$/.test(data.packageId) ||
+  if (data.packageId !== 'com.usedpick.app' ||
       data.host !== 'used-pick.com' || data.startUrl !== '/?source=app' ||
       data.webManifestUrl !== 'https://used-pick.com/manifest.webmanifest' ||
       data.fullScopeUrl !== 'https://used-pick.com/' ||
@@ -104,6 +104,28 @@ async function neutralLaunch() {
   }
 }
 
+async function installNativeController() {
+  const native = path.join(root, 'native');
+  const java = path.join(project, 'app/src/main/java/com/usedpick/app');
+  await mkdir(java, { recursive: true });
+  for (const name of ['LauncherActivity.java', 'TwaController.java', 'AdManager.java', 'AdHostActivity.java']) {
+    await copyFile(path.join(native, name), path.join(java, name));
+  }
+  await copyFile(path.join(native, 'ad_host_theme.xml'),
+    path.join(project, 'app/src/main/res/values/ad_host_theme.xml'));
+  await copyFile(path.join(native, 'admob.gradle'), path.join(project, 'app/admob.gradle'));
+  const gradle = path.join(project, 'app/build.gradle');
+  await writeFile(gradle, `${await readFile(gradle, 'utf8')}\napply from: 'admob.gradle'\n`);
+  const manifest = path.join(project, 'app/src/main/AndroidManifest.xml');
+  const additions = await readFile(path.join(native, 'application.xml'), 'utf8');
+  const xml = (await readFile(manifest, 'utf8'))
+    .replace('<application', '<uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />\n\n    <application')
+    .replace('<activity android:name="LauncherActivity"',
+      '<activity android:name="LauncherActivity"\n            android:configChanges="orientation|screenSize|keyboardHidden"')
+    .replace('</application>', `${additions.replace(/<\/?application>/g, '').trim()}\n    </application>`);
+  await writeFile(manifest, xml);
+}
+
 async function generate(mode) {
   const data = await config();
   const assets = await sourceAssets();
@@ -132,6 +154,7 @@ async function generate(mode) {
     fetchUtils.fetch = originalFetch;
   }
   await neutralLaunch();
+  await installNativeController();
   await writeFile(generatedConfig, `${JSON.stringify(data, null, 2)}\n`);
   // Bubblewrap CLI uses SHA-1 here solely as a change detector, not for signing.
   const checksum = createHash('sha1').update(await readFile(generatedConfig)).digest('hex');

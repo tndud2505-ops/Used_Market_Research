@@ -16,7 +16,7 @@ test('assetlinks requires an explicit package and a complete real-format fingerp
 
 test('assetlinks binds only the selected package; normalizes and deduplicates rotation certificates', () => {
   const [entry] = createAssetLinks('com.usedpick.app', [synthetic, synthetic.toUpperCase()]);
-  assert.deepEqual(entry.relation, ['delegate_permission/common.handle_all_urls']);
+  assert.deepEqual(entry.relation, ['delegate_permission/common.handle_all_urls', 'delegate_permission/common.use_as_origin']);
   assert.equal(entry.target.package_name, 'com.usedpick.app');
   assert.equal(entry.target.namespace, 'android_app');
   assert.deepEqual(entry.target.sha256_cert_fingerprints, [synthetic.toUpperCase()]);

@@ -18,7 +18,7 @@ export function createAssetLinks(packageId, fingerprints) {
     }
     return fingerprint;
   });
-  return [{ relation: ['delegate_permission/common.handle_all_urls'], target: {
+  return [{ relation: ['delegate_permission/common.handle_all_urls', 'delegate_permission/common.use_as_origin'], target: {
     namespace: 'android_app', package_name: packageId,
     sha256_cert_fingerprints: [...new Set(normalized)],
   } }];

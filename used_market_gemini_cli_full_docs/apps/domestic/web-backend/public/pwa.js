@@ -1,4 +1,5 @@
 import { appSurface, verifiedPlayStoreUrl } from './app-settings.mjs';
+import './app-ad-bridge.mjs?v=1';
 
 let installPrompt;
 let installArea;

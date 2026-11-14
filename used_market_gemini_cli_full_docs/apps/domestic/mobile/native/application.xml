@@ -1,0 +1,13 @@
+<application>
+    <meta-data
+        android:name="com.google.android.gms.ads.APPLICATION_ID"
+        android:value="@string/admob_app_id" />
+    <service
+        android:name="androidx.browser.customtabs.PostMessageService"
+        android:exported="true" />
+    <activity
+        android:name=".AdHostActivity"
+        android:exported="false"
+        android:configChanges="orientation|screenSize|keyboardHidden"
+        android:theme="@style/AdHostTheme" />
+</application>

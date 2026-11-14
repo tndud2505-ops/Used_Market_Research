@@ -1,6 +1,6 @@
 {
   "name": "used-pick-android",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "private": true,
   "description": "USED PICK Trusted Web Activity packaging; no production signing identity included",
   "type": "module",

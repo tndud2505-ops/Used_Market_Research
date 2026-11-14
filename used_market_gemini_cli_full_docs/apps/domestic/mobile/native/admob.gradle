@@ -1,0 +1,19 @@
+// UMP 4.0.0 is already a dependency of Next-Gen 1.6.0. Do not add legacy GMA.
+android {
+    buildFeatures { buildConfig true }
+    buildTypes {
+        debug {
+            buildConfigField 'String', 'ADMOB_APP_ID', '"ca-app-pub-3940256099942544~3347511713"'
+            resValue 'string', 'admob_app_id', 'ca-app-pub-3940256099942544~3347511713'
+            buildConfigField 'String', 'ADMOB_UNIT_ID', '"ca-app-pub-3940256099942544/1033173712"'
+        }
+        release {
+            buildConfigField 'String', 'ADMOB_APP_ID', '"ca-app-pub-3069551914203809~2949398161"'
+            resValue 'string', 'admob_app_id', 'ca-app-pub-3069551914203809~2949398161'
+            buildConfigField 'String', 'ADMOB_UNIT_ID', '"ca-app-pub-3069551914203809/2418740110"'
+        }
+    }
+}
+dependencies {
+    implementation 'com.google.android.libraries.ads.mobile.sdk:ads-mobile-sdk:1.6.0'
+}
