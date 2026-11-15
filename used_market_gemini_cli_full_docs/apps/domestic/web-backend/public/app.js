@@ -1,4 +1,4 @@
-import { createPromotionSlots } from "./promotions/rotation.js?v=house-rotation-v1-scenes3";
+import { createPromotionSlots } from "./promotions/rotation.js?v=house-rotation-v1-scenes3-photo";
 import { toolQueryMatches } from "./pc-tools-catalog.mjs?v=parts-ux-v4";
 import { readJsonResponse } from "./read-json.mjs?v=lookup-recovery-v1";
 import { createPriceStore } from "./pc-tools-data.mjs?v=domestic-danawa-v1";
