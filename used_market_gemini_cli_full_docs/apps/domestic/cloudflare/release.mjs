@@ -1,4 +1,41 @@
 import { spawn } from 'node:child_process';
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const ROOT = fileURLToPath(new URL('../', import.meta.url));
+const arguments_ = process.argv.slice(2);
+const option = name => {
+  const index = arguments_.indexOf(name);
+  if (index < 0) return '';
+  if (!arguments_[index + 1] || arguments_[index + 1].startsWith('--')) throw new Error(`${name} requires a value`);
+  return arguments_[index + 1];
+};
+const VERSION = option('--version');
+const VERSION_CONFIG = path.resolve(ROOT, option('--version-config') || 'cloudflare/wrangler.jsonc');
+if (arguments_.includes('--version') && !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(VERSION))
+  throw new Error('--version must be the exact UUID of an already uploaded, reviewed Worker version');
+if (arguments_.includes('--version-config') && !VERSION) throw new Error('--version-config requires --version');
+const UI_ARGS = ['--android-serial', '--adb-server-port', '--android-cdp-port', '--adb']
+  .flatMap(name => option(name) ? [name, option(name)] : []);
+const UI_OUT = option('--out') || process.env.USED_PICK_RELEASE_UI_OUT;
+
+async function validateVersionConfig() {
+  // JSONC comments/trailing commas are accepted without evaluating configuration code.
+  const source = await readFile(VERSION_CONFIG, 'utf8');
+  const uncommented = source.replace(/"(?:\\.|[^"\\])*"|\/\*[\s\S]*?\*\/|\/\/[^\r\n]*/g,
+    match => match.startsWith('"') ? match : ' ');
+  const config = JSON.parse(uncommented.replace(/"(?:\\.|[^"\\])*"|,\s*(?=[}\]])/g,
+    match => match.startsWith('"') ? match : ''));
+  if (config.name !== 'used-market-runner') throw new Error('Release config must target the exact used-market-runner Worker');
+}
+
+async function jointUi(candidate) {
+  await run(candidate ? 'Candidate web and installed Android acceptance' : 'Public web and installed Android acceptance',
+    'node', [path.join(ROOT, 'harness/pc-analysis-workspace-browser.mjs'), '--run',
+      ...(candidate ? ['--candidate'] : []), ...UI_ARGS,
+      ...(UI_OUT ? ['--out', path.resolve(UI_OUT, candidate ? 'candidate' : 'public')] : [])]);
+}
 
 const PUBLIC_URL = (process.env.CLOUDFLARE_PUBLIC_URL || 'https://used-pick.com').replace(/\/$/, '');
 const PUBLIC_ALIASES = Array.from(new Set([
@@ -18,7 +55,7 @@ function run(label, command, args) {
   return new Promise((resolve, reject) => {
     console.log(`\n[release] ${label}`);
     const child = spawn(executable(command), args, {
-      cwd: process.cwd(),
+      cwd: ROOT,
       stdio: ['ignore', 'inherit', 'inherit'],
       env: { ...process.env, CI: process.env.CI || '1' },
       shell: process.platform === 'win32' && command !== 'node'
@@ -39,7 +76,7 @@ function capture(label, command, args) {
   return new Promise((resolve, reject) => {
     console.log(`\n[release] ${label}`);
     const child = spawn(executable(command), args, {
-      cwd: process.cwd(),
+      cwd: ROOT,
       stdio: ['ignore', 'pipe', 'pipe'],
       env: { ...process.env, CI: process.env.CI || '1' },
       shell: process.platform === 'win32' && command !== 'node'
@@ -57,7 +94,7 @@ function capture(label, command, args) {
 
 async function currentProductionVersion() {
   const output = await capture('Resolve exact current Worker deployment', 'npx', [
-    'wrangler', 'deployments', 'status', '--config', 'cloudflare/wrangler.jsonc', '--json'
+    'wrangler', 'deployments', 'status', '--config', VERSION_CONFIG, '--json'
   ]);
   const status = JSON.parse(output);
   const versions = Array.isArray(status?.versions) ? status.versions : [];
@@ -176,39 +213,48 @@ async function verifyPublicSites() {
 let workerDeployed = false;
 let previousWorkerVersion = null;
 try {
+  await validateVersionConfig();
+  if (VERSION) {
+    console.log('[release] Already uploaded version: no upload, bundle, dry-run, migration or source canary');
+  }
   if (APP_ONLY) {
     console.log('[release] Application-only scope: source readiness and D1 migrations are skipped');
   }
   await run('Run Cloudflare worker harness', 'npm', ['run', 'cloudflare:harness']);
-  await run('Validate Cloudflare deployment with dry-run', 'npx', [
+  if (!VERSION) await run('Validate Cloudflare deployment with dry-run', 'npx', [
     'wrangler',
     'deploy',
     '--config',
     'cloudflare/wrangler.jsonc',
     '--dry-run'
   ]);
-  if (!APP_ONLY) {
+  await jointUi(true);
+  if (!VERSION && !APP_ONLY) {
     await run('Verify directory-source canaries, recent collection, rollback, and publication before remote mutations', 'node', [
       'cloudflare/deploy.mjs', '--preflight-only'
     ]);
   }
   previousWorkerVersion = await currentProductionVersion();
-  if (!APP_ONLY) {
+  if (!VERSION && !APP_ONLY) {
     await run('Apply D1 migrations', 'npx', [
       'wrangler', 'd1', 'migrations', 'apply', 'used-market-free', '--remote', '--config', 'cloudflare/wrangler.jsonc'
     ]);
   }
-  await run(
+  // Retain the exact 100% recovery version before attempting either deployment.
+  workerDeployed = true;
+  if (VERSION) await run('Activate the reviewed existing Worker version at 100%', 'npx', [
+    'wrangler', 'versions', 'deploy', `${VERSION}@100%`, '--yes', '--config', VERSION_CONFIG
+  ]);
+  else await run(
     APP_ONLY
       ? 'Deploy application Worker, assets, custom domains, and cron triggers'
       : 'Deploy Worker, assets, custom domains, and cron triggers',
     'npm',
     ['run', APP_ONLY ? 'cloudflare:deploy:app' : 'cloudflare:deploy']
   );
-  workerDeployed = true;
-
   console.log('\n[release] Verify public domains');
   const checks = await verifyPublicSites();
+  await jointUi(false);
   console.log(JSON.stringify({ status: 'released', domains: checks }, null, 2));
 } catch (error) {
   console.error(`[release] ${error instanceof Error ? error.message : String(error)}`);
@@ -216,7 +262,7 @@ try {
     try {
       if (!previousWorkerVersion) throw new Error('Exact pre-deploy Worker version is unavailable');
       await run('Rollback Worker after failed public smoke', 'npx', [
-        'wrangler', 'rollback', previousWorkerVersion, '--yes', '--config', 'cloudflare/wrangler.jsonc',
+        'wrangler', 'rollback', previousWorkerVersion, '--yes', '--config', VERSION_CONFIG,
         '--message', 'automatic-rollback-used-pick-public-smoke-failed'
       ]);
       await verifyRollbackRestored(previousWorkerVersion);

@@ -889,7 +889,8 @@ function renderAnalysis() {
   $('#price-chart').setAttribute('aria-busy', String(Boolean(state.selectedId) && pending));
   $('#price-chart').dataset.modelId = state.selectedId;
   // Keep every source available in the readout, even when its line is hidden.
-  const sourcesHidden = Boolean(state.selectedId) && (!visibleSources.length || (series.length > 0 && !chartSeries.length));
+  const sourcesHidden = Boolean(state.selectedId) && (!visibleSources.length || (state.compare && series.length > 0
+    && !chartSeries.length && !pending && !failedSource && !sparsePrices));
   $('#price-chart').dataset.priceState = !state.selectedId ? 'empty' : sourcesHidden ? 'hidden' : pending ? 'loading'
     : chartSeries.length ? 'ready' : failedSource ? 'error' : sparsePrices ? 'insufficient' : 'unavailable';
   $('#price-chart').hidden=false;

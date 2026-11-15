@@ -26,7 +26,12 @@ whether the current execution path actually uses Chat On Steroids.
 4. Regardless of execution path, a passing unit test is not browser proof and a
    preflight is not a deployment. Report completion only from the actual
    browser/deploy tool call and its resulting production marker or equivalent
-   receipt.
+   receipt. For web or Android user-facing changes, use the shared
+   `npm run test:release-ui` harness to check desktop web, mobile web and the
+   actual installed `com.usedpick.app` TWA before publication and against the
+   resulting production version. An Android-sized browser is not app proof.
+   Use the existing release entry point so the same checks and rollback apply;
+   keep device/ADB/CDP identities explicit and never silently skip app QA.
 
 Read `README.md` and `used_market_gemini_cli_full_docs/SETUP.md` first.
 

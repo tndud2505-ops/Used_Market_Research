@@ -126,6 +126,23 @@ assert.deepEqual(Array.from(vm.runInContext('analysisSources({ latest: true }).m
   'latest prices must hide disabled sources while remaining independent of chart selection');
 assert.deepEqual(Array.from(vm.runInContext('analysisSources().map(item => item.id)', sourceContext)), ['joonggonara', 'ebay'],
   'readout sources must respect public availability while retaining unchecked sources for restoration');
+const chartStateSource = toolsScript.slice(toolsScript.indexOf('  const sourcesHidden ='), toolsScript.indexOf("  $('#price-chart').hidden=false;"));
+const chartState = options => {
+  const chart = { dataset: {} };
+  const context = vm.createContext({
+    state: { selectedId: 'motherboard:test', compare: false }, visibleSources: [{}],
+    series: [{}], chartSeries: [], pending: false, failedSource: null, sparsePrices: false,
+    ...options, $: () => chart,
+  });
+  vm.runInContext(chartStateSource, context);
+  return chart.dataset.priceState;
+};
+assert.equal(chartState({ sparsePrices: true }), 'insufficient',
+  'one selected registration price stays insufficient when an unchecked source has a representative line');
+assert.equal(chartState({}), 'unavailable',
+  'a selected site without records must not be described as a hidden price line');
+assert.equal(chartState({ state: { selectedId: 'motherboard:test', compare: true } }), 'hidden',
+  'comparison with every available representative source unchecked retains the restoration notice');
 requireText(toolsChart, "item.label || metric?.label",
   "site-specific chart descriptors must provide stable legend and tooltip labels");
 requireText(toolsChart, "filter(item => item.points.some(point => point.value != null))",

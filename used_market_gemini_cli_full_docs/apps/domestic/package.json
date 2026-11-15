@@ -45,6 +45,7 @@
     "test:pc-release": "node harness/pc-agent1-publication-http-contract.mjs && node harness/pc-agent1-chunk-integrity-contract.mjs && node harness/pc-scoped-stats-repair-contract.mjs && node harness/pc-unknown-identity-repair-contract.mjs && node harness/pc-listing-classification-repair-contract.mjs",
     "test:pc-final": "node harness/pc-agent2-ui-contract.mjs && node harness/pc-agent2-resume-contract.mjs && node harness/pc-agent3-independent-price-contract.mjs && node harness/pc-agent3-publication-bootstrap-contract.mjs && node harness/pc-agent3-stats-readiness-contract.mjs && node harness/pc-final-price-readiness-contract.mjs && node harness/pc-price-recovery-contract.mjs",
     "test:ui-a": "node harness/pc-ui-concept-a-contract.mjs && node harness/pc-search-modal-contract.mjs",
+    "test:release-ui": "node harness/pc-analysis-workspace-browser.mjs --run",
     "test": "npm run build && node harness/html-analytics-contract.mjs && node harness/pwa-contract.mjs && npm run test:storage && npm run test:danawa && npm run test:daangn && npm run test:pc && npm run test:pc-tools && npm run test:pc-release && npm run test:pc-final && npm run test:ui-a",
     "pc:repair-classification": "node aws-runner/repair-pc-listing-classification.mjs"
   },
@@ -57,6 +58,7 @@
   "devDependencies": {
     "@cloudflare/playwright": "^1.3.0",
     "@types/node": "^24.6.0",
+    "playwright": "1.63.0-alpha-2026-08-05",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3"
   }
