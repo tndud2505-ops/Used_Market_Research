@@ -110,7 +110,7 @@ export function createPromotionSlots(roots) {
   const render = view => {
     const product = productFor(view.placement, index);
     const { url, label } = destinationFor(product);
-    const art = format => `/promotions/house/${product.id}-${format}.jpg?v=20261115-play`;
+    const art = format => `/promotions/house/${product.id}-${format}.jpg?v=20261115-art2`;
     view.link.href = url;
     view.link.setAttribute('aria-label', `${product.name} — ${product.message} ${label} (새 창)`);
     if (view.source) view.source.srcset = art('strip');
