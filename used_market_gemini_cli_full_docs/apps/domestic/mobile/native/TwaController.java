@@ -20,6 +20,7 @@ import com.google.androidbrowserhelper.trusted.SharedPreferencesTokenStore;
 import com.google.androidbrowserhelper.trusted.TwaLauncher;
 import com.google.androidbrowserhelper.trusted.TwaProviderPicker;
 import com.google.androidbrowserhelper.trusted.TwaSharedPreferencesManager;
+import com.google.androidbrowserhelper.trusted.splashscreens.SplashScreenStrategy;
 import androidx.browser.trusted.Token;
 import java.util.UUID;
 import org.json.JSONException;
@@ -34,13 +35,15 @@ final class TwaController {
     private final String provider;
     private final boolean twaCapable;
     private CustomTabsSession session;
+    private SplashScreenStrategy splash;
     private TrustedWebActivityIntentBuilder pending;
     private boolean bound, destroyed, validated, navigated, requested, channel, authenticated, shown;
     private String nonce = UUID.randomUUID().toString();
     private long sequence;
 
-    TwaController(LauncherActivity owner) {
+    TwaController(LauncherActivity owner, SplashScreenStrategy splash) {
         this.owner = owner;
+        this.splash = splash;
         TwaProviderPicker.Action action = TwaProviderPicker.pickProvider(owner.getPackageManager());
         provider = action.provider;
         twaCapable = action.launchMode == TwaProviderPicker.LaunchMode.TRUSTED_WEB_ACTIVITY;
@@ -62,6 +65,8 @@ final class TwaController {
         if (session != null) { launchPending(); return; }
         if (!twaCapable || provider == null) { fallback(); return; }
         if (!bound) {
+            // Show the splash before the browser is bound so none of its startup is visible.
+            if (splash != null) splash.onTwaLaunchInitiated(provider, builder);
             try {
                 bound = CustomTabsClient.bindCustomTabsServicePreservePriority(owner, provider, connection);
             } catch (RuntimeException error) { bound = false; }
@@ -90,9 +95,20 @@ final class TwaController {
 
     private void launchPending() {
         if (pending == null || session == null || destroyed) return;
-        TrustedWebActivityIntentBuilder builder = pending;
-        pending = null;
         resetDocument();
+        SplashScreenStrategy startup = splash;
+        splash = null; // Only this owner's first browser launch has a startup to cover.
+        if (startup == null) { launchTwa(); return; }
+        // Hands the splash image to the browser, then launches with the splash parameters.
+        startup.configureTwaBuilder(pending, session, this::launchTwa);
+    }
+
+    private void launchTwa() {
+        // A newer intent may have replaced the pending builder while the splash was transferred.
+        TrustedWebActivityIntentBuilder builder = pending;
+        if (builder == null || destroyed || owner.isFinishing()) return;
+        pending = null;
+        if (session == null) { pending = builder; fallback(); return; }
         TrustedWebActivityIntent intent = builder.build(session);
         FocusActivity.addToIntent(intent.getIntent(), owner);
         new SharedPreferencesTokenStore(owner).store(Token.create(provider, owner.getPackageManager()));
@@ -225,5 +241,6 @@ final class TwaController {
         }
         session = null;
         pending = null;
+        splash = null;
     }
 }

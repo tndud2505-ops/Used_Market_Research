@@ -3,13 +3,16 @@ package com.usedpick.app;
 import android.app.ActivityManager;
 import android.app.KeyguardManager;
 import android.content.Intent;
+import android.graphics.Color;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.PowerManager;
+import android.widget.ImageView;
 import androidx.browser.trusted.FileHandlingData;
 import androidx.browser.trusted.TrustedWebActivityIntentBuilder;
 import com.google.androidbrowserhelper.trusted.LauncherActivityMetadata;
+import com.google.androidbrowserhelper.trusted.splashscreens.PwaWrapperSplashScreenStrategy;
 import java.lang.ref.WeakReference;
 import java.util.Collections;
 import java.util.List;
@@ -18,6 +21,7 @@ import java.util.List;
 public class LauncherActivity extends com.google.androidbrowserhelper.trusted.LauncherActivity {
     private static WeakReference<LauncherActivity> owner = new WeakReference<>(null);
     private TwaController controller;
+    private PwaWrapperSplashScreenStrategy splash;
     private boolean launched;
     private boolean leftForBrowser;
 
@@ -40,7 +44,16 @@ public class LauncherActivity extends com.google.androidbrowserhelper.trusted.La
             return;
         }
         owner = new WeakReference<>(this);
-        controller = new TwaController(this);
+        // Chrome keeps this plain white screen above its own toolbar until the page paints, so
+        // the address bar is not visible while the browser starts. A launch into a task that is
+        // already running has nothing to cover and shows no splash.
+        if (isTaskRoot()) {
+            splash = new PwaWrapperSplashScreenStrategy(this, R.drawable.transparent_splash_icon,
+                    Color.WHITE, ImageView.ScaleType.CENTER, null,
+                    getResources().getInteger(R.integer.splashScreenFadeOutDuration),
+                    getString(R.string.providerAuthority), false);
+        }
+        controller = new TwaController(this, splash);
         // Consent updates and ad loading never hold the browser launch.
         AdManager.get(this).updateConsent(this);
         controller.open(builder);
@@ -79,6 +92,12 @@ public class LauncherActivity extends com.google.androidbrowserhelper.trusted.La
 
     void browserLaunched() { launched = true; }
 
+    @Override public void onEnterAnimationComplete() {
+        super.onEnterAnimationComplete();
+        // The splash strategy starts Chrome only after this activity finished entering.
+        if (splash != null) splash.onActivityEnterAnimationComplete();
+    }
+
     @Override protected void onPause() {
         if (launched) leftForBrowser = true;
         super.onPause();
@@ -98,6 +117,7 @@ public class LauncherActivity extends com.google.androidbrowserhelper.trusted.La
 
     @Override protected void onDestroy() {
         if (controller != null) controller.destroy();
+        if (splash != null) splash.destroy();
         if (owner.get() == this) owner.clear();
         super.onDestroy();
     }

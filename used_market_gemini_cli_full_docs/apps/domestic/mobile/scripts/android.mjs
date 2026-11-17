@@ -58,7 +58,9 @@ async function assertOwnedProject() {
 async function neutralLaunch() {
   // Bubblewrap 1.27.0 always derives a custom TWA splash from iconUrl; it has
   // no manifest switch to disable it. Without this metadata Browser Helper
-  // skips its splash strategy, including the extra browser splash and fade.
+  // skips its logo splash. native/LauncherActivity.java adds back a plain white
+  // splash with the transparent drawable below, which keeps Chrome's toolbar
+  // covered until the page paints.
   const manifest = path.join(project, 'app/src/main/AndroidManifest.xml');
   const xml = (await readFile(manifest, 'utf8'))
     .replace(/\s*<meta-data\s+android:name="android\.support\.customtabs\.trusted\.(?:SPLASH_IMAGE_DRAWABLE|SPLASH_SCREEN_BACKGROUND_COLOR|SPLASH_SCREEN_FADE_OUT_DURATION)"[^>]*\/>/g, '')
